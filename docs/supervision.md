@@ -1,0 +1,47 @@
+# Supervision
+
+Consigliere has exactly one supervision protocol: the codex bounded foreground checkpoint.
+Codex cannot reason during a foreground tool call, so a background watcher that "notifies" the model has no wake semantics; the checkpoint returns control at a bound instead.
+
+## The cycle
+
+1. Drain first: `bin/cs-wake-drain.sh` at the start of every wake-handling turn.
+2. Run one checkpoint: `bin/cs-watch-checkpoint.sh --seconds "${CS_WATCH_CHECKPOINT:-180}"`.
+3. Actionable wake (`signal:` / `stale:` / `check:` / `heartbeat`): drain, handle, start the next checkpoint in the same turn.
+4. Quiet checkpoint (`checkpoint:` line, exit 124): drain anyway, process any queued boss message, start the next checkpoint.
+5. Never `&`, never background tasks, never a second cycle beside a healthy one.
+6. Failure or missing cycle only: drain, inspect, start a fresh checkpoint.
+
+`bin/cs-watch.sh` is the zero-token classifier under the checkpoint: it absorbs benign wakes in bash (no model turn) and exits with a reason line only for actionable ones.
+Wakes are appended durably to `state/.wake-queue` before detector state advances, so a missed process exit is recovered by the next drain.
+
+## Wake vocabulary
+
+- `signal: <files>` - status/turn-end signals; surfaced when a listed status has a boss-relevant verb OR a no-verb signal's soldier is not provably working.
+- `stale: <pane>` - endpoint went quiet; absorb-only-when-provably-working, wedge escalation past `CS_STALE_ESCALATE_SECS` with an escalation count and a `demand-deep-inspection` marker at `CS_WEDGE_DEMAND_INSPECT_COUNT` consecutive escalations.
+- `check: <script>: <out>` - authenticated poll output (PR merge poll, registered custom checks); always actionable. Unauthenticated state checks are rejected without execution.
+- `heartbeat` - fleet-scan backstop found an unsurfaced boss-relevant status.
+
+`bin/cs-classify-lib.sh` is the single owner of the verb vocabulary shared with the away-mode daemon.
+`bin/cs-crew-state.sh` is the authoritative current-state read (no-mistakes run-step first, then native agent status, then status-log fallback).
+
+## Busy evidence policy
+
+Native herdr `agent get` status drives busy detection: `working` is trusted outright and `blocked` surfaces immediately.
+Native `idle`/`unknown` is corroborated against the codex `esc to interrupt` signature before a soldier is declared not-working, because `agent.get` can read idle during a long foreground tool call (docs/herdr.md).
+
+## Event push splice
+
+When the herdr socket is capable, the watcher replaces its poll sleep with a bounded native event wait (`bin/cs-herdr-events.py`, a raw AF_UNIX subscriber for `pane.agent_status_changed`), surfacing `blocked` sub-second.
+The poll loop remains live every cycle as the permanent fail-closed backstop.
+
+## Structural backstop
+
+`.codex/hooks.json` registers `bin/cs-turnend-guard.sh` as the codex Stop hook: when tasks are in flight and no live watcher holds this home's lock with a fresh beacon, the stop is blocked once (exit 2), with `stop_hook_active` as the loop guard.
+The guard scopes itself to a genuine primary home (main checkout or marked capo home) via `bin/cs-primary-scope-lib.sh`; soldier task worktrees are exempt.
+It is a backstop, never permission to omit the live cycle.
+
+## Repair
+
+A forced watcher repair is home-scoped: kill only the pid recorded in this home's `state/.watch.lock`, then start a fresh foreground checkpoint.
+Never broadly kill watchers by process name; sibling capo homes run their own.
