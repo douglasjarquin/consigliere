@@ -9,6 +9,12 @@
 #   model_reasoning_effort with low|medium|high|xhigh; max is omitted rather
 #   than passed as an unsupported value.
 #   --scout marks the task kind=scout (report deliverable, scratch worktree).
+#   --headless (scout only) runs `codex exec` instead of the interactive TUI:
+#     fire-and-forget for bounded investigations. Turn-end is process exit;
+#     the launch itself appends the terminal `done:`/`failed:` status line, so
+#     the watcher surfaces completion through the ordinary signal path. A
+#     headless scout cannot be steered mid-flight; use the interactive default
+#     when follow-up questions are likely.
 #   --base <ref> bases the task branch on <ref> instead of the current HEAD.
 #
 # Ship/scout mechanics:
@@ -66,11 +72,13 @@ KIND=ship
 MODEL=
 EFFORT=
 BASE=
+HEADLESS=0
 POS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --scout) KIND=scout ;;
     --capo) KIND=capo ;;
+    --headless) HEADLESS=1 ;;
     --model) MODEL=${2:?--model requires a value}; shift ;;
     --effort) EFFORT=${2:?--effort requires a value}; shift ;;
     --base) BASE=${2:?--base requires a value}; shift ;;
@@ -91,6 +99,10 @@ case "$EFFORT" in
   max) echo "error: codex does not accept effort=max; choose low|medium|high|xhigh" >&2; exit 2 ;;
   *) echo "error: unknown effort '$EFFORT'" >&2; exit 2 ;;
 esac
+if [ "$HEADLESS" -eq 1 ] && [ "$KIND" != scout ]; then
+  echo "error: --headless applies only to --scout tasks" >&2
+  exit 2
+fi
 
 cs_herdr_protocol_check
 
@@ -200,20 +212,34 @@ if [ -z "$WT_REAL" ] || [ -z "$WT_TOP_REAL" ] || [ "$WT_REAL" != "$WT_TOP_REAL" 
 fi
 
 TURNEND="$STATE/$ID.turn-ended"
-cs_meta_write "$STATE/$ID.meta" \
-  "workspace=$WS" \
-  "pane=$PANE" \
-  "worktree=$WT_REAL" \
-  "project=$PROJ_ABS" \
-  "model=${MODEL:-default}" \
-  "effort=${EFFORT:-default}" \
-  "kind=$KIND" \
-  "mode=$MODE" \
+META_LINES=(
+  "workspace=$WS"
+  "pane=$PANE"
+  "worktree=$WT_REAL"
+  "project=$PROJ_ABS"
+  "model=${MODEL:-default}"
+  "effort=${EFFORT:-default}"
+  "kind=$KIND"
+  "mode=$MODE"
   "yolo=$YOLO"
+)
+[ "$HEADLESS" -eq 1 ] && META_LINES+=("headless=1")
+cs_meta_write "$STATE/$ID.meta" "${META_LINES[@]}"
 
 sq_brief=$(shell_quote "$BRIEF")
 sq_turnend=$(shell_quote "$TURNEND")
-LAUNCH="codex $(model_flag)$(effort_flag)--dangerously-bypass-approvals-and-sandbox -c \"notify=[\\\"bash\\\",\\\"-c\\\",\\\"touch $sq_turnend\\\"]\" \"\$(cat $sq_brief)\""
+if [ "$HEADLESS" -eq 1 ]; then
+  # Fire-and-forget scout: codex exec runs the brief non-interactively; the
+  # launch line itself appends the terminal status event, so completion
+  # surfaces through the watcher's ordinary signal path with no special
+  # classification. No notify hook: process exit IS the turn end.
+  sq_status=$(shell_quote "$STATE/$ID.status")
+  LAUNCH="if codex exec $(model_flag)$(effort_flag)--dangerously-bypass-approvals-and-sandbox \"\$(cat $sq_brief)\"; then echo 'done: headless scout finished; read the report' >> $sq_status; else echo \"failed: codex exec exited \$?\" >> $sq_status; fi"
+else
+  LAUNCH="codex $(model_flag)$(effort_flag)--dangerously-bypass-approvals-and-sandbox -c \"notify=[\\\"bash\\\",\\\"-c\\\",\\\"touch $sq_turnend\\\"]\" \"\$(cat $sq_brief)\""
+fi
 cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
 
-echo "spawned $ID kind=$KIND mode=$MODE yolo=$YOLO workspace=$WS pane=$PANE worktree=$WT_REAL"
+HEADLESS_NOTE=""
+[ "$HEADLESS" -eq 1 ] && HEADLESS_NOTE=" headless=1"
+echo "spawned $ID kind=$KIND mode=$MODE yolo=$YOLO workspace=$WS pane=$PANE worktree=$WT_REAL$HEADLESS_NOTE"
