@@ -104,6 +104,12 @@ assert_contains "$out" "no report" "scout refusal names the report"
 mkdir -p "$TMP/data/sc1"
 echo "# findings" > "$TMP/data/sc1/report.md"
 touch "$TMP/state/sc1.status"
+# The report alone is not enough: the unresolved-decision completion gate must
+# also pass (cs-decision-hold.sh), exactly as at a real scout completion.
+out=$("$BIN" sc1 2>&1) && fail "scout with report but no decision inventory must refuse"
+assert_contains "$out" "unresolved-decision completion gate" "gate refusal names the inventory"
+CS_HOME="$TMP" CS_STATE_OVERRIDE="$TMP/state" CS_DATA_OVERRIDE="$TMP/data" \
+  "$ROOT/bin/cs-decision-hold.sh" complete sc1 --none >/dev/null || fail "decision inventory completion failed"
 out=$("$BIN" sc1 2>&1) || fail "scout with report teardown failed: $out"
 assert_contains "$out" "teardown sc1 complete" "scout teardown completes"
 assert_absent "$TMP/wt-sc1" "scratch worktree removed"
