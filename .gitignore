@@ -1,0 +1,7 @@
+# Boss-private operational home — never tracked.
+.env
+data/
+state/
+config/
+projects/
+.no-mistakes/
