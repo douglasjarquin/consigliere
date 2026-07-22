@@ -1,0 +1,59 @@
+# Architecture
+
+How consigliere works, in depth.
+The always-loaded operating contract is [`AGENTS.md`](../AGENTS.md); this is the human-facing companion.
+Consigliere is a personal rewrite of Firstmate for exactly one harness (codex) and one terminal runtime (herdr); [`docs/upstream.md`](upstream.md) owns the relationship to upstream.
+
+## One harness, one runtime
+
+There is no harness or backend abstraction anywhere.
+`bin/cs-herdr-lib.sh` is the whole herdr layer (session-explicit CLI, workspace/worktree/pane/agent operations, the busy-corroboration policy); [`docs/herdr.md`](herdr.md) is its evidence ledger.
+Codex facts live in [`docs/codex.md`](codex.md); the launch template exists once, in `bin/cs-spawn.sh`.
+
+## Workspace-per-task, herdr-native worktrees
+
+`herdr worktree create --cwd <project> --branch cs/<id> --label <id>` creates the isolated task worktree at `~/.herdr/worktrees/<repo>/<branch>` AND its own workspace whose root pane is the task pane.
+There is no worktree pool: create is fast, dirty removal fails closed upstream, a clean removal preserves the branch, and a surviving worktree is recovered with `herdr worktree open --path` after a workspace or server loss.
+`bin/cs-spawn.sh` refuses to launch unless the physically-resolved worktree root is a real git toplevel distinct from the project primary checkout.
+Capo homes are the exception: a capo home must survive server restarts and empty workspaces, so it is a plain detached `git worktree` of the consigliere repo under `~/.consigliere/capos/<id>`, marked by `.cs-capo-home`, never herdr-managed.
+
+## Event-driven supervision
+
+A zero-token bash watcher (`bin/cs-watch.sh`) sleeps on the fleet, classifies wakes in bash, and wakes consigliere only when something is actionable; actionable wakes are written to the durable `state/.wake-queue` before detector state advances.
+The absorb policy is absorb-only-when-provably-working: a no-verb signal or fresh stale pane is absorbed only with positive working evidence (an attributed no-mistakes run step from `bin/cs-crew-state.sh`, or native-busy corroborated per docs/herdr.md), a declared `paused:` idles on a long bounded cadence, and a provably-working stale escalates past the wedge threshold with a `demand-deep-inspection` marker on repetition.
+Native herdr `blocked` surfaces immediately - sub-second via the socket event splice (`bin/cs-herdr-events.py`, `pane.agent_status_changed`) and on the next poll without it; the poll loop is the permanent fail-closed backstop.
+`bin/cs-classify-lib.sh` is the one owner of the status-verb vocabulary and the keyed decision/activity folds, shared by the watcher and the away-mode daemon.
+The supervision wait shape is the bounded foreground checkpoint ([`docs/supervision.md`](supervision.md)); the codex Stop hook (`bin/cs-turnend-guard.sh`) is the structural backstop.
+
+## Authenticated checks
+
+The watcher executes a task's `state/<id>.check.sh` only from a hash-validated private snapshot bound by `bin/cs-check-register.sh`; everything else is rejected without execution.
+The PR merge poll is byte-static: `bin/cs-pr-check.sh` records canonical `pr=`/`pr_head=` and publishes a validated data sidecar that `bin/cs-pr-poll.sh` (a trusted repository script) revalidates on every dispatch.
+GitHub only; GitLab URLs are refused loudly at arm time.
+
+## Two task shapes, three delivery modes
+
+Ship tasks change projects and land by the project's mode from `data/projects.md` (`bin/cs-project-mode.sh`): `no-mistakes` (the external pipeline owns review through PR; consigliere feeds gate decisions, never drives a soldier-owned run), `direct-PR`, or `local-only` (guarded fast-forward via `bin/cs-merge-local.sh`).
+Scout tasks leave a report at `data/<id>/report.md`, never push, and their scratch worktree is discarded only after the report exists and `bin/cs-decision-hold.sh verify` passes; `bin/cs-promote.sh` flips a scout to ship in place.
+`bin/cs-teardown.sh` owns the fail-closed landed-work proofs (uncommitted never landed; landed = remote-reachable OR merged-PR-head containment OR content already in the up-to-date default branch), with the git-lock staleness proof from `bin/cs-lock-lib.sh`.
+
+## Capos
+
+A capo is a soldier with an isolated consigliere home (`CS_HOME`) and a charter, not a second architecture: own data/state/config/projects, own session lock, own watcher, workspace `capo-<id>`.
+`bin/cs-home-seed.sh` provisions transactionally and sweeps (fast-forward + liveness respawn) at bootstrap; `data/capos.md` is the routing table; marked requests travel with the `bin/cs-marker-lib.sh` U+2063 marker and a `corr=` token, with parent-owned expectations in `bin/cs-pending-reply-lib.sh`.
+Inheritance is deliberately tiny: `data/boss-shared.md` (read-only) and the backlog-backend choice (`bin/cs-inherit-lib.sh`).
+
+## Away mode
+
+`/afk` sets the durable `state/.afk` flag and starts `bin/cs-daemon.sh`, a presence-gated sub-supervisor that self-handles routine wakes in bash and injects batched, U+2063-marked escalation digests into the primary's own pane (recorded at afk-start from `HERDR_PANE_ID`), only into an affirmatively empty composer (`bin/cs-composer-lib.sh` strips codex ghost text before judging emptiness).
+Any unmarked message means the boss returned; `bin/cs-afk-return.sh` owns ordered shutdown and the fail-closed catch-up gate.
+
+## Restart-proof
+
+Durable state and live herdr inventory, not conversation memory, are authoritative: `bin/cs-session-start.sh` reproduces the whole operating picture in one digest, and a restart is a non-event.
+Self-updates are fast-forward-only git pulls of this repo (`bin/cs-update.sh`), which never touch the gitignored operational home or anything under `projects/`; `bin/cs-fleet-sync.sh` separately keeps project clones fresh.
+
+## Development notes
+
+Tests are colocated in `tests/` (offline by default; live suites behind `CS_TEST_HERDR_LIVE`/`CS_TEST_CODEX_LIVE` use `bin/cs-herdr-lab.sh` isolated sessions, never the `default` session).
+Every bin script is `shellcheck -x` clean; one sentence per line in contract prose; scripts own their exact mechanics in their headers.

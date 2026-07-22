@@ -28,6 +28,15 @@
 # chat the main consigliere never reads. Ship/scout targets, explicit pane
 # targets, and the --key path are never marked.
 #
+# Pending reply: a marked kind=capo send also creates a durable parent-owned
+# pending-reply record under state/pending-replies/ BEFORE delivery and
+# appends its privacy-safe corr=<id> token after the marker label
+# (bin/cs-pending-reply-lib.sh). Delivery success never resolves the record;
+# only a correlated parent status line does. Set
+# CS_PENDING_REPLY_EXISTING_CORR to re-send under an existing open record
+# instead of creating a second expectation. A send that cannot be confirmed
+# leaves the durable delivery-attempt marker for the watcher to reconcile.
+#
 # After a successful submit cs-send pauses CS_SEND_SETTLE seconds (default 1,
 # 0 disables) before returning, so an immediate peek catches the receiving
 # turn starting rather than the stale idle pane.
@@ -49,6 +58,8 @@ STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 . "$SCRIPT_DIR/cs-meta-lib.sh"
 # shellcheck source=bin/cs-marker-lib.sh
 . "$SCRIPT_DIR/cs-marker-lib.sh"
+# shellcheck source=bin/cs-pending-reply-lib.sh
+. "$SCRIPT_DIR/cs-pending-reply-lib.sh"
 
 RAW=${1:?usage: cs-send.sh <target> <text...>}
 shift
@@ -81,9 +92,39 @@ if [ "${1:-}" = "--key" ]; then
 fi
 
 TEXT="$*"
+PENDING_CORR=
+PENDING_CREATED=0
 if [ "$KIND" = capo ]; then
-  cs_message_mark_from_consigliere "$TEXT" TEXT
+  # Create (or reuse) the durable parent pending-reply expectation BEFORE
+  # delivery, then embed marker + corr token; transport success never
+  # resolves it (bin/cs-pending-reply-lib.sh).
+  existing_corr=${CS_PENDING_REPLY_EXISTING_CORR:-$(cs_pending_reply_extract_corr "$TEXT")}
+  if [ -n "$existing_corr" ] && cs_pending_reply_corr_reusable "$STATE" "$existing_corr" "$RAW"; then
+    PENDING_CORR=$existing_corr
+  else
+    PENDING_CORR=$(cs_pending_reply_create "$CS_HOME" "$STATE" "$RAW" "$TEXT") \
+      || { echo "error: failed to create parent pending-reply expectation for '$RAW'" >&2; exit 1; }
+    PENDING_CREATED=1
+  fi
+  cs_pending_reply_embed_corr "$TEXT" "$PENDING_CORR" TEXT
+  if [ "$PENDING_CREATED" = 1 ] \
+    && ! cs_pending_reply_prepare_delivery "$STATE" "$PENDING_CORR"; then
+    cs_pending_reply_discard_undelivered "$STATE" "$PENDING_CORR" || true
+    echo "error: failed to durably prepare pending-reply delivery for '$RAW'" >&2
+    exit 1
+  fi
 fi
+
+# Delivery confirmed: mark the pending expectation delivered without
+# resolving it - only a correlated parent report acknowledges the request.
+pending_confirm_delivery() {
+  [ -n "$PENDING_CORR" ] || return 0
+  if cs_pending_reply_confirm_delivery "$STATE" "$PENDING_CORR"; then
+    return 0
+  fi
+  echo "error: text was delivered to '$RAW' but its pending-reply delivery commit failed; a durable recovery marker was stored and the watcher will reconcile it. Do not resend." >&2
+  exit 1
+}
 
 RETRIES=${CS_SEND_RETRIES:-3}
 SETTLE=${CS_SEND_SETTLE:-1}
@@ -106,6 +147,7 @@ esac
 if [ "$pre_status" = busy ]; then
   # Mid-turn steer: codex queues the input for after the turn; native state
   # cannot distinguish queued from swallowed, so report queued and succeed.
+  pending_confirm_delivery
   echo "queued (target was mid-turn)"
   [ "$SETTLE" = 0 ] || sleep "$SETTLE"
   exit 0
@@ -114,6 +156,7 @@ fi
 attempt=0
 while [ "$attempt" -le "$RETRIES" ]; do
   if cs_herdr_submit_confirm "$PANE" 4000; then
+    pending_confirm_delivery
     echo "submitted"
     [ "$SETTLE" = 0 ] || sleep "$SETTLE"
     exit 0
