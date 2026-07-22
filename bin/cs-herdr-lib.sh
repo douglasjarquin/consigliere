@@ -76,17 +76,26 @@ cs_herdr_workspace_exists() { # <workspace_id>
     | jq -e --arg id "$1" '.result.workspaces[] | select(.workspace_id == $id)' >/dev/null 2>&1
 }
 
+cs_herdr_workspace_root_pane() { # <workspace_id> -> first pane_id in workspace
+  local id
+  id=$(cs_herdr pane list 2>/dev/null | jq -r --arg w "$1" \
+    '[.result.panes[] | select(.workspace_id == $w) | .pane_id] | first // empty')
+  [ -n "$id" ] || return 1
+  printf '%s\n' "$id"
+}
+
 # --- task worktrees (workspace-per-task) -----------------------------------
 
-cs_herdr_task_create() { # <source-workspace-id> <branch> <task-label> [base-ref]
-  # Creates the task worktree + its own workspace. Prints TAB-separated:
-  #   workspace_id  pane_id  worktree_path  branch
+cs_herdr_task_create() { # <project-path> <branch> <task-label> [base-ref]
+  # Creates the task worktree + its own workspace, sourcing the repo from the
+  # project path (--cwd) so no workspace needs to be open on the project.
+  # Prints TAB-separated: workspace_id  pane_id  worktree_path  branch
   # The root pane IS the task pane (docs/herdr.md); no default-tab prune.
   local src=$1 branch=$2 label=$3 base=${4:-} out
   if [ -n "$base" ]; then
-    out=$(cs_herdr worktree create --workspace "$src" --branch "$branch" --base "$base" --label "$label" --no-focus) || return 1
+    out=$(cs_herdr worktree create --cwd "$src" --branch "$branch" --base "$base" --label "$label" --no-focus) || return 1
   else
-    out=$(cs_herdr worktree create --workspace "$src" --branch "$branch" --label "$label" --no-focus) || return 1
+    out=$(cs_herdr worktree create --cwd "$src" --branch "$branch" --label "$label" --no-focus) || return 1
   fi
   printf '%s' "$out" | jq -re \
     '.result | [.workspace.workspace_id, .root_pane.pane_id, .worktree.path, .worktree.branch] | @tsv'
