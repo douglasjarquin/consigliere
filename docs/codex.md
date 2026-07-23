@@ -9,10 +9,10 @@ Re-verify after codex upgrades; `bin/cs-bootstrap.sh` checks presence only, not 
 codex [--model <m>] [-c 'model_reasoning_effort="<low|medium|high|xhigh>"'] \
   --dangerously-bypass-approvals-and-sandbox \
   -c "notify=[\"bash\",\"-c\",\"touch state/<id>.turn-ended\"]" \
-  "$(cat data/<id>/brief.md)"
+  "$(bin/cs-operational-input.sh encode launch-brief < data/<id>/brief.md)"
 ```
 
-- Positional prompt starts the supervised interactive session.
+- The typed `launch-brief` positional prompt starts the supervised interactive session.
 - `--dangerously-bypass-approvals-and-sandbox` gives the unattended soldier full autonomy (no trust dialog).
 - The `notify` hook fires at every turn end, touching the task's turn-ended signal for the watcher.
 - Effort vocabulary: `low|medium|high|xhigh`; `max` is not in the bundled catalog and is refused by cs-spawn rather than passed.
@@ -26,7 +26,7 @@ codex [--model <m>] [-c 'model_reasoning_effort="<low|medium|high|xhigh>"'] \
 ## Interaction facts
 
 - Skill invocation is `$<skill>` (codex rejects claude's `/<skill>` form); sends of `$...` need a pre-Enter settle so the completion popup does not swallow the Enter (cs-send owns this).
-- Codex queues input submitted mid-turn and processes it after the turn (cs-send reports `queued`).
+- Codex queues input submitted mid-turn and processes it after the turn (cs-send reports `queued`); textual sends carry the `watcher` operational kind except for the byte-compatible capo-routing kind.
 - Composer ghost-text (dim inline suggestions) can make an empty composer look non-empty in captures; the away-mode composer gate must strip ANSI de-emphasis before judging emptiness (ported incident, 2026-07-08 upstream).
 - Session resume is **cwd-keyed, not id-keyed**. codex records every session by working directory under `~/.codex/sessions/` (the rollout's `payload.cwd`), and `codex resume --last` continues the most recent session FOR THE CURRENT CWD by default (`--all` disables that cwd filter; verified codex 0.144, 2026-07-22). Because every soldier owns a unique worktree cwd, running `codex resume --last` from that worktree recovers exactly its own session with full context - no session id needs to be captured at spawn. `codex resume <uuid>` also works when an id is known (printed on quit), but recovery never depends on capturing it. See `skills/stuck-soldier-recovery`.
 

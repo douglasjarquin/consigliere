@@ -47,6 +47,8 @@ CONFIG="${CS_CONFIG_OVERRIDE:-$CS_HOME/config}"
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
 # shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# shellcheck source=bin/cs-operational-input.sh
+. "$SCRIPT_DIR/cs-operational-input.sh"
 
 STATUS_TAIL=${CS_SESSION_START_STATUS_TAIL:-5}
 case "$STATUS_TAIL" in ''|*[!0-9]*) STATUS_TAIL=5 ;; esac
@@ -155,6 +157,10 @@ print_status_tail() {
   tail -n "$STATUS_TAIL" "$status"
 }
 
+# Prefix the complete digest with its structural type. section starts with a
+# newline, which becomes the first byte of the body after the canonical ": ".
+cs_operational_input_construct session-start '' SESSION_START_PREFIX
+printf '%s' "$SESSION_START_PREFIX"
 section "SESSION START - $CS_HOME"
 
 # --- 1. lock -----------------------------------------------------------

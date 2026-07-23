@@ -8,9 +8,9 @@
 #
 # Behavioral contract covered:
 #   - a routine wake (working: note) is SELF-HANDLED: no injection, no buffer;
-#   - a done: wake escalates as ONE batched digest, marked with CS_INJECT_MARK
-#     (bare U+2063), typed once into an affirmatively EMPTY codex composer
-#     (ANSI ghost text stripped) and confirmed natively;
+#   - a done: wake escalates as ONE batched away-supervisor digest, whose
+#     envelope retains the bare leading U+2063, typed once into an
+#     affirmatively EMPTY codex composer and confirmed natively;
 #   - a pending composer (ghost text whose ANSI the transport stripped, i.e.
 #     indistinguishable from typed input) DEFERS injection, and past
 #     CS_MAX_DEFER_SECS the wedge alarm fires: durable marker + the notifier
@@ -262,13 +262,16 @@ test_done_wake_escalates_one_marked_digest() {
     "$CS_INJECT_MARK"*) : ;;
     *) fail "digest is not prefixed with CS_INJECT_MARK (bare U+2063): $sent" ;;
   esac
+  [ "$(cs_operational_input_kind "$sent")" = away-supervisor ] \
+    || fail "digest does not carry the away-supervisor kind"
+  sent=$(cs_operational_input_body "$sent")
   assert_contains "$sent" "1 event(s)" "digest is not the single batched away-mode digest"
   assert_contains "$sent" "done: PR https://example.test/pr/7" "digest lost the boss-relevant done: content"
   case "$sent" in
     *$'\n'*) fail "digest contains an embedded newline (must be single-line)" ;;
   esac
   file_has "send-keys" "$dir/herdr.log" || fail "digest was never submitted with Enter"
-  pass "a done: wake escalates as ONE single-line CS_INJECT_MARK digest into an empty (ghost-stripped) composer, natively confirmed"
+  pass "a done: wake escalates as ONE typed away-supervisor digest into an empty composer, natively confirmed"
 }
 
 # --- 3. pending composer defers; max-defer fires the wedge alarm ---------------

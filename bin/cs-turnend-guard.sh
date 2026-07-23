@@ -31,6 +31,8 @@ WATCH="$SCRIPT_DIR/cs-watch.sh"
 . "$SCRIPT_DIR/cs-supervision-lib.sh"
 # shellcheck source=bin/cs-primary-scope-lib.sh
 . "$SCRIPT_DIR/cs-primary-scope-lib.sh"
+# shellcheck source=bin/cs-operational-input.sh
+. "$SCRIPT_DIR/cs-operational-input.sh"
 
 # Read the whole turn-end hook payload once; never block on unreadable/absent
 # stdin.
@@ -61,12 +63,14 @@ cs_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$CS_HOME" && exit 0
 [ -e "$STATE/.afk" ] && exit 0
 
 rule='━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
-{
+GUARD_BODY=$(
   printf '●%s\n' "$rule"
   printf '●  TURN WOULD END BLIND - SUPERVISION IS OFF\n'
   printf '●  %s task(s) in flight, but no live watcher holds this home lock (last beat: %s).\n' "$CS_SUP_IN_FLIGHT" "$CS_SUP_BEACON_DESC"
 # shellcheck disable=SC2016 # the ${CS_WATCH_CHECKPOINT:-180} is literal advice text for the reading agent
   printf '●  Drain queued wakes with bin/cs-wake-drain.sh, then start the foreground checkpoint: bin/cs-watch-checkpoint.sh --seconds "${CS_WATCH_CHECKPOINT:-180}". No turn ends blind while work is under way.\n'
   printf '●%s\n' "$rule"
-} >&2
+)
+cs_operational_input_construct turn-end-guard "$GUARD_BODY" GUARD_INPUT
+printf '%s\n' "$GUARD_INPUT" >&2
 exit 2

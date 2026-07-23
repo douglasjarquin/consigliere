@@ -42,6 +42,7 @@ So consigliere's shape is: one home workspace (`consigliere`, or `capo-<id>`) wh
 
 - `pane read <pane> --lines N --format text|ansi` returned exactly N lines on 0.7.4; the upstream small-`--lines` truncation bug was NOT reproduced. `cs-herdr-lib.sh` passes `--lines` through directly; if a regression appears, re-add the read-wide-then-tail workaround from firstmate's adapter.
 - `pane run <pane> '<text>'` submits text plus Enter atomically (verified launching codex and steering it).
+- Machine input uses U+2063 INVISIBLE SEPARATOR because it survives UTF-8 terminal input; the upstream herdr 0.7.3 incident showed ASCII 0x1f was stripped from the composer. `bin/cs-operational-input.sh` owns the exact bytes.
 
 ## Push events
 

@@ -22,7 +22,7 @@ Wakes are appended durably to `state/.wake-queue` before detector state advances
 - `check: <script>: <out>` - authenticated poll output (PR merge poll, registered custom checks); always actionable. Unauthenticated state checks are rejected without execution.
 - `heartbeat` - fleet-scan backstop found an unsurfaced boss-relevant status.
 
-`bin/cs-classify-lib.sh` is the single owner of the verb vocabulary shared with the away-mode daemon.
+`bin/cs-classify-lib.sh` is the single owner of the verb vocabulary shared with the away-mode daemon and delegates machine-input typing to `bin/cs-operational-input.sh`.
 `bin/cs-crew-state.sh` is the authoritative current-state read (no-mistakes run-step first, then native agent status, then status-log fallback).
 
 ## Busy evidence policy
@@ -38,6 +38,7 @@ The poll loop remains live every cycle as the permanent fail-closed backstop.
 ## Structural backstop
 
 `.codex/hooks.json` registers `bin/cs-turnend-guard.sh` as the codex Stop hook: when tasks are in flight and no live watcher holds this home's lock with a fresh beacon, the stop is blocked once (exit 2), with `stop_hook_active` as the loop guard.
+Its continuation is typed `turn-end-guard`, so it cannot be confused with boss input after rewording.
 The guard scopes itself to a genuine primary home (main checkout or marked capo home) via `bin/cs-primary-scope-lib.sh`; soldier task worktrees are exempt.
 It is a backstop, never permission to omit the live cycle.
 

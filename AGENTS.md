@@ -309,14 +309,14 @@ The spawn assertion and generated ship brief must both enforce that project work
 
 ### Away-mode stub
 
-Invoke the `/afk` skill when the boss says `/afk`, says they are going afk, `state/.afk` exists, an incoming message starts with `CS_INJECT_MARK`, or any `state/.subsuper-*` marker is involved.
+Invoke the `/afk` skill when the boss says `/afk`, says they are going afk, `state/.afk` exists, an incoming message classifies as `away-supervisor` through `bin/cs-operational-input.sh`, or any `state/.subsuper-*` marker is involved.
 The skill owns the daemon procedure; these safety facts remain inline:
 
-- Every daemon injection starts with `CS_INJECT_MARK` plus U+2063 INVISIBLE SEPARATOR, which distinguishes internal escalation from boss input.
+- Every daemon injection is typed `away-supervisor` and retains the bare leading U+2063 `CS_INJECT_MARK`; unmarked input classifies as boss input.
 - While `state/.afk` exists, the daemon owns supervision; do not arm a separate watcher.
-- A marked message while away mode is active is internal escalation and does not exit away mode.
+- Input classified `away-supervisor` while away mode is active is internal escalation and does not exit away mode.
 - A message beginning `/afk` refreshes away mode.
-- Any other unmarked message means the boss returned; load `/afk`, run the return owner, and do not process that message as ordinary work until its durable catch-up gate clears.
+- Input classified `boss` means the boss returned; load `/afk`, run the return owner, and do not process that message as ordinary work until its durable catch-up gate clears.
 - Away mode never expands approval authority for merges, ask-user findings, destructive actions, irreversible actions, or security-sensitive choices.
 - Bias ambiguous input toward exit because a present boss takes precedence.
 
