@@ -25,8 +25,32 @@ Requirements: `codex`, `herdr` (protocol >= 16), `jq`, `gh` + `gh-axi` (authenti
 - `bin/` - `cs-*` scripts; read each header before first use
 - `skills/` - agent-loaded procedures (afk, rundown, the-books, stow, capo-provisioning, upstream-review, ...)
 - `docs/` - architecture, configuration schema (owner), supervision protocol, verified herdr/codex facts
-- `tests/` - colocated behavior tests (`bash tests/<name>.test.sh`; live suites opt in via `CS_TEST_HERDR_LIVE=1` / `CS_TEST_CODEX_LIVE=1`)
+- `tests/` - colocated behavior tests (`bash tests/<name>.test.sh`, or `bin/cs-test-run.sh --portable`; live suites opt in via `CS_TEST_HERDR_LIVE=1` / `CS_TEST_CODEX_LIVE=1`)
 - `data/ state/ config/ projects/` - boss-private operational home, gitignored
+
+## CI
+
+`.github/workflows/ci.yml` runs required checks on pushes to `main` and PRs into
+`main`, with least-privilege `contents: read` and cancellation of superseded
+runs. CI and local runs share the same repository-owned entrypoints, so hosted
+checks cannot drift from what you run before pushing:
+
+| Hosted check | Reproduce locally |
+| --- | --- |
+| Shell lint | `bin/cs-lint.sh` (single owner of the file set, config, and pinned ShellCheck version; `--required-version` prints the pin) |
+| Portable behavior | `bin/cs-test-run.sh --portable` (every hermetic test, serial) |
+| Real Herdr behavior | `CS_TEST_HERDR_LIVE=1 bin/cs-test-run.sh --herdr` (needs a real herdr + a running default session for the lab tripwire) |
+| Stock macOS Bash | `/bin/bash bin/cs-test-run.sh --portable` (consigliere's primary OS; scripts stay Bash-3.2-safe) |
+| Repo invariants | `git ls-files -- .env data state config projects .no-mistakes` prints nothing; tracked symlinks stay symlinks |
+| Coverage guard | `bin/cs-test-run.sh --check-coverage` (proves every `tests/*.test.sh` is in exactly one lane) |
+
+Pinned-tool owners: ShellCheck version in `bin/cs-lint.sh`; herdr version in
+`bin/cs-install-herdr.sh` (documented in `docs/herdr.md`); herdr protocol floor
+in `bin/cs-herdr-lib.sh` (`CS_HERDR_MIN_PROTOCOL`), which the installer reads.
+Every `tests/*.test.sh` belongs to one lane - `portable`, `real-herdr`, or the
+opt-in `live-codex` (`CS_TEST_CODEX_LIVE=1`, never run in hosted CI and reported
+as visibly excluded by the coverage guard). The workflow contract is protected
+by `tests/cs-ci-contract.test.sh`.
 
 ## Upstream
 
