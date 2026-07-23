@@ -347,6 +347,17 @@ Do the work as usual; consigliere closes issue #$ISSUE after it lands the approv
 Do NOT close the issue yourself and do NOT move its board card - the board's own workflow handles the card once the issue is closed.
 EOF
 )
+  elif [ "$MODE" = no-mistakes ]; then
+    ISSUE_SECTION=$(cat <<EOF
+# Board issue #$ISSUE - THE PR MUST CLOSE IT
+This task implements GitHub issue #$ISSUE.
+The merged PR MUST close this issue via the GitHub closing keyword \`Closes #$ISSUE\`, so that the board's built-in workflow moves its card to Done. This is a hard requirement, not a nicety: if the PR does not close the issue, the card is stranded in In Progress.
+You do NOT open the PR - the no-mistakes pipeline owns push and PR creation. So do not try to create or find a PR to satisfy this; instead route the closing keyword into the material the pipeline builds the PR from:
+- Put the line \`Closes #$ISSUE\` in your commit message body before you run no-mistakes.
+- Include "This PR closes #$ISSUE." in the \`--intent\` you pass to \`no-mistakes axi run\`, so the pipeline's PR step writes the closing keyword into the PR description.
+Do NOT edit the project board yourself and do NOT close the issue by hand - the merge does both through \`Closes #$ISSUE\`.
+EOF
+)
   else
     ISSUE_SECTION=$(cat <<EOF
 # Board issue #$ISSUE - PR MUST CLOSE IT
