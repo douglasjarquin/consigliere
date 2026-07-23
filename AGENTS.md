@@ -195,6 +195,13 @@ Classify work as dispatchable when it does not overlap work under way, or queued
 Dispatch independent work immediately with no concurrency cap, serialize coarse overlaps, and record blockers durably.
 Write the task-specific brief under section 11 before spawning.
 
+### Board-driven work
+
+When the boss asks to knock out, clear, or work a project's Ready issues, take the open contracts, or work the board, load the `contracts` skill.
+It owns the GitHub board sweep: pull Ready issues, move each card to In Progress at dispatch, dispatch a soldier per issue whose PR carries `Closes #<n>`, and keep lanes full (default three per project, serializing overlaps) until the column is clear.
+Consigliere moves a card only Ready to In Progress; the card reaches Done solely through the board's own closed-to-Done workflow when the merged PR closes the issue.
+Everything else stays the ordinary ship lifecycle below.
+
 ### Dispatch and supervision handoff
 
 Spawn only through `bin/cs-spawn.sh`.

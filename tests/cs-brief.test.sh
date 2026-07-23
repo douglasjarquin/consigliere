@@ -68,6 +68,26 @@ assert_grep 'HARD SAFETY CONTRACT' "$B" "herdr-lab contract present"
 assert_grep 'cs-herdr-lab.sh' "$B" "lab helper referenced"
 pass "herdr-lab guarded brief"
 
+# --issue linkage: PR-mode brief carries the hard Closes contract
+"$BIN" t7 alpha --issue 42 >/dev/null
+B="$TMP/data/t7/brief.md"
+assert_grep 'Board issue #42' "$B" "issue section present"
+assert_grep 'Closes #42' "$B" "PR must close the issue"
+assert_grep 'Do NOT edit the project board yourself' "$B" "no self board edits"
+pass "ship brief --issue bakes in the Closes contract"
+
+# --issue on local-only: no PR, consigliere closes after local merge
+"$BIN" t8 gamma --issue 43 >/dev/null
+B="$TMP/data/t8/brief.md"
+assert_grep 'consigliere closes issue #43 after' "$B" "local-only issue closed by consigliere"
+assert_no_grep 'Closes #43' "$B" "no PR keyword on local-only"
+pass "ship brief --issue local-only variant"
+
+# --issue rejected on scout and non-numeric
+if "$BIN" t9 alpha --scout --issue 5 >/dev/null 2>&1; then fail "--issue on scout must refuse"; fi
+if "$BIN" t10 alpha --issue abc >/dev/null 2>&1; then fail "non-numeric --issue must refuse"; fi
+pass "--issue misuse refusals"
+
 # capo charter
 CS_CAPO_CHARTER='Own the data-platform domain.' "$BIN" c1 --capo alpha beta >/dev/null
 B="$TMP/data/c1/brief.md"

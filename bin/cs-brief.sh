@@ -73,17 +73,28 @@ STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 KIND=ship
 HERDR_LAB=0
 NO_PROJECTS=0
+ISSUE=
 POS=()
-for a in "$@"; do
-  case "$a" in
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --scout) KIND=scout ;;
     --capo) KIND=capo ;;
     --herdr-lab) HERDR_LAB=1 ;;
     --no-projects) NO_PROJECTS=1 ;;
-    *) POS+=("$a") ;;
+    --issue) ISSUE=${2:?--issue requires an issue number}; shift ;;
+    --issue=*) ISSUE=${1#--issue=} ;;
+    *) POS+=("$1") ;;
   esac
+  shift
 done
 ID=${POS[0]}
+if [ -n "$ISSUE" ]; then
+  case "$ISSUE" in *[!0-9]*) echo "error: --issue must be a number, got '$ISSUE'" >&2; exit 1 ;; esac
+fi
+if [ -n "$ISSUE" ] && [ "$KIND" != ship ]; then
+  echo "error: --issue applies only to ship briefs (an issue is closed by a merged PR)" >&2
+  exit 1
+fi
 
 if [ "$KIND" = capo ] && [ "$HERDR_LAB" -eq 1 ]; then
   echo "error: --herdr-lab applies only to soldier ship or scout briefs" >&2
@@ -326,11 +337,36 @@ EOF
     ;;
 esac
 
+if [ -n "$ISSUE" ]; then
+  if [ "$MODE" = local-only ]; then
+    ISSUE_SECTION=$(cat <<EOF
+# Board issue #$ISSUE
+This task implements GitHub issue #$ISSUE.
+This project ships local-only (no PR), so you cannot close the issue with a PR keyword.
+Do the work as usual; consigliere closes issue #$ISSUE after it lands the approved local merge.
+Do NOT close the issue yourself and do NOT move its board card - the board's own workflow handles the card once the issue is closed.
+EOF
+)
+  else
+    ISSUE_SECTION=$(cat <<EOF
+# Board issue #$ISSUE - PR MUST CLOSE IT
+This task implements GitHub issue #$ISSUE.
+The PR description you open MUST contain the line \`Closes #$ISSUE\` (a GitHub closing keyword) so that merging the PR closes the issue and the board's built-in workflow moves its card to Done.
+This is a hard requirement, not a nicety: if the PR does not close the issue, the card is stranded in In Progress.
+Do NOT edit the project board yourself and do NOT close the issue by hand - the merge does both through \`Closes #$ISSUE\`.
+EOF
+)
+  fi
+else
+  ISSUE_SECTION=""
+fi
+
 cat > "$BRIEF" <<EOF
 You are a soldier: an autonomous worker agent managed by consigliere. Work on your own; do not wait for a human.
 
 # Task
 {TASK}
+$ISSUE_SECTION
 
 $HERDR_SECTION
 

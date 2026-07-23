@@ -26,6 +26,7 @@ Test and script overrides: `CS_ROOT_OVERRIDE`, `CS_STATE_OVERRIDE` narrow a sing
 | `config/backlog-backend` | absent or `tasks-axi` = tasks-axi against `data/backlog.md` (`.tasks.toml` owns schema); `manual` = hand-edit the markdown |
 | `config/upstream` | path or URL of the firstmate checkout for `/upstream-review`; absent = `../firstmate` |
 | `config/wedge-alarm` | away-mode wedge-alarm active-alert directives; absent = auto (macOS Notification Center when available) |
+| `config/boards` | GitHub Projects (v2) board mapping for the `contracts` skill; one line per project: `<project> <owner> <number> [ready-label] [in-progress-label] [status-field]`. Labels/field default to `Ready` / `In Progress` / `Status`; use `_` for spaces in a label token. `<owner>` is a user/org login or `@me`. `bin/cs-board.sh` reads it |
 
 Inheritance into capo homes: `data/boss-shared.md` is propagated read-only, and `config/backlog-backend` is copied at seed time; nothing else is inherited.
 `bin/cs-inherit-lib.sh` owns the allowlist.

@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# GitHub Projects (v2) board access for consigliere's board-driven work.
+# The mechanical half of the `contracts` skill: list Ready issues, move a card
+# to In Progress at dispatch, and read a card's current status. It deliberately
+# NEVER moves a card to Done - that is owned by the board's built-in
+# "when issue closed -> Done" workflow, triggered by a merged PR whose body
+# carries `Closes #<n>` (see the contracts skill and cs-brief.sh --issue).
+#
+# Board identity comes from config/boards (LOCAL, gitignored). One line per
+# registered project:
+#   <project-name> <owner> <project-number> [ready-label] [inprogress-label] [status-field]
+# Defaults: ready-label="Ready", inprogress-label="In Progress", status-field="Status".
+# <owner> is a user or org login, or "@me" for the authenticated user.
+#
+# Commands:
+#   cs-board.sh ready <project>            TSV of open Ready issues:
+#                                          <item-id>\t<number>\t<url>\t<title>
+#   cs-board.sh start <project> <item-id>  set the card's Status -> In Progress
+#   cs-board.sh status <project> <item-id> print the card's current Status name
+#   cs-board.sh check <project>            read-only board sanity + a reminder
+#                                          that the closed->Done workflow must
+#                                          be enabled (built-in-only Done move)
+#   cs-board.sh ids <project>              debug: resolved project/field/option ids
+#
+# Requires gh (with the `project` token scope) and jq. gh project is not wrapped
+# by gh-axi, so this script calls gh directly; issue/PR work still goes through
+# gh-axi elsewhere.
+set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CS_ROOT="${CS_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
+CONFIG="${CS_CONFIG_OVERRIDE:-$CS_HOME/config}"
+BOARDS="$CONFIG/boards"
+
+# Test seam: point CS_BOARD_GH at a fake gh for offline tests.
+GH=${CS_BOARD_GH:-gh}
+
+usage() {
+  awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next} {exit}' "$0"
+}
+
+die() { echo "cs-board: $*" >&2; exit 1; }
+
+command -v jq >/dev/null 2>&1 || die "jq is required"
+
+# resolve <project> -> sets OWNER NUMBER READY_LABEL INPROGRESS_LABEL STATUS_FIELD
+resolve_board() {
+  local project=$1 line
+  [ -f "$BOARDS" ] || die "no board config at $BOARDS; add a line: <project> <owner> <number> [ready] [in-progress] [status-field]"
+  line=$(awk -v p="$project" '$1==p {print; exit}' "$BOARDS")
+  [ -n "$line" ] || die "project '$project' not in $BOARDS"
+  # shellcheck disable=SC2086 # deliberate word split of the config line
+  set -- $line
+  OWNER=$2
+  NUMBER=$3
+  READY_LABEL=${4:-Ready}
+  INPROGRESS_LABEL=${5:-In Progress}
+  STATUS_FIELD=${6:-Status}
+  # Underscores in config stand in for spaces so labels stay single tokens.
+  READY_LABEL=${READY_LABEL//_/ }
+  INPROGRESS_LABEL=${INPROGRESS_LABEL//_/ }
+  STATUS_FIELD=${STATUS_FIELD//_/ }
+  case "$NUMBER" in ''|*[!0-9]*) die "board number for '$project' must be numeric, got '$NUMBER'" ;; esac
+}
+
+project_json() {
+  $GH project view "$NUMBER" --owner "$OWNER" --format json 2>/dev/null \
+    || die "cannot read project $NUMBER for owner $OWNER (is gh authed with the 'project' scope?)"
+}
+
+field_json() {
+  $GH project field-list "$NUMBER" --owner "$OWNER" --format json 2>/dev/null \
+    || die "cannot list fields for project $NUMBER (owner $OWNER)"
+}
+
+items_json() {
+  # -L caps the page; boards with more Ready items than this need --limit tuning.
+  $GH project item-list "$NUMBER" --owner "$OWNER" --format json --limit "${CS_BOARD_ITEM_LIMIT:-200}" 2>/dev/null \
+    || die "cannot list items for project $NUMBER (owner $OWNER)"
+}
+
+# resolve_ids: sets PROJECT_ID FIELD_ID READY_OPT INPROGRESS_OPT DONE_OPT
+resolve_ids() {
+  local pj fj
+  pj=$(project_json)
+  PROJECT_ID=$(printf '%s' "$pj" | jq -r '.id // empty')
+  [ -n "$PROJECT_ID" ] || die "could not resolve the project node id"
+  fj=$(field_json)
+  FIELD_ID=$(printf '%s' "$fj" | jq -r --arg n "$STATUS_FIELD" '.fields[] | select(.name==$n) | .id' | head -1)
+  [ -n "$FIELD_ID" ] || die "no '$STATUS_FIELD' single-select field on this board"
+  READY_OPT=$(printf '%s' "$fj" | jq -r --arg n "$STATUS_FIELD" --arg o "$READY_LABEL" '.fields[] | select(.name==$n) | .options[]? | select(.name==$o) | .id' | head -1)
+  INPROGRESS_OPT=$(printf '%s' "$fj" | jq -r --arg n "$STATUS_FIELD" --arg o "$INPROGRESS_LABEL" '.fields[] | select(.name==$n) | .options[]? | select(.name==$o) | .id' | head -1)
+  DONE_OPT=$(printf '%s' "$fj" | jq -r --arg n "$STATUS_FIELD" '.fields[] | select(.name==$n) | .options[]? | select(.name=="Done") | .id' | head -1)
+}
+
+cmd_ready() {
+  local project=$1
+  resolve_board "$project"
+  # The single-select field value renders under the lowercased field name key
+  # in gh's item JSON (e.g. "status"); filter client-side so the command works
+  # regardless of whether the API host supports server-side --query.
+  local key
+  key=$(printf '%s' "$STATUS_FIELD" | tr '[:upper:] ' '[:lower:]_')
+  items_json | jq -r --arg ready "$READY_LABEL" --arg key "$key" '
+    .items[]
+    | select((.[$key] // .status) == $ready)
+    | select(.content.type == "Issue")
+    | select((.content.state // "OPEN") | ascii_upcase == "OPEN")
+    | [.id, (.content.number|tostring), .content.url, .content.title]
+    | @tsv
+  '
+}
+
+cmd_start() {
+  local project=$1 item=$2
+  [ -n "$item" ] || die "usage: cs-board.sh start <project> <item-id>"
+  resolve_board "$project"
+  resolve_ids
+  [ -n "$INPROGRESS_OPT" ] || die "no '$INPROGRESS_LABEL' option on the '$STATUS_FIELD' field"
+  $GH project item-edit --id "$item" --field-id "$FIELD_ID" --project-id "$PROJECT_ID" --single-select-option-id "$INPROGRESS_OPT" >/dev/null \
+    || die "failed to move item $item to '$INPROGRESS_LABEL'"
+  echo "moved $item -> $INPROGRESS_LABEL"
+}
+
+cmd_status() {
+  local project=$1 item=$2
+  [ -n "$item" ] || die "usage: cs-board.sh status <project> <item-id>"
+  resolve_board "$project"
+  local key
+  key=$(printf '%s' "$STATUS_FIELD" | tr '[:upper:] ' '[:lower:]_')
+  items_json | jq -r --arg id "$item" --arg key "$key" '
+    .items[] | select(.id==$id) | (.[$key] // .status // "(unset)")
+  '
+}
+
+cmd_check() {
+  local project=$1
+  resolve_board "$project"
+  resolve_ids
+  echo "board: $OWNER/#$NUMBER  status-field='$STATUS_FIELD'"
+  printf 'options: Ready=%s  In-Progress=%s  Done=%s\n' \
+    "${READY_OPT:+ok}" "${INPROGRESS_OPT:+ok}" "${DONE_OPT:+ok}"
+  [ -n "$READY_OPT" ] || echo "WARN: no '$READY_LABEL' option - the sweep will find nothing to dispatch"
+  [ -n "$INPROGRESS_OPT" ] || echo "WARN: no '$INPROGRESS_LABEL' option - cards cannot be moved at dispatch"
+  [ -n "$DONE_OPT" ] || echo "WARN: no 'Done' option - the closed->Done workflow has nowhere to move cards"
+  cat <<'EOF'
+NOTE: consigliere moves a card only to In Progress. The card reaches Done ONLY
+through the board's built-in workflow "when an issue is closed -> set Status
+Done", fired by a merged PR carrying `Closes #<n>`. Enable that workflow once in
+the project's Workflows settings; consigliere will read-only-verify cards left
+In Progress after merge and warn if any are stuck, but it never sets Done itself.
+EOF
+}
+
+cmd_ids() {
+  local project=$1
+  resolve_board "$project"
+  resolve_ids
+  printf 'project_id=%s\nfield_id=%s\nready_opt=%s\ninprogress_opt=%s\ndone_opt=%s\n' \
+    "$PROJECT_ID" "$FIELD_ID" "$READY_OPT" "$INPROGRESS_OPT" "$DONE_OPT"
+}
+
+case "${1:-}" in
+  -h|--help|'') usage; exit 0 ;;
+  ready)  [ $# -ge 2 ] || die "usage: cs-board.sh ready <project>"; cmd_ready "$2" ;;
+  start)  [ $# -ge 3 ] || die "usage: cs-board.sh start <project> <item-id>"; cmd_start "$2" "$3" ;;
+  status) [ $# -ge 3 ] || die "usage: cs-board.sh status <project> <item-id>"; cmd_status "$2" "$3" ;;
+  check)  [ $# -ge 2 ] || die "usage: cs-board.sh check <project>"; cmd_check "$2" ;;
+  ids)    [ $# -ge 2 ] || die "usage: cs-board.sh ids <project>"; cmd_ids "$2" ;;
+  *) die "unknown command '$1' (ready|start|status|check|ids)" ;;
+esac

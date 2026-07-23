@@ -16,6 +16,9 @@
 #     headless scout cannot be steered mid-flight; use the interactive default
 #     when follow-up questions are likely.
 #   --base <ref> bases the task branch on <ref> instead of the current HEAD.
+#   --issue <n> records issue=<n> in meta for board-driven work (the Closes-#n
+#     contract itself lives in the brief via cs-brief.sh --issue). Correlates
+#     the task to a GitHub issue for the fleet view and the contracts skill.
 #
 # Ship/scout mechanics:
 #   - Requires the brief at data/<id>/brief.md (scaffold with cs-brief.sh first).
@@ -73,6 +76,7 @@ MODEL=
 EFFORT=
 BASE=
 HEADLESS=0
+ISSUE=
 POS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -82,11 +86,15 @@ while [ "$#" -gt 0 ]; do
     --model) MODEL=${2:?--model requires a value}; shift ;;
     --effort) EFFORT=${2:?--effort requires a value}; shift ;;
     --base) BASE=${2:?--base requires a value}; shift ;;
+    --issue) ISSUE=${2:?--issue requires a value}; shift ;;
     -*) echo "error: unknown flag $1" >&2; exit 2 ;;
     *) POS+=("$1") ;;
   esac
   shift
 done
+if [ -n "$ISSUE" ]; then
+  case "$ISSUE" in *[!0-9]*) echo "error: --issue must be a number, got '$ISSUE'" >&2; exit 2 ;; esac
+fi
 [ "${#POS[@]}" -ge 2 ] || { usage >&2; exit 2; }
 ID=${POS[0]}
 TARGET=${POS[1]}
@@ -224,6 +232,7 @@ META_LINES=(
   "yolo=$YOLO"
 )
 [ "$HEADLESS" -eq 1 ] && META_LINES+=("headless=1")
+[ -n "$ISSUE" ] && META_LINES+=("issue=$ISSUE")
 cs_meta_write "$STATE/$ID.meta" "${META_LINES[@]}"
 
 sq_brief=$(shell_quote "$BRIEF")
