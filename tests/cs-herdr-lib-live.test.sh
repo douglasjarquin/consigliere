@@ -46,7 +46,11 @@ ws2=$(cs_herdr_home_workspace_ensure consigliere-test "$TMP/$REPO") || fail "hom
 [ "$ws" = "$ws2" ] || fail "home workspace ensure is not idempotent ($ws vs $ws2)"
 pass "home workspace ensure is idempotent"
 
-tuple=$(cs_herdr_task_create "$ws" cs/lib-test t-lib-test) || fail "task worktree create"
+# cs_herdr_task_create takes the project PATH (as bin/cs-spawn.sh passes
+# $PROJ_ABS), not a workspace id: --cwd must resolve to $TMP/$REPO so the task
+# branch is created in this repo and the branch-preservation assertion below is
+# actually meaningful.
+tuple=$(cs_herdr_task_create "$TMP/$REPO" cs/lib-test t-lib-test) || fail "task worktree create"
 task_ws=$(printf '%s' "$tuple" | cut -f1)
 task_pane=$(printf '%s' "$tuple" | cut -f2)
 task_path=$(printf '%s' "$tuple" | cut -f3)
@@ -80,7 +84,7 @@ cs_herdr_worktree_remove "$task_ws" >/dev/null || fail "clean worktree remove"
 git -C "$TMP/$REPO" show-ref --verify --quiet refs/heads/cs/lib-test || fail "branch must survive clean remove"
 pass "clean remove deletes worktree, preserves branch"
 
-tuple=$(cs_herdr_task_create "$ws" cs/lib-recover t-lib-recover) || fail "second task create"
+tuple=$(cs_herdr_task_create "$TMP/$REPO" cs/lib-recover t-lib-recover) || fail "second task create"
 task_ws=$(printf '%s' "$tuple" | cut -f1)
 task_path=$(printf '%s' "$tuple" | cut -f3)
 echo keep > "$task_path/keep.txt"
