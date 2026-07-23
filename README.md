@@ -23,7 +23,7 @@ Requirements: `codex`, `herdr` (protocol >= 16), `jq`, `gh` + `gh-axi` (authenti
 ## Layout
 
 - `bin/` - `cs-*` scripts; read each header before first use
-- `skills/` - agent-loaded procedures (afk, bearings, stow, capo-provisioning, upstream-review, ...)
+- `skills/` - agent-loaded procedures (afk, the-books, stow, capo-provisioning, upstream-review, ...)
 - `docs/` - architecture, configuration schema (owner), supervision protocol, verified herdr/codex facts
 - `tests/` - colocated behavior tests (`bash tests/<name>.test.sh`; live suites opt in via `CS_TEST_HERDR_LIVE=1` / `CS_TEST_CODEX_LIVE=1`)
 - `data/ state/ config/ projects/` - boss-private operational home, gitignored

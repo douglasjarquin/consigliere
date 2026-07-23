@@ -1,9 +1,9 @@
 ---
-name: bearings
-description: Generate a "pick up where I left off" status report from consigliere's live fleet state. Use when the boss invokes /bearings or asks for a bearings report, morning brief, status report, catch-up, "where did I leave off", or "what's in the works". Read-mostly; never tears down, merges, or mutates task state as a side effect of producing the brief.
+name: the-books
+description: Open the books with a full "pick up where I left off" status report from consigliere's live fleet state. Use when the boss invokes /the-books or asks for a bearings report, morning brief, status report, catch-up, "where did I leave off", or "what's in the works". Read-mostly; never tears down, merges, or mutates task state as a side effect of producing the brief.
 ---
 
-# Bearings
+# The Books
 
 Produce a scannable catch-up brief from durable fleet state, then surface a concise version in chat.
 
