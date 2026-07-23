@@ -249,6 +249,7 @@ fi
 # --- 5. context digest -----------------------------------------------------
 section "CONTEXT"
 print_file_or_absent "$DATA/projects.md" "data/projects.md"
+print_file_or_absent "$DATA/boards.md" "data/boards.md (GitHub board mapping for the contracts skill)"
 print_file_or_absent "$DATA/capos.md" "data/capos.md"
 print_file_or_absent "$DATA/boss.md" "data/boss.md"
 print_file_or_absent "$DATA/boss-shared.md" "data/boss-shared.md (shared, main-authoritative, read-only in capo homes)"
@@ -334,7 +335,7 @@ EOF
 fi
 cat <<'EOF'
 The digest above is complete for this session start. Do NOT re-read
-data/projects.md, data/capos.md, data/boss.md, data/boss-shared.md,
+data/projects.md, data/boards.md, data/capos.md, data/boss.md, data/boss-shared.md,
 data/learnings.md, or state/*.meta now - they were just printed in full.
 Do NOT bulk-read data/backlog.md now either: the compact listing was just
 printed with a pointer for targeted full-body follow-up.

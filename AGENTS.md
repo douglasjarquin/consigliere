@@ -73,6 +73,7 @@ data/                personal fleet records; LOCAL, gitignored as a whole
   boss-shared.md     main-authoritative shared boss preferences propagated read-only to capo homes
   learnings.md       fleet-local operational facts; dated, evidence-backed, curated; created lazily
   projects.md        thin fleet navigation registry (section 6)
+  boards.md          per-project GitHub Projects board mapping for the contracts skill (section 7); parsed by bin/cs-board.sh
   capos.md           capo routing table; maintained by cs-home-seed.sh (section 6)
   upstream-review.md last-reviewed firstmate SHA plus dated review entries (section 14)
   <id>/brief.md      per-task soldier brief, or per-capo charter brief when kind=capo

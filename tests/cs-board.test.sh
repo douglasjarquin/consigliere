@@ -7,8 +7,8 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 TMP=$(cs_test_tmproot cs-board)
-export CS_CONFIG_OVERRIDE="$TMP/config"
-mkdir -p "$TMP/config"
+export CS_DATA_OVERRIDE="$TMP/data"
+mkdir -p "$TMP/data"
 
 FAKEBIN=$(cs_fakebin "$TMP")
 # Fake gh: canned project view / field-list / item-list, and an item-edit that
@@ -53,12 +53,18 @@ export EDIT_LOG="$TMP/edit.log"
 
 BIN="$ROOT/bin/cs-board.sh"
 
-# missing config fails closed
-out=$("$BIN" ready proj 2>&1) && fail "missing config must fail"
-assert_contains "$out" "no board config" "missing config named"
-pass "missing board config fails closed"
+# missing mapping fails closed
+out=$("$BIN" ready proj 2>&1) && fail "missing mapping must fail"
+assert_contains "$out" "no board mapping" "missing mapping named"
+pass "missing board mapping fails closed"
 
-printf 'proj o 7\n' > "$TMP/config/boards"
+# markdown comments and blank lines are ignored; mapping keyed by project name
+cat > "$TMP/data/boards.md" <<'EOF'
+# Board mappings for the contracts skill
+# <project> <owner> <number> [labels...]
+
+proj o 7
+EOF
 
 # ready: only OPEN Issues in Ready, drafts and non-Ready and closed excluded
 out=$("$BIN" ready proj)
@@ -89,7 +95,7 @@ assert_contains "$out" "built-in" "check reminds about the workflow"
 pass "check reports board sanity + workflow reminder"
 
 # custom labels via underscores
-printf 'todoproj o 9 Todo In_Progress Status\n' > "$TMP/config/boards"
+printf 'todoproj o 9 Todo In_Progress Status\n' > "$TMP/data/boards.md"
 out=$("$BIN" ready todoproj 2>&1)
 # fixture items are labeled "Ready", not "Todo", so a Todo board finds none
 [ -z "$out" ] || fail "custom ready label should match nothing in this fixture, got: $out"

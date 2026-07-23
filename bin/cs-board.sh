@@ -6,8 +6,10 @@
 # "when issue closed -> Done" workflow, triggered by a merged PR whose body
 # carries `Closes #<n>` (see the contracts skill and cs-brief.sh --issue).
 #
-# Board identity comes from config/boards (LOCAL, gitignored). One line per
-# registered project:
+# Board identity comes from data/boards.md (LOCAL, gitignored), a durable
+# per-project record kept beside data/projects.md and keyed by the same project
+# name. Blank lines and lines beginning with '#' are ignored; every other line
+# is one mapping:
 #   <project-name> <owner> <project-number> [ready-label] [inprogress-label] [status-field]
 # Defaults: ready-label="Ready", inprogress-label="In Progress", status-field="Status".
 # <owner> is a user or org login, or "@me" for the authenticated user.
@@ -30,8 +32,8 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CS_ROOT="${CS_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
-CONFIG="${CS_CONFIG_OVERRIDE:-$CS_HOME/config}"
-BOARDS="$CONFIG/boards"
+DATA="${CS_DATA_OVERRIDE:-$CS_HOME/data}"
+BOARDS="$DATA/boards.md"
 
 # Test seam: point CS_BOARD_GH at a fake gh for offline tests.
 GH=${CS_BOARD_GH:-gh}
@@ -47,8 +49,9 @@ command -v jq >/dev/null 2>&1 || die "jq is required"
 # resolve <project> -> sets OWNER NUMBER READY_LABEL INPROGRESS_LABEL STATUS_FIELD
 resolve_board() {
   local project=$1 line
-  [ -f "$BOARDS" ] || die "no board config at $BOARDS; add a line: <project> <owner> <number> [ready] [in-progress] [status-field]"
-  line=$(awk -v p="$project" '$1==p {print; exit}' "$BOARDS")
+  [ -f "$BOARDS" ] || die "no board mapping at $BOARDS; add a line: <project> <owner> <number> [ready] [in-progress] [status-field]"
+  # Skip blank lines and '#' comments so the file reads as ordinary markdown.
+  line=$(awk -v p="$project" '/^[[:space:]]*#/ {next} $1==p {print; exit}' "$BOARDS")
   [ -n "$line" ] || die "project '$project' not in $BOARDS"
   # shellcheck disable=SC2086 # deliberate word split of the config line
   set -- $line

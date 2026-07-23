@@ -26,7 +26,6 @@ Test and script overrides: `CS_ROOT_OVERRIDE`, `CS_STATE_OVERRIDE` narrow a sing
 | `config/backlog-backend` | absent or `tasks-axi` = tasks-axi against `data/backlog.md` (`.tasks.toml` owns schema); `manual` = hand-edit the markdown |
 | `config/upstream` | path or URL of the firstmate checkout for `/upstream-review`; absent = `../firstmate` |
 | `config/wedge-alarm` | away-mode wedge-alarm active-alert directives; absent = auto (macOS Notification Center when available) |
-| `config/boards` | GitHub Projects (v2) board mapping for the `contracts` skill; one line per project: `<project> <owner> <number> [ready-label] [in-progress-label] [status-field]`. Labels/field default to `Ready` / `In Progress` / `Status`; use `_` for spaces in a label token. `<owner>` is a user/org login or `@me`. `bin/cs-board.sh` reads it |
 
 Inheritance into capo homes: `data/boss-shared.md` is propagated read-only, and `config/backlog-backend` is copied at seed time; nothing else is inherited.
 `bin/cs-inherit-lib.sh` owns the allowlist.
@@ -35,7 +34,8 @@ Inheritance into capo homes: `data/boss-shared.md` is propagated read-only, and 
 
 The complete field-level inventory lives in AGENTS.md section 2; producing scripts own mutation:
 
-- `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `model=`, `effort=`, `kind=` (ship|scout|capo), `mode=` (no-mistakes|direct-PR|local-only), `yolo=`; `kind=capo` also records `home=`; `cs-pr-check.sh` appends `pr=` and `pr_head=`; `cs-spawn.sh` appends `codex_session=` when it can capture one.
+- `data/boards.md` - per-project GitHub Projects (v2) board mapping for the `contracts` skill, kept beside `data/projects.md` and keyed by the same project name. Blank lines and `#` comments ignored; every other line is `<project> <owner> <number> [ready-label] [in-progress-label] [status-field]`. Labels/field default to `Ready` / `In Progress` / `Status`; use `_` for spaces in a label token. `<owner>` is a user/org login or `@me`. `bin/cs-board.sh` reads it; the board mapping is optional (only projects worked via the board need a line).
+- `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `model=`, `effort=`, `kind=` (ship|scout|capo), `mode=` (no-mistakes|direct-PR|local-only), `yolo=`; `kind=capo` also records `home=`; `cs-spawn.sh` also records `issue=` for board-driven work and `headless=1` for a `codex exec` scout; `cs-pr-check.sh` appends `pr=` and `pr_head=`.
 - `state/<id>.status` - appended by soldiers; wake events, never current state. `bin/cs-classify-lib.sh` owns the verb vocabulary.
 - `state/.wake-queue` - `epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload`; `bin/cs-wake-lib.sh` owns it.
 
