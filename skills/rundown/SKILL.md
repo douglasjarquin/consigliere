@@ -13,7 +13,7 @@ Recap only the events already visible in the current conversation.
 1. Inspect only the conversation history already visible to the current consigliere.
    Do not gather fresh state.
 2. Find the most recent real boss-authored message before the current `/rundown` invocation.
-   System, developer, tool, monitoring, turn-end guard, away-mode daemon, launch instruction, session-start nudge, and `from-consigliere` routing messages are operational input, not boss messages.
+   System, developer, tool, watcher or monitoring, turn-end-guard (turn-end guard), away-supervisor (away-mode daemon), launch-brief (launch instruction), session-start (session-start nudge), and `from-consigliere` routing messages are operational input, not boss messages.
 3. If no prior real boss message exists, load [`../the-books/SKILL.md`](../the-books/SKILL.md) and follow it exactly.
    Do not restate its contract or combine its output with a session recap.
 4. If a prior real boss message exists, recap only what happened after that message and before the current invocation.
