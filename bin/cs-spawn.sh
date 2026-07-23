@@ -64,6 +64,8 @@ esac
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
 # shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# shellcheck source=bin/cs-operational-input.sh
+. "$SCRIPT_DIR/cs-operational-input.sh"
 
 CS_ROOT="${CS_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
@@ -144,6 +146,7 @@ effort_flag() {
 }
 
 BRIEF="$DATA/$ID/brief.md"
+sq_operational=$(shell_quote "$SCRIPT_DIR/cs-operational-input.sh")
 
 # ---------------------------------------------------------------- capo spawn
 if [ "$KIND" = capo ]; then
@@ -172,7 +175,7 @@ if [ "$KIND" = capo ]; then
 
   sq_brief=$(shell_quote "$BRIEF")
   sq_home=$(shell_quote "$HOME_ABS")
-  LAUNCH="CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_HOME=$sq_home codex $(model_flag)$(effort_flag)--dangerously-bypass-approvals-and-sandbox \"\$(cat $sq_brief)\""
+  LAUNCH="CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_HOME=$sq_home codex $(model_flag)$(effort_flag)--dangerously-bypass-approvals-and-sandbox \"\$($sq_operational encode launch-brief < $sq_brief)\""
   cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
   echo "spawned $ID kind=capo home=$HOME_ABS workspace=$WS pane=$PANE"
   exit 0
@@ -243,9 +246,9 @@ if [ "$HEADLESS" -eq 1 ]; then
   # surfaces through the watcher's ordinary signal path with no special
   # classification. No notify hook: process exit IS the turn end.
   sq_status=$(shell_quote "$STATE/$ID.status")
-  LAUNCH="if codex exec $(model_flag)$(effort_flag)--dangerously-bypass-approvals-and-sandbox \"\$(cat $sq_brief)\"; then echo 'done: headless scout finished; read the report' >> $sq_status; else echo \"failed: codex exec exited \$?\" >> $sq_status; fi"
+  LAUNCH="if codex exec $(model_flag)$(effort_flag)--dangerously-bypass-approvals-and-sandbox \"\$($sq_operational encode launch-brief < $sq_brief)\"; then echo 'done: headless scout finished; read the report' >> $sq_status; else echo \"failed: codex exec exited \$?\" >> $sq_status; fi"
 else
-  LAUNCH="codex $(model_flag)$(effort_flag)--dangerously-bypass-approvals-and-sandbox -c \"notify=[\\\"bash\\\",\\\"-c\\\",\\\"touch $sq_turnend\\\"]\" \"\$(cat $sq_brief)\""
+  LAUNCH="codex $(model_flag)$(effort_flag)--dangerously-bypass-approvals-and-sandbox -c \"notify=[\\\"bash\\\",\\\"-c\\\",\\\"touch $sq_turnend\\\"]\" \"\$($sq_operational encode launch-brief < $sq_brief)\""
 fi
 cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
 

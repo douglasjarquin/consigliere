@@ -19,13 +19,11 @@
 # escalations that remain when afk turns off survive in
 # state/.subsuper-escalations and are flushed by the return catch-up.
 #
-# IN-BAND SENTINEL MARKER. Every injection is prefixed with CS_INJECT_MARK
-# (a BARE U+2063 INVISIBLE SEPARATOR, owned by bin/cs-marker-lib.sh - never
-# redefined here). No normal keyboard produces it, and herdr transports it as
-# UTF-8 text. Consigliere's contract: a message starting with the marker is an
-# internal escalation (stay afk); an unmarked message means the boss is back
-# (exit afk, run the return owner). The separate from-consigliere marker
-# (label + U+2063) cannot conflate with this bare leading marker.
+# OPERATIONAL INPUT. Every injection is constructed as away-supervisor by
+# bin/cs-operational-input.sh. It starts with the same bare U+2063
+# CS_INJECT_MARK, followed by a versioned kind header. Consigliere classifies
+# the structure without reading body prose. The labeled from-consigliere
+# compatibility form remains byte-distinct.
 #
 # Reliability model (see skills/afk/SKILL.md):
 #   - Nothing is lost: while state/.afk exists the watcher enqueues every wake
@@ -124,10 +122,6 @@ CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
 # state/<id>.meta readers (pane_for_task below).
 # shellcheck source=bin/cs-meta-lib.sh
 . "$CS_DAEMON_DIR/cs-meta-lib.sh"
-# CS_INJECT_MARK (bare U+2063) - single definition site, never redefined.
-# shellcheck source=bin/cs-marker-lib.sh
-. "$CS_DAEMON_DIR/cs-marker-lib.sh"
-
 # --- tunables ----------------------------------------------------------------
 INJECT_SKIP_DEFAULT="heartbeat"
 STALE_ESCALATE_SECS_DEFAULT=240
@@ -181,17 +175,14 @@ afk_exit() {  # <state>
   rm -f "$1/$AFK_FLAG_NAME"
 }
 
-# message_is_injection: 0 if the message starts with the bare sentinel marker
-# (a daemon escalation), 1 otherwise (a real boss message). Consigliere's
-# afk-exit contract keys off this; ambiguity biases toward exit (a false exit
-# is self-correcting - the boss re-runs /afk).
+# message_is_injection: 0 for a structurally typed operational input, 1 for
+# boss text. Consigliere's afk-exit contract keys off this; ambiguity biases
+# toward exit (a false exit is self-correcting - the boss re-runs /afk).
 message_is_injection() {  # <message-text>
-  local msg=$1
+  local msg=$1 kind
   [ -n "$msg" ] || return 1
-  case "$msg" in
-    "$CS_INJECT_MARK"*) return 0 ;;
-  esac
-  return 1
+  kind=$(cs_classify_input "$msg")
+  [ "$kind" != boss ]
 }
 
 # should_exit_afk: the afk-exit contract as a testable function.
@@ -209,10 +200,9 @@ should_exit_afk() {  # <state> <message-text>
   return 0
 }
 
-# strip_injection_marker: remove the leading sentinel so relayed digest text is
-# clean once the marker's presence has been read.
+# strip_injection_marker: return the typed body once provenance was read.
 strip_injection_marker() {  # <message-text>
-  printf '%s' "${1#"$CS_INJECT_MARK"}"
+  cs_operational_input_body "$1"
 }
 
 # Collapse newlines to a literal " - " so the injected digest is a single line
@@ -776,9 +766,9 @@ inject_msg() {  # <message> [state]
   # (1) Presence-gate: inject ONLY while afk is active.
   afk_active "$state" || { log "inject deferred: afk inactive"; return 1; }
   pane=$(daemon_target_pane "$state") || { log "inject failed: no supervisor pane recorded"; return 1; }
-  # (2) Single-line digest, then the sentinel marker prefix.
+  # (2) Single-line digest, then the typed away-supervisor envelope.
   msg=$(_collapse_newlines "$msg")
-  msg="${CS_INJECT_MARK}${msg}"
+  cs_operational_input_construct away-supervisor "$msg" msg
   cs_herdr_pane_exists "$pane" || { log "inject deferred: supervisor pane '$pane' gone"; return 1; }
   # (3) Busy-guard: never inject into a mid-turn or human-blocked pane.
   bs=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || bs=unknown

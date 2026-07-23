@@ -10,6 +10,14 @@ There is no harness or backend abstraction anywhere.
 `bin/cs-herdr-lib.sh` is the whole herdr layer (session-explicit CLI, workspace/worktree/pane/agent operations, the busy-corroboration policy); [`docs/herdr.md`](herdr.md) is its evidence ledger.
 Codex facts live in [`docs/codex.md`](codex.md); the launch template exists once, in `bin/cs-spawn.sh`.
 
+## Typed operational input
+
+`bin/cs-operational-input.sh` is the single construction and classification owner for machine-generated session input.
+Its current wire form is `U+2063 CONSIGLIERE_OP: v1 <kind>: <body>`, with kinds `launch-brief`, `session-start`, `watcher`, `turn-end-guard`, and `away-supervisor`.
+The compatibility kind `from-consigliere` retains the byte-identical `[cs-from-consigliere]` label followed immediately by U+2063, while the away form retains bare leading U+2063 before its typed header.
+Unmarked input classifies as `boss`; provenance never depends on body prose.
+`bin/cs-marker-lib.sh` is a thin compatibility entry point for legacy marker callers.
+
 ## Workspace-per-task, herdr-native worktrees
 
 `herdr worktree create --cwd <project> --branch cs/<id> --label <id>` creates the isolated task worktree at `~/.herdr/worktrees/<repo>/<branch>` AND its own workspace whose root pane is the task pane.
@@ -22,7 +30,7 @@ Capo homes are the exception: a capo home must survive server restarts and empty
 A zero-token bash watcher (`bin/cs-watch.sh`) sleeps on the fleet, classifies wakes in bash, and wakes consigliere only when something is actionable; actionable wakes are written to the durable `state/.wake-queue` before detector state advances.
 The absorb policy is absorb-only-when-provably-working: a no-verb signal or fresh stale pane is absorbed only with positive working evidence (an attributed no-mistakes run step from `bin/cs-crew-state.sh`, or native-busy corroborated per docs/herdr.md), a declared `paused:` idles on a long bounded cadence, and a provably-working stale escalates past the wedge threshold with a `demand-deep-inspection` marker on repetition.
 Native herdr `blocked` surfaces immediately - sub-second via the socket event splice (`bin/cs-herdr-events.py`, `pane.agent_status_changed`) and on the next poll without it; the poll loop is the permanent fail-closed backstop.
-`bin/cs-classify-lib.sh` is the one owner of the status-verb vocabulary and the keyed decision/activity folds, shared by the watcher and the away-mode daemon.
+`bin/cs-classify-lib.sh` is the one owner of the status-verb vocabulary and the keyed decision/activity folds, shared by the watcher and the away-mode daemon, and consumes operational-input types from `bin/cs-operational-input.sh`.
 The supervision wait shape is the bounded foreground checkpoint ([`docs/supervision.md`](supervision.md)); the codex Stop hook (`bin/cs-turnend-guard.sh`) is the structural backstop.
 
 ## Authenticated checks
@@ -40,13 +48,13 @@ Scout tasks leave a report at `data/<id>/report.md`, never push, and their scrat
 ## Capos
 
 A capo is a soldier with an isolated consigliere home (`CS_HOME`) and a charter, not a second architecture: own data/state/config/projects, own session lock, own watcher, workspace `capo-<id>`.
-`bin/cs-home-seed.sh` provisions transactionally and sweeps (fast-forward + liveness respawn) at bootstrap; `data/capos.md` is the routing table; marked requests travel with the `bin/cs-marker-lib.sh` U+2063 marker and a `corr=` token, with parent-owned expectations in `bin/cs-pending-reply-lib.sh`.
+`bin/cs-home-seed.sh` provisions transactionally and sweeps (fast-forward + liveness respawn) at bootstrap; `data/capos.md` is the routing table; marked requests travel with the byte-compatible `from-consigliere` kind and a `corr=` token, with parent-owned expectations in `bin/cs-pending-reply-lib.sh`.
 Inheritance is deliberately tiny: `data/boss-shared.md` (read-only) and the backlog-backend choice (`bin/cs-inherit-lib.sh`).
 
 ## Away mode
 
-`/afk` sets the durable `state/.afk` flag and starts `bin/cs-daemon.sh`, a presence-gated sub-supervisor that self-handles routine wakes in bash and injects batched, U+2063-marked escalation digests into the primary's own pane (recorded at afk-start from `HERDR_PANE_ID`), only into an affirmatively empty composer (`bin/cs-composer-lib.sh` strips codex ghost text before judging emptiness).
-Any unmarked message means the boss returned; `bin/cs-afk-return.sh` owns ordered shutdown and the fail-closed catch-up gate.
+`/afk` sets the durable `state/.afk` flag and starts `bin/cs-daemon.sh`, a presence-gated sub-supervisor that self-handles routine wakes in bash and injects batched `away-supervisor` digests into the primary's own pane (recorded at afk-start from `HERDR_PANE_ID`), only into an affirmatively empty composer (`bin/cs-composer-lib.sh` strips codex ghost text before judging emptiness).
+Input classified `boss` means the boss returned; `bin/cs-afk-return.sh` owns ordered shutdown and the fail-closed catch-up gate.
 
 ## Restart-proof
 

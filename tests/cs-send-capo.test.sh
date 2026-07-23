@@ -4,8 +4,8 @@
 #   1. A kind=capo task target gets marker + corr prepended, and a durable
 #      parent pending-reply record is created before delivery and marked
 #      delivered after the confirmed submit.
-#   2. Ship targets stay unmarked and create no records.
-#   3. Explicit pane targets stay unmarked.
+#   2. Ship targets carry the watcher kind and create no records.
+#   3. Explicit pane targets carry the watcher kind.
 #   4. The --key path never marks and never creates a record.
 #   5. Re-sending already-correlated text is idempotent for that open corr.
 #   6. CS_PENDING_REPLY_EXISTING_CORR guards a recovery re-send.
@@ -17,6 +17,8 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/capo-helpers.sh"
 # shellcheck source=bin/cs-marker-lib.sh
 . "$ROOT/bin/cs-marker-lib.sh"
+# shellcheck source=bin/cs-operational-input.sh
+. "$ROOT/bin/cs-operational-input.sh"
 # shellcheck source=bin/cs-pending-reply-lib.sh
 . "$ROOT/bin/cs-pending-reply-lib.sh"
 
@@ -67,26 +69,30 @@ rec=$(cs_pending_reply_path "$home/state" "$corr")
 [ "$(cs_pending_reply_get "$rec" task_id)" = domain ] || fail "task_id must match the capo id"
 pass "cs-send: a kind=capo target gets marker + corr and a durable pending record"
 
-# 2. ship target: unmarked, no record
+# 2. ship target: typed watcher, no record
 home=$(setup_home ship)
 cs_write_meta "$home/state/build.meta" \
   "workspace=w2" "pane=w2:p2" "kind=ship" "mode=no-mistakes" "yolo=off"
 log="$TMP/send2.log"
 run_send "$home" "$log" build "fix the test" || fail "ship send should succeed"
-[ "$(cat "$log")" = "fix the test" ] || fail "ship send must stay unmarked: $(cat "$log")"
+got=$(cat "$log")
+[ "$(cs_operational_input_kind "$got")" = watcher ] || fail "ship send must carry watcher kind"
+[ "$(cs_operational_input_body "$got")" = "fix the test" ] || fail "ship send lost its body"
 [ ! -d "$home/state/pending-replies" ] \
   || [ -z "$(ls "$home/state/pending-replies" 2>/dev/null)" ] \
   || fail "ship send must create no pending-reply records"
-pass "cs-send: a kind=ship target is sent unmarked with no expectation"
+pass "cs-send: a kind=ship target is typed watcher input with no expectation"
 
-# 3. explicit pane target: unmarked even with matching capo meta
+# 3. explicit pane target: typed watcher even with matching capo meta
 home=$(setup_home explicit)
 cs_write_meta "$home/state/domain.meta" \
   "workspace=w3" "pane=w3:p3" "kind=capo" "mode=capo" "home=$home/capo-home"
 log="$TMP/send3.log"
 run_send "$home" "$log" "w3:p3" "ping" || fail "explicit pane send should succeed"
-[ "$(cat "$log")" = "ping" ] || fail "explicit pane send must stay unmarked: $(cat "$log")"
-pass "cs-send: explicit pane targets stay unmarked"
+got=$(cat "$log")
+[ "$(cs_operational_input_kind "$got")" = watcher ] || fail "explicit pane send must carry watcher kind"
+[ "$(cs_operational_input_body "$got")" = ping ] || fail "explicit pane send lost its body"
+pass "cs-send: explicit pane targets carry watcher kind"
 
 # 4. --key path: no marker, no record
 home=$(setup_home key)
@@ -150,6 +156,8 @@ pass "cs-send: an unconfirmed submit leaves the attempt marker for reconciliatio
 separator=$(printf '\342\201\243')
 [ "$CS_FROMCONS_MARK" = "[cs-from-consigliere]$separator" ] \
   || fail "marker is not the expected label + U+2063 sequence"
+[ "$CS_INJECT_MARK" = "$separator" ] \
+  || fail "away marker is not the exact bare U+2063 sequence"
 cs_message_from_consigliere "${CS_FROMCONS_MARK}do the work" || fail "detector should recognize a marked message"
 cs_message_from_consigliere "do the work" && fail "direct boss input must remain unmarked"
 cs_message_from_consigliere "[cs-from-consigliere]do the work" && fail "label without U+2063 must not match"

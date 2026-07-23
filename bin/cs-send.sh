@@ -22,11 +22,10 @@
 # (CS_SEND_SKILL_SETTLE, default 1.5s) so the completion popup does not
 # swallow the Enter; it is sent as send-text + Enter instead of the atomic run.
 #
-# From-consigliere marker: when the resolved target's meta records kind=capo,
-# the text is prefixed with the from-consigliere marker (bin/cs-marker-lib.sh)
-# so the capo routes its reply via its status file instead of stranding it in
-# chat the main consigliere never reads. Ship/scout targets, explicit pane
-# targets, and the --key path are never marked.
+# Operational input: textual sends are typed by bin/cs-operational-input.sh.
+# kind=capo keeps the byte-compatible from-consigliere marker so the capo
+# routes its reply via its status file. Ship/scout and explicit-pane sends use
+# the watcher kind. The --key path carries no text and is never marked.
 #
 # Pending reply: a marked kind=capo send also creates a durable parent-owned
 # pending-reply record under state/pending-replies/ BEFORE delivery and
@@ -56,6 +55,8 @@ STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
 # shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# shellcheck source=bin/cs-operational-input.sh
+. "$SCRIPT_DIR/cs-operational-input.sh"
 # shellcheck source=bin/cs-marker-lib.sh
 . "$SCRIPT_DIR/cs-marker-lib.sh"
 # shellcheck source=bin/cs-pending-reply-lib.sh
@@ -91,7 +92,8 @@ if [ "${1:-}" = "--key" ]; then
   exit 0
 fi
 
-TEXT="$*"
+RAW_TEXT="$*"
+TEXT=$RAW_TEXT
 PENDING_CORR=
 PENDING_CREATED=0
 if [ "$KIND" = capo ]; then
@@ -113,6 +115,8 @@ if [ "$KIND" = capo ]; then
     echo "error: failed to durably prepare pending-reply delivery for '$RAW'" >&2
     exit 1
   fi
+else
+  cs_operational_input_construct watcher "$TEXT" TEXT
 fi
 
 # Delivery confirmed: mark the pending expectation delivered without
@@ -132,7 +136,7 @@ SKILL_SETTLE=${CS_SEND_SKILL_SETTLE:-1.5}
 
 pre_status=$(cs_herdr_agent_busy_state "$PANE")
 
-case "$TEXT" in
+case "$RAW_TEXT" in
   '$'*)
     # Skill invocation: literal text, settle for the popup, then Enter.
     cs_herdr_send_text "$PANE" "$TEXT" >/dev/null

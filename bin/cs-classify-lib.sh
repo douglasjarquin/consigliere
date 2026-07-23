@@ -20,6 +20,19 @@
 
 _CS_CLASSIFY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null)" || _CS_CLASSIFY_LIB_DIR="."
 
+# Machine-generated session input is structurally typed by the canonical wire
+# owner. Unmarked text classifies as boss input without prose inspection.
+# shellcheck source=bin/cs-operational-input.sh
+. "$_CS_CLASSIFY_LIB_DIR/cs-operational-input.sh"
+
+cs_classify_input() {  # <message> -> current kind or boss
+  cs_operational_input_classify "${1-}"
+}
+
+cs_input_is_boss() {  # <message>
+  [ "$(cs_classify_input "${1-}")" = boss ]
+}
+
 # The soldier current-state reader used for the "provably working" decision.
 # Overridable so tests can stub the run-step/pane verdict without a real
 # worktree or no-mistakes install; absent, it points at the real sibling script.

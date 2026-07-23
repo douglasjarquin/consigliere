@@ -1,8 +1,8 @@
 ---
 name: afk
 description: >-
-  Enter away-mode supervision when the boss invokes /afk, says they are going afk, `state/.afk` exists, an incoming message starts with `CS_INJECT_MARK`, or any `state/.subsuper-*` marker is involved.
-  It sets a durable away-mode flag so the sub-supervisor daemon can self-handle routine wakes and escalate boss-relevant events plus bounded declared-external-wait rechecks as batched digests during walk-away stretches, then exits automatically when any real unmarked message returns consigliere to full per-wake responsiveness.
+  Enter away-mode supervision when the boss invokes /afk, says they are going afk, `state/.afk` exists, an incoming message classifies as `away-supervisor`, or any `state/.subsuper-*` marker is involved.
+  It sets a durable away-mode flag so the sub-supervisor daemon can self-handle routine wakes and escalate boss-relevant events plus bounded declared-external-wait rechecks as batched digests during walk-away stretches, then exits automatically when input classifies as boss.
 user-invocable: true
 ---
 
@@ -45,13 +45,13 @@ batched digest rather than per-wake injections.
 
 No `/back` is needed. The first genuine message is the return signal:
 
-- A message **without** the sentinel marker and **not** starting with `/afk` -> the boss is back.
+- Input classified `boss` and not starting with `/afk` -> the boss is back.
   Run `bin/cs-afk-return.sh` before acting on the message that brought the boss back.
   That script owns correct-ordered daemon shutdown (stop the daemon, then clear `state/.afk`), durable wake draining, escalation and wedge evidence, and the fail-closed return catch-up gate.
   If it reports a consigliere-actionable `blocked:` decision, remediate it immediately through the normal lifecycle, or explicitly reclassify it with a durable reason and close its decision key with `resolved [key=...]`, then run `bin/cs-afk-return.sh check`.
   Once the daemon stops, resume the normal foreground checkpoint cycle while blocker handling proceeds, so the gate never creates a blind wait.
   Do not perform any other ordinary boss work until the check exits successfully.
-- A message **with** the sentinel marker (`CS_INJECT_MARK`, a bare leading U+2063 INVISIBLE SEPARATOR) -> it is a daemon escalation; stay afk and process it.
+- Input classified `away-supervisor` -> it is a daemon escalation; stay afk and process it.
 - Re-invoking `/afk` while already away -> stay afk (refresh the flag); this does **not** trigger an exit.
 
 Bias ambiguous cases toward exit: a present boss beats token savings, and a
@@ -65,15 +65,11 @@ needs-decision finding, or anything destructive, irreversible, or
 security-sensitive still waits for the boss's explicit word - the daemon just
 batches the notification.
 
-## Sentinel marker contract
+## Operational-input contract
 
-The daemon prefixes every injection with `CS_INJECT_MARK`, a bare leading
-U+2063 INVISIBLE SEPARATOR that no normal keyboard produces and herdr
-transports as UTF-8 text (`bin/cs-marker-lib.sh` is the single definition
-site). This is how consigliere tells a daemon escalation apart from a real
-boss message in the same pane. It is distinct from the from-consigliere
-request marker, which begins with a human-readable label before its U+2063,
-so the two cannot conflate.
+`bin/cs-operational-input.sh` constructs every daemon injection with the `away-supervisor` kind.
+The wire retains `CS_INJECT_MARK`, a bare leading U+2063 INVISIBLE SEPARATOR that no normal keyboard produces and herdr transports as UTF-8 text, then adds the versioned kind header before the body.
+The byte-compatible `from-consigliere` form instead begins with its visible label before U+2063, so the two cannot conflate.
 
 ## Busy-guard and composer guard
 
@@ -150,7 +146,7 @@ the verb vocabulary.
 - Unknown reason, or any uncertainty -> escalate fail-safe.
 
 Escalations buffer up to `CS_ESCALATE_BATCH_SECS` (default 90; 0 = immediate)
-and flush as ONE single-line digest prefixed with the sentinel marker.
+and flush as ONE single-line digest typed `away-supervisor`.
 `CS_INJECT_SKIP` (default `heartbeat`) force-self-handles matching reason
 prefixes, overriding classification; use it sparingly.
 
