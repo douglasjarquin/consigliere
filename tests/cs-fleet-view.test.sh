@@ -6,7 +6,8 @@
 # backlog compact listing, every state/<id>.meta with endpoint liveness and
 # current state, the keyed open-decision fold, scout report and PR pointers,
 # and marker-validated capo home summaries (unknown, never guessed, for an
-# unmarked or missing home); --json emits the same data under the
+# unmarked or missing home); a headless scout row is labeled so its endpoint
+# never implies a steerable pane; --json emits the same data under the
 # cs-fleet-view.v1 schema; and the command mutates nothing.
 set -u
 
@@ -97,6 +98,15 @@ cs_write_meta "$HOME_DIR/state/t3.meta" \
   "workspace=w3" "pane=w3:p1" "worktree=$TMP_ROOT/gone" "project=$TMP_ROOT/proj" \
   "kind=ship" "mode=direct-PR" "yolo=on"
 
+# t4: a headless scout (codex exec / claude -p). Its pane exists but presents no
+# steerable TUI; the render must label it so the endpoint does not imply a steer.
+mkdir -p "$TMP_ROOT/wt4" "$HOME_DIR/data/t4"
+cs_write_meta "$HOME_DIR/state/t4.meta" \
+  "workspace=w4" "pane=w4:p1" "worktree=$TMP_ROOT/wt4" "project=$TMP_ROOT/proj" \
+  "kind=scout" "mode=no-mistakes" "yolo=off" "headless=1"
+printf 'done: headless scout finished; read the report\n' > "$HOME_DIR/state/t4.status"
+printf '# headless findings\n' > "$HOME_DIR/data/t4/report.md"
+
 # Capo homes: alpha is valid+marked, beta lacks the marker, gamma is missing.
 mkdir -p "$TMP_ROOT/capoA/state" "$TMP_ROOT/capoA/data" "$TMP_ROOT/capoB"
 : > "$TMP_ROOT/capoA/.cs-capo-home"
@@ -127,10 +137,11 @@ run_view() {  # [flags...] -> stdout; exit code in $RC
   OUT=$(env PATH="$FAKEBIN:$PATH" \
     CS_HOME="$HOME_DIR" \
     CS_CREW_STATE_BIN="$FAKEBIN/cs-crew-state.sh" \
-    CS_FAKE_PANES="w1:p1 w2:p1" \
+    CS_FAKE_PANES="w1:p1 w2:p1 w4:p1" \
     CS_FAKE_HERDR_AGENT_STATUS=working \
     CS_FAKE_CREW_STATE_t1='state: working · source: run-step · validating (running)' \
     CS_FAKE_CREW_STATE_t2='state: done · source: status-log · report ready' \
+    CS_FAKE_CREW_STATE_t4='state: done · source: status-log · report ready' \
     CS_FLEET_NOW=2026-07-22T00:00:00Z \
     "$VIEW" "$@") || RC=$?
 }
@@ -164,6 +175,10 @@ test_markdown_review() {
   assert_contains "$OUT" "$HOME_DIR/data/t2/report.md" "t2 scout report pointer missing"
   assert_contains "$OUT" "| t3 | ship | unknown (none) | ABSENT |" "t3 dead-endpoint row wrong"
 
+  # A headless scout is labeled so the endpoint never implies a steerable pane;
+  # the interactive scout t2 above stays unlabeled (exact row asserted).
+  assert_contains "$OUT" "| t4 | scout | done (status-log) | present / busy · headless (not steerable) |" "t4 headless row not labeled"
+
   # Keyed open-decision fold: the later working: line must not mask it.
   assert_contains "$OUT" "- t1 [key=api] needs-decision: choose A or B" "open keyed decision missing"
   assert_not_contains "$OUT" "t2 [key=" "scout with no open decision leaked one"
@@ -190,7 +205,7 @@ test_json_snapshot() {
   printf '%s' "$OUT" | jq -e '.schema == "cs-fleet-view.v1"' >/dev/null \
     || fail "--json schema is not cs-fleet-view.v1"
   printf '%s' "$OUT" | jq -e '
-    (.tasks | length) == 3
+    (.tasks | length) == 4
     and (.backlog.present and .backlog.counts.in_flight == 1 and .backlog.counts.queued == 1 and .backlog.counts.done == 1)
     and ((.backlog.listing | join("\n")) | contains("Fix the flux capacitor"))
   ' >/dev/null || fail "--json backlog/tasks shape wrong: $OUT"
@@ -207,8 +222,13 @@ test_json_snapshot() {
   printf '%s' "$OUT" | jq -e '
     (.tasks[] | select(.id == "t2")) as $t
     | $t.kind == "scout" and $t.report.present == true and $t.pr == null
-      and ($t.open_decisions | length) == 0
+      and ($t.open_decisions | length) == 0 and $t.headless == false
   ' >/dev/null || fail "--json t2 record wrong: $OUT"
+  printf '%s' "$OUT" | jq -e '
+    (.tasks[] | select(.id == "t4")) as $t
+    | $t.kind == "scout" and $t.headless == true
+      and $t.endpoint.exists == true and $t.report.present == true
+  ' >/dev/null || fail "--json t4 headless record wrong: $OUT"
   printf '%s' "$OUT" | jq -e '
     (.tasks[] | select(.id == "t3")) as $t
     | $t.endpoint.exists == false and $t.current_state.state == "unknown"
