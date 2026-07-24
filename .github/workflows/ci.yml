@@ -71,7 +71,12 @@ jobs:
   # real run, and always clean up job-owned lab sessions.
   herdr:
     name: Real Herdr behavior
-    runs-on: ubuntu-latest
+    # macOS is consigliere's verified Herdr platform (docs/herdr.md). On a
+    # headless ubuntu runner, real-Herdr pane capture does not render the probe
+    # output in time; macOS matches where the suite is verified and passes
+    # locally. This mirrors firstmate's documented "move the Herdr job to macOS
+    # on a Linux platform invariant failure" fallback.
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
