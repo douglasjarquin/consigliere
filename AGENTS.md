@@ -211,6 +211,7 @@ Spawn only through `bin/cs-spawn.sh`.
 A ship or scout spawn creates a herdr-native worktree in its own task workspace; the spawn must resolve a genuine isolated worktree root distinct from the project primary checkout, and a failed isolation assertion stops the task.
 After spawning, confirm the soldier is processing the brief and record ship or scout work as under way.
 A persistent capo is recorded in the capo registry and runtime state, never as a backlog work item.
+A scout may be spawned `--headless` (`codex exec` / `claude -p`): a cheaper fire-and-forget investigation whose turn end is process exit and whose completion surfaces through the ordinary status path, but which cannot be steered mid-flight; use the interactive default when follow-up questions are likely.
 
 Steer a soldier with short single-line messages through fail-closed `cs-send`; put long instructions in a file.
 A capo's routed reply returns through status or a document pointer, not by consigliere peeking into its chat.
