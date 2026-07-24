@@ -1,8 +1,12 @@
 # Headless scouts: decision and end-to-end trace
 
-Status: **RECOMMEND FINISH.** The safe wiring (docs + fleet-view labeling) is
-done in this change; the one remaining piece is a MED-risk watcher refinement
-that is gated on human sign-off (section "Downstream changes").
+Status: **FINISHED (signed off).** The safe wiring (docs + fleet-view labeling)
+and the watcher refinement both landed: `bin/cs-watch.sh` now recognizes a live
+headless scout (`pane_is_headless`) and skips its stale triage until it reports a
+terminal `done:`/`failed:`, so it no longer raises a spurious "went quiet" wake
+while working non-interactively (tests in `tests/cs-watch-triage.test.sh`). A live
+headless run writes no status until exit, so the signal path never fires for it;
+completion still surfaces via the terminal status wake.
 
 A `--headless` scout runs the brief non-interactively (`codex exec` / `claude -p`)
 as a cheap fire-and-forget investigation that does not hold a supervised

@@ -239,6 +239,16 @@ pane_kind() {  # <pane> -> ship|scout|capo|unknown
   echo unknown
 }
 
+# 0 if <pane>'s task is a headless scout (meta headless=1). A headless scout runs
+# non-interactively (codex exec / claude -p) and presents no TUI activity, so the
+# interactive stale-triage heuristics do not apply to it while it runs.
+pane_is_headless() {  # <pane>
+  local p=$1 meta
+  meta=$(meta_for_pane "$p" 2>/dev/null || true)
+  [ -n "$meta" ] || return 1
+  [ "$(cs_meta_get "$meta" headless 2>/dev/null || true)" = 1 ]
+}
+
 # pane_agent_state: CONFIDENT liveness of a real codex agent in the pane, for
 # the pause reconciliation below. Only a successful agent read showing no agent
 # is `dead`; an unreadable pane (server down, pane gone) is `unknown`, so an
@@ -1130,6 +1140,14 @@ EOF
       clear_pause_tracking "$w"
     fi
     if [ "$kind" = capo ] && ! status_is_paused "$last"; then
+      continue
+    fi
+    # A live headless scout (codex exec / claude -p) has no interactive composer
+    # or TUI busy banner, so the stale-triage heuristics below would raise a
+    # spurious "went quiet" wake while it is legitimately working. Skip its stale
+    # triage until it is terminal; completion still surfaces through its
+    # done:/failed: status line on the ordinary signal path. (docs/headless-scouts.md)
+    if pane_is_headless "$w" && ! status_is_terminal_verb "$last"; then
       continue
     fi
     tail40=$(cs_herdr_capture "$w" 40 text 2>/dev/null) || continue
