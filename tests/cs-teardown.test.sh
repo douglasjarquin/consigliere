@@ -17,9 +17,15 @@ FAKEBIN=$(cs_fakebin "$TMP")
 cat > "$FAKEBIN/herdr" <<'SH'
 #!/usr/bin/env bash
 # Hermetic herdr: empty workspace/pane lists, everything else succeeds.
+# "pane close" models the soldier being frozen: when CS_TEST_QUIESCE_CLEAN_FILE
+# names a path, closing the pane removes it. A worktree left "dirty" only while
+# the agent is live then reads clean iff the pane was closed before the proof.
 case "$1 ${2:-}" in
   "workspace list") echo '{"result":{"workspaces":[]}}' ;;
   "pane list") echo '{"result":{"panes":[]}}' ;;
+  "pane close")
+    [ -n "${CS_TEST_QUIESCE_CLEAN_FILE:-}" ] && rm -f "$CS_TEST_QUIESCE_CLEAN_FILE"
+    echo '{}' ;;
   *) echo '{}' ;;
 esac
 exit 0
@@ -130,5 +136,23 @@ ln -s /etc/hosts "$TMP/state/a1.check.sh"
 out=$("$BIN" a1 2>&1) && fail "symlinked artifact must refuse"
 assert_contains "$out" "symlink" "artifact refusal names the symlink"
 pass "tampered artifact refuses cleanup"
+
+# 8. quiesce runs BEFORE the safety proof. A worktree that is "dirty" only while
+# the soldier is live reads clean because the pane is closed first. Control (q0):
+# the same dirty fixture refuses when closing the pane changes nothing, pinning
+# that the file is genuinely dirty and only a pre-proof close makes it clean.
+make_task q0 ship
+echo live > "$TMP/wt-q0/scratch.txt"
+out=$("$BIN" q0 2>&1) && fail "control: dirty worktree must refuse when pane close is inert"
+assert_contains "$out" "uncommitted changes" "control fixture is genuinely dirty"
+assert_present "$TMP/wt-q0/scratch.txt" "control dirty work preserved on refusal"
+
+make_task q1 ship
+echo live > "$TMP/wt-q1/scratch.txt"
+out=$(CS_TEST_QUIESCE_CLEAN_FILE="$TMP/wt-q1/scratch.txt" "$BIN" q1 2>&1) \
+  || fail "quiesce-before-proof teardown failed: $out"
+assert_contains "$out" "teardown q1 complete" "frozen worktree reads clean, teardown proceeds"
+assert_absent "$TMP/wt-q1" "worktree removed after quiesce-clean proof"
+pass "pane quiesce runs before the safety proof"
 
 pass "cs-teardown landed-work proofs"

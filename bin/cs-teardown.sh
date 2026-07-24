@@ -270,6 +270,26 @@ cleanup_stale_lock_for_safety_check() { # <worktree>
   return 1
 }
 
+# --- pane quiesce (freeze the soldier before the safety proof) --------------
+
+# Close the recorded pane and wait, bounded, until no live agent remains in it,
+# so the worktree cleanliness snapshot taken by validate_worktree_teardown_safety
+# is against a frozen worktree the soldier is no longer writing to, and any
+# index.lock the agent held has been released. A no-op when PANE is empty. Never
+# fails teardown: closing an already-closed pane is harmless, and the wait is
+# bounded so a --force discard never hangs on an agent that will not die.
+quiesce_pane() {
+  local waited=0
+  [ -n "$PANE" ] || return 0
+  cs_herdr_pane_close "$PANE" >/dev/null 2>&1 || true
+  while cs_herdr_agent_alive "$PANE"; do
+    [ "$waited" -ge 30 ] && break
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  return 0
+}
+
 # --- the fail-closed safety check -------------------------------------------
 
 validate_worktree_teardown_safety() {
@@ -408,6 +428,11 @@ if [ "$KIND" = scout ] && [ "$FORCE" != "--force" ]; then
 fi
 
 if [ -n "$WT" ] && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
+  # Freeze the soldier before proving its worktree is safe to discard: close the
+  # pane and wait for the agent to exit so the cleanliness snapshot below sees a
+  # worktree no longer being written to. The post-proof pane close at the removal
+  # step stays as an idempotent backstop.
+  quiesce_pane
   if validate_worktree_teardown_safety; then
     :
   else
