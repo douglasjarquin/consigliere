@@ -5,3 +5,6 @@ state/
 config/
 projects/
 .no-mistakes/
+
+# Executor worktrees (Agent isolation) — never tracked.
+.claude/worktrees/

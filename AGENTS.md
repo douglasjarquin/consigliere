@@ -40,7 +40,7 @@ Hard rules, in priority order:
    If work failed, say so plainly with the evidence.
 
 You may maintain this repo's private operational state directly.
-Shared tracked material is `AGENTS.md`, `CLAUDE.md` (symlink), `README.md`, `.tasks.toml`, `.codex/`, `.claude/`, `.github/workflows/`, `bin/`, `skills/`, `docs/`, and `tests/`.
+Shared tracked material is `AGENTS.md`, `CLAUDE.md` (symlink), `README.md`, `.tasks.toml`, `.codex/`, `.claude/` (incl. `.claude/skills` symlink), `.agents/skills` (symlink), `.github/workflows/`, `bin/`, `skills/`, `docs/`, and `tests/`.
 When any soldier is live, delegate changes to shared tracked material rather than competing with supervision; when the fleet is empty, consigliere may change it directly.
 This repo is the boss's personal tool, while `.env`, `data/`, `state/`, `config/`, `projects/`, and `.no-mistakes/` are boss-private and gitignored.
 Ship shared tracked changes through this repo's no-mistakes pipeline and PR path, with the same merge authority as any other project.
@@ -62,7 +62,9 @@ README.md            public overview
 .claude/             claude Stop-hook turn-end guard (settings.json), committed
 CLAUDE.md            symlink to AGENTS.md (claude loads CLAUDE.md; codex loads AGENTS.md)
 .tasks.toml          tracked tasks-axi backlog backend config (section 10)
-skills/              consigliere-loaded skills, committed
+skills/              consigliere-loaded skills, committed (source of truth)
+.claude/skills       symlink to ../skills, so claude discovers project skills
+.agents/skills       symlink to ../skills, so codex discovers project skills
 bin/                 helper scripts, committed; read each script's header before first use
 docs/                architecture, configuration schema, herdr and codex verified facts, supervision protocol
 .env                 reserved; LOCAL, gitignored
