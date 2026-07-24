@@ -98,6 +98,32 @@ wait_live() {
   return 0
 }
 
+# wait_until <limit-ticks> <cmd...>: poll <cmd> every 0.1s until it succeeds;
+# return 0 the instant it does, or 1 after <limit> ticks. This is the async
+# alternative to a blind fixed sleep/window: instead of waiting a worst-case
+# duration for a condition, we proceed the moment the condition holds. Use it to
+# wait for a positive signal (a marker file the watcher writes when it processes
+# a cycle) rather than sleeping a fixed guess.
+wait_until() {
+  local limit=$1 i=0; shift
+  while [ "$i" -lt "$limit" ]; do
+    "$@" >/dev/null 2>&1 && return 0
+    sleep 0.1
+    i=$((i + 1))
+  done
+  return 1
+}
+
+# absorbed_alive <pid> <marker-file> [limit-ticks]: confirm a benign wake was
+# ABSORBED - the watcher processed a cycle (the marker appeared) AND did not exit
+# (surfacing exits it). Polls for the marker (async, fast) then checks liveness,
+# replacing a blind `wait_live` window. 0 if absorbed-and-alive, 1 otherwise.
+absorbed_alive() {
+  local pid=$1 marker=$2 limit=${3:-50}
+  wait_until "$limit" test -e "$marker" || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
 is_live_non_zombie() {
   local pid=$1 stat
   kill -0 "$pid" 2>/dev/null || return 1
