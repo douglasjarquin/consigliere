@@ -69,10 +69,9 @@ esac
 # shellcheck source=bin/cs-herdr-lib.sh
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
 
-CS_ROOT="${CS_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
-DATA="${CS_DATA_OVERRIDE:-$CS_HOME/data}"
-STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
+# shellcheck source=bin/cs-root-lib.sh
+. "$SCRIPT_DIR/cs-root-lib.sh"
+cs_resolve_root
 PROJECTS="${CS_PROJECTS_OVERRIDE:-$CS_HOME/projects}"
 CAPOS_ROOT="${CS_CAPOS_ROOT:-$HOME/.consigliere/capos}"
 REG="$DATA/capos.md"

@@ -104,8 +104,9 @@
 set -u
 
 CS_DAEMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CS_ROOT="${CS_ROOT_OVERRIDE:-$(cd "$CS_DAEMON_DIR/.." && pwd)}"
-CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
+# shellcheck source=bin/cs-root-lib.sh
+. "$CS_DAEMON_DIR/cs-root-lib.sh"
+cs_resolve_root
 
 # Shared wake classifier (last_status_line, status_is_boss_relevant,
 # pane_to_task, scan_boss_relevant_statuses...). The SAME library backs the
