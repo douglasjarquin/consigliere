@@ -371,6 +371,51 @@ remove_task_artifacts() {
   return 0
 }
 
+# --- watcher per-task/per-pane marker cleanup --------------------------------
+# The watcher (bin/cs-watch.sh) derives many long-lived marker files under
+# $STATE keyed by a task's id or its herdr pane. Because task ids and pane ids
+# (w<N>:p<N>) are reused, a stale marker left by a prior task can make the next
+# task's status look "already surfaced" (a swallowed wake) or leak into its
+# stale/wedge tracking. Teardown removes exactly THIS task's derived markers, by
+# exact derived name (never a glob that could match a concurrent task's marker),
+# mirroring the watcher's own key derivation:
+#   - .seen-<id>_status / .seen-<id>_turn-ended  (scan_signals: basename|tr '.' '_')
+#   - .hb-surfaced-<id-tr>                        (_hb_surfaced_path, keyed by task id)
+#   - .hash-/.count-/.stale-/.stale-since-/.wedge-escalations-<pane-tr>
+#                                                 (stale/wedge poll, keyed by pane)
+#   - .herdr-escalated-<pane-tr>                  (cs_transition_marker, keyed by pane)
+# LOCKSTEP: if the watcher grows a new per-task/per-pane marker family, extend
+# this helper in the same change. A derived marker is always an ordinary file,
+# so (as remove_task_artifacts does) refuse if one is unexpectedly a symlink.
+remove_watcher_markers() {
+  local m id_key pane_key markers=()
+  id_key=$(printf '%s' "$ID" | tr ':/.' '___')
+  markers+=(
+    "$STATE/.seen-$(printf '%s' "$ID.status" | tr '.' '_')"
+    "$STATE/.seen-$(printf '%s' "$ID.turn-ended" | tr '.' '_')"
+    "$STATE/.hb-surfaced-$id_key"
+  )
+  if [ -n "$PANE" ]; then
+    pane_key=$(printf '%s' "$PANE" | tr ':/.' '___')
+    markers+=(
+      "$STATE/.hash-$pane_key"
+      "$STATE/.count-$pane_key"
+      "$STATE/.stale-$pane_key"
+      "$STATE/.stale-since-$pane_key"
+      "$STATE/.wedge-escalations-$pane_key"
+      "$STATE/.herdr-escalated-$pane_key"
+    )
+  fi
+  for m in "${markers[@]}"; do
+    if [ -L "$m" ]; then
+      echo "REFUSED: $m is a symlink, not the ordinary marker the watcher created; investigate before cleanup." >&2
+      return 1
+    fi
+    [ -e "$m" ] && rm -f "$m"
+  done
+  return 0
+}
+
 # --- capo retirement ---------------------------------------------------------
 
 remove_capo_registry_entry() {
@@ -487,6 +532,7 @@ if [ "$HARNESS" = claude ]; then
   rm -f "$STATE/$ID.claude-settings.json"
 fi
 rm -f "$STATE/$ID.status" "$STATE/$ID.turn-ended" "$STATE/$ID.meta"
+remove_watcher_markers || exit 1
 
 if [ "$KIND" != scout ] && [ "$MODE" != local-only ] && [ -x "$SCRIPT_DIR/cs-fleet-sync.sh" ] && [ -n "$PROJ" ]; then
   "$SCRIPT_DIR/cs-fleet-sync.sh" "$PROJ" || true
