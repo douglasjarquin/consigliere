@@ -16,6 +16,7 @@ Per-harness verified facts live in [`docs/codex.md`](codex.md) and [`docs/claude
 Its current wire form is `U+2063 CONSIGLIERE_OP: v1 <kind>: <body>`, with kinds `launch-brief`, `session-start`, `watcher`, `turn-end-guard`, and `away-supervisor`.
 The compatibility kind `from-consigliere` retains the byte-identical `[cs-from-consigliere]` label followed immediately by U+2063, while the away form retains bare leading U+2063 before its typed header.
 Unmarked input classifies as `boss`; provenance never depends on body prose.
+The U+2063 marker is a **boss-disambiguation aid, not an authenticity control**: it is unforgeable by boss keystrokes (U+2063 has no key), but an agent can emit those bytes verbatim, so a present marker is not proof of consigliere provenance. Where agent-authored text is folded into a trusted envelope — the away-mode daemon distilling soldier status lines into an `away-supervisor` digest — that text is neutralized as quoted DATA first (`cs_operational_input_neutralize`) so a soldier cannot launder a forged marker into trusted framing (docs/operational-input-provenance.md, option C). Full cryptographic integrity on the machine-classified channel (HMAC) is a documented, deferred follow-up.
 `bin/cs-marker-lib.sh` is a thin compatibility entry point for legacy marker callers.
 
 ## Workspace-per-task, herdr-native worktrees

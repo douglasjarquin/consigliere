@@ -224,7 +224,12 @@ classify_signal() {  # <file-list-after-colon> <state>
     [ -e "$f" ] || continue
     last=$(last_status_line "$f")
     [ -n "$last" ] || continue
-    distilled="${distilled}$(basename "$f"): ${last} | "
+    # The status line is agent-authored; it is distilled into the trusted
+    # away-supervisor envelope by inject_msg. Neutralize it as quoted DATA so a
+    # soldier cannot launder a forged operational-input marker into that trusted
+    # framing (docs/operational-input-provenance.md, option C). Classification
+    # below still uses the RAW line so verb detection is unaffected.
+    distilled="${distilled}$(basename "$f"): $(cs_operational_input_neutralize "$last") | "
     status_is_boss_relevant "$last" || continue
     rel=1
     # Dedupe against the catch-all scan: a status already escalated (seen
@@ -740,7 +745,10 @@ housekeeping() {  # <state>
       [ -n "$f" ] || continue
       seen="$state/.subsuper-seen-status-$(_stale_key "$task")"
       [ "$(cat "$seen" 2>/dev/null || true)" = "$last" ] && continue
-      escalate_add "$state" "$(basename "$f"): $last (catch-all scan)"
+      # $last is agent-authored and this digest is injected into the trusted
+      # away-supervisor envelope; neutralize it as quoted DATA (same rationale as
+      # classify_signal). The seen-marker below stores the RAW line for dedupe.
+      escalate_add "$state" "$(basename "$f"): $(cs_operational_input_neutralize "$last") (catch-all scan)"
       mark_status_seen "$state" "$task" "$last"
     done < <(scan_boss_relevant_statuses "$state")
   fi
