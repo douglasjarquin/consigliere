@@ -14,8 +14,10 @@ STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 LOCK="$STATE/.lock"
 mkdir -p "$STATE"
 
-# Codex is the only harness; the test harness may widen this to match itself.
-HARNESS_RE="${CS_LOCK_HARNESS_RE:-codex}"
+# The root session runs on one of the supported harnesses (codex or claude);
+# either may hold this home's lock. The test harness may widen this to match its
+# own shell.
+HARNESS_RE="${CS_LOCK_HARNESS_RE:-codex|claude}"
 
 harness_pid() {
   local pid=$$ comm args

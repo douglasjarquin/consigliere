@@ -3,11 +3,12 @@
 # when this session holds the lock.
 #
 # DETECT-ONLY checks (always run; silent when healthy):
-#   MISSING: <tool> ...        a required tool is absent (herdr, codex, jq, gh,
+#   MISSING: <tool> ...        a required tool is absent (herdr, the ROOT
+#                              session's harness - codex or claude - jq, gh,
 #                              gh-axi); consigliere must not dispatch until
-#                              present. Optional tools (tasks-axi, no-mistakes,
-#                              lavish-axi, chrome-devtools-axi) print
-#                              BOOTSTRAP_INFO lines instead.
+#                              present. Optional tools (the other harness,
+#                              tasks-axi, no-mistakes, lavish-axi,
+#                              chrome-devtools-axi) print BOOTSTRAP_INFO instead.
 #   HERDR_DOWN / HERDR_PROTOCOL:  the herdr server is unreachable or below the
 #                              minimum protocol (docs/herdr.md).
 #   NEEDS_GH_AUTH              gh is present but not authenticated.
@@ -33,13 +34,21 @@ PROJECTS="${CS_PROJECTS_OVERRIDE:-$CS_HOME/projects}"
 DETECT_ONLY=${CS_BOOTSTRAP_DETECT_ONLY:-0}
 
 # --- required tools ----------------------------------------------------------
+# The required harness is the ROOT session's own (codex or claude); the other
+# harness is optional. Everything else is unconditionally required.
+# shellcheck source=bin/cs-harness-lib.sh
+. "$SCRIPT_DIR/cs-harness-lib.sh"
+ROOT_HARNESS=$(cs_harness_detect_root)
+ROOT_HARNESS_BIN=$(cs_harness_binary "$ROOT_HARNESS")
+OTHER_HARNESS_BIN=$([ "$ROOT_HARNESS" = codex ] && echo claude || echo codex)
+
 missing=""
-for tool in herdr codex jq gh gh-axi git; do
+for tool in herdr "$ROOT_HARNESS_BIN" jq gh gh-axi git; do
   command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
 done
 [ -z "$missing" ] || printf 'MISSING:%s - install before dispatching; consigliere cannot operate without these.\n' "$missing"
 
-for tool in tasks-axi no-mistakes lavish-axi chrome-devtools-axi; do
+for tool in "$OTHER_HARNESS_BIN" tasks-axi no-mistakes lavish-axi chrome-devtools-axi; do
   command -v "$tool" >/dev/null 2>&1 || printf 'BOOTSTRAP_INFO: optional tool %s not installed.\n' "$tool"
 done
 

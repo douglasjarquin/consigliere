@@ -28,23 +28,28 @@ all_count=${#inventory[@]}
 p=$("$RUN" --list --portable | grep -c .)
 h=$("$RUN" --list --herdr | grep -c .)
 c=$("$RUN" --list --lane live-codex | grep -c .)
-[ "$((p + h + c))" -eq "$all_count" ] \
-  || fail "lanes ($p+$h+$c) must sum to the inventory ($all_count)"
-pass "portable + real-herdr + live-codex partition the whole inventory"
+cl=$("$RUN" --list --lane live-claude | grep -c .)
+[ "$((p + h + c + cl))" -eq "$all_count" ] \
+  || fail "lanes ($p+$h+$c+$cl) must sum to the inventory ($all_count)"
+pass "portable + real-herdr + live-codex + live-claude partition the whole inventory"
 
 # No script may appear in two lanes.
-dups=$({ "$RUN" --list --portable; "$RUN" --list --herdr; "$RUN" --list --lane live-codex; } \
+dups=$({ "$RUN" --list --portable; "$RUN" --list --herdr; "$RUN" --list --lane live-codex; "$RUN" --list --lane live-claude; } \
   | LC_ALL=C sort | uniq -d)
 [ -z "$dups" ] || fail "a test is categorized into more than one lane: $dups"
 pass "no test appears in two lanes"
 
-# The two live-only families keep their exact, self-gating lane.
+# The live-only families keep their exact, self-gating lane.
 [ "$("$RUN" --lane-of cs-herdr-lib-live.test.sh)" = "real-herdr" ] \
   || fail "cs-herdr-lib-live must be the real-herdr lane"
 [ "$("$RUN" --lane-of cs-lifecycle-live.test.sh)" = "live-codex" ] \
   || fail "cs-lifecycle-live must be the live-codex lane"
+[ "$("$RUN" --lane-of cs-lifecycle-claude-live.test.sh)" = "live-claude" ] \
+  || fail "cs-lifecycle-claude-live must be the live-claude lane"
 assert_contains "$out" "excluded (CS_TEST_CODEX_LIVE)" \
   "coverage guard reports live-codex as visibly excluded, not silently dropped"
+assert_contains "$out" "excluded (CS_TEST_CLAUDE_LIVE)" \
+  "coverage guard reports live-claude as visibly excluded, not silently dropped"
 pass "live-only lanes are pinned and live-codex is visibly excluded"
 
 # --- single-owner pins ------------------------------------------------------
@@ -91,11 +96,13 @@ assert_no_grep 'shellcheck --norc' "$WF" "workflow must not re-spell the shellch
 assert_no_grep 'shellcheck bin/' "$WF" "workflow must not re-spell the shellcheck file set"
 pass "workflow does not duplicate the lint definition"
 
-# Live Codex tests must never run in hosted CI.
+# Live agent tests must never run in hosted CI.
 assert_no_grep 'CS_TEST_CODEX_LIVE' "$WF" \
   "hosted CI must never enable CS_TEST_CODEX_LIVE (live-codex is opt-in only)"
+assert_no_grep 'CS_TEST_CLAUDE_LIVE' "$WF" \
+  "hosted CI must never enable CS_TEST_CLAUDE_LIVE (live-claude is opt-in only)"
 assert_grep 'CS_TEST_HERDR_LIVE' "$WF" "the Herdr lane must enable CS_TEST_HERDR_LIVE"
-pass "hosted CI runs real Herdr but never the live-codex suite"
+pass "hosted CI runs real Herdr but never the live-codex or live-claude suites"
 
 # Least-privilege + superseded-run cancellation.
 assert_grep 'contents: read' "$WF" "workflow must use least-privilege contents: read"

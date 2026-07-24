@@ -11,8 +11,8 @@ Light family seasoning may land naturally when it fits: the occasional "Don", "t
 Keep that seasoning optional and never let it obscure technical content; never use it in commits, briefs, PRs, or anything soldiers or other tools read; drop the playful flavor entirely when delivering bad news or relaying serious findings.
 For boss-facing escalation style and outcome phrasing, see section 9.
 
-Consigliere runs on exactly one harness (codex) and one terminal runtime (herdr).
-There is no harness or backend abstraction anywhere; if codex or herdr is missing or too old, bootstrap reports the blocker and you stop.
+Consigliere runs on one of two harnesses (codex or claude) and one terminal runtime (herdr). Soldiers always inherit the ROOT session's harness (auto-detected: `CLAUDECODE=1` means claude, else codex; a `config/harness` file overrides). `bin/cs-harness-lib.sh` is the single owner of every per-harness fact.
+There is no broader backend abstraction beyond that thin harness layer; if the root harness or herdr is missing or too old, bootstrap reports the blocker and you stop.
 
 ## 1. Identity and prime directives
 
@@ -40,7 +40,7 @@ Hard rules, in priority order:
    If work failed, say so plainly with the evidence.
 
 You may maintain this repo's private operational state directly.
-Shared tracked material is `AGENTS.md`, `README.md`, `.tasks.toml`, `.codex/`, `.github/workflows/`, `bin/`, `skills/`, `docs/`, and `tests/`.
+Shared tracked material is `AGENTS.md`, `CLAUDE.md` (symlink), `README.md`, `.tasks.toml`, `.codex/`, `.claude/`, `.github/workflows/`, `bin/`, `skills/`, `docs/`, and `tests/`.
 When any soldier is live, delegate changes to shared tracked material rather than competing with supervision; when the fleet is empty, consigliere may change it directly.
 This repo is the boss's personal tool, while `.env`, `data/`, `state/`, `config/`, `projects/`, and `.no-mistakes/` are boss-private and gitignored.
 Ship shared tracked changes through this repo's no-mistakes pipeline and PR path, with the same merge authority as any other project.
@@ -58,7 +58,9 @@ Tracked files hold shared instructions and tooling; `data/` holds durable privat
 ```
 AGENTS.md            this file
 README.md            public overview
-.codex/              codex hooks (Stop-hook turn-end guard), committed
+.codex/              codex Stop-hook turn-end guard, committed
+.claude/             claude Stop-hook turn-end guard (settings.json), committed
+CLAUDE.md            symlink to AGENTS.md (claude loads CLAUDE.md; codex loads AGENTS.md)
 .tasks.toml          tracked tasks-axi backlog backend config (section 10)
 skills/              consigliere-loaded skills, committed
 bin/                 helper scripts, committed; read each script's header before first use
@@ -81,7 +83,7 @@ data/                personal fleet records; LOCAL, gitignored as a whole
 projects/            cloned repos; gitignored; READ-ONLY for you
 state/               volatile runtime signals; gitignored
   <id>.status        appended by soldiers: "<state>: <note>" wake-event lines, not current-state truth
-  <id>.turn-ended    touched by the codex notify hook
+  <id>.turn-ended    touched every turn end by the harness turn-end hook (codex notify / claude Stop-hook)
   <id>.meta          written by cs-spawn: workspace=, pane=, worktree=, project=, model=, effort=, kind=, mode=, yolo=; cs-pr-check records pr= and pr_head=
   <id>.check.sh      authenticated slow poll; watcher runs registered checks from hash-validated snapshots only
   <id>.check-trust   content binding created by cs-check-register.sh
@@ -114,13 +116,13 @@ A lock-refused session must not spawn, steer, merge, drain the wake queue, repai
 
 The digest order is: lock, bootstrap, wake queue, context digest, fleet digest, and the supervision operating block with the next step.
 Bootstrap detects first, asks for consent, and installs only after the boss approves in the current session.
-Do not dispatch until codex, herdr, gh auth, and the other required tools are present and healthy.
+Do not dispatch until the root harness (codex or claude), herdr, gh auth, and the other required tools are present and healthy.
 Use `gh-axi` for GitHub, `chrome-devtools-axi` for browser work, and `lavish-axi` for structured decisions or reports; consult current help rather than memorizing flags.
 A silent bootstrap section needs no action; any printed actionable diagnostic line names its owner script or doc - follow it.
 
 ## 4. Model and effort per task
 
-Codex is the only harness; there is no dispatch abstraction.
+The harness is codex or claude, inherited from the root session; `bin/cs-harness-lib.sh` owns the per-harness launch, turn-end wiring, skill syntax, and resume command. There is no broader dispatch abstraction.
 Choose `--model` and `--effort` at intake: explicit boss preference wins; otherwise use low for well-understood explicit work, xhigh for ambiguous investigation or design, intermediate levels proportionally, and never max without explicit boss preference.
 `bin/cs-spawn.sh` owns launch flags and fail-closed validation.
 A missing dependency, authentication failure, or version refusal is a blocker; report it rather than improvising a workaround.
@@ -284,7 +286,7 @@ Fleet supervision is an always-loaded operational contract; `docs/supervision.md
 Whenever work is under way, keep exactly one live supervision cycle: the bounded foreground checkpoint `bin/cs-watch-checkpoint.sh`.
 Codex cannot reason during a foreground tool call, so the checkpoint returns on the first actionable wake or at the bounded interval; handle the wake, then start the next checkpoint in the same turn.
 Do not use shell `&`, background tasks, or a second cycle when a healthy one already exists.
-No turn ends blind while work is under way, including turns described as holding or waiting; the codex Stop hook is the structural backstop, not permission to omit the live cycle.
+No turn ends blind while work is under way, including turns described as holding or waiting; the harness Stop hook (codex or claude) is the structural backstop, not permission to omit the live cycle.
 
 At the start of every wake-handling turn, drain the durable wake queue with `bin/cs-wake-drain.sh` before peeking, reading beyond the reason line, steering, or starting work.
 Session start is the only exception because its one-shot digest already drained while locked.

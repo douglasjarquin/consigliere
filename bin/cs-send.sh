@@ -61,6 +61,8 @@ STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 . "$SCRIPT_DIR/cs-marker-lib.sh"
 # shellcheck source=bin/cs-pending-reply-lib.sh
 . "$SCRIPT_DIR/cs-pending-reply-lib.sh"
+# shellcheck source=bin/cs-harness-lib.sh
+. "$SCRIPT_DIR/cs-harness-lib.sh"
 
 RAW=${1:?usage: cs-send.sh <target> <text...>}
 shift
@@ -68,6 +70,10 @@ shift
 
 PANE=""
 KIND=""
+# Target harness drives the skill-invocation syntax and settle. Default codex
+# (matches legacy soldiers with no harness= line and explicit-pane sends whose
+# harness is unknown); a task meta with harness=claude switches to /skill.
+HARNESS=codex
 case "$RAW" in
   w*[0-9]:p*[0-9])
     PANE=$RAW
@@ -77,6 +83,10 @@ case "$RAW" in
     [ -f "$META" ] || { echo "error: no task '$RAW' in this home (missing $META) and not an explicit pane id" >&2; exit 1; }
     PANE=$(cs_meta_get "$META" pane) || { echo "error: no pane recorded in $META" >&2; exit 1; }
     KIND=$(cs_meta_get "$META" kind 2>/dev/null || true)
+    META_HARNESS=$(cs_meta_get "$META" harness 2>/dev/null || true)
+    if [ -n "$META_HARNESS" ] && cs_harness_valid "$META_HARNESS"; then
+      HARNESS=$META_HARNESS
+    fi
     ;;
 esac
 
@@ -136,11 +146,15 @@ SKILL_SETTLE=${CS_SEND_SKILL_SETTLE:-1.5}
 
 pre_status=$(cs_herdr_agent_busy_state "$PANE")
 
+SKILL_PREFIX=$(cs_harness_skill_prefix "$HARNESS")
+SKILL_NEEDS_SETTLE=$(cs_harness_skill_needs_settle "$HARNESS")
 case "$RAW_TEXT" in
-  '$'*)
-    # Skill invocation: literal text, settle for the popup, then Enter.
+  "$SKILL_PREFIX"*)
+    # Skill invocation ($skill on codex, /skill on claude): send the literal
+    # text, then Enter separately. codex needs a pre-Enter settle so its
+    # completion popup does not swallow the Enter; claude does not.
     cs_herdr_send_text "$PANE" "$TEXT" >/dev/null
-    sleep "$SKILL_SETTLE"
+    [ "$SKILL_NEEDS_SETTLE" = 1 ] && sleep "$SKILL_SETTLE"
     cs_herdr_send_keys "$PANE" Enter >/dev/null
     ;;
   *)
@@ -149,7 +163,7 @@ case "$RAW_TEXT" in
 esac
 
 if [ "$pre_status" = busy ]; then
-  # Mid-turn steer: codex queues the input for after the turn; native state
+  # Mid-turn steer: the harness queues the input for after the turn; native state
   # cannot distinguish queued from swallowed, so report queued and succeed.
   pending_confirm_delivery
   echo "queued (target was mid-turn)"

@@ -158,8 +158,11 @@ SH
   prompt=$(cat "$TMP/spawn.prompt")
   [ "$(cs_operational_input_kind "$prompt")" = launch-brief ] || fail "spawn prompt lacks launch-brief kind"
   [ "$(cs_operational_input_body "$prompt")" = "implement the fixture" ] || fail "spawn prompt lost brief body"
-  occurrences=$(grep -c 'encode launch-brief' "$SPAWN")
-  [ "$occurrences" -eq 3 ] || fail "not every capo, headless, and interactive launch path stamps launch-brief"
+  # The launch strings are owned by cs-harness-lib.sh: one per launch path per
+  # harness - soldier(codex), soldier(claude), scout, capo = 4. Every path must
+  # stamp the typed launch-brief kind through cs-operational-input.
+  occurrences=$(grep -c 'encode launch-brief' "$ROOT/bin/cs-harness-lib.sh")
+  [ "$occurrences" -eq 4 ] || fail "not every launch path (soldier codex/claude, scout, capo) stamps launch-brief"
   pass "spawn passes a typed launch-brief prompt on every launch path"
 }
 

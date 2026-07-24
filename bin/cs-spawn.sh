@@ -66,12 +66,19 @@ esac
 . "$SCRIPT_DIR/cs-meta-lib.sh"
 # shellcheck source=bin/cs-operational-input.sh
 . "$SCRIPT_DIR/cs-operational-input.sh"
+# shellcheck source=bin/cs-harness-lib.sh
+. "$SCRIPT_DIR/cs-harness-lib.sh"
 
 CS_ROOT="${CS_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
 DATA="${CS_DATA_OVERRIDE:-$CS_HOME/data}"
 STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 mkdir -p "$STATE"
+
+# A soldier/capo always inherits the ROOT session's harness. Resolved once here;
+# persisted per-soldier as harness= in state/<id>.meta so the watcher, cs-send,
+# and cs-crew-state read it back without re-detecting.
+HARNESS=$(cs_harness_detect_root)
 
 KIND=ship
 MODEL=
@@ -104,11 +111,13 @@ TARGET=${POS[1]}
 case "$ID" in
   *[!A-Za-z0-9._-]*|'') echo "error: task id must be [A-Za-z0-9._-]+: '$ID'" >&2; exit 2 ;;
 esac
-case "$EFFORT" in
-  ''|low|medium|high|xhigh) ;;
-  max) echo "error: codex does not accept effort=max; choose low|medium|high|xhigh" >&2; exit 2 ;;
-  *) echo "error: unknown effort '$EFFORT'" >&2; exit 2 ;;
-esac
+if ! cs_harness_effort_valid "$HARNESS" "$EFFORT"; then
+  case "$EFFORT" in
+    max) echo "error: $HARNESS does not accept effort=max; choose low|medium|high|xhigh" >&2 ;;
+    *) echo "error: unknown effort '$EFFORT'" >&2 ;;
+  esac
+  exit 2
+fi
 if [ "$HEADLESS" -eq 1 ] && [ "$KIND" != scout ]; then
   echo "error: --headless applies only to --scout tasks" >&2
   exit 2
@@ -133,16 +142,6 @@ shell_quote() {
   printf "'"
   printf '%s' "$1" | sed "s/'/'\\\\''/g"
   printf "'"
-}
-
-model_flag() {
-  [ -n "$MODEL" ] && [ "$MODEL" != default ] || return 0
-  printf -- '--model %s ' "$(shell_quote "$MODEL")"
-}
-
-effort_flag() {
-  [ -n "$EFFORT" ] && [ "$EFFORT" != default ] || return 0
-  printf -- '-c %s ' "$(shell_quote "model_reasoning_effort=\"$EFFORT\"")"
 }
 
 BRIEF="$DATA/$ID/brief.md"
@@ -171,11 +170,12 @@ if [ "$KIND" = capo ]; then
     "kind=capo" \
     "mode=capo" \
     "yolo=off" \
+    "harness=$HARNESS" \
     "home=$HOME_ABS"
 
   sq_brief=$(shell_quote "$BRIEF")
   sq_home=$(shell_quote "$HOME_ABS")
-  LAUNCH="CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_HOME=$sq_home codex $(model_flag)$(effort_flag)--dangerously-bypass-approvals-and-sandbox \"\$($sq_operational encode launch-brief < $sq_brief)\""
+  LAUNCH=$(cs_harness_capo_launch "$HARNESS" "${MODEL:-default}" "${EFFORT:-default}" "$sq_operational" "$sq_brief" "$sq_home")
   cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
   echo "spawned $ID kind=capo home=$HOME_ABS workspace=$WS pane=$PANE"
   exit 0
@@ -233,6 +233,7 @@ META_LINES=(
   "kind=$KIND"
   "mode=$MODE"
   "yolo=$YOLO"
+  "harness=$HARNESS"
 )
 [ "$HEADLESS" -eq 1 ] && META_LINES+=("headless=1")
 [ -n "$ISSUE" ] && META_LINES+=("issue=$ISSUE")
@@ -240,15 +241,30 @@ cs_meta_write "$STATE/$ID.meta" "${META_LINES[@]}"
 
 sq_brief=$(shell_quote "$BRIEF")
 sq_turnend=$(shell_quote "$TURNEND")
+MODEL_ARG=${MODEL:-default}
+EFFORT_ARG=${EFFORT:-default}
 if [ "$HEADLESS" -eq 1 ]; then
-  # Fire-and-forget scout: codex exec runs the brief non-interactively; the
-  # launch line itself appends the terminal status event, so completion
-  # surfaces through the watcher's ordinary signal path with no special
-  # classification. No notify hook: process exit IS the turn end.
+  # Fire-and-forget scout: the harness runs the brief non-interactively (codex
+  # exec / claude -p); the launch line appends the terminal status event, so
+  # completion surfaces through the watcher's ordinary signal path with no
+  # special classification. No turn-end hook: process exit IS the turn end.
   sq_status=$(shell_quote "$STATE/$ID.status")
-  LAUNCH="if codex exec $(model_flag)$(effort_flag)--dangerously-bypass-approvals-and-sandbox \"\$($sq_operational encode launch-brief < $sq_brief)\"; then echo 'done: headless scout finished; read the report' >> $sq_status; else echo \"failed: codex exec exited \$?\" >> $sq_status; fi"
+  LAUNCH=$(cs_harness_scout_launch "$HARNESS" "$MODEL_ARG" "$EFFORT_ARG" "$sq_operational" "$sq_brief" "$sq_status")
 else
-  LAUNCH="codex $(model_flag)$(effort_flag)--dangerously-bypass-approvals-and-sandbox -c \"notify=[\\\"bash\\\",\\\"-c\\\",\\\"touch $sq_turnend\\\"]\" \"\$($sq_operational encode launch-brief < $sq_brief)\""
+  # Interactive supervised soldier. codex wires turn-end inline via -c notify;
+  # claude via a launch-scoped --settings Stop hook written per-soldier here
+  # (claude resolves a repo .claude/settings.json to the main checkout, so a
+  # worktree file would pollute the boss's project and not isolate the soldier).
+  sq_settings=''
+  if [ "$HARNESS" = claude ]; then
+    SETTINGS_FILE="$STATE/$ID.claude-settings.json"
+    cs_harness_claude_settings_json "$TURNEND" > "$SETTINGS_FILE"
+    sq_settings=$(shell_quote "$SETTINGS_FILE")
+    # Interactive claude blocks at the folder-trust dialog for a fresh worktree;
+    # pre-trust it so the unattended soldier can take its first turn.
+    cs_harness_claude_trust_dir "$WT_REAL" || abort_task "could not pre-trust claude worktree $WT_REAL"
+  fi
+  LAUNCH=$(cs_harness_soldier_launch "$HARNESS" "$MODEL_ARG" "$EFFORT_ARG" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings")
 fi
 cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
 

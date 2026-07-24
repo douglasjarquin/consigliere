@@ -13,7 +13,7 @@ The goal is a session that is safe to reset or destroy because everything durabl
 
 1. **Sweep the session for uncaptured durable knowledge.**
    Read back over this conversation and look for:
-   - Operational learnings: fleet-local facts and gotchas discovered while operating consigliere (a script's sharp edge, a herdr or codex quirk, a recurring false alarm and its real cause).
+   - Operational learnings: fleet-local facts and gotchas discovered while operating consigliere (a script's sharp edge, a herdr/codex/claude quirk, a recurring false alarm and its real cause).
    - Boss preferences expressed in passing: a working-style or approval preference the boss stated conversationally rather than through the destination selected by AGENTS.md's knowledge-routing table.
    - Project-intrinsic facts discovered: build, test, release, or architecture facts about a project that belong in that project's own `AGENTS.md`.
    - Decisions made: a standing choice the boss made this session that should outlive it.

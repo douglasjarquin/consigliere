@@ -12,8 +12,8 @@
 #                      when locked; drained records are this turn's first work
 #                      queue. The read-only path leaves the queue untouched
 #                      and runs cs-guard.sh in advisory mode instead.
-#   4. supervision   - the ONE codex foreground-checkpoint operating block,
-#                      inlined here (consigliere has exactly one harness and
+#   4. supervision   - the ONE foreground-checkpoint operating block, inlined
+#                      here (the protocol is identical across harnesses and
 #                      one wait shape; there is no protocol renderer).
 #   5. context       - data/projects.md, data/capos.md, data/boss.md,
 #                      data/boss-shared.md, data/learnings.md, each with an
@@ -219,7 +219,7 @@ fi
 AFK_PRESENT=0
 [ -e "$STATE/.afk" ] && AFK_PRESENT=1
 
-subsection "SUPERVISION (codex foreground checkpoint)"
+subsection "SUPERVISION (foreground checkpoint)"
 if [ "$READ_ONLY" -eq 1 ]; then
   cat <<'EOF'
 Read-only session: do NOT arm or repair supervision from here; the session
@@ -242,7 +242,7 @@ When this session owns supervision:
 4. Quiet checkpoint (prints checkpoint: / exits 124): drain queued wakes
    anyway, process any queued boss message now visible, then start the next
    checkpoint.
-5. Never use shell '&' or background tasks for watcher supervision; codex
+5. Never use shell '&' or background tasks for watcher supervision; the harness
    cannot reason during a foreground tool call, and the bounded checkpoint is
    the only sanctioned wait shape.
 6. Failure or missing cycle only: drain queued wakes, inspect the failure,
@@ -334,7 +334,7 @@ the daemon is running, because the daemon owns watcher supervision.
 EOF
 else
   cat <<'EOF'
-Follow the supervision operating block above (codex foreground checkpoint).
+Follow the supervision operating block above (foreground checkpoint).
 This script never starts supervision itself.
 
 EOF

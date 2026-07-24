@@ -25,6 +25,14 @@ CS_TEST_LIB_SOURCED=1
 # shellcheck disable=SC2034
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Pin the harness for tests so behavior does not depend on the developer's own
+# session (a codex dev has no CLAUDECODE; a claude dev's session would otherwise
+# leak CLAUDECODE=1 into cs_harness_detect_root). Defaults to codex, matching the
+# existing fixtures; a claude-specific test sets CS_HARNESS_OVERRIDE=claude before
+# sourcing this file.
+: "${CS_HARNESS_OVERRIDE:=codex}"
+export CS_HARNESS_OVERRIDE
+
 # --- reporters --------------------------------------------------------------
 
 fail() {

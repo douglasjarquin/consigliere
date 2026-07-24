@@ -57,6 +57,8 @@ esac
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
 # shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# shellcheck source=bin/cs-harness-lib.sh
+. "$SCRIPT_DIR/cs-harness-lib.sh"
 # shellcheck source=bin/cs-lock-lib.sh
 CS_LOCK_LOG_PREFIX="cs-teardown" . "$SCRIPT_DIR/cs-lock-lib.sh"
 
@@ -81,6 +83,7 @@ KIND=$(cs_meta_get "$META" kind || echo ship)
 MODE=$(cs_meta_get "$META" mode || echo no-mistakes)
 PR_URL=$(cs_meta_get "$META" pr || true)
 HOME_PATH=$(cs_meta_get "$META" home || true)
+HARNESS=$(cs_meta_get "$META" harness 2>/dev/null || true)
 
 # Minimum age before a git lock with no live holder is considered abandoned.
 STALE_LOCK_MIN_AGE=${CS_TEARDOWN_STALE_LOCK_MIN_AGE:-30}
@@ -452,6 +455,12 @@ if [ -n "$BRANCH" ] && [ "$BRANCH" != HEAD ] && [ -n "$PROJ" ] && [ -d "$PROJ" ]
 fi
 
 remove_task_artifacts || exit 1
+# claude soldiers pre-trust their worktree and carry a per-soldier settings file;
+# drop both so the boss's claude config and state dir do not accumulate leftovers.
+if [ "$HARNESS" = claude ]; then
+  [ -n "$WT" ] && cs_harness_claude_untrust_dir "$WT" || true
+  rm -f "$STATE/$ID.claude-settings.json"
+fi
 rm -f "$STATE/$ID.status" "$STATE/$ID.turn-ended" "$STATE/$ID.meta"
 
 if [ "$KIND" != scout ] && [ "$MODE" != local-only ] && [ -x "$SCRIPT_DIR/cs-fleet-sync.sh" ] && [ -n "$PROJ" ]; then
