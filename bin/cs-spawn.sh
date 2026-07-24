@@ -69,10 +69,9 @@ esac
 # shellcheck source=bin/cs-harness-lib.sh
 . "$SCRIPT_DIR/cs-harness-lib.sh"
 
-CS_ROOT="${CS_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
-DATA="${CS_DATA_OVERRIDE:-$CS_HOME/data}"
-STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
+# shellcheck source=bin/cs-root-lib.sh
+. "$SCRIPT_DIR/cs-root-lib.sh"
+cs_resolve_root
 mkdir -p "$STATE"
 
 # A soldier/capo always inherits the ROOT session's harness. Resolved once here;

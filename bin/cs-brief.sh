@@ -66,10 +66,9 @@ esac
 # shellcheck source=bin/cs-classify-lib.sh
 . "$SCRIPT_DIR/cs-classify-lib.sh"
 PAUSED_VERB=${CS_CLASSIFY_PAUSED_VERB:-$CS_CLASSIFY_PAUSED_VERB_DEFAULT}
-CS_ROOT="${CS_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
-DATA="${CS_DATA_OVERRIDE:-$CS_HOME/data}"
-STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
+# shellcheck source=bin/cs-root-lib.sh
+. "$SCRIPT_DIR/cs-root-lib.sh"
+cs_resolve_root
 KIND=ship
 HERDR_LAB=0
 NO_PROJECTS=0

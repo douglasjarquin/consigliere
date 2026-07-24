@@ -29,6 +29,8 @@ mk_fixture() { # <name> -> sets ORIGIN, CLONE
   printf '#!/usr/bin/env bash\nexit 0\n' > "$CLONE/bin/cs-guard.sh"
   chmod +x "$CLONE/bin/cs-guard.sh"
   cp "$ROOT/bin/cs-update.sh" "$CLONE/bin/cs-update.sh"
+  # cs-update sources the root/home resolver from its own script dir.
+  cp "$ROOT/bin/cs-root-lib.sh" "$CLONE/bin/cs-root-lib.sh"
 }
 
 run_update() { # <clone>
