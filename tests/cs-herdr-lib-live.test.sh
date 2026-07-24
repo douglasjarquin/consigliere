@@ -68,9 +68,14 @@ fi
 [ -f "$task_path/dirty.txt" ] || fail "dirty file lost on refused remove"
 pass "dirty-remove fails closed"
 
-cs_herdr_run "$task_pane" 'echo cs-capture-probe' >/dev/null || fail "pane run"
+# Re-submit the probe on every attempt, not once before the loop: a freshly
+# created worktree pane's shell may not be ready to accept input yet on a slow
+# or headless runner, and a single early `pane run` is then silently lost while
+# re-reading the buffer can never recover it. Re-running echo is idempotent.
 out=""
-for _ in 1 2 3 4 5 6 7 8 9 10; do
+for _ in $(seq 1 30); do
+  cs_herdr_run "$task_pane" 'echo cs-capture-probe' >/dev/null || fail "pane run"
+  sleep 0.3
   out=$(cs_herdr_capture "$task_pane" 20 text) || fail "capture"
   case "$out" in *cs-capture-probe*) break ;; esac
   sleep 0.5
