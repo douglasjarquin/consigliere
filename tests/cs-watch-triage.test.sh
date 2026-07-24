@@ -35,8 +35,11 @@ test_provably_working_signal_absorbed() {
   export CS_FAKE_CREW_STATE='state: working · source: run-step · validating (running)'
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  if ! wait_live "$pid" 30; then
-    reap "$pid"; fail "watcher exited for a working: signal whose soldier is provably working (should absorb): $(cat "$out")"
+  # Absorb is proven by the .seen-* suppressor appearing (the cycle processed and
+  # absorbed the signal) with the watcher still alive; poll for it instead of
+  # blindly waiting a fixed window.
+  if ! absorbed_alive "$pid" "$state/.seen-task_status"; then
+    reap "$pid"; fail "watcher exited or never absorbed a working: signal whose soldier is provably working: $(cat "$out")"
   fi
   [ ! -s "$out" ] || fail "provably-working signal printed a wake reason: $(cat "$out")"
   [ ! -s "$state/.wake-queue" ] || fail "provably-working signal enqueued a durable wake record"
@@ -56,8 +59,8 @@ test_turn_ended_provably_working_absorbed() {
   export CS_FAKE_CREW_STATE='state: working · source: pane · harness busy'
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  if ! wait_live "$pid" 30; then
-    reap "$pid"; fail "watcher exited for a turn-end whose soldier is provably working (should absorb): $(cat "$out")"
+  if ! absorbed_alive "$pid" "$state/.seen-task_turn-ended"; then
+    reap "$pid"; fail "watcher exited or never absorbed a turn-end whose soldier is provably working: $(cat "$out")"
   fi
   [ ! -s "$out" ] || fail "provably-working turn-end printed a wake reason: $(cat "$out")"
   [ ! -s "$state/.wake-queue" ] || fail "provably-working turn-end enqueued a durable wake record"
@@ -166,7 +169,7 @@ test_live_headless_scout_stale_absorbed() {
   export CS_FAKE_HERDR_CAPTURE="$capture_file"
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  if ! wait_live "$pid" 30; then
+  if ! absorbed_alive "$pid" "$state/.last-watcher-beat"; then
     reap "$pid"; fail "watcher exited (spurious wake) for a live headless scout: $(cat "$out")"
   fi
   [ ! -s "$out" ] || fail "live headless scout raised a stale wake reason: $(cat "$out")"
@@ -226,8 +229,8 @@ test_stale_terminal_status_overridden_by_active_run() {
   # not surfaced, despite the boss-relevant "done:" status-log line.
   watch_bg "$state" "$fakebin" "$out" CS_STALE_ESCALATE_SECS=999
   pid=$!
-  if ! wait_live "$pid" 30; then
-    reap "$pid"; fail "watcher exited for a stale terminal-looking status the run-step overrides (should absorb): $(cat "$out")"
+  if ! absorbed_alive "$pid" "$state/.stale-since-$key"; then
+    reap "$pid"; fail "watcher exited or never recorded the stale timer for a terminal-looking status the run-step overrides (should absorb): $(cat "$out")"
   fi
   [ ! -s "$out" ] || fail "the overridden stale terminal status printed a wake reason during absorb"
   [ ! -s "$state/.wake-queue" ] || fail "the overridden stale terminal status enqueued a wake during absorb"
@@ -269,8 +272,8 @@ test_nonterminal_stale_provably_working_absorbed_then_escalated() {
   # Phase A: a high escalation threshold means the first sighting is absorbed.
   watch_bg "$state" "$fakebin" "$out" CS_STALE_ESCALATE_SECS=999
   pid=$!
-  if ! wait_live "$pid" 30; then
-    reap "$pid"; fail "watcher exited for a fresh provably-working non-terminal stale (should absorb): $(cat "$out")"
+  if ! absorbed_alive "$pid" "$state/.stale-since-$key"; then
+    reap "$pid"; fail "watcher exited or never recorded the stale timer for a fresh provably-working non-terminal stale (should absorb): $(cat "$out")"
   fi
   [ ! -s "$out" ] || fail "fresh provably-working stale printed a wake reason during absorb"
   [ ! -s "$state/.wake-queue" ] || fail "fresh provably-working stale enqueued a wake during absorb"
@@ -313,8 +316,8 @@ test_wedge_escalation_marks_demand_deep_inspection_after_threshold() {
   # (establishing .stale-$key and starting the wedge timer).
   watch_bg "$state" "$fakebin" "$out" CS_STALE_ESCALATE_SECS=999
   pid=$!
-  if ! wait_live "$pid" 30; then
-    reap "$pid"; fail "watcher exited on the priming round (should absorb): $(cat "$out")"
+  if ! absorbed_alive "$pid" "$state/.stale-since-$key"; then
+    reap "$pid"; fail "watcher exited or never recorded the stale timer on the priming round (should absorb): $(cat "$out")"
   fi
   reap "$pid"
 
@@ -398,8 +401,8 @@ test_nonterminal_stale_paused_absorbed_then_resurfaced() {
   # threshold is absorbed - no wake, no wedge timer.
   watch_bg "$state" "$fakebin" "$out" CS_PAUSE_RESURFACE_SECS=999
   pid=$!
-  if ! wait_live "$pid" 30; then
-    reap "$pid"; fail "watcher exited for a fresh declared pause (should absorb): $(cat "$out")"
+  if ! absorbed_alive "$pid" "$state/.paused-$key"; then
+    reap "$pid"; fail "watcher exited or never recorded the paused flag for a fresh declared pause (should absorb): $(cat "$out")"
   fi
   [ ! -s "$out" ] || fail "fresh paused stale printed a wake reason during absorb"
   [ ! -s "$state/.wake-queue" ] || fail "fresh paused stale enqueued a wake during absorb"
@@ -458,7 +461,7 @@ test_blocked_pane_surfaces_immediately() {
   : > "$out"
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  if ! wait_live "$pid" 25; then
+  if ! absorbed_alive "$pid" "$state/.last-watcher-beat"; then
     reap "$pid"; fail "re-armed watcher re-escalated an already-surfaced blocked pane: $(cat "$out")"
   fi
   reap "$pid"
@@ -483,8 +486,8 @@ test_blocked_pane_declared_pause_absorbed() {
 
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  if ! wait_live "$pid" 25; then
-    reap "$pid"; fail "watcher escalated a blocked pane under a declared pause (should absorb): $(cat "$out")"
+  if ! absorbed_alive "$pid" "$state/.herdr-escalated-$key"; then
+    reap "$pid"; fail "watcher escalated a blocked pane under a declared pause, or never committed the dedupe marker (should absorb): $(cat "$out")"
   fi
   [ ! -s "$out" ] || fail "a pause-exempted blocked pane printed a wake reason: $(cat "$out")"
   [ ! -s "$state/.wake-queue" ] || fail "a pause-exempted blocked pane enqueued a wake"
@@ -575,8 +578,8 @@ test_heartbeat_no_change_absorbed() {
   # A truly quiet fleet (no panes, no statuses) with a fast heartbeat cadence.
   watch_bg "$state" "$fakebin" "$out" CS_HEARTBEAT=1
   pid=$!
-  if ! wait_live "$pid" 30; then
-    reap "$pid"; fail "watcher exited for a no-change heartbeat (should absorb): $(cat "$out")"
+  if ! absorbed_alive "$pid" "$state/.heartbeat-streak"; then
+    reap "$pid"; fail "watcher exited or never advanced the heartbeat streak for a no-change heartbeat (should absorb): $(cat "$out")"
   fi
   [ ! -s "$out" ] || fail "no-change heartbeat printed a wake reason: $(cat "$out")"
   [ ! -s "$state/.wake-queue" ] || fail "no-change heartbeat enqueued a durable wake record"
@@ -616,11 +619,11 @@ test_beacon_stays_fresh_while_absorbing() {
   export CS_FAKE_CREW_STATE='state: working · source: run-step · validating (running)'
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  wait_live "$pid" 15 || { reap "$pid"; fail "watcher exited while absorbing the first benign signal"; }
+  absorbed_alive "$pid" "$state/.last-watcher-beat" || { reap "$pid"; fail "watcher exited while absorbing the first benign signal"; }
   m1=$(file_mtime "$state/.last-watcher-beat")
   # A second benign signal keeps it absorbing; the beacon must keep advancing.
   printf 'working: b\n' >> "$status_file"
-  wait_live "$pid" 20 || { reap "$pid"; fail "watcher exited while absorbing a second benign signal"; }
+  absorbed_alive "$pid" "$state/.last-watcher-beat" || { reap "$pid"; fail "watcher exited while absorbing a second benign signal"; }
   m2=$(file_mtime "$state/.last-watcher-beat")
   now=$(date +%s)
   if [ -z "$m1" ] || [ -z "$m2" ]; then
@@ -675,7 +678,7 @@ test_event_splice_blocked_edge_and_dedupe_clear() {
 # args: <socket> <timeout> <pane...>
 echo "@subscribed"
 printf 'pane-ev-1\tws-1\tblocked\tcodex\n'
-sleep 5
+sleep 2
 exit 0
 SH
   chmod +x "$reader"
@@ -685,7 +688,7 @@ SH
     cd "$dir" || exit 2
     # shellcheck disable=SC1090,SC1091
     PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
-    CS_HERDR_EVENT_READER="$reader" PATH="$fakebin:$PATH" cs_watch_wait_transition 5 "$state" pane-ev-1
+    CS_HERDR_EVENT_READER="$reader" PATH="$fakebin:$PATH" cs_watch_wait_transition 1 "$state" pane-ev-1
   ); rc=$?
   expect_code 0 "$rc" "blocked stream edge did not return an actionable record"
   [ "$(printf '%s' "$rec" | cut -f1)" = pane-ev-1 ] || fail "record pane_id wrong: $rec"
@@ -709,7 +712,7 @@ SH
     cd "$dir" || exit 2
     # shellcheck disable=SC1090,SC1091
     PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
-    CS_HERDR_EVENT_READER="$reader" PATH="$fakebin:$PATH" cs_watch_wait_transition 5 "$state" pane-ev-1
+    CS_HERDR_EVENT_READER="$reader" PATH="$fakebin:$PATH" cs_watch_wait_transition 1 "$state" pane-ev-1
   ); rc=$?
   expect_code 1 "$rc" "clean full-budget wait did not return 1"
   [ ! -e "$marker" ] || fail "a working edge did not clear the escalation dedupe marker"
@@ -725,7 +728,7 @@ SH
     cd "$dir" || exit 2
     # shellcheck disable=SC1090,SC1091
     PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
-    CS_HERDR_EVENT_READER="$reader" PATH="$fakebin:$PATH" cs_watch_wait_transition 5 "$state" pane-ev-1
+    CS_HERDR_EVENT_READER="$reader" PATH="$fakebin:$PATH" cs_watch_wait_transition 1 "$state" pane-ev-1
   ); rc=$?
   expect_code 2 "$rc" "a failed subscribe did not report the event path unusable"
   unset CS_FAKE_HERDR_SOCKET CS_FAKE_HERDR_AGENT_STATUS
@@ -741,7 +744,7 @@ test_event_splice_level_reconcile_catches_already_blocked() {
   cat > "$reader" <<'SH'
 #!/usr/bin/env bash
 echo "@subscribed"
-sleep 5
+sleep 2
 exit 0
 SH
   chmod +x "$reader"
@@ -751,7 +754,7 @@ SH
     cd "$dir" || exit 2
     # shellcheck disable=SC1090,SC1091
     PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
-    CS_HERDR_EVENT_READER="$reader" PATH="$fakebin:$PATH" cs_watch_wait_transition 5 "$state" pane-lvl-1
+    CS_HERDR_EVENT_READER="$reader" PATH="$fakebin:$PATH" cs_watch_wait_transition 1 "$state" pane-lvl-1
   ); rc=$?
   expect_code 0 "$rc" "an already-blocked pane was not caught by the level reconcile"
   [ "$(printf '%s' "$rec" | cut -f1)" = pane-lvl-1 ] || fail "level record pane_id wrong: $rec"
