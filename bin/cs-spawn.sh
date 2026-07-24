@@ -125,13 +125,103 @@ fi
 
 cs_herdr_protocol_check
 
-# Task-id-scoped spawn lock: creation through metadata publication.
+# Task-id-scoped spawn lock: held from creation through metadata publication so
+# concurrent same-id spawns serialize. The lock is a mkdir-atomic directory that
+# records the holder's PID. This makes it signal-safe and stale-recoverable: the
+# terminating signals are trapped (not only EXIT), so a spawn killed by Ctrl-C or
+# a signal releases the lock instead of wedging every later spawn of this id; and
+# a lock left behind by a holder that died without running any trap is reclaimed
+# on the "already exists" branch. Reclaim can only ever remove a provably
+# abandoned lock - a lock whose recorded PID is still live (kill -0), including a
+# reused PID, is never treated as stale, and concurrent reclaimers are serialized
+# so a live holder's fresh lock is never removed out from under it. A false
+# reclaim is worse than a stuck lock, so every uncertain case refuses.
 SPAWN_LOCK="$STATE/.spawn-$ID.lock"
-if ! mkdir "$SPAWN_LOCK" 2>/dev/null; then
+SPAWN_RECLAIM_LOCK="$SPAWN_LOCK.reclaim"
+SPAWN_LOCK_OWNED=0
+SPAWN_RECLAIM_OWNED=0
+# A lock with a dead recorded PID is reclaimable at once. A lock with no PID yet
+# (holder caught between its mkdir and its PID write, or a legacy pre-PID lock)
+# is reclaimed only once it is older than this, so a live holder that is merely
+# slow to record its PID is never mistaken for stale.
+SPAWN_LOCK_STALE_AFTER=2
+
+_cs_spawn_pid_alive() { # <pid>: 0 iff a live process currently holds this PID
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$1" 2>/dev/null
+}
+
+_cs_spawn_path_age() { # <path>: whole-second mtime age on stdout; non-zero on failure
+  local m now
+  if [ "$(uname)" = Darwin ]; then
+    m=$(stat -f %m "$1" 2>/dev/null) || m=
+  else
+    m=$(stat -c %Y "$1" 2>/dev/null) || m=
+  fi
+  case "$m" in ''|*[!0-9]*) return 1 ;; esac
+  now=$(date +%s)
+  printf '%s\n' "$(( now - m ))"
+}
+
+# _cs_spawn_lock_is_stale: 0 iff the lock currently at $SPAWN_LOCK is provably
+# abandoned - a dead recorded PID, or no PID on a lock past the grace window.
+_cs_spawn_lock_is_stale() {
+  local pid age
+  pid=$(cat "$SPAWN_LOCK/pid" 2>/dev/null || true)
+  if [ -n "$pid" ]; then
+    _cs_spawn_pid_alive "$pid" && return 1
+    return 0
+  fi
+  age=$(_cs_spawn_path_age "$SPAWN_LOCK") || return 1
+  [ "$age" -ge "$SPAWN_LOCK_STALE_AFTER" ]
+}
+
+# _cs_spawn_lock_acquire: 0 with the lock held (PID recorded, SPAWN_LOCK_OWNED=1),
+# 1 if a genuinely live spawn holds it. Reclaim of a stale lock is serialized by
+# an atomic mkdir on a sibling reclaim lock and re-verified under it, so at most
+# one reclaimer removes-and-recreates the lock; racers that lose the reclaim, or
+# find the lock freshly recreated, refuse rather than delete a live lock.
+_cs_spawn_lock_acquire() {
+  if mkdir "$SPAWN_LOCK" 2>/dev/null; then
+    printf '%s\n' "$$" > "$SPAWN_LOCK/pid" 2>/dev/null || true
+    SPAWN_LOCK_OWNED=1
+    return 0
+  fi
+  _cs_spawn_lock_is_stale || return 1
+  mkdir "$SPAWN_RECLAIM_LOCK" 2>/dev/null || return 1
+  SPAWN_RECLAIM_OWNED=1
+  local rc=1
+  # No other reclaimer can remove/recreate the lock while we hold the reclaim
+  # lock, so this second staleness read is authoritative before we delete.
+  if _cs_spawn_lock_is_stale; then
+    rm -f "$SPAWN_LOCK/pid" 2>/dev/null || true
+    rmdir "$SPAWN_LOCK" 2>/dev/null || true
+    if mkdir "$SPAWN_LOCK" 2>/dev/null; then
+      printf '%s\n' "$$" > "$SPAWN_LOCK/pid" 2>/dev/null || true
+      SPAWN_LOCK_OWNED=1
+      rc=0
+    fi
+  fi
+  rmdir "$SPAWN_RECLAIM_LOCK" 2>/dev/null || true
+  SPAWN_RECLAIM_OWNED=0
+  return "$rc"
+}
+
+_cs_spawn_cleanup() {
+  if [ "$SPAWN_RECLAIM_OWNED" = 1 ]; then
+    rmdir "$SPAWN_RECLAIM_LOCK" 2>/dev/null || true
+  fi
+  if [ "$SPAWN_LOCK_OWNED" = 1 ]; then
+    rm -f "$SPAWN_LOCK/pid" 2>/dev/null || true
+    rmdir "$SPAWN_LOCK" 2>/dev/null || true
+  fi
+}
+trap _cs_spawn_cleanup EXIT INT TERM HUP
+
+if ! _cs_spawn_lock_acquire; then
   echo "error: another spawn for '$ID' is in flight (lock $SPAWN_LOCK)" >&2
   exit 1
 fi
-trap 'rmdir "$SPAWN_LOCK" 2>/dev/null || true' EXIT
 
 if [ -e "$STATE/$ID.meta" ]; then
   echo "error: task '$ID' already has metadata at $STATE/$ID.meta; tear it down or pick a new id" >&2
