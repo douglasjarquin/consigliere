@@ -41,11 +41,9 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CS_ROOT="${CS_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
-STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
-DATA="${CS_DATA_OVERRIDE:-$CS_HOME/data}"
-CONFIG="${CS_CONFIG_OVERRIDE:-$CS_HOME/config}"
+# shellcheck source=bin/cs-root-lib.sh
+. "$SCRIPT_DIR/cs-root-lib.sh"
+cs_resolve_root
 BACKLOG="$DATA/backlog.md"
 CAPO_REG="$DATA/capos.md"
 NOW=${CS_FLEET_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
@@ -175,7 +173,7 @@ crew_state_line() {  # <id> -> the one canonical "state: … · source: … · �
 
 task_json_stream() {
   local meta id kind mode yolo project worktree pane workspace pr sep raw rest
-  local cstate csource cdetail pane_exists agent report last_line decisions
+  local cstate csource cdetail pane_exists agent report last_line decisions headless
   sep=' · '
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || continue
@@ -188,6 +186,9 @@ task_json_stream() {
     pane=$(cs_meta_get "$meta" pane || true)
     workspace=$(cs_meta_get "$meta" workspace || true)
     pr=$(cs_meta_get "$meta" pr || true)
+    # A headless scout runs codex exec / claude -p: it never presents a steerable
+    # TUI pane. Surface the marker so the render does not imply one can be steered.
+    headless=$(cs_meta_get "$meta" headless || true)
 
     pane_exists=null
     agent=unknown
@@ -230,10 +231,11 @@ task_json_stream() {
       --arg report "$report" --arg last_verb "$(status_line_verb "$last_line")" \
       --arg last_note "$(status_line_note "$last_line")" --arg last_raw "$last_line" \
       --argjson pane_exists "$pane_exists" \
+      --argjson headless "$(bool_json "$([ "$headless" = 1 ] && echo 1 || echo 0)")" \
       --argjson worktree_present "$(bool_json "$([ -n "$worktree" ] && [ -d "$worktree" ] && echo 1 || echo 0)")" \
       --argjson report_present "$(bool_json "$([ -f "$report" ] && echo 1 || echo 0)")" \
       --argjson open_decisions "$decisions" \
-      '{id:$id,kind:$kind,mode:$mode,yolo:$yolo,
+      '{id:$id,kind:$kind,mode:$mode,yolo:$yolo,headless:$headless,
         project:(if $project == "" then null else $project end),
         worktree:{path:(if $worktree == "" then null else $worktree end),present:$worktree_present},
         endpoint:{pane:(if $pane == "" then null else $pane end),workspace:(if $workspace == "" then null else $workspace end),
@@ -335,7 +337,8 @@ printf '%s\n' "$SNAPSHOT" | jq -r '
   def endpoint_of($t):
     (if $t.endpoint.exists == null then "no pane recorded"
      elif $t.endpoint.exists then "present / \($t.endpoint.agent)"
-     else "ABSENT" end);
+     else "ABSENT" end)
+    + (if $t.headless then " · headless (not steerable)" else "" end);
   def artifact($t):
     if $t.pr != null then $t.pr
     elif $t.report.present then $t.report.path

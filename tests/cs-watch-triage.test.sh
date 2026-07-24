@@ -145,6 +145,59 @@ test_terminal_stale_surfaced() {
   pass "a stale pane sitting on a terminal status is surfaced (queue + exit)"
 }
 
+# --- a live headless scout (codex exec / claude -p) is NOT stale-triaged -------
+# It presents no interactive composer/busy banner, so the stale heuristics would
+# raise a spurious "went quiet" wake while it legitimately works. The watcher
+# skips its stale triage until the run writes a terminal done:/failed:.
+# (docs/headless-scouts.md; bin/cs-watch.sh pane_is_headless)
+
+test_live_headless_scout_stale_absorbed() {
+  local dir state fakebin out capture_file pane pid
+  dir=$(make_case headless-live); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"
+  pane="pane-headless-1"
+  printf 'exec: investigating (no TUI)\n' > "$capture_file"
+  cs_write_meta "$state/hs.meta" "pane=$pane" "kind=scout" "headless=1"
+  # A live headless run writes NO status file until it exits with done:/failed:
+  # (cs-spawn does not pre-create it), so the signal scan sees nothing and only
+  # the stale-pane path fires.
+  rm -f "$state/hs.status"
+  prime_stale "$state" "$pane" "exec: investigating (no TUI)" >/dev/null
+  export CS_FAKE_HERDR_CAPTURE="$capture_file"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  if ! wait_live "$pid" 30; then
+    reap "$pid"; fail "watcher exited (spurious wake) for a live headless scout: $(cat "$out")"
+  fi
+  [ ! -s "$out" ] || fail "live headless scout raised a stale wake reason: $(cat "$out")"
+  [ "$(count_wakes "$state" stale "$pane")" -eq 0 ] || fail "live headless scout enqueued a stale wake"
+  reap "$pid"
+  unset CS_FAKE_HERDR_CAPTURE
+  pass "a live (non-terminal) headless scout is not stale-triaged (no spurious wake)"
+}
+
+# --- a headless scout that has finished IS surfaced (the guard only skips the
+# live, non-terminal window; completion still surfaces) ------------------------
+
+test_terminal_headless_scout_surfaced() {
+  local dir state fakebin out capture_file pane sig pid
+  dir=$(make_case headless-terminal); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"
+  pane="pane-headless-done-1"
+  printf 'done: headless scout finished; read the report\n' > "$capture_file"
+  cs_write_meta "$state/hd.meta" "pane=$pane" "kind=scout" "headless=1"
+  printf 'done: headless scout finished; read the report\n' > "$state/hd.status"
+  sig=$(seen_sig "$state/hd.status"); printf '%s' "$sig" > "$state/.seen-hd_status"
+  prime_stale "$state" "$pane" "done: headless scout finished; read the report" >/dev/null
+  export CS_FAKE_HERDR_CAPTURE="$capture_file"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" 60 || fail "watcher did not exit for a terminal headless scout"
+  grep -Fx "stale: $pane" "$out" >/dev/null || fail "terminal headless scout not surfaced: $(cat "$out")"
+  unset CS_FAKE_HERDR_CAPTURE
+  pass "a finished (terminal) headless scout is still surfaced"
+}
+
 # --- stale pane, STALE terminal status overridden by an active run: absorbed --
 # A soldier's own status log gets no new entry once consigliere hands it to a
 # no-mistakes validation (the sparse status-reporting contract), so the log
@@ -740,6 +793,8 @@ test_turn_ended_not_working_surfaced
 test_working_note_not_working_surfaced
 test_actionable_signal_surfaced
 test_terminal_stale_surfaced
+test_live_headless_scout_stale_absorbed
+test_terminal_headless_scout_surfaced
 test_stale_terminal_status_overridden_by_active_run
 test_nonterminal_stale_provably_working_absorbed_then_escalated
 test_wedge_escalation_marks_demand_deep_inspection_after_threshold

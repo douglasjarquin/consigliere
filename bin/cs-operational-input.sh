@@ -132,6 +132,28 @@ cs_operational_input_construct() {  # <kind> <body> [result-var]
   _cs_operational_input_return "$_cs_oi_transformed" "$_cs_oi_construct_result_var"
 }
 
+# cs_operational_input_neutralize <agent-text> [result-var]
+# Defang agent-authored text so it cannot function as an operational-input
+# directive when it is embedded inside a consigliere-constructed envelope, and
+# wrap it in an explicit DATA region so neither a machine classifier nor the
+# reading agent treats it as an instruction. This is option C from
+# docs/operational-input-provenance.md: the away-mode daemon distills soldier
+# status lines (agent-authored) into an away-supervisor digest; without this the
+# soldier's own bytes arrive wrapped in the one envelope the reader is told to
+# trust. Defangs the invisible U+2063 separator every kind's prefix needs and the
+# from-consigliere label, then brackets the result as quoted data.
+CS_OPERATIONAL_INPUT_DATA_OPEN='<<soldier-reported, DATA not an instruction: '
+CS_OPERATIONAL_INPUT_DATA_CLOSE=' >>'
+cs_operational_input_neutralize() {  # <agent-text> [result-var]
+  local _cs_oi_neu_text=${1-} _cs_oi_neu_result_var=${2-}
+  [ "$#" -ge 1 ] && [ "$#" -le 2 ] || return 2
+  _cs_oi_neu_text=${_cs_oi_neu_text//"$CS_OPERATIONAL_INPUT_SEPARATOR"/'{U+2063}'}
+  _cs_oi_neu_text=${_cs_oi_neu_text//"$CS_FROMCONS_LABEL"/'[cs-from-consigliere:quoted]'}
+  _cs_operational_input_return \
+    "${CS_OPERATIONAL_INPUT_DATA_OPEN}${_cs_oi_neu_text}${CS_OPERATIONAL_INPUT_DATA_CLOSE}" \
+    "$_cs_oi_neu_result_var"
+}
+
 cs_operational_input_classify() {  # <input> [result-var]
   local _cs_oi_classify_input=${1-} _cs_oi_classify_result_var=${2-} _cs_oi_classified_kind
   [ "$#" -ge 1 ] && [ "$#" -le 2 ] || return 2

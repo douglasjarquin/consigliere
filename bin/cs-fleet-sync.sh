@@ -31,8 +31,9 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CS_ROOT="${CS_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
+# shellcheck source=bin/cs-root-lib.sh
+. "$SCRIPT_DIR/cs-root-lib.sh"
+cs_resolve_root
 PROJECTS="${CS_PROJECTS_OVERRIDE:-$CS_HOME/projects}"
 # shellcheck source=bin/cs-lock-lib.sh
 . "$SCRIPT_DIR/cs-lock-lib.sh"

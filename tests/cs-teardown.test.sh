@@ -17,9 +17,15 @@ FAKEBIN=$(cs_fakebin "$TMP")
 cat > "$FAKEBIN/herdr" <<'SH'
 #!/usr/bin/env bash
 # Hermetic herdr: empty workspace/pane lists, everything else succeeds.
+# "pane close" models the soldier being frozen: when CS_TEST_QUIESCE_CLEAN_FILE
+# names a path, closing the pane removes it. A worktree left "dirty" only while
+# the agent is live then reads clean iff the pane was closed before the proof.
 case "$1 ${2:-}" in
   "workspace list") echo '{"result":{"workspaces":[]}}' ;;
   "pane list") echo '{"result":{"panes":[]}}' ;;
+  "pane close")
+    [ -n "${CS_TEST_QUIESCE_CLEAN_FILE:-}" ] && rm -f "$CS_TEST_QUIESCE_CLEAN_FILE"
+    echo '{}' ;;
   *) echo '{}' ;;
 esac
 exit 0
@@ -90,11 +96,34 @@ git -C "$TMP/proj-s1" show-ref --verify --quiet refs/heads/cs/s1 \
   && fail "task branch should be deleted after teardown"
 pass "squash-landed content teardown completes"
 
-# 4. clean no-new-work worktree proceeds
-make_task c1 ship
+# 4. clean no-new-work worktree proceeds, and the watcher's derived per-task /
+#    per-pane markers are cleaned by exact name while a DIFFERENT task's / pane's
+#    markers are left untouched (scoped deletion, never a broad glob).
+make_task c1 ship  # id c1, pane w99:p99 -> pane key w99_p99
+# c1's own derived markers (mirrors bin/cs-watch.sh key derivation)
+c1_markers=(
+  "$TMP/state/.seen-c1_status"
+  "$TMP/state/.seen-c1_turn-ended"
+  "$TMP/state/.hb-surfaced-c1"
+  "$TMP/state/.hash-w99_p99"
+  "$TMP/state/.count-w99_p99"
+  "$TMP/state/.stale-w99_p99"
+  "$TMP/state/.stale-since-w99_p99"
+  "$TMP/state/.wedge-escalations-w99_p99"
+  "$TMP/state/.herdr-escalated-w99_p99"
+)
+for m in "${c1_markers[@]}"; do : > "$m"; done
+# markers belonging to a different task id / pane must survive teardown of c1
+: > "$TMP/state/.seen-other_status"
+: > "$TMP/state/.hb-surfaced-other"
+: > "$TMP/state/.hash-w88_p88"
 out=$("$BIN" c1 2>&1) || fail "clean teardown failed: $out"
 assert_contains "$out" "teardown c1 complete" "clean teardown completes"
-pass "clean worktree teardown completes"
+for m in "${c1_markers[@]}"; do assert_absent "$m" "watcher marker $(basename "$m") removed"; done
+assert_present "$TMP/state/.seen-other_status" "other task's .seen marker untouched"
+assert_present "$TMP/state/.hb-surfaced-other" "other task's .hb-surfaced marker untouched"
+assert_present "$TMP/state/.hash-w88_p88" "other pane's .hash marker untouched"
+pass "clean worktree teardown completes and cleans this task's watcher markers"
 
 # 5. scout without report refuses; with report proceeds even dirty
 make_task sc1 scout
@@ -130,5 +159,23 @@ ln -s /etc/hosts "$TMP/state/a1.check.sh"
 out=$("$BIN" a1 2>&1) && fail "symlinked artifact must refuse"
 assert_contains "$out" "symlink" "artifact refusal names the symlink"
 pass "tampered artifact refuses cleanup"
+
+# 8. quiesce runs BEFORE the safety proof. A worktree that is "dirty" only while
+# the soldier is live reads clean because the pane is closed first. Control (q0):
+# the same dirty fixture refuses when closing the pane changes nothing, pinning
+# that the file is genuinely dirty and only a pre-proof close makes it clean.
+make_task q0 ship
+echo live > "$TMP/wt-q0/scratch.txt"
+out=$("$BIN" q0 2>&1) && fail "control: dirty worktree must refuse when pane close is inert"
+assert_contains "$out" "uncommitted changes" "control fixture is genuinely dirty"
+assert_present "$TMP/wt-q0/scratch.txt" "control dirty work preserved on refusal"
+
+make_task q1 ship
+echo live > "$TMP/wt-q1/scratch.txt"
+out=$(CS_TEST_QUIESCE_CLEAN_FILE="$TMP/wt-q1/scratch.txt" "$BIN" q1 2>&1) \
+  || fail "quiesce-before-proof teardown failed: $out"
+assert_contains "$out" "teardown q1 complete" "frozen worktree reads clean, teardown proceeds"
+assert_absent "$TMP/wt-q1" "worktree removed after quiesce-clean proof"
+pass "pane quiesce runs before the safety proof"
 
 pass "cs-teardown landed-work proofs"

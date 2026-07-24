@@ -32,7 +32,7 @@ codex [--model <m>] [-c 'model_reasoning_effort="<low|medium|high|xhigh>"'] \
 
 ## Native features deliberately available to consigliere
 
-- `codex exec` - headless non-interactive run; planned as the `--headless` scout option (turn-end = process exit, done = exit + report exists).
+- `codex exec` - headless non-interactive run; used for `--headless` scouts (turn-end = process exit; the launch line appends the terminal `done:`/`failed:` status event, so completion surfaces through the watcher's ordinary signal path). The analog of `claude -p`.
 - `codex review` / `codex apply` - candidates for the no-mistakes rewrite, not used by consigliere directly.
 - `codex fork/archive/delete` - session lifecycle, unused.
 - Codex Desktop (`codex app`) is not a runtime surface for consigliere.

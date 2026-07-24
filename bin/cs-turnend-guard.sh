@@ -26,9 +26,9 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CS_ROOT="${CS_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
-STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
+# shellcheck source=bin/cs-root-lib.sh
+. "$SCRIPT_DIR/cs-root-lib.sh"
+cs_resolve_root
 GRACE=${CS_GUARD_GRACE:-300}
 WATCH="$SCRIPT_DIR/cs-watch.sh"
 
@@ -54,6 +54,50 @@ STOP_HOOK_ACTIVE=$(printf '%s' "$PAYLOAD" | jq -r '.stop_hook_active // false' 2
 # Scope precisely to a PRIMARY checkout: a genuinely marked capo home is
 # force-included; an unmarked linked task worktree is exempt.
 cs_primary_scope_matches "$CS_ROOT" "$STATE" || exit 0
+
+# Defer when ANOTHER live consigliere session holds this home's lock. The guard
+# scopes to a primary checkout but that says nothing about whether THIS session
+# is the supervisor: a second window, a read-only helper, or a tooling session
+# started in the repo root shares the scope yet must not be nagged to drive a
+# fleet it does not own. cs-session-start.sh already turns the same signal into a
+# read-only session ("ANOTHER LIVE CONSIGLIERE SESSION HOLDS THE FLEET LOCK");
+# mirror that here so the two components stop giving a secondary session opposite
+# instructions. Query the lock non-mutatingly via `cs-lock.sh status` - NEVER
+# acquire, which would take the lock as a side effect. Fail open: only an
+# affirmative live holder that is provably NOT part of this session's process
+# tree adds the defer. A free, stale, or own lock - or any unreadable condition -
+# falls through to the supervision logic so a genuine primary is still guarded
+# when it ends a turn blind.
+cs_lock_holder_is_foreign() {  # <holder-pid>: 0 only if provably a different session
+  local holder=$1 pid=$$ ppid hops=0
+  case "$holder" in
+    ''|*[!0-9]*) return 1 ;;  # unparseable -> not provably foreign (fail open)
+  esac
+  while [ "$hops" -lt 64 ]; do
+    # The holder is this process or one of its ancestors -> this session owns the
+    # lock; not foreign.
+    [ "$pid" = "$holder" ] && return 1
+    ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    case "$ppid" in
+      ''|*[!0-9]*) return 1 ;;  # cannot read ancestry -> fail open (do not defer)
+    esac
+    # Reached init/reaper without meeting the holder: it lives outside this
+    # session's process tree -> another live session holds the lock.
+    [ "$ppid" -gt 1 ] || return 0
+    pid=$ppid
+    hops=$((hops + 1))
+  done
+  return 1  # ran out of hops -> cannot prove foreign, fail open
+}
+
+LOCK_STATUS=$(CS_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/cs-lock.sh" status 2>/dev/null || true)
+case "$LOCK_STATUS" in
+  'lock: held by live harness pid '*)
+    if cs_lock_holder_is_foreign "${LOCK_STATUS##* }"; then
+      exit 0
+    fi
+    ;;
+esac
 
 # --- the actual predicate ----------------------------------------------------
 # shellcheck source=bin/cs-wake-lib.sh

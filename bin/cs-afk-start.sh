@@ -26,9 +26,10 @@
 set -eu
 
 CS_AFK_START_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CS_ROOT="${CS_ROOT_OVERRIDE:-$(cd "$CS_AFK_START_DIR/.." && pwd)}"
-CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
-CS_AFK_STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
+# shellcheck source=bin/cs-root-lib.sh
+. "$CS_AFK_START_DIR/cs-root-lib.sh"
+cs_resolve_root
+CS_AFK_STATE="$STATE"
 CS_AFK_LOCK="$CS_AFK_STATE/.subsuper-daemon.lock"
 CS_AFK_DAEMON="${CS_AFK_DAEMON:-$CS_AFK_START_DIR/cs-daemon.sh}"
 
