@@ -1,0 +1,6 @@
+# actionlint config. Blacksmith provides managed CI runners dispatched by label
+# via its GitHub app; the labels are not in actionlint's built-in hosted-runner
+# list, so declare them here to keep `actionlint` clean.
+self-hosted-runner:
+  labels:
+    - blacksmith-4vcpu-ubuntu-2404

@@ -46,7 +46,11 @@ ws2=$(cs_herdr_home_workspace_ensure consigliere-test "$TMP/$REPO") || fail "hom
 [ "$ws" = "$ws2" ] || fail "home workspace ensure is not idempotent ($ws vs $ws2)"
 pass "home workspace ensure is idempotent"
 
-tuple=$(cs_herdr_task_create "$ws" cs/lib-test t-lib-test) || fail "task worktree create"
+# cs_herdr_task_create takes the project PATH (as bin/cs-spawn.sh passes
+# $PROJ_ABS), not a workspace id: --cwd must resolve to $TMP/$REPO so the task
+# branch is created in this repo and the branch-preservation assertion below is
+# actually meaningful.
+tuple=$(cs_herdr_task_create "$TMP/$REPO" cs/lib-test t-lib-test) || fail "task worktree create"
 task_ws=$(printf '%s' "$tuple" | cut -f1)
 task_pane=$(printf '%s' "$tuple" | cut -f2)
 task_path=$(printf '%s' "$tuple" | cut -f3)
@@ -64,9 +68,14 @@ fi
 [ -f "$task_path/dirty.txt" ] || fail "dirty file lost on refused remove"
 pass "dirty-remove fails closed"
 
-cs_herdr_run "$task_pane" 'echo cs-capture-probe' >/dev/null || fail "pane run"
+# Re-submit the probe on every attempt, not once before the loop: a freshly
+# created worktree pane's shell may not be ready to accept input yet on a slow
+# or headless runner, and a single early `pane run` is then silently lost while
+# re-reading the buffer can never recover it. Re-running echo is idempotent.
 out=""
-for _ in 1 2 3 4 5 6 7 8 9 10; do
+for _ in $(seq 1 30); do
+  cs_herdr_run "$task_pane" 'echo cs-capture-probe' >/dev/null || fail "pane run"
+  sleep 0.3
   out=$(cs_herdr_capture "$task_pane" 20 text) || fail "capture"
   case "$out" in *cs-capture-probe*) break ;; esac
   sleep 0.5
@@ -80,7 +89,7 @@ cs_herdr_worktree_remove "$task_ws" >/dev/null || fail "clean worktree remove"
 git -C "$TMP/$REPO" show-ref --verify --quiet refs/heads/cs/lib-test || fail "branch must survive clean remove"
 pass "clean remove deletes worktree, preserves branch"
 
-tuple=$(cs_herdr_task_create "$ws" cs/lib-recover t-lib-recover) || fail "second task create"
+tuple=$(cs_herdr_task_create "$TMP/$REPO" cs/lib-recover t-lib-recover) || fail "second task create"
 task_ws=$(printf '%s' "$tuple" | cut -f1)
 task_path=$(printf '%s' "$tuple" | cut -f3)
 echo keep > "$task_path/keep.txt"

@@ -1,0 +1,184 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least privilege: CI only reads the checkout. No job writes to the repo.
+permissions:
+  contents: read
+
+# Cancel superseded runs for the same branch or PR so only the newest commit's
+# checks keep running.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Shell lint
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned ShellCheck
+        run: |
+          set -eu
+          bin/cs-install-shellcheck.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # Single owner of the lint definition (file set + config + version). Do not
+      # re-spell the shellcheck command here; keep CI and local on this script.
+      - run: bin/cs-lint.sh
+
+  # Prove that portable + real-herdr + live-codex partition tests/*.test.sh with
+  # no missing, no duplicate, and live-codex visibly excluded from hosted CI.
+  test-coverage:
+    name: Test coverage guard
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v6
+      - run: bin/cs-test-run.sh --check-coverage
+
+  portable:
+    name: Portable behavior
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require test tools
+        run: |
+          set -eu
+          command -v jq >/dev/null || { echo "::error::jq is required"; exit 1; }
+          command -v python3 >/dev/null || { echo "::error::python3 is required"; exit 1; }
+          jq --version
+          python3 --version
+      - name: Install tasks-axi
+        # cs-decision-hold.sh's completion gate (exercised by cs-teardown and
+        # cs-decision-hold) probes a compatible tasks-axi; install it so those
+        # tests run for real instead of skipping or failing on its absence.
+        run: |
+          set -eu
+          npm install -g tasks-axi
+          tasks-axi --version
+      - name: Run every portable (hermetic) test, serial
+        run: bin/cs-test-run.sh --portable
+
+  # Required real-Herdr lane: pinned install, protocol-floor assert, an isolated
+  # cs-lab-* session only, hard-fail if the env-gate causes a skip instead of a
+  # real run, and always clean up job-owned lab sessions.
+  herdr:
+    name: Real Herdr behavior
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require tools for real Herdr
+        run: |
+          set -eu
+          command -v jq >/dev/null || { echo "::error::jq is required"; exit 1; }
+          command -v curl >/dev/null || { echo "::error::curl is required"; exit 1; }
+          command -v tar >/dev/null || { echo "::error::tar is required"; exit 1; }
+          jq --version
+      - name: Install pinned Herdr
+        run: |
+          set -eu
+          bin/cs-install-herdr.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Assert Herdr pin and protocol floor
+        run: |
+          set -eu
+          command -v herdr >/dev/null || { echo "::error::herdr not on PATH after install"; exit 1; }
+          herdr --version
+          floor=$(awk -F= '/^CS_HERDR_MIN_PROTOCOL=/ { gsub(/[^0-9]/, "", $2); print $2; exit }' bin/cs-herdr-lib.sh)
+          status=$(herdr status --json)
+          printf '%s\n' "$status"
+          version=$(printf '%s' "$status" | jq -r '.client.version // empty')
+          protocol=$(printf '%s' "$status" | jq -r '.client.protocol // empty')
+          [ "$version" = "0.7.4" ] || { echo "::error::expected Herdr pin 0.7.4, got ${version:-<empty>}"; exit 1; }
+          case "$protocol" in
+            ''|*[!0-9]*) echo "::error::could not read client protocol"; exit 1 ;;
+          esac
+          [ "$protocol" -ge "$floor" ] || { echo "::error::herdr protocol $protocol below floor $floor"; exit 1; }
+      - name: Start default Herdr session for the fleet-state tripwire
+        run: |
+          set -eu
+          # cs-herdr-lab.sh provision requires exactly one running default session
+          # so the default-session tripwire can arm. Start it headless; the suite
+          # never uses it for lab work (it refuses default and uses cs-lab-* only).
+          mkdir -p "$RUNNER_TEMP/cs-herdr"
+          nohup herdr server >"$RUNNER_TEMP/cs-herdr/default-server.log" 2>&1 &
+          echo $! >"$RUNNER_TEMP/cs-herdr/default-server.pid"
+          attempt=0
+          while [ "$attempt" -lt 150 ]; do
+            running=$(herdr status --json 2>/dev/null | jq -r '.server.running // false' || echo false)
+            if [ "$running" = true ]; then
+              herdr session list --json | jq -e '
+                [.sessions[]? | select(.default == true and .name == "default" and .running == true)]
+                | length == 1
+              ' >/dev/null
+              echo "default Herdr session is running"
+              exit 0
+            fi
+            sleep 0.2
+            attempt=$((attempt + 1))
+          done
+          echo "::error::default Herdr server did not become ready"
+          cat "$RUNNER_TEMP/cs-herdr/default-server.log" || true
+          exit 1
+      - name: Snapshot pre-suite Herdr sessions
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/cs-herdr"
+          bin/cs-herdr-ci-cleanup.sh snapshot "$RUNNER_TEMP/cs-herdr/sessions-before.json"
+      - name: Run real-Herdr lane (serial, required)
+        env:
+          CS_TEST_HERDR_LIVE: "1"
+        run: |
+          set -eu
+          # Fail if the env-gate causes a skip instead of a real run, so a broken
+          # lane cannot pass as a false green. The live-codex opt-in env var is
+          # never set anywhere in this workflow, so that suite never runs here.
+          bin/cs-test-run.sh --herdr \
+            --fail-on-gate-skip 'CS_TEST_HERDR_LIVE=1 to run'
+      - name: Cleanup job-owned Herdr lab sessions
+        if: always()
+        run: |
+          set -eu
+          bin/cs-herdr-ci-cleanup.sh teardown "$RUNNER_TEMP/cs-herdr/sessions-before.json" || {
+            echo "::warning::lab session cleanup reported a problem; see logs"
+            herdr session list --json || true
+            exit 1
+          }
+
+  invariants:
+    name: Repo invariants
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v6
+      - name: Tracked symlinks must stay symlinks
+        run: |
+          set -eu
+          # Any file git records with mode 120000 must still be a symlink on disk.
+          # consigliere tracks none today; this guards a future one from being
+          # committed as a resolved regular file.
+          git ls-files -s | awk '$1 == "120000" { print $4 }' >symlinks.txt
+          count=0
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            count=$((count + 1))
+            [ -L "$path" ] || { echo "::error::tracked symlink is no longer a symlink: $path"; exit 1; }
+          done <symlinks.txt
+          echo "verified $count tracked symlink(s)"
+          rm -f symlinks.txt
+      - name: Boss-private paths must not be tracked
+        run: |
+          set -eu
+          # Mirrors .gitignore's boss-private operational home.
+          tracked=$(git ls-files -- .env data state config projects .no-mistakes)
+          if [ -n "$tracked" ]; then
+            echo "::error::boss-private paths are tracked in git:"
+            printf '%s\n' "$tracked"
+            exit 1
+          fi
+          echo "no boss-private paths tracked"
