@@ -1,6 +1,6 @@
 # Supervision
 
-Consigliere has exactly one supervision protocol: the codex bounded foreground checkpoint.
+Consigliere has exactly one supervision protocol: the bounded foreground checkpoint. It is identical across harnesses (codex and claude); only the Stop-hook registration differs.
 Codex cannot reason during a foreground tool call, so a background watcher that "notifies" the model has no wake semantics; the checkpoint returns control at a bound instead.
 
 ## The cycle
@@ -28,7 +28,7 @@ Wakes are appended durably to `state/.wake-queue` before detector state advances
 ## Busy evidence policy
 
 Native herdr `agent get` status drives busy detection: `working` is trusted outright and `blocked` surfaces immediately.
-Native `idle`/`unknown` is corroborated against the codex `esc to interrupt` signature before a soldier is declared not-working, because `agent.get` can read idle during a long foreground tool call (docs/herdr.md).
+Native `idle`/`unknown` is corroborated against the `esc to interrupt` rendered-banner signature (shared by codex and claude) before a soldier is declared not-working, because `agent.get` can read idle during a long foreground tool call (docs/herdr.md).
 
 ## Event push splice
 
@@ -37,7 +37,7 @@ The poll loop remains live every cycle as the permanent fail-closed backstop.
 
 ## Structural backstop
 
-`.codex/hooks.json` registers `bin/cs-turnend-guard.sh` as the codex Stop hook: when tasks are in flight and no live watcher holds this home's lock with a fresh beacon, the stop is blocked once (exit 2), with `stop_hook_active` as the loop guard.
+The harness Stop hook registers `bin/cs-turnend-guard.sh` (`.codex/hooks.json` for codex; `.claude/settings.json` at the repo root for a claude root/capo, and a launch-scoped `--settings` file for claude soldiers): when tasks are in flight and no live watcher holds this home's lock with a fresh beacon, the stop is blocked once (exit 2), with `stop_hook_active` as the loop guard (both harnesses carry that field).
 Its continuation is typed `turn-end-guard`, so it cannot be confused with boss input after rewording.
 The guard scopes itself to a genuine primary home (main checkout or marked capo home) via `bin/cs-primary-scope-lib.sh`; soldier task worktrees are exempt.
 It is a backstop, never permission to omit the live cycle.

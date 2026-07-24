@@ -35,7 +35,7 @@ Inheritance into capo homes: `data/boss-shared.md` is propagated read-only, and 
 The complete field-level inventory lives in AGENTS.md section 2; producing scripts own mutation:
 
 - `data/boards.md` - per-project GitHub Projects (v2) board mapping for the `contracts` skill, kept beside `data/projects.md` and keyed by the same project name. Blank lines and `#` comments ignored; every other line is `<project> <owner> <number> [ready-label] [in-progress-label] [status-field]`. Labels/field default to `Ready` / `In Progress` / `Status`; use `_` for spaces in a label token. `<owner>` is a user/org login or `@me`. `bin/cs-board.sh` reads it; the board mapping is optional (only projects worked via the board need a line).
-- `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `model=`, `effort=`, `kind=` (ship|scout|capo), `mode=` (no-mistakes|direct-PR|local-only), `yolo=`; `kind=capo` also records `home=`; `cs-spawn.sh` also records `issue=` for board-driven work and `headless=1` for a `codex exec` scout; `cs-pr-check.sh` appends `pr=` and `pr_head=`.
+- `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `model=`, `effort=`, `kind=` (ship|scout|capo), `mode=` (no-mistakes|direct-PR|local-only), `yolo=`, `harness=` (codex|claude, inherited from the root session); `kind=capo` also records `home=`; `cs-spawn.sh` also records `issue=` for board-driven work and `headless=1` for a headless scout (`codex exec` / `claude -p`); `cs-pr-check.sh` appends `pr=` and `pr_head=`.
 - `state/<id>.status` - appended by soldiers; wake events, never current state. `bin/cs-classify-lib.sh` owns the verb vocabulary.
 - `state/.wake-queue` - `epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload`; `bin/cs-wake-lib.sh` owns it.
 
@@ -52,7 +52,12 @@ The complete field-level inventory lives in AGENTS.md section 2; producing scrip
 | `CS_PAUSE_RESURFACE_SECS` | cs-watch, cs-daemon | declared external-wait recheck cadence |
 | `CS_MAX_DEFER_SECS` | cs-daemon | away-mode escalation max-defer alarm |
 | `CS_LOCK_HARNESS_RE` | cs-lock | test-only harness ancestry override |
+| `CS_HARNESS_OVERRIDE` | cs-harness-lib | force the root harness (codex\|claude); highest precedence, test/escape seam |
 | `CS_ROOT_OVERRIDE` `CS_STATE_OVERRIDE` | single scripts | test-only resolution overrides |
 
-Codex launch flags and hook facts: `docs/codex.md`.
+Root harness resolution (`cs_harness_detect_root`): `CS_HARNESS_OVERRIDE` → `config/harness` file → `CLAUDECODE=1` ⇒ claude → default codex. A soldier inherits the resolved value (persisted as `harness=` in meta).
+
+- `config/harness` - optional; a single line `codex` or `claude` pins the root harness regardless of environment.
+
+Per-harness launch flags and hook facts: `docs/codex.md`, `docs/claude.md`.
 Supervision protocol: `docs/supervision.md`.

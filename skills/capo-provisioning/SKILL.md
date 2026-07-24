@@ -32,7 +32,7 @@ The `projects:` field is a non-exclusive clone list, not ownership.
 A capo home is a PLAIN DETACHED git worktree of this consigliere repo at `${CS_CAPOS_ROOT:-~/.consigliere/capos}/<id>`, marked with a `.cs-capo-home` file containing the capo id.
 It is never a herdr-managed worktree and never pooled or leased: a capo home must survive herdr server restarts and empty workspaces, so its lifetime is owned by seed and retirement alone.
 The detached HEAD follows the main repo's default-branch tip through the guarded fast-forward sweep, never a branch of its own.
-Capos run on codex like everything else; there are no harness or model pins.
+Capos run on the root session's harness (codex or claude) like every other soldier; there are no per-capo harness or model pins.
 Choose `--model` and `--effort` per launch on `cs-spawn.sh` when the domain warrants it, exactly as for any soldier.
 
 ## Charter and seed
@@ -76,7 +76,7 @@ Launch the seeded capo with:
 bin/cs-spawn.sh <id> <home> --capo [--model <name>] [--effort <level>]
 ```
 
-It validates the `.cs-capo-home` marker, ensures the `capo-<id>` home workspace, and launches codex there with `CS_HOME` pointing at the home.
+It validates the `.cs-capo-home` marker, ensures the `capo-<id>` home workspace, and launches the root harness there (via `bin/cs-harness-lib.sh`) with `CS_HOME` pointing at the home.
 
 ## Sync and inherited local material
 

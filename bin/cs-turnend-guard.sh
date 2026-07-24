@@ -8,13 +8,18 @@
 # happens to run. A primary session that ends a turn without resuming the
 # foreground checkpoint, and then never runs another fleet-touching command
 # itself, can sit blind for hours.
-# This script is push-based: the codex Stop hook (.codex/hooks.json) invokes it
-# every time the primary is about to end a turn, and blocks the stop by
-# preserving exit status 2 and stderr.
+# This script is push-based: the harness Stop hook invokes it every time the
+# primary is about to end a turn, and blocks the stop by preserving exit status 2
+# and stderr. Registration is harness-specific: codex via .codex/hooks.json;
+# claude via the launch-scoped --settings Stop hook (cs-harness-lib.sh). Both feed
+# the same payload shape and honor an exit-2 block. The blocked message is a
+# TYPED turn-end-guard operational input (not raw text), which is what marks it as
+# legitimate supervision rather than an injected instruction to the reading agent.
 #
-# Loop-guard: never block twice in the same turn. Codex Stop payloads carry
-# stop_hook_active=true when the CURRENT stop attempt was itself already forced
-# by an earlier block this turn; on that signal we always allow the stop,
+# Loop-guard: never block twice in the same turn. codex and claude Stop payloads
+# both carry stop_hook_active=true when the CURRENT stop attempt was itself
+# already forced by an earlier block this turn; on that signal we always allow the
+# stop,
 # whether or not watcher supervision actually got resumed. That bounds this to
 # at most one forced continuation per turn - never a wedged, un-endable
 # session - while still nagging again on a later turn if the problem persists.

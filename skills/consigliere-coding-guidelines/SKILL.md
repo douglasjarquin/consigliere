@@ -65,8 +65,8 @@ Consigliere adds this skill's load instruction to consigliere-repo briefs by han
 
 ## Compatibility and enforcement
 
-Consigliere runs on exactly one harness (codex) and one terminal runtime (herdr); there is no adapter matrix to sweep.
-Before changing shared tracked behavior that touches codex or herdr, re-verify the affected facts against `docs/codex.md` and `docs/herdr.md`, and update that verification evidence when behavior changes.
+Consigliere runs on one of two harnesses (codex or claude) and one terminal runtime (herdr); `bin/cs-harness-lib.sh` is the whole harness layer and there is no broader adapter matrix to sweep.
+Before changing shared tracked behavior that touches a harness or herdr, re-verify the affected facts against `docs/codex.md`, `docs/claude.md`, and `docs/herdr.md`, and update that verification evidence when behavior changes.
 
 For critical safety, routing, startup, and supervision infrastructure, prefer deterministic and idempotent enforcement over relying on agent memory alone.
 Keep instructions as the authority and discovery layer, but make repeated execution converge safely and make invalid or unsafe states fail closed wherever the runtime can enforce them.
@@ -79,6 +79,6 @@ Keep instructions as the authority and discovery layer, but make repeated execut
 - Never add an agent name as a commit co-author.
 - `bin/*.sh` must pass `shellcheck -x` run from the repo root before a script change is treated as done.
 - Colocate tests with the existing pattern in `tests/`, name them `<subject>.test.sh`, and extend an existing script rather than inventing a new runner.
-- A verified-facts doc (`docs/herdr.md`, `docs/codex.md`) records empirical facts, not assumptions.
+- A verified-facts doc (`docs/herdr.md`, `docs/codex.md`, `docs/claude.md`) records empirical facts, not assumptions.
 - Include the date, version, exact commands run, and exact output.
 - Write incidents the same way, as evidence, not narrative alone.

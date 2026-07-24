@@ -20,9 +20,14 @@
 #     because agent.get can read idle during a long foreground tool call.
 
 CS_HERDR_MIN_PROTOCOL=16
-# The single codex busy signature used to corroborate a native idle/unknown
-# reading. One constant, one owner; do not add per-model variants.
-CS_CODEX_BUSY_RE='[Ee]sc to interrupt'
+# The rendered-banner busy signature used to corroborate a native idle/unknown
+# reading. codex and claude both render "esc to interrupt" during a live turn, so
+# one constant covers both harnesses. CS_CODEX_BUSY_RE is kept as a back-compat
+# alias for existing readers (cs-watch, cs-crew-state). One owner; do not add
+# per-model variants (cs-harness-lib.sh's cs_harness_busy_re is the seam if a
+# harness ever diverges).
+CS_HARNESS_BUSY_RE='[Ee]sc to interrupt'
+CS_CODEX_BUSY_RE="$CS_HARNESS_BUSY_RE"
 
 cs_herdr_session() {
   printf '%s' "${CS_HERDR_SESSION:-default}"
@@ -181,7 +186,7 @@ cs_herdr_agent_busy_state() { # <pane_id> -> busy|idle|blocked|done|unknown
   printf '%s\n' "$raw"
 }
 
-cs_herdr_agent_alive() { # <pane_id>  - is a real codex agent in the pane?
+cs_herdr_agent_alive() { # <pane_id>  - is a real agent (codex or claude) in the pane?
   local out
   out=$(cs_herdr agent get "$1" 2>/dev/null) || return 1
   printf '%s' "$out" | jq -e '.result.agent.agent // empty | select(. != "")' >/dev/null 2>&1

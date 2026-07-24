@@ -16,11 +16,13 @@
 #                 OPT-IN ONLY: never run in hosted CI. The coverage guard reports
 #                 it as explicitly excluded so it is visibly skipped, not silently
 #                 dropped.
+#   live-claude - needs a real Claude agent and credentials (CS_TEST_CLAUDE_LIVE=1).
+#                 OPT-IN ONLY: never run in hosted CI, same exclusion as live-codex.
 #
 # Selection modes (exactly one):
 #   cs-test-run.sh --portable                 run every portable (hermetic) test, serial
 #   cs-test-run.sh --herdr                    run the real-herdr lane, serial
-#   cs-test-run.sh --lane <name>              run a named lane (portable|real-herdr|live-codex)
+#   cs-test-run.sh --lane <name>              run a named lane (portable|real-herdr|live-codex|live-claude)
 #   cs-test-run.sh tests/<name>.test.sh ...   run the given scripts, serial
 #
 # Inspection (no execution):
@@ -79,6 +81,9 @@ lane_for_basename() {
     cs-lifecycle-live.test.sh)
       printf '%s\n' live-codex
       ;;
+    cs-lifecycle-claude-live.test.sh)
+      printf '%s\n' live-claude
+      ;;
     *)
       printf '%s\n' portable
       ;;
@@ -90,6 +95,7 @@ list_known_lanes() {
 portable
 real-herdr
 live-codex
+live-claude
 EOF
 }
 
@@ -130,7 +136,7 @@ add_script() {
 select_lane() {
   local want=$1 s found=0
   case "$want" in
-    portable|real-herdr|live-codex) ;;
+    portable|real-herdr|live-codex|live-claude) ;;
     *) die "unknown lane '$want' (see --list-lanes)" ;;
   esac
   while IFS= read -r s; do
@@ -152,7 +158,7 @@ run_coverage_guard() {
   all_repo_tests | LC_ALL=C sort -u >"$tmp/all"
 
   : >"$tmp/union"
-  for lane in portable real-herdr live-codex; do
+  for lane in portable real-herdr live-codex live-claude; do
     : >"$tmp/lane.$lane"
     while IFS= read -r s; do
       [ -n "$s" ] || continue
@@ -177,16 +183,17 @@ run_coverage_guard() {
   missing=$(comm -23 "$tmp/all" "$tmp/union_sorted" || true)
   extra=$(comm -13 "$tmp/all" "$tmp/union_sorted" || true)
   if [ -n "$missing" ] || [ -n "$extra" ] || [ "$dup_overlap" -ne 0 ]; then
-    log "coverage guard: the portable + real-herdr + live-codex lanes must equal tests/*.test.sh exactly, with no script in two lanes"
+    log "coverage guard: the portable + real-herdr + live-codex + live-claude lanes must equal tests/*.test.sh exactly, with no script in two lanes"
     [ -z "$missing" ] || { log "missing from every lane:"; printf '%s\n' "$missing" >&2; }
     [ -z "$extra" ] || { log "categorized but not in the inventory:"; printf '%s\n' "$extra" >&2; }
     return 1
   fi
 
-  # The two live-only scripts must exist and be excluded from the hosted lanes.
-  local herdr_count codex_count portable_count total
+  # The live-only scripts must exist and be excluded from the hosted lanes.
+  local herdr_count codex_count claude_count portable_count total
   herdr_count=$(wc -l <"$tmp/lane.real-herdr" | tr -d ' ')
   codex_count=$(wc -l <"$tmp/lane.live-codex" | tr -d ' ')
+  claude_count=$(wc -l <"$tmp/lane.live-claude" | tr -d ' ')
   portable_count=$(wc -l <"$tmp/lane.portable" | tr -d ' ')
   total=$(wc -l <"$tmp/all" | tr -d ' ')
 
@@ -197,9 +204,16 @@ run_coverage_guard() {
       log "  excluded (CS_TEST_CODEX_LIVE): $s"
     done <"$tmp/lane.live-codex"
   fi
+  if [ "$claude_count" -gt 0 ]; then
+    log "coverage guard: live-claude is opt-in only and excluded from hosted CI:"
+    while IFS= read -r s; do
+      [ -n "$s" ] || continue
+      log "  excluded (CS_TEST_CLAUDE_LIVE): $s"
+    done <"$tmp/lane.live-claude"
+  fi
 
-  printf 'CS_TEST_COVERAGE ok total=%s portable=%s real-herdr=%s live-codex=%s\n' \
-    "$total" "$portable_count" "$herdr_count" "$codex_count"
+  printf 'CS_TEST_COVERAGE ok total=%s portable=%s real-herdr=%s live-codex=%s live-claude=%s\n' \
+    "$total" "$portable_count" "$herdr_count" "$codex_count" "$claude_count"
   return 0
 }
 

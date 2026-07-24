@@ -2,13 +2,13 @@
 
 How consigliere works, in depth.
 The always-loaded operating contract is [`AGENTS.md`](../AGENTS.md); this is the human-facing companion.
-Consigliere is a personal rewrite of Firstmate for exactly one harness (codex) and one terminal runtime (herdr); [`docs/upstream.md`](upstream.md) owns the relationship to upstream.
+Consigliere is a personal rewrite of Firstmate for two harnesses (codex and claude) and one terminal runtime (herdr); soldiers inherit the root session's harness. [`docs/upstream.md`](upstream.md) owns the relationship to upstream.
 
-## One harness, one runtime
+## Two harnesses, one runtime
 
-There is no harness or backend abstraction anywhere.
+`bin/cs-harness-lib.sh` is a thin harness-profile layer — the single owner of every per-harness fact (launch template, turn-end wiring, busy signature, skill syntax, resume command, instruction file). It is the only harness abstraction; there is no broader backend/dispatch machinery. A soldier inherits the root session's harness (`cs_harness_detect_root`) and records it as `harness=` in `state/<id>.meta`.
 `bin/cs-herdr-lib.sh` is the whole herdr layer (session-explicit CLI, workspace/worktree/pane/agent operations, the busy-corroboration policy); [`docs/herdr.md`](herdr.md) is its evidence ledger.
-Codex facts live in [`docs/codex.md`](codex.md); the launch template exists once, in `bin/cs-spawn.sh`.
+Per-harness verified facts live in [`docs/codex.md`](codex.md) and [`docs/claude.md`](claude.md); the launch strings exist once, in `bin/cs-harness-lib.sh` (assembled by `bin/cs-spawn.sh`).
 
 ## Typed operational input
 
@@ -31,7 +31,7 @@ A zero-token bash watcher (`bin/cs-watch.sh`) sleeps on the fleet, classifies wa
 The absorb policy is absorb-only-when-provably-working: a no-verb signal or fresh stale pane is absorbed only with positive working evidence (an attributed no-mistakes run step from `bin/cs-crew-state.sh`, or native-busy corroborated per docs/herdr.md), a declared `paused:` idles on a long bounded cadence, and a provably-working stale escalates past the wedge threshold with a `demand-deep-inspection` marker on repetition.
 Native herdr `blocked` surfaces immediately - sub-second via the socket event splice (`bin/cs-herdr-events.py`, `pane.agent_status_changed`) and on the next poll without it; the poll loop is the permanent fail-closed backstop.
 `bin/cs-classify-lib.sh` is the one owner of the status-verb vocabulary and the keyed decision/activity folds, shared by the watcher and the away-mode daemon, and consumes operational-input types from `bin/cs-operational-input.sh`.
-The supervision wait shape is the bounded foreground checkpoint ([`docs/supervision.md`](supervision.md)); the codex Stop hook (`bin/cs-turnend-guard.sh`) is the structural backstop.
+The supervision wait shape is the bounded foreground checkpoint ([`docs/supervision.md`](supervision.md)); the harness Stop hook (`bin/cs-turnend-guard.sh`, registered per-harness) is the structural backstop.
 
 ## Authenticated checks
 
