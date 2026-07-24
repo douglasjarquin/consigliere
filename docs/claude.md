@@ -59,13 +59,14 @@ claude [--model <m>] [--effort <low|medium|high|xhigh|max>] \
 - Root-session detection: a Claude Code session exports `CLAUDECODE=1`;
   `cs_harness_detect_root` reads it (after `config/harness` and `CS_HARNESS_OVERRIDE`).
 
-## Known limitation
+## Away-mode composer
 
-- Away-mode composer injection (`bin/cs-composer-lib.sh`) is tuned to codex's dim
-  ghost-text rendering; it strips codex SGR de-emphasis before judging composer
-  emptiness. A claude away-mode daemon session may need a claude-specific
-  emptiness gate. The core loop (spawn, supervise, steer, land) is fully
-  harness-parametrized; only this away-mode rendering detail remains codex-tuned.
+`bin/cs-composer-lib.sh` recognizes claude's empty-composer glyph `❯` (U+276F)
+alongside codex's `›`. Claude's empty composer (verified 2.1.218) is a bare `❯`
+between horizontal rules with no ghost/placeholder text, so the codex ghost strip
+is a harmless no-op; a bare `❯` reads `empty`, `❯ <text>` reads `pending`. The
+away-mode daemon can therefore inject escalation digests into a claude composer,
+same as codex.
 
 ## Native features deliberately available to consigliere
 

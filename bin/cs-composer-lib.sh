@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# bin/cs-composer-lib.sh - codex-only composer-emptiness classifier for the
-# away-mode daemon (bin/cs-daemon.sh). Sourced, never executed. Requires
-# bin/cs-herdr-lib.sh to be sourced first (cs_herdr_capture).
+# bin/cs-composer-lib.sh - composer-emptiness classifier for the away-mode daemon
+# (bin/cs-daemon.sh). Sourced, never executed. Requires bin/cs-herdr-lib.sh to be
+# sourced first (cs_herdr_capture).
+#
+# HARNESSES: recognizes both agent prompt glyphs - codex `›` and claude `❯`
+# (distinct codepoints, so recognition is universal, no harness plumbing). codex
+# fills an empty composer with a dim ghost suggestion (stripped below); claude's
+# empty composer (verified 2.1.218, 2026-07-24) is a bare `❯` between horizontal
+# rules with NO ghost text, so the ghost strip is a no-op there and harmless.
 #
 # WHY: the daemon injects an escalation digest into consigliere's own pane, so
 # it must know the codex composer is AFFIRMATIVELY empty first. Typing into a
@@ -26,8 +32,8 @@
 # wedge alarm (CS_MAX_DEFER_SECS) instead of wedging silently.
 #
 # SAFETY RULE for prompt glyphs (one owner, ported from upstream
-# fm-composer-lib): the codex agent glyph `›` is a genuine empty agent
-# composer, bordered or bare. A bare SHELL glyph (`>`, `$`, `%`, `#`) is what a
+# fm-composer-lib): an agent glyph (codex `›`, claude `❯`) is a genuine empty
+# agent composer, bordered or bare. A bare SHELL glyph (`>`, `$`, `%`, `#`) is what a
 # pane shows once its agent exited to a login shell; it is 'empty' ONLY inside
 # a real bordered composer box (the harness drawing its own prompt) and never
 # on an unstructured row - structurally, a bare shell-glyph row is not even
@@ -141,8 +147,8 @@ _cs_composer_trim() {  # <text>
 cs_composer_classify_content() {  # <bordered> <content>
   local bordered=$1 content=$2
   case "$content" in
-    '›')
-      printf 'empty'; return 0 ;;          # codex agent glyph: empty either way
+    '›'|'❯')
+      printf 'empty'; return 0 ;;          # agent glyph (codex ›, claude ❯): empty either way
     '>'|'$'|'%'|'#')
       # Shell glyph: empty ONLY inside a composer box (the harness's own
       # prompt). Bare, it is a dead-shell prompt - never a safe target.
@@ -152,22 +158,22 @@ cs_composer_classify_content() {  # <bordered> <content>
   [ -n "$content" ] || { printf 'empty'; return 0; }
   # Strip one leading prompt glyph, then re-judge the remainder.
   case "$content" in
-    '› '*|'> '*|'$ '*|'% '*|'# '*) content=${content#??} ;;
-    '›'*|'>'*|'$'*|'%'*|'#'*) content=${content#?} ;;
+    '› '*|'❯ '*|'> '*|'$ '*|'% '*|'# '*) content=${content#??} ;;
+    '›'*|'❯'*|'>'*|'$'*|'%'*|'#'*) content=${content#?} ;;
   esac
   content=$(_cs_composer_trim "$content")
   [ -n "$content" ] || { printf 'empty'; return 0; }
   printf 'pending'; return 0               # real, unsubmitted content remains
 }
 
-# cs_composer_state: classify pane <pane_id>'s codex composer as
+# cs_composer_state: classify pane <pane_id>'s agent composer as
 # empty|pending|unknown (always prints one token, exits 0). Captures the pane
 # bottom WITH ANSI styling (cs_herdr_capture ... ansi), locates the composer
 # structurally on the ANSI-stripped rows - keeping the LAST match so a
 # decorative box earlier in the window never outranks the live bottom composer:
 #   bordered - trimmed row both starts and ends with a border glyph (│ ┃ |)
-#   bare     - trimmed row starts with the codex agent glyph `›` (a bare shell
-#              glyph is deliberately NOT a composer shape: it stays unknown)
+#   bare     - trimmed row starts with an agent glyph (codex `›`, claude `❯`; a
+#              bare shell glyph is deliberately NOT a composer shape: unknown)
 # then extracts real typed content from the RAW styled row with
 # cs_composer_strip_ghost and hands the verdict to
 # cs_composer_classify_content. No composer row found, or an unreadable pane,
@@ -183,7 +189,7 @@ cs_composer_state() {  # <pane_id>
     case "$trimmed" in
       '│'*'│'|'┃'*'┃'|'|'*'|')
         bordered=1; raw_match=$line; found=1 ;;
-      '›'*)
+      '›'*|'❯'*)
         bordered=0; raw_match=$line; found=1 ;;
     esac
   done <<EOF

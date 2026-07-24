@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tests/cs-afk-daemon.test.sh - the away-mode stack: bin/cs-daemon.sh (the
-# presence-gated sub-supervisor), bin/cs-composer-lib.sh (codex composer
-# emptiness), bin/cs-afk-start.sh, and bin/cs-afk-return.sh. Fully offline: a
+# presence-gated sub-supervisor), bin/cs-composer-lib.sh (agent composer
+# emptiness, codex › and claude ❯), bin/cs-afk-start.sh, and bin/cs-afk-return.sh.
+# Fully offline: a
 # fake herdr CLI drives agent status, ANSI pane captures, send logging, and
 # native submit confirmation; a scripted cs-watch stub prints canned wake
 # reasons one-shot, exactly like the real watcher's afk mode.
@@ -209,12 +210,22 @@ test_composer_classifier() {
     printf '\342\224\202 > \342\224\202\n' > "$cap"
     verdict=$(cs_composer_state w1:p1)
     [ "$verdict" = empty ] || { echo "bordered empty composer read '$verdict', want empty" >&2; exit 1; }
+    # Claude empty composer: a bare ❯ (U+276F) prompt row between horizontal
+    # rules, no ghost text (verified claude 2.1.218). The rule rows are not
+    # composer shapes and are skipped; the ❯ row reads empty.
+    printf '\342\224\200\342\224\200\342\224\200\n\342\235\257 \n\342\224\200\342\224\200\342\224\200\n  hint line\n' > "$cap"
+    verdict=$(cs_composer_state w1:p1)
+    [ "$verdict" = empty ] || { echo "empty claude composer read '$verdict', want empty" >&2; exit 1; }
+    # Claude typed input after the ❯ prompt is pending.
+    printf '\342\235\257 land the PR now\n\342\224\200\342\224\200\342\224\200\n' > "$cap"
+    verdict=$(cs_composer_state w1:p1)
+    [ "$verdict" = pending ] || { echo "typed claude input read '$verdict', want pending" >&2; exit 1; }
     # Unreadable/blank pane: unknown.
     : > "$cap"
     verdict=$(cs_composer_state w1:p1)
     [ "$verdict" = unknown ] || { echo "blank pane read '$verdict', want unknown" >&2; exit 1; }
   ) || fail "composer classifier verdicts wrong"
-  pass "codex composer classifier: ghost-empty, typed-pending, stripped-transport-pending, dead-shell-unknown, bordered-empty"
+  pass "composer classifier (codex › and claude ❯): ghost-empty, typed-pending, stripped-transport-pending, dead-shell-unknown, bordered-empty"
 }
 
 # --- 1. a routine wake is self-handled: no model turn, no injection ------------

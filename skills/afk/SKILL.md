@@ -78,14 +78,16 @@ injection:
 
 - **Busy-guard** - herdr's native agent state must not read `busy` (mid-turn)
   or `blocked` (waiting on the human); `cs_herdr_agent_busy_state` corroborates
-  an ambiguous native reading against the codex busy signature.
-- **Composer guard** - `bin/cs-composer-lib.sh` classifies the codex composer
-  from an ANSI pane capture as `empty`/`pending`/`unknown`, and only an
-  affirmatively `empty` verdict permits injection.
+  an ambiguous native reading against the harness busy signature.
+- **Composer guard** - `bin/cs-composer-lib.sh` classifies the agent composer
+  (codex `›` or claude `❯`) from an ANSI pane capture as
+  `empty`/`pending`/`unknown`, and only an affirmatively `empty` verdict permits
+  injection.
   It strips ANSI de-emphasis (dim/faint and dark-truecolor runs) before
   judging, so codex's idle ghost suggestion after the bare `›` prompt reads as
   empty instead of wedging every escalation (the 2026-07-08 upstream
-  ghost-text incident, docs/codex.md).
+  ghost-text incident, docs/codex.md); claude's `❯` composer has no ghost text,
+  so the strip is a harmless no-op there.
   `pending` protects a half-typed boss line or a previous injection's
   swallowed text; `unknown` protects unreadable panes and bare dead-shell
   prompts (typing into a shell could execute the digest). Both defer.
