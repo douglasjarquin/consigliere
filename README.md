@@ -40,7 +40,6 @@ checks cannot drift from what you run before pushing:
 | Shell lint | `bin/cs-lint.sh` (single owner of the file set, config, and pinned ShellCheck version; `--required-version` prints the pin) |
 | Portable behavior | `bin/cs-test-run.sh --portable` (every hermetic test, serial) |
 | Real Herdr behavior | `CS_TEST_HERDR_LIVE=1 bin/cs-test-run.sh --herdr` (needs a real herdr + a running default session for the lab tripwire) |
-| Stock macOS Bash | `/bin/bash bin/cs-test-run.sh --portable` (consigliere's primary OS; scripts stay Bash-3.2-safe) |
 | Repo invariants | `git ls-files -- .env data state config projects .no-mistakes` prints nothing; tracked symlinks stay symlinks |
 | Coverage guard | `bin/cs-test-run.sh --check-coverage` (proves every `tests/*.test.sh` is in exactly one lane) |
 

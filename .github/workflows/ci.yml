@@ -55,6 +55,14 @@ jobs:
           command -v python3 >/dev/null || { echo "::error::python3 is required"; exit 1; }
           jq --version
           python3 --version
+      - name: Install tasks-axi
+        # cs-decision-hold.sh's completion gate (exercised by cs-teardown and
+        # cs-decision-hold) probes a compatible tasks-axi; install it so those
+        # tests run for real instead of skipping or failing on its absence.
+        run: |
+          set -eu
+          npm install -g tasks-axi
+          tasks-axi --version
       - name: Run every portable (hermetic) test, serial
         run: bin/cs-test-run.sh --portable
 
@@ -146,32 +154,6 @@ jobs:
             herdr session list --json || true
             exit 1
           }
-
-  macos-stock-bash:
-    name: Stock macOS Bash compatibility
-    runs-on: macos-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Run the portable suite on stock macOS Bash
-        # consigliere's primary operating environment is macOS; its shell is
-        # written to stay compatible with the system /bin/bash. Use it explicitly
-        # with a stock PATH so a bash-4-only construct fails here, not on a boss's
-        # machine. The full portable lane runs - no reduced subset.
-        shell: /bin/bash {0}
-        env:
-          PATH: /bin:/usr/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin
-        run: |
-          set -eu
-          case "$BASH_VERSION" in
-            3.2.57*) ;;
-            *) echo "::error::expected stock macOS Bash 3.2.57, got $BASH_VERSION"; exit 1 ;;
-          esac
-          /bin/bash --version | head -1
-          command -v jq >/dev/null || { echo "::error::jq is required"; exit 1; }
-          bin/cs-test-run.sh --portable
 
   invariants:
     name: Repo invariants

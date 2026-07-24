@@ -19,7 +19,9 @@ test_user_invocation_and_inventory() {
 test_session_only_recap_boundary() {
   assert_grep 'conversation history already visible' "$SKILL" "rundown does not limit itself to visible history"
   assert_grep 'most recent real boss-authored message' "$SKILL" "rundown lacks the boss-message boundary"
+  # shellcheck disable=SC2016  # literal grep patterns; backticks are content, not expansion
   assert_grep 'current `/rundown` message is outside the recap interval' "$SKILL" "current invocation is included in the recap interval"
+  # shellcheck disable=SC2016
   assert_grep 'previous `/rundown` is a real boss message' "$SKILL" "previous rundown is not a recap boundary"
   assert_grep 'nothing happened after the previous boss message' "$SKILL" "empty recap behavior is missing"
   pass "rundown uses the previous real boss message as its session boundary"
@@ -41,6 +43,7 @@ test_operational_input_and_side_effect_boundaries() {
 test_first_message_fallback() {
   assert_grep 'If no prior real boss message exists' "$SKILL" "rundown lacks the first-message fallback"
   assert_grep '../the-books/SKILL.md' "$SKILL" "rundown does not point to the-books"
+  # shellcheck disable=SC2016  # literal grep pattern; backticks are content, not expansion
   assert_grep 'Fall back to `the-books` only when this is genuinely the first real boss message' \
     "$SKILL" "rundown fallback is not limited to the first real boss message"
   pass "rundown delegates only a first-message request to the-books"

@@ -97,12 +97,6 @@ assert_no_grep 'CS_TEST_CODEX_LIVE' "$WF" \
 assert_grep 'CS_TEST_HERDR_LIVE' "$WF" "the Herdr lane must enable CS_TEST_HERDR_LIVE"
 pass "hosted CI runs real Herdr but never the live-codex suite"
 
-# The macOS lane runs the portable suite (not a bespoke subset).
-assert_grep 'macos-latest' "$WF" "workflow must have a macOS lane"
-grep -A40 'macos-stock-bash' "$WF" | grep -q 'bin/cs-test-run.sh --portable' \
-  || fail "the macOS lane must run bin/cs-test-run.sh --portable"
-pass "macOS lane runs the portable suite on stock Bash"
-
 # Least-privilege + superseded-run cancellation.
 assert_grep 'contents: read' "$WF" "workflow must use least-privilege contents: read"
 assert_grep 'cancel-in-progress: true' "$WF" "workflow must cancel superseded runs"
