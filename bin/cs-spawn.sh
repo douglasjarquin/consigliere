@@ -4,10 +4,12 @@
 # Usage: cs-spawn.sh <task-id> <project-dir> [--model <name>] [--effort <level>] [--scout] [--base <ref>]
 #        cs-spawn.sh <task-id> <capo-home> --capo [--model <name>] [--effort <level>]
 #
-#   --model <name> and --effort <low|medium|high|xhigh> are concrete profile
-#   axes chosen by consigliere at intake. The codex config schema uses
-#   model_reasoning_effort with low|medium|high|xhigh; max is omitted rather
-#   than passed as an unsupported value.
+#   --model <name> and --effort <low|medium|high|xhigh> override the optional
+#   config/dispatch-policy entry for the resolved harness and task kind.
+#   The policy's exact format is in docs/configuration.md.
+#   The codex config schema uses model_reasoning_effort with
+#   low|medium|high|xhigh; max is omitted rather than passed as an unsupported
+#   value.
 #   --scout marks the task kind=scout (report deliverable, scratch worktree).
 #   --headless (scout only) runs `codex exec` instead of the interactive TUI:
 #     fire-and-forget for bounded investigations. Turn-end is process exit;
@@ -79,6 +81,59 @@ mkdir -p "$STATE"
 # and cs-crew-state read it back without re-detecting.
 HARNESS=$(cs_harness_detect_root)
 
+cs_spawn_apply_dispatch_policy() {
+  local file="$CONFIG/dispatch-policy" line entry_harness entry_kind entry_model entry_effort extra
+  local line_no=0 seen='|' match_model='' match_effort=''
+  [ ! -e "$file" ] && [ ! -L "$file" ] && return 0
+  if [ ! -f "$file" ] || [ -L "$file" ]; then
+    echo "error: dispatch policy must be a regular file: $file" >&2
+    exit 2
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line_no=$((line_no + 1))
+    entry_harness='' entry_kind='' entry_model='' entry_effort='' extra=''
+    IFS=$' \t' read -r entry_harness entry_kind entry_model entry_effort extra <<EOF
+$line
+EOF
+    case "$entry_harness" in
+      ''|'#'*) continue ;;
+    esac
+    if [ -z "$entry_kind" ] || [ -z "$entry_model" ] || [ -z "$entry_effort" ] || [ -n "$extra" ]; then
+      echo "error: dispatch policy line $line_no must be: <harness> <kind> <model> <effort>" >&2
+      exit 2
+    fi
+    if ! cs_harness_valid "$entry_harness"; then
+      echo "error: dispatch policy line $line_no has unknown harness '$entry_harness'" >&2
+      exit 2
+    fi
+    case "$entry_kind" in ship|scout|capo) ;; *)
+      echo "error: dispatch policy line $line_no has unknown kind '$entry_kind'" >&2
+      exit 2
+    esac
+    case "$entry_model" in default|*[!A-Za-z0-9._:-]*|'')
+      echo "error: dispatch policy line $line_no has invalid model '$entry_model'" >&2
+      exit 2
+    esac
+    if ! cs_harness_effort_valid "$entry_harness" "$entry_effort"; then
+      echo "error: dispatch policy line $line_no has invalid $entry_harness effort '$entry_effort'" >&2
+      exit 2
+    fi
+    case "$seen" in *"|$entry_harness:$entry_kind|"*)
+      echo "error: dispatch policy line $line_no duplicates $entry_harness $entry_kind" >&2
+      exit 2
+    esac
+    seen="$seen$entry_harness:$entry_kind|"
+    if [ "$entry_harness" = "$HARNESS" ] && [ "$entry_kind" = "$KIND" ]; then
+      match_model=$entry_model
+      match_effort=$entry_effort
+    fi
+  done < "$file"
+
+  [ -n "$MODEL" ] || MODEL=$match_model
+  [ -n "$EFFORT" ] || EFFORT=$match_effort
+}
+
 KIND=ship
 MODEL=
 EFFORT=
@@ -110,6 +165,7 @@ TARGET=${POS[1]}
 case "$ID" in
   *[!A-Za-z0-9._-]*|'') echo "error: task id must be [A-Za-z0-9._-]+: '$ID'" >&2; exit 2 ;;
 esac
+cs_spawn_apply_dispatch_policy
 if ! cs_harness_effort_valid "$HARNESS" "$EFFORT"; then
   case "$EFFORT" in
     max) echo "error: $HARNESS does not accept effort=max; choose low|medium|high|xhigh" >&2 ;;

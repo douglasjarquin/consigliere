@@ -24,11 +24,40 @@ Test and script overrides: `CS_ROOT_OVERRIDE`, `CS_STATE_OVERRIDE` narrow a sing
 | file | semantics |
 |---|---|
 | `config/backlog-backend` | absent or `tasks-axi` = tasks-axi against `data/backlog.md` (`.tasks.toml` owns schema); `manual` = hand-edit the markdown |
+| `config/dispatch-policy` | optional per-home profiles for task dispatch; `bin/cs-spawn.sh` owns its strict four-column schema below |
 | `config/upstream` | path or URL of the firstmate checkout for `/upstream-review`; absent = `../firstmate` |
 | `config/wedge-alarm` | away-mode wedge-alarm active-alert directives; absent = auto (macOS Notification Center when available) |
 
 Inheritance into capo homes: `data/boss-shared.md` is propagated read-only, and `config/backlog-backend` is copied at seed time; nothing else is inherited.
 `bin/cs-inherit-lib.sh` owns the allowlist.
+
+### Dispatch policy
+
+`config/dispatch-policy` is optional and local to one Consigliere home.
+It sets default model and effort values for the resolved harness and task kind.
+One non-comment line has exactly four whitespace-separated fields:
+
+```text
+<harness> <kind> <model> <effort>
+```
+
+`harness` is `codex` or `claude`.
+`kind` is `scout` for planning, investigations, and audits, `ship` for implementation, or `capo` for a persistent dispatcher.
+`model` is `default` or an identifier containing letters, numbers, `.`, `_`, `:`, and `-`.
+`effort` is `default`, `low`, `medium`, `high`, or `xhigh` for either harness, with `max` additionally supported by Claude.
+Blank lines and lines whose first field begins with `#` are ignored.
+Every record is validated and duplicate `<harness> <kind>` entries stop dispatch with an error.
+
+```text
+# harness kind  model          effort
+codex scout     gpt-5.6-sol    xhigh
+codex ship      gpt-5.6-terra  high
+claude scout    opus           xhigh
+claude ship     sonnet         high
+```
+
+An explicit `cs-spawn.sh --model` or `--effort` value overrides only that policy axis for that task.
+An absent policy or absent matching line retains the existing harness default.
 
 ## data/ and state/
 

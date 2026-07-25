@@ -39,14 +39,14 @@ SH
 chmod +x "$FAKEBIN/herdr"
 
 HOME_DIR="$TMP/home"
-mkdir -p "$HOME_DIR/data" "$HOME_DIR/state"
+mkdir -p "$HOME_DIR/data" "$HOME_DIR/state" "$HOME_DIR/config"
 printf -- '- project [local-only] - fixture\n' > "$HOME_DIR/data/projects.md"
 REPO="$TMP/project"
 cs_git_init_commit "$REPO"
 
-# spawn_one <harness> <id> -> echoes the captured launch string; writes meta.
 spawn_one() {
   local harness=$1 id=$2 wt="$TMP/wt-$2"
+  shift 2
   mkdir -p "$HOME_DIR/data/$id"
   printf 'implement the fixture\n' > "$HOME_DIR/data/$id/brief.md"
   # CS_CLAUDE_JSON sandboxes the folder-trust pre-seed away from the real
@@ -55,7 +55,7 @@ spawn_one() {
     CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
     CS_CLAUDE_JSON="$TMP/claude.json" \
     CS_FAKE_SPAWN_WORKTREE="$wt" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-$id" \
-    "$SPAWN" "$id" "$REPO" >/dev/null || fail "spawn ($harness) failed"
+    "$SPAWN" "$id" "$REPO" "$@" >/dev/null || fail "spawn ($harness) failed"
   cat "$TMP/launch-$id"
 }
 
@@ -67,6 +67,45 @@ assert_contains "$launch" 'notify=' "codex root wires notify turn-end"
 assert_not_contains "$launch" '--settings' "codex root does not use --settings"
 assert_absent "$HOME_DIR/state/t-codex.claude-settings.json" "codex root writes no claude settings file"
 pass "codex root: harness=codex, codex notify launch, no settings file"
+
+cat > "$HOME_DIR/config/dispatch-policy" <<'EOF'
+# harness kind model effort
+codex scout gpt-5.6-sol xhigh
+codex ship gpt-5.6-terra high
+claude scout opus max
+claude ship sonnet medium
+EOF
+
+launch=$(spawn_one codex t-policy-codex-scout --scout)
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-scout.meta" model)" = gpt-5.6-sol ] || fail "codex scout policy model"
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-scout.meta" effort)" = xhigh ] || fail "codex scout policy effort"
+assert_contains "$launch" "--model 'gpt-5.6-sol'" "codex scout policy model launch"
+assert_contains "$launch" "model_reasoning_effort=\"xhigh\"" "codex scout policy effort launch"
+
+launch=$(spawn_one codex t-policy-codex-ship)
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-ship.meta" model)" = gpt-5.6-terra ] || fail "codex ship policy model"
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-ship.meta" effort)" = high ] || fail "codex ship policy effort"
+assert_contains "$launch" "--model 'gpt-5.6-terra'" "codex ship policy model launch"
+assert_contains "$launch" "model_reasoning_effort=\"high\"" "codex ship policy effort launch"
+
+launch=$(spawn_one claude t-policy-claude-scout --scout)
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-claude-scout.meta" model)" = opus ] || fail "claude scout policy model"
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-claude-scout.meta" effort)" = max ] || fail "claude scout policy effort"
+assert_contains "$launch" "--model 'opus'" "claude scout policy model launch"
+assert_contains "$launch" "--effort 'max'" "claude scout policy effort launch"
+
+launch=$(spawn_one claude t-policy-claude-ship)
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-claude-ship.meta" model)" = sonnet ] || fail "claude ship policy model"
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-claude-ship.meta" effort)" = medium ] || fail "claude ship policy effort"
+assert_contains "$launch" "--model 'sonnet'" "claude ship policy model launch"
+assert_contains "$launch" "--effort 'medium'" "claude ship policy effort launch"
+
+launch=$(spawn_one codex t-policy-explicit --model gpt-5.6-mini --effort low)
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-explicit.meta" model)" = gpt-5.6-mini ] || fail "explicit model overrides policy"
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-explicit.meta" effort)" = low ] || fail "explicit effort overrides policy"
+assert_contains "$launch" "--model 'gpt-5.6-mini'" "explicit model launch"
+assert_contains "$launch" "model_reasoning_effort=\"low\"" "explicit effort launch"
+pass "dispatch policy selects harness and task-kind profile; explicit flags win"
 
 # --- claude root: --settings launch, harness=claude, settings file written --
 launch=$(spawn_one claude t-claude)
@@ -83,5 +122,19 @@ assert_no_grep 'cs-turnend-guard' "$SETTINGS" "soldier settings must not run the
 # The launch references the settings file by path.
 assert_contains "$launch" "$SETTINGS" "claude launch references the settings file"
 pass "claude root: harness=claude, --settings launch, settings file written"
+
+printf 'codex ship gpt-5.6-sol too-much\n' > "$HOME_DIR/config/dispatch-policy"
+mkdir -p "$HOME_DIR/data/t-policy-invalid"
+printf 'implement the fixture\n' > "$HOME_DIR/data/t-policy-invalid/brief.md"
+if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
+  CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
+  CS_CLAUDE_JSON="$TMP/claude.json" \
+  CS_FAKE_SPAWN_WORKTREE="$TMP/wt-policy-invalid" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-policy-invalid" \
+  "$SPAWN" t-policy-invalid "$REPO" 2>&1); then
+  fail "malformed dispatch policy must reject spawn"
+fi
+assert_contains "$output" "invalid codex effort 'too-much'" "malformed policy error is specific"
+assert_absent "$HOME_DIR/state/t-policy-invalid.meta" "malformed policy writes no metadata"
+pass "malformed dispatch policy blocks dispatch"
 
 pass "cs-spawn harness resolution and launch"
