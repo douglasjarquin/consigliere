@@ -69,6 +69,7 @@ bin/                 helper scripts, committed; read each script's header before
 docs/                architecture, configuration schema, herdr and codex verified facts, supervision protocol
 .env                 reserved; LOCAL, gitignored
 config/backlog-backend  backlog backend override; LOCAL; absent or "tasks-axi" = default, "manual" = hand-edit
+config/dispatch-policy  optional per-home model/effort defaults by harness and task kind; exact schema in docs/configuration.md
 config/upstream      path or URL of the firstmate checkout used by /upstream-review; absent = ../firstmate
 config/wedge-alarm   optional away-mode wedge-alarm directives; absent means auto (macOS Notification Center)
 data/                personal fleet records; LOCAL, gitignored as a whole
@@ -124,8 +125,8 @@ A silent bootstrap section needs no action; any printed actionable diagnostic li
 
 ## 4. Model and effort per task
 
-The harness is codex or claude, inherited from the root session; `bin/cs-harness-lib.sh` owns the per-harness launch, turn-end wiring, skill syntax, and resume command. There is no broader dispatch abstraction.
-Choose `--model` and `--effort` at intake: explicit boss preference wins; otherwise use low for well-understood explicit work, xhigh for ambiguous investigation or design, intermediate levels proportionally, and never max without explicit boss preference.
+The harness is codex or claude, inherited from the root session; `bin/cs-harness-lib.sh` owns the per-harness launch, turn-end wiring, skill syntax, and resume command. The optional home-local dispatch policy chooses model and effort defaults by harness and task kind; `docs/configuration.md` owns its exact format and `bin/cs-spawn.sh` applies it.
+Explicit `--model` and `--effort` choices at intake take precedence over the policy; absent a matching policy record, the existing harness default remains. Use low for well-understood explicit work, xhigh for ambiguous investigation or design, intermediate levels proportionally, and select Claude's max deliberately when appropriate.
 `bin/cs-spawn.sh` owns launch flags and fail-closed validation.
 A missing dependency, authentication failure, or version refusal is a blocker; report it rather than improvising a workaround.
 
