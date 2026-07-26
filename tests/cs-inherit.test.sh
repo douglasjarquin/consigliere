@@ -21,6 +21,14 @@ printf 'manual\n' > "$MAIN/config/backlog-backend"
 
 DEST="$CAPO/data/boss-shared.md"
 
+file_mtime() {
+  if [ "$(uname -s)" = Darwin ]; then
+    stat -f %m "$1"
+  else
+    stat -c %Y "$1"
+  fi
+}
+
 # 1. seed-time propagation: header + content, read-only, backend copied
 out=$(cs_inherit_seed "$MAIN" "$CAPO" 2>&1) || fail "seed inheritance failed: $out"
 [ -z "$out" ] || fail "clean seed propagation must be silent, got: $out"
@@ -32,12 +40,12 @@ pass "seed propagation writes a read-only headered copy plus the backend"
 
 # 2. converged re-run is a byte-level no-op
 before=$(shasum -a 256 "$DEST" | awk '{print $1}')
-mtime_before=$(stat -f %m "$DEST" 2>/dev/null || stat -c %Y "$DEST")
+mtime_before=$(file_mtime "$DEST")
 sleep 1
 out=$(cs_inherit_converge "$MAIN" "$CAPO" 2>&1) || fail "converged re-run failed: $out"
 [ -z "$out" ] || fail "converged re-run must be silent, got: $out"
 after=$(shasum -a 256 "$DEST" | awk '{print $1}')
-mtime_after=$(stat -f %m "$DEST" 2>/dev/null || stat -c %Y "$DEST")
+mtime_after=$(file_mtime "$DEST")
 [ "$before" = "$after" ] || fail "converged re-run must not change bytes"
 [ "$mtime_before" = "$mtime_after" ] || fail "converged re-run must not churn mtime"
 [ ! -w "$DEST" ] || fail "converged re-run must keep the copy read-only"
