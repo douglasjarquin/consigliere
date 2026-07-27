@@ -145,22 +145,29 @@ pass "custom label config is honored"
 printf 'badproj o 7 Ready In_Progress Status Inbox Ready\n' > "$TMP/data/boards.md"
 edits_before=$(wc -l < "$EDIT_LOG")
 out=$("$BIN" specced badproj PVTI_f 2>&1) && fail "Ready alias must fail closed"
-assert_contains "$out" "aliases the protected 'Ready' option" "Ready alias is rejected"
+assert_contains "$out" "Ready option 'Ready' aliases Backlog option 'Ready'" "Ready alias is rejected"
 [ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "Ready alias must not edit a card"
 pass "specced rejects a Ready alias"
 
 printf 'badwipproj o 7 Ready In_Progress Status Inbox In_Progress\n' > "$TMP/data/boards.md"
 edits_before=$(wc -l < "$EDIT_LOG")
 out=$("$BIN" specced badwipproj PVTI_f 2>&1) && fail "In Progress alias must fail closed"
-assert_contains "$out" "aliases the protected 'In Progress' option" "In Progress alias is rejected"
+assert_contains "$out" "In Progress option 'In Progress' aliases Backlog option 'In Progress'" "In Progress alias is rejected"
 [ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "In Progress alias must not edit a card"
 pass "specced rejects an In Progress alias"
 
 printf 'badstartproj o 7 Ready Ready Status Inbox Backlog\n' > "$TMP/data/boards.md"
 edits_before=$(wc -l < "$EDIT_LOG")
 out=$("$BIN" start badstartproj PVTI_a 2>&1) && fail "Ready alias must fail closed"
-assert_contains "$out" "In Progress option 'Ready' aliases the protected 'Ready' option" "start Ready alias is rejected"
+assert_contains "$out" "Ready option 'Ready' aliases In Progress option 'Ready'" "start Ready alias is rejected"
 [ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "start Ready alias must not edit a card"
 pass "start rejects a Ready alias"
+
+printf 'badreadyproj o 7 Backlog In_Progress Status Inbox Backlog\n' > "$TMP/data/boards.md"
+edits_before=$(wc -l < "$EDIT_LOG")
+out=$("$BIN" start badreadyproj PVTI_i 2>&1) && fail "Backlog Ready alias must fail closed"
+assert_contains "$out" "Ready option 'Backlog' aliases Backlog option 'Backlog'" "Backlog Ready alias is rejected"
+[ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "Backlog Ready alias must not edit a card"
+pass "start rejects a Backlog Ready alias"
 
 pass "cs-board behaviors"

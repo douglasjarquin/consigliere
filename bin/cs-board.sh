@@ -151,16 +151,27 @@ cmd_inbox() {
   list_open_issues "$INBOX_LABEL"
 }
 
+validate_board_options() {
+  local -a role_names=("Ready" "In Progress" "Done" "Inbox" "Backlog")
+  local -a role_labels=("$READY_LABEL" "$INPROGRESS_LABEL" "Done" "$INBOX_LABEL" "$BACKLOG_LABEL")
+  local -a role_options=("$READY_OPT" "$INPROGRESS_OPT" "$DONE_OPT" "$INBOX_OPT" "$BACKLOG_OPT")
+  local i j
+  for ((i = 0; i < ${#role_options[@]}; i += 1)); do
+    [ -n "${role_options[i]}" ] || continue
+    for ((j = i + 1; j < ${#role_options[@]}; j += 1)); do
+      [ -n "${role_options[j]}" ] || continue
+      [ "${role_options[i]}" != "${role_options[j]}" ] || die "${role_names[i]} option '${role_labels[i]}' aliases ${role_names[j]} option '${role_labels[j]}'"
+    done
+  done
+}
+
 cmd_start() {
   local project=$1 item=$2 current
   [ -n "$item" ] || die "usage: cs-board.sh start <project> <item-id>"
   resolve_board "$project"
   resolve_ids
+  validate_board_options
   [ -n "$INPROGRESS_OPT" ] || die "no '$INPROGRESS_LABEL' option on the '$STATUS_FIELD' field"
-  [ "$INPROGRESS_OPT" != "$READY_OPT" ] || die "In Progress option '$INPROGRESS_LABEL' aliases the protected '$READY_LABEL' option"
-  [ "$INPROGRESS_OPT" != "$DONE_OPT" ] || die "In Progress option '$INPROGRESS_LABEL' aliases the protected Done option"
-  [ "$INPROGRESS_OPT" != "$INBOX_OPT" ] || die "In Progress option '$INPROGRESS_LABEL' aliases the protected '$INBOX_LABEL' option"
-  [ "$INPROGRESS_OPT" != "$BACKLOG_OPT" ] || die "In Progress option '$INPROGRESS_LABEL' aliases the protected '$BACKLOG_LABEL' option"
   current=$(item_status "$item")
   [ "$current" = "$READY_LABEL" ] || die "item $item must be in '$READY_LABEL' before moving to '$INPROGRESS_LABEL' (current: ${current:-unset})"
   $GH project item-edit --id "$item" --field-id "$FIELD_ID" --project-id "$PROJECT_ID" --single-select-option-id "$INPROGRESS_OPT" >/dev/null \
@@ -173,15 +184,9 @@ cmd_specced() {
   [ -n "$item" ] || die "usage: cs-board.sh specced <project> <item-id>"
   resolve_board "$project"
   resolve_ids
+  validate_board_options
   [ -n "$INBOX_OPT" ] || die "no '$INBOX_LABEL' option on the '$STATUS_FIELD' field"
   [ -n "$BACKLOG_OPT" ] || die "no '$BACKLOG_LABEL' option on the '$STATUS_FIELD' field"
-  [ "$INBOX_OPT" != "$BACKLOG_OPT" ] || die "Inbox option '$INBOX_LABEL' aliases Backlog option '$BACKLOG_LABEL'"
-  [ "$INBOX_OPT" != "$READY_OPT" ] || die "Inbox option '$INBOX_LABEL' aliases the protected '$READY_LABEL' option"
-  [ "$INBOX_OPT" != "$INPROGRESS_OPT" ] || die "Inbox option '$INBOX_LABEL' aliases the protected '$INPROGRESS_LABEL' option"
-  [ "$INBOX_OPT" != "$DONE_OPT" ] || die "Inbox option '$INBOX_LABEL' aliases the protected Done option"
-  [ "$BACKLOG_OPT" != "$READY_OPT" ] || die "Backlog option '$BACKLOG_LABEL' aliases the protected '$READY_LABEL' option"
-  [ "$BACKLOG_OPT" != "$INPROGRESS_OPT" ] || die "Backlog option '$BACKLOG_LABEL' aliases the protected '$INPROGRESS_LABEL' option"
-  [ "$BACKLOG_OPT" != "$DONE_OPT" ] || die "Backlog option '$BACKLOG_LABEL' aliases the protected Done option"
   current=$(item_status "$item")
   [ "$current" = "$INBOX_LABEL" ] || die "item $item must be in '$INBOX_LABEL' before moving to '$BACKLOG_LABEL' (current: ${current:-unset})"
   $GH project item-edit --id "$item" --field-id "$FIELD_ID" --project-id "$PROJECT_ID" --single-select-option-id "$BACKLOG_OPT" >/dev/null \
