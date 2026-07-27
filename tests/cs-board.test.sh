@@ -140,4 +140,11 @@ assert_contains "$out" "aliases the protected 'Ready' option" "Ready alias is re
 [ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "Ready alias must not edit a card"
 pass "specced rejects a Ready alias"
 
+printf 'badwipproj o 7 Ready In_Progress Status Inbox In_Progress\n' > "$TMP/data/boards.md"
+edits_before=$(wc -l < "$EDIT_LOG")
+out=$("$BIN" specced badwipproj PVTI_f 2>&1) && fail "In Progress alias must fail closed"
+assert_contains "$out" "aliases the protected 'In Progress' option" "In Progress alias is rejected"
+[ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "In Progress alias must not edit a card"
+pass "specced rejects an In Progress alias"
+
 pass "cs-board behaviors"

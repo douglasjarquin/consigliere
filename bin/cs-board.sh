@@ -167,8 +167,14 @@ cmd_specced() {
   [ -n "$item" ] || die "usage: cs-board.sh specced <project> <item-id>"
   resolve_board "$project"
   resolve_ids
+  [ -n "$INBOX_OPT" ] || die "no '$INBOX_LABEL' option on the '$STATUS_FIELD' field"
   [ -n "$BACKLOG_OPT" ] || die "no '$BACKLOG_LABEL' option on the '$STATUS_FIELD' field"
+  [ "$INBOX_OPT" != "$BACKLOG_OPT" ] || die "Inbox option '$INBOX_LABEL' aliases Backlog option '$BACKLOG_LABEL'"
+  [ "$INBOX_OPT" != "$READY_OPT" ] || die "Inbox option '$INBOX_LABEL' aliases the protected '$READY_LABEL' option"
+  [ "$INBOX_OPT" != "$INPROGRESS_OPT" ] || die "Inbox option '$INBOX_LABEL' aliases the protected '$INPROGRESS_LABEL' option"
+  [ "$INBOX_OPT" != "$DONE_OPT" ] || die "Inbox option '$INBOX_LABEL' aliases the protected Done option"
   [ "$BACKLOG_OPT" != "$READY_OPT" ] || die "Backlog option '$BACKLOG_LABEL' aliases the protected '$READY_LABEL' option"
+  [ "$BACKLOG_OPT" != "$INPROGRESS_OPT" ] || die "Backlog option '$BACKLOG_LABEL' aliases the protected '$INPROGRESS_LABEL' option"
   [ "$BACKLOG_OPT" != "$DONE_OPT" ] || die "Backlog option '$BACKLOG_LABEL' aliases the protected Done option"
   current=$(item_status "$item")
   [ "$current" = "$INBOX_LABEL" ] || die "item $item must be in '$INBOX_LABEL' before moving to '$BACKLOG_LABEL' (current: ${current:-unset})"
