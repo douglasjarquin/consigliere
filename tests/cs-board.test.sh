@@ -67,7 +67,7 @@ pass "missing board mapping fails closed"
 
 # markdown comments and blank lines are ignored; mapping keyed by project name
 cat > "$TMP/data/boards.md" <<'EOF'
-# Board mappings for the contracts skill
+# Board mappings for the contracts and casino skills
 # <project> <owner> <number> [labels...]
 
 proj o 7
