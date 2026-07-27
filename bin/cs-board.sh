@@ -131,6 +131,14 @@ list_open_issues() {
   '
 }
 
+item_status() {
+  local item=$1 key
+  key=$(printf '%s' "$STATUS_FIELD" | tr '[:upper:] ' '[:lower:]_')
+  items_json | jq -r --arg id "$item" --arg key "$key" '
+    .items[] | select(.id==$id) | (.[$key] // .status // "(unset)")
+  '
+}
+
 cmd_ready() {
   local project=$1
   resolve_board "$project"
@@ -155,11 +163,15 @@ cmd_start() {
 }
 
 cmd_specced() {
-  local project=$1 item=$2
+  local project=$1 item=$2 current
   [ -n "$item" ] || die "usage: cs-board.sh specced <project> <item-id>"
   resolve_board "$project"
   resolve_ids
   [ -n "$BACKLOG_OPT" ] || die "no '$BACKLOG_LABEL' option on the '$STATUS_FIELD' field"
+  [ "$BACKLOG_OPT" != "$READY_OPT" ] || die "Backlog option '$BACKLOG_LABEL' aliases the protected '$READY_LABEL' option"
+  [ "$BACKLOG_OPT" != "$DONE_OPT" ] || die "Backlog option '$BACKLOG_LABEL' aliases the protected Done option"
+  current=$(item_status "$item")
+  [ "$current" = "$INBOX_LABEL" ] || die "item $item must be in '$INBOX_LABEL' before moving to '$BACKLOG_LABEL' (current: ${current:-unset})"
   $GH project item-edit --id "$item" --field-id "$FIELD_ID" --project-id "$PROJECT_ID" --single-select-option-id "$BACKLOG_OPT" >/dev/null \
     || die "failed to move item $item to '$BACKLOG_LABEL'"
   echo "moved $item -> $BACKLOG_LABEL"
@@ -169,11 +181,7 @@ cmd_status() {
   local project=$1 item=$2
   [ -n "$item" ] || die "usage: cs-board.sh status <project> <item-id>"
   resolve_board "$project"
-  local key
-  key=$(printf '%s' "$STATUS_FIELD" | tr '[:upper:] ' '[:lower:]_')
-  items_json | jq -r --arg id "$item" --arg key "$key" '
-    .items[] | select(.id==$id) | (.[$key] // .status // "(unset)")
-  '
+  item_status "$item"
 }
 
 cmd_check() {

@@ -106,6 +106,12 @@ assert_no_grep 'opt_ready' "$EDIT_LOG" "Ready option is never set"
 assert_no_grep 'opt_done' "$EDIT_LOG" "Done option is still never set"
 pass "specced moves card only to Backlog"
 
+edits_before=$(wc -l < "$EDIT_LOG")
+out=$("$BIN" specced proj PVTI_a 2>&1) && fail "specced must reject a non-Inbox card"
+assert_contains "$out" "must be in 'Inbox'" "specced names the required source column"
+[ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "non-Inbox card must not be edited"
+pass "specced rejects non-Inbox cards"
+
 # status: read-only current value
 out=$("$BIN" status proj PVTI_b)
 [ "$out" = "In Progress" ] || fail "status read wrong value: '$out'"
@@ -126,5 +132,12 @@ out=$("$BIN" ready todoproj 2>&1)
 # fixture items are labeled "Ready", not "Todo", so a Todo board finds none
 [ -z "$out" ] || fail "custom ready label should match nothing in this fixture, got: $out"
 pass "custom label config is honored"
+
+printf 'badproj o 7 Ready In_Progress Status Inbox Ready\n' > "$TMP/data/boards.md"
+edits_before=$(wc -l < "$EDIT_LOG")
+out=$("$BIN" specced badproj PVTI_f 2>&1) && fail "Ready alias must fail closed"
+assert_contains "$out" "aliases the protected 'Ready' option" "Ready alias is rejected"
+[ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "Ready alias must not edit a card"
+pass "specced rejects a Ready alias"
 
 pass "cs-board behaviors"
