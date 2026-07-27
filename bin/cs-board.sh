@@ -92,7 +92,7 @@ field_json() {
 }
 
 items_json() {
-  # -L caps the page; boards with more Ready items than this need --limit tuning.
+  # -L caps the page; boards with more matching items than this need --limit tuning.
   $GH project item-list "$NUMBER" --owner "$OWNER" --format json --limit "${CS_BOARD_ITEM_LIMIT:-200}" 2>/dev/null \
     || die "cannot list items for project $NUMBER (owner $OWNER)"
 }

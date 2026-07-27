@@ -13,7 +13,7 @@ mkdir -p "$TMP/data"
 
 FAKEBIN=$(cs_fakebin "$TMP")
 # Fake gh: canned project view / field-list / item-list, and an item-edit that
-# records its args so the test can prove only In Progress is ever set.
+# records its args so the test can prove only allowed destination options are set.
 cat > "$FAKEBIN/gh" <<'SH'
 #!/usr/bin/env bash
 sub="$1 $2"
