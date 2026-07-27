@@ -69,12 +69,13 @@ cs_harness_detect_root() {
 }
 
 # cs_harness_effort_valid <h> <effort> - true if <effort> is accepted by <h>.
-# codex refuses max (not in the bundled catalog); claude accepts it.
+# Codex accepts max and ultra; Claude accepts max but rejects ultra.
 cs_harness_effort_valid() {
   local h=$1 effort=$2
   case "$effort" in
     ''|default|low|medium|high|xhigh) return 0 ;;
-    max) [ "$h" = claude ] && return 0 || return 1 ;;
+    max) [ "$h" = codex ] || [ "$h" = claude ] ;;
+    ultra) [ "$h" = codex ] ;;
     *) return 1 ;;
   esac
 }

@@ -1,12 +1,13 @@
 # Codex verified facts
 
-Verified against codex-cli 0.139-0.144 (upstream firstmate evidence) and re-verified live on 2026-07-22 (spawn, native herdr agent detection, steer).
+Verified against codex-cli 0.139-0.144 (upstream firstmate evidence) and re-verified live on 2026-07-27 with `codex --version` returning `codex-cli 0.145.0`.
+`codex debug models` reported `low,medium,high,xhigh,max,ultra` for both `gpt-5.6-sol` and `gpt-5.6-terra`.
 Re-verify after codex upgrades; `bin/cs-bootstrap.sh` checks presence only, not version.
 
 ## Launch template (the only one)
 
 ```
-codex [--model <m>] [-c 'model_reasoning_effort="<low|medium|high|xhigh>"'] \
+codex [--model <m>] [-c 'model_reasoning_effort="<low|medium|high|xhigh|max|ultra>"'] \
   --dangerously-bypass-approvals-and-sandbox \
   -c "notify=[\"bash\",\"-c\",\"touch state/<id>.turn-ended\"]" \
   "$(bin/cs-operational-input.sh encode launch-brief < data/<id>/brief.md)"

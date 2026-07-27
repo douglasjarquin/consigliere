@@ -51,20 +51,22 @@ cs_harness_valid gpt && fail "unknown harness must be invalid" || true
 pass "valid and binary"
 
 # --- effort validation ------------------------------------------------------
-for e in low medium high xhigh; do
+for e in default low medium high xhigh max; do
   cs_harness_effort_valid codex "$e" || fail "codex must accept $e"
   cs_harness_effort_valid claude "$e" || fail "claude must accept $e"
 done
-cs_harness_effort_valid codex max && fail "codex must reject max" || true
-cs_harness_effort_valid claude max || fail "claude must accept max"
+cs_harness_effort_valid codex ultra || fail "codex must accept ultra"
+cs_harness_effort_valid claude ultra && fail "claude must reject ultra" || true
 cs_harness_effort_valid codex bogus && fail "codex must reject bogus" || true
-pass "effort validation (codex rejects max, claude accepts)"
+pass "effort validation (codex accepts max and ultra, claude rejects ultra)"
 
 # --- flags ------------------------------------------------------------------
 [ -z "$(cs_harness_model_flag codex default)" ] || fail "default model -> empty flag"
 [ "$(cs_harness_model_flag codex gpt-5)" = "--model 'gpt-5' " ] || fail "codex model flag"
 [ "$(cs_harness_model_flag claude sonnet)" = "--model 'sonnet' " ] || fail "claude model flag"
 [ "$(cs_harness_effort_flag codex high)" = "-c 'model_reasoning_effort=\"high\"' " ] || fail "codex effort flag"
+[ "$(cs_harness_effort_flag codex max)" = "-c 'model_reasoning_effort=\"max\"' " ] || fail "codex max effort flag"
+[ "$(cs_harness_effort_flag codex ultra)" = "-c 'model_reasoning_effort=\"ultra\"' " ] || fail "codex ultra effort flag"
 [ "$(cs_harness_effort_flag claude high)" = "--effort 'high' " ] || fail "claude effort flag"
 [ "$(cs_harness_autonomy_flag codex)" = "--dangerously-bypass-approvals-and-sandbox" ] || fail "codex autonomy"
 [ "$(cs_harness_autonomy_flag claude)" = "--dangerously-skip-permissions" ] || fail "claude autonomy"
