@@ -152,11 +152,17 @@ cmd_inbox() {
 }
 
 cmd_start() {
-  local project=$1 item=$2
+  local project=$1 item=$2 current
   [ -n "$item" ] || die "usage: cs-board.sh start <project> <item-id>"
   resolve_board "$project"
   resolve_ids
   [ -n "$INPROGRESS_OPT" ] || die "no '$INPROGRESS_LABEL' option on the '$STATUS_FIELD' field"
+  [ "$INPROGRESS_OPT" != "$READY_OPT" ] || die "In Progress option '$INPROGRESS_LABEL' aliases the protected '$READY_LABEL' option"
+  [ "$INPROGRESS_OPT" != "$DONE_OPT" ] || die "In Progress option '$INPROGRESS_LABEL' aliases the protected Done option"
+  [ "$INPROGRESS_OPT" != "$INBOX_OPT" ] || die "In Progress option '$INPROGRESS_LABEL' aliases the protected '$INBOX_LABEL' option"
+  [ "$INPROGRESS_OPT" != "$BACKLOG_OPT" ] || die "In Progress option '$INPROGRESS_LABEL' aliases the protected '$BACKLOG_LABEL' option"
+  current=$(item_status "$item")
+  [ "$current" = "$READY_LABEL" ] || die "item $item must be in '$READY_LABEL' before moving to '$INPROGRESS_LABEL' (current: ${current:-unset})"
   $GH project item-edit --id "$item" --field-id "$FIELD_ID" --project-id "$PROJECT_ID" --single-select-option-id "$INPROGRESS_OPT" >/dev/null \
     || die "failed to move item $item to '$INPROGRESS_LABEL'"
   echo "moved $item -> $INPROGRESS_LABEL"

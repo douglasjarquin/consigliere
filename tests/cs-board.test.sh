@@ -42,7 +42,8 @@ JSON
   {"id":"PVTI_e","status":"Ready","content":{"type":"Issue","number":14,"state":"OPEN","url":"https://github.com/o/r/issues/14","title":"second ready"}},
   {"id":"PVTI_f","status":"Inbox","content":{"type":"Issue","number":15,"state":"OPEN","url":"https://github.com/o/r/issues/15","title":"raw idea"}},
   {"id":"PVTI_g","status":"Inbox","content":{"type":"DraftIssue","number":0,"title":"inbox draft"}},
-  {"id":"PVTI_h","status":"Inbox","content":{"type":"Issue","number":16,"state":"CLOSED","url":"https://github.com/o/r/issues/16","title":"inbox but closed"}}
+  {"id":"PVTI_h","status":"Inbox","content":{"type":"Issue","number":16,"state":"CLOSED","url":"https://github.com/o/r/issues/16","title":"inbox but closed"}},
+  {"id":"PVTI_i","status":"Backlog","content":{"type":"Issue","number":17,"state":"OPEN","url":"https://github.com/o/r/issues/17","title":"specced idea"}}
 ]}
 JSON
     ;;
@@ -98,6 +99,14 @@ assert_grep 'single-select-option-id opt_wip' "$EDIT_LOG" "edit used the In Prog
 assert_no_grep 'opt_done' "$EDIT_LOG" "Done option is never set"
 pass "start moves card only to In Progress"
 
+for item in PVTI_f PVTI_i; do
+  edits_before=$(wc -l < "$EDIT_LOG")
+  out=$("$BIN" start proj "$item" 2>&1) && fail "start must reject a non-Ready card"
+  assert_contains "$out" "must be in 'Ready'" "start names the required source column"
+  [ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "non-Ready card must not be edited"
+done
+pass "start rejects non-Ready cards"
+
 # specced: moves to Backlog, and never to Ready or Done (the human gate)
 out=$("$BIN" specced proj PVTI_f)
 assert_contains "$out" "Backlog" "specced reports the move"
@@ -146,5 +155,12 @@ out=$("$BIN" specced badwipproj PVTI_f 2>&1) && fail "In Progress alias must fai
 assert_contains "$out" "aliases the protected 'In Progress' option" "In Progress alias is rejected"
 [ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "In Progress alias must not edit a card"
 pass "specced rejects an In Progress alias"
+
+printf 'badstartproj o 7 Ready Ready Status Inbox Backlog\n' > "$TMP/data/boards.md"
+edits_before=$(wc -l < "$EDIT_LOG")
+out=$("$BIN" start badstartproj PVTI_a 2>&1) && fail "Ready alias must fail closed"
+assert_contains "$out" "In Progress option 'Ready' aliases the protected 'Ready' option" "start Ready alias is rejected"
+[ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "start Ready alias must not edit a card"
+pass "start rejects a Ready alias"
 
 pass "cs-board behaviors"
