@@ -1,23 +1,32 @@
 #!/usr/bin/env bash
 # GitHub Projects (v2) board access for consigliere's board-driven work.
-# The mechanical half of the `contracts` skill: list Ready issues, move a card
-# to In Progress at dispatch, and read a card's current status. It deliberately
+# The mechanical half of the `contracts` and `casino` skills: list Inbox and
+# Ready issues, move a card to Backlog after its spec lands or to In Progress
+# at dispatch, and read a card's current status. It deliberately
 # NEVER moves a card to Done - that is owned by the board's built-in
 # "when issue closed -> Done" workflow, triggered by a merged PR whose body
 # carries `Closes #<n>` (see the contracts skill and cs-brief.sh --issue).
+# It also NEVER moves a card to Ready - Backlog -> Ready is the boss's human
+# approval gate (see the casino skill) and has no command here on purpose.
 #
 # Board identity comes from data/boards.md (LOCAL, gitignored), a durable
 # per-project record kept beside data/projects.md and keyed by the same project
 # name. Blank lines and lines beginning with '#' are ignored; every other line
 # is one mapping:
-#   <project-name> <owner> <project-number> [ready-label] [inprogress-label] [status-field]
-# Defaults: ready-label="Ready", inprogress-label="In Progress", status-field="Status".
+#   <project-name> <owner> <project-number> [ready-label] [inprogress-label] [status-field] [inbox-label] [backlog-label]
+# Defaults: ready-label="Ready", inprogress-label="In Progress",
+# status-field="Status", inbox-label="Inbox", backlog-label="Backlog".
 # <owner> is a user or org login, or "@me" for the authenticated user.
 #
 # Commands:
 #   cs-board.sh ready <project>            TSV of open Ready issues:
 #                                          <item-id>\t<number>\t<url>\t<title>
+#   cs-board.sh inbox <project>            same TSV for open Inbox issues
+#                                          (draft cards are never listed; convert
+#                                          a draft to an issue to make it workable)
 #   cs-board.sh start <project> <item-id>  set the card's Status -> In Progress
+#   cs-board.sh specced <project> <item-id> set the card's Status -> Backlog
+#                                          (after a verified spec; casino skill)
 #   cs-board.sh status <project> <item-id> print the card's current Status name
 #   cs-board.sh check <project>            read-only board sanity + a reminder
 #                                          that the closed->Done workflow must
@@ -46,10 +55,11 @@ die() { echo "cs-board: $*" >&2; exit 1; }
 
 command -v jq >/dev/null 2>&1 || die "jq is required"
 
-# resolve <project> -> sets OWNER NUMBER READY_LABEL INPROGRESS_LABEL STATUS_FIELD
+# resolve <project> -> sets OWNER NUMBER READY_LABEL INPROGRESS_LABEL
+# STATUS_FIELD INBOX_LABEL BACKLOG_LABEL
 resolve_board() {
   local project=$1 line
-  [ -f "$BOARDS" ] || die "no board mapping at $BOARDS; add a line: <project> <owner> <number> [ready] [in-progress] [status-field]"
+  [ -f "$BOARDS" ] || die "no board mapping at $BOARDS; add a line: <project> <owner> <number> [ready] [in-progress] [status-field] [inbox] [backlog]"
   # Skip blank lines and '#' comments so the file reads as ordinary markdown.
   line=$(awk -v p="$project" '/^[[:space:]]*#/ {next} $1==p {print; exit}' "$BOARDS")
   [ -n "$line" ] || die "project '$project' not in $BOARDS"
@@ -60,10 +70,14 @@ resolve_board() {
   READY_LABEL=${4:-Ready}
   INPROGRESS_LABEL=${5:-In Progress}
   STATUS_FIELD=${6:-Status}
+  INBOX_LABEL=${7:-Inbox}
+  BACKLOG_LABEL=${8:-Backlog}
   # Underscores in config stand in for spaces so labels stay single tokens.
   READY_LABEL=${READY_LABEL//_/ }
   INPROGRESS_LABEL=${INPROGRESS_LABEL//_/ }
   STATUS_FIELD=${STATUS_FIELD//_/ }
+  INBOX_LABEL=${INBOX_LABEL//_/ }
+  BACKLOG_LABEL=${BACKLOG_LABEL//_/ }
   case "$NUMBER" in ''|*[!0-9]*) die "board number for '$project' must be numeric, got '$NUMBER'" ;; esac
 }
 
@@ -84,6 +98,7 @@ items_json() {
 }
 
 # resolve_ids: sets PROJECT_ID FIELD_ID READY_OPT INPROGRESS_OPT DONE_OPT
+# INBOX_OPT BACKLOG_OPT
 resolve_ids() {
   local pj fj
   pj=$(project_json)
@@ -95,24 +110,37 @@ resolve_ids() {
   READY_OPT=$(printf '%s' "$fj" | jq -r --arg n "$STATUS_FIELD" --arg o "$READY_LABEL" '.fields[] | select(.name==$n) | .options[]? | select(.name==$o) | .id' | head -1)
   INPROGRESS_OPT=$(printf '%s' "$fj" | jq -r --arg n "$STATUS_FIELD" --arg o "$INPROGRESS_LABEL" '.fields[] | select(.name==$n) | .options[]? | select(.name==$o) | .id' | head -1)
   DONE_OPT=$(printf '%s' "$fj" | jq -r --arg n "$STATUS_FIELD" '.fields[] | select(.name==$n) | .options[]? | select(.name=="Done") | .id' | head -1)
+  INBOX_OPT=$(printf '%s' "$fj" | jq -r --arg n "$STATUS_FIELD" --arg o "$INBOX_LABEL" '.fields[] | select(.name==$n) | .options[]? | select(.name==$o) | .id' | head -1)
+  BACKLOG_OPT=$(printf '%s' "$fj" | jq -r --arg n "$STATUS_FIELD" --arg o "$BACKLOG_LABEL" '.fields[] | select(.name==$n) | .options[]? | select(.name==$o) | .id' | head -1)
 }
 
-cmd_ready() {
-  local project=$1
-  resolve_board "$project"
-  # The single-select field value renders under the lowercased field name key
-  # in gh's item JSON (e.g. "status"); filter client-side so the command works
-  # regardless of whether the API host supports server-side --query.
-  local key
+# list_open_issues <column-label>: TSV of open Issues whose Status matches.
+# The single-select field value renders under the lowercased field name key
+# in gh's item JSON (e.g. "status"); filter client-side so the command works
+# regardless of whether the API host supports server-side --query.
+list_open_issues() {
+  local col=$1 key
   key=$(printf '%s' "$STATUS_FIELD" | tr '[:upper:] ' '[:lower:]_')
-  items_json | jq -r --arg ready "$READY_LABEL" --arg key "$key" '
+  items_json | jq -r --arg col "$col" --arg key "$key" '
     .items[]
-    | select((.[$key] // .status) == $ready)
+    | select((.[$key] // .status) == $col)
     | select(.content.type == "Issue")
     | select((.content.state // "OPEN") | ascii_upcase == "OPEN")
     | [.id, (.content.number|tostring), .content.url, .content.title]
     | @tsv
   '
+}
+
+cmd_ready() {
+  local project=$1
+  resolve_board "$project"
+  list_open_issues "$READY_LABEL"
+}
+
+cmd_inbox() {
+  local project=$1
+  resolve_board "$project"
+  list_open_issues "$INBOX_LABEL"
 }
 
 cmd_start() {
@@ -124,6 +152,17 @@ cmd_start() {
   $GH project item-edit --id "$item" --field-id "$FIELD_ID" --project-id "$PROJECT_ID" --single-select-option-id "$INPROGRESS_OPT" >/dev/null \
     || die "failed to move item $item to '$INPROGRESS_LABEL'"
   echo "moved $item -> $INPROGRESS_LABEL"
+}
+
+cmd_specced() {
+  local project=$1 item=$2
+  [ -n "$item" ] || die "usage: cs-board.sh specced <project> <item-id>"
+  resolve_board "$project"
+  resolve_ids
+  [ -n "$BACKLOG_OPT" ] || die "no '$BACKLOG_LABEL' option on the '$STATUS_FIELD' field"
+  $GH project item-edit --id "$item" --field-id "$FIELD_ID" --project-id "$PROJECT_ID" --single-select-option-id "$BACKLOG_OPT" >/dev/null \
+    || die "failed to move item $item to '$BACKLOG_LABEL'"
+  echo "moved $item -> $BACKLOG_LABEL"
 }
 
 cmd_status() {
@@ -142,13 +181,18 @@ cmd_check() {
   resolve_board "$project"
   resolve_ids
   echo "board: $OWNER/#$NUMBER  status-field='$STATUS_FIELD'"
-  printf 'options: Ready=%s  In-Progress=%s  Done=%s\n' \
-    "${READY_OPT:+ok}" "${INPROGRESS_OPT:+ok}" "${DONE_OPT:+ok}"
+  printf 'options: Ready=%s  In-Progress=%s  Done=%s  Inbox=%s  Backlog=%s\n' \
+    "${READY_OPT:+ok}" "${INPROGRESS_OPT:+ok}" "${DONE_OPT:+ok}" \
+    "${INBOX_OPT:+ok}" "${BACKLOG_OPT:+ok}"
   [ -n "$READY_OPT" ] || echo "WARN: no '$READY_LABEL' option - the sweep will find nothing to dispatch"
   [ -n "$INPROGRESS_OPT" ] || echo "WARN: no '$INPROGRESS_LABEL' option - cards cannot be moved at dispatch"
   [ -n "$DONE_OPT" ] || echo "WARN: no 'Done' option - the closed->Done workflow has nowhere to move cards"
+  [ -n "$INBOX_OPT" ] || echo "WARN: no '$INBOX_LABEL' option - the casino spec sweep will find nothing (contracts alone does not need it)"
+  [ -n "$BACKLOG_OPT" ] || echo "WARN: no '$BACKLOG_LABEL' option - specced cards cannot be parked for the boss's gate (contracts alone does not need it)"
   cat <<'EOF'
-NOTE: consigliere moves a card only to In Progress. The card reaches Done ONLY
+NOTE: consigliere moves a card only to Backlog (after a verified spec) or to
+In Progress (at dispatch). Backlog -> Ready is the boss's human approval gate
+and this script has no command for it. The card reaches Done ONLY
 through the board's built-in workflow "when an issue is closed -> set Status
 Done", fired by a merged PR carrying `Closes #<n>`. Enable that workflow once in
 the project's Workflows settings; consigliere will read-only-verify cards left
@@ -160,16 +204,18 @@ cmd_ids() {
   local project=$1
   resolve_board "$project"
   resolve_ids
-  printf 'project_id=%s\nfield_id=%s\nready_opt=%s\ninprogress_opt=%s\ndone_opt=%s\n' \
-    "$PROJECT_ID" "$FIELD_ID" "$READY_OPT" "$INPROGRESS_OPT" "$DONE_OPT"
+  printf 'project_id=%s\nfield_id=%s\nready_opt=%s\ninprogress_opt=%s\ndone_opt=%s\ninbox_opt=%s\nbacklog_opt=%s\n' \
+    "$PROJECT_ID" "$FIELD_ID" "$READY_OPT" "$INPROGRESS_OPT" "$DONE_OPT" "$INBOX_OPT" "$BACKLOG_OPT"
 }
 
 case "${1:-}" in
   -h|--help|'') usage; exit 0 ;;
-  ready)  [ $# -ge 2 ] || die "usage: cs-board.sh ready <project>"; cmd_ready "$2" ;;
-  start)  [ $# -ge 3 ] || die "usage: cs-board.sh start <project> <item-id>"; cmd_start "$2" "$3" ;;
-  status) [ $# -ge 3 ] || die "usage: cs-board.sh status <project> <item-id>"; cmd_status "$2" "$3" ;;
-  check)  [ $# -ge 2 ] || die "usage: cs-board.sh check <project>"; cmd_check "$2" ;;
-  ids)    [ $# -ge 2 ] || die "usage: cs-board.sh ids <project>"; cmd_ids "$2" ;;
-  *) die "unknown command '$1' (ready|start|status|check|ids)" ;;
+  ready)   [ $# -ge 2 ] || die "usage: cs-board.sh ready <project>"; cmd_ready "$2" ;;
+  inbox)   [ $# -ge 2 ] || die "usage: cs-board.sh inbox <project>"; cmd_inbox "$2" ;;
+  start)   [ $# -ge 3 ] || die "usage: cs-board.sh start <project> <item-id>"; cmd_start "$2" "$3" ;;
+  specced) [ $# -ge 3 ] || die "usage: cs-board.sh specced <project> <item-id>"; cmd_specced "$2" "$3" ;;
+  status)  [ $# -ge 3 ] || die "usage: cs-board.sh status <project> <item-id>"; cmd_status "$2" "$3" ;;
+  check)   [ $# -ge 2 ] || die "usage: cs-board.sh check <project>"; cmd_check "$2" ;;
+  ids)     [ $# -ge 2 ] || die "usage: cs-board.sh ids <project>"; cmd_ids "$2" ;;
+  *) die "unknown command '$1' (ready|inbox|start|specced|status|check|ids)" ;;
 esac

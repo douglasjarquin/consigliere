@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Behavior: cs-board.sh resolves board config, lists open Ready issues, moves a
-# card to In Progress (never to Done), reads status, and fails closed on
-# missing config/options. gh is faked; no network.
+# Behavior: cs-board.sh resolves board config, lists open Ready and Inbox
+# issues, moves a card to In Progress or Backlog (never to Ready or Done),
+# reads status, and fails closed on missing config/options. gh is faked;
+# no network.
 set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -23,6 +24,8 @@ case "$sub" in
     cat <<'JSON'
 {"fields":[
   {"id":"PVTSSF_status","name":"Status","options":[
+    {"id":"opt_inbox","name":"Inbox"},
+    {"id":"opt_backlog","name":"Backlog"},
     {"id":"opt_ready","name":"Ready"},
     {"id":"opt_wip","name":"In Progress"},
     {"id":"opt_done","name":"Done"}]}
@@ -36,7 +39,10 @@ JSON
   {"id":"PVTI_b","status":"In Progress","content":{"type":"Issue","number":12,"state":"OPEN","url":"https://github.com/o/r/issues/12","title":"already started"}},
   {"id":"PVTI_c","status":"Ready","content":{"type":"Issue","number":13,"state":"CLOSED","url":"https://github.com/o/r/issues/13","title":"ready but closed"}},
   {"id":"PVTI_d","status":"Ready","content":{"type":"DraftIssue","number":0,"title":"draft note"}},
-  {"id":"PVTI_e","status":"Ready","content":{"type":"Issue","number":14,"state":"OPEN","url":"https://github.com/o/r/issues/14","title":"second ready"}}
+  {"id":"PVTI_e","status":"Ready","content":{"type":"Issue","number":14,"state":"OPEN","url":"https://github.com/o/r/issues/14","title":"second ready"}},
+  {"id":"PVTI_f","status":"Inbox","content":{"type":"Issue","number":15,"state":"OPEN","url":"https://github.com/o/r/issues/15","title":"raw idea"}},
+  {"id":"PVTI_g","status":"Inbox","content":{"type":"DraftIssue","number":0,"title":"inbox draft"}},
+  {"id":"PVTI_h","status":"Inbox","content":{"type":"Issue","number":16,"state":"CLOSED","url":"https://github.com/o/r/issues/16","title":"inbox but closed"}}
 ]}
 JSON
     ;;
@@ -76,12 +82,29 @@ assert_not_contains "$out" "PVTI_d" "draft excluded"
 [ "$(printf '%s\n' "$out" | grep -c .)" = 2 ] || fail "exactly two ready issues"
 pass "ready lists only open Ready issues"
 
+# inbox: only OPEN Issues in Inbox, drafts and closed excluded
+out=$("$BIN" inbox proj)
+assert_contains "$out" "PVTI_f	15	https://github.com/o/r/issues/15	raw idea" "inbox issue listed"
+assert_not_contains "$out" "PVTI_g" "inbox draft excluded"
+assert_not_contains "$out" "PVTI_h" "closed inbox issue excluded"
+assert_not_contains "$out" "PVTI_a" "ready issue not in inbox listing"
+[ "$(printf '%s\n' "$out" | grep -c .)" = 1 ] || fail "exactly one inbox issue"
+pass "inbox lists only open Inbox issues"
+
 # start: moves to In Progress, and ONLY to the In Progress option id
 out=$("$BIN" start proj PVTI_a)
 assert_contains "$out" "In Progress" "start reports the move"
 assert_grep 'single-select-option-id opt_wip' "$EDIT_LOG" "edit used the In Progress option"
 assert_no_grep 'opt_done' "$EDIT_LOG" "Done option is never set"
 pass "start moves card only to In Progress"
+
+# specced: moves to Backlog, and never to Ready or Done (the human gate)
+out=$("$BIN" specced proj PVTI_f)
+assert_contains "$out" "Backlog" "specced reports the move"
+assert_grep 'single-select-option-id opt_backlog' "$EDIT_LOG" "edit used the Backlog option"
+assert_no_grep 'opt_ready' "$EDIT_LOG" "Ready option is never set"
+assert_no_grep 'opt_done' "$EDIT_LOG" "Done option is still never set"
+pass "specced moves card only to Backlog"
 
 # status: read-only current value
 out=$("$BIN" status proj PVTI_b)
@@ -91,7 +114,10 @@ pass "status reads current card value"
 # check: reports options and the built-in-only Done reminder
 out=$("$BIN" check proj)
 assert_contains "$out" "Done=ok" "check confirms Done option"
+assert_contains "$out" "Inbox=ok" "check confirms Inbox option"
+assert_contains "$out" "Backlog=ok" "check confirms Backlog option"
 assert_contains "$out" "built-in" "check reminds about the workflow"
+assert_contains "$out" "human approval gate" "check states the Backlog->Ready gate"
 pass "check reports board sanity + workflow reminder"
 
 # custom labels via underscores
