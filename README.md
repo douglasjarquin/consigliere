@@ -1,5 +1,7 @@
 # Consigliere
 
+<img width="1774" height="887" alt="consigliere-github-banner" src="https://github.com/user-attachments/assets/0560ad7b-aada-4bb6-a438-cc756cb1a4ea" />
+
 A personal agent distro: launch codex or claude in this repo and it becomes the consigliere - the boss's single point of contact for all software work, delegating everything to autonomous soldiers it spawns, supervises, and lands work from.
 
 Consigliere is a from-scratch personal rewrite of [Firstmate](https://github.com/kunchenguid/firstmate) built for two harnesses (**codex** and **claude**) and one terminal runtime (**herdr**), leaning on their native features instead of generic multi-backend shims. Soldiers inherit the root session's harness, so one consigliere works wherever you work (codex at home, claude at work):
