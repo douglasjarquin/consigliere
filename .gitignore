@@ -8,3 +8,6 @@ projects/
 
 # Executor worktrees (Agent isolation) — never tracked.
 .claude/worktrees/
+
+# Python bytecode caches (bin/cs-herdr-events.py) — build artifacts, never tracked.
+__pycache__/
