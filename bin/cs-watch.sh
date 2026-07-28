@@ -116,9 +116,17 @@ HEARTBEAT=${CS_HEARTBEAT:-600}        # base seconds between heartbeat scans
 HEARTBEAT_MAX=${CS_HEARTBEAT_MAX:-7200}  # heartbeat backoff cap
 CHECK_INTERVAL=${CS_CHECK_INTERVAL:-300}  # seconds between *.check.sh sweeps
 CHECK_TIMEOUT=${CS_CHECK_TIMEOUT:-30}     # seconds allowed per *.check.sh
-SIGNAL_GRACE=${CS_SIGNAL_GRACE:-30}   # seconds to linger after a signal so trailing
-                                      # signals (a status write, then the same turn's
-                                      # turn-end hook) coalesce into one wake
+SIGNAL_GRACE=${CS_SIGNAL_GRACE:-30}   # seconds to linger after a NO-VERB signal so
+                                      # trailing signals (a status write, then the same
+                                      # turn's turn-end hook) coalesce into one wake
+SIGNAL_GRACE_ACTIONABLE=${CS_SIGNAL_GRACE_ACTIONABLE:-3}
+                                      # the shorter grace for a signal already carrying a
+                                      # boss-relevant verb: that wake is surfacing either
+                                      # way, so it needs only long enough to coalesce the
+                                      # same turn's turn-end hook (which lands ~1s after
+                                      # the status write), not the full no-verb grace.
+                                      # Every extra second here is added latency on a
+                                      # decision the boss is already waiting for.
 # Busy signature fallback for the rare cycle where herdr's native agent state
 # reads unknown. Consigliere is codex-only, so the single codex signature owned
 # by cs-herdr-lib.sh is the default; CS_BUSY_REGEX overrides.
@@ -477,6 +485,21 @@ scan_signals() {
     fi
   done
   return 0
+}
+
+# The deduplicated file list of a scan_signals blob, as the space-separated,
+# leading-space string the "signal:" wake reason and the classifier's file
+# arguments both take. One owner so the pre-grace verb probe and the post-grace
+# reason cannot disagree about which files a signal covers.
+signal_files_of() {  # <pending-blob> -> " <file> <file> ..."
+  local blob=$1 sf sig f files=""
+  while IFS=$(printf '\t') read -r sf sig f; do
+    [ -n "$sf" ] || continue
+    case " $files " in *" $f "*) ;; *) files="$files $f" ;; esac
+  done <<EOF
+$blob
+EOF
+  printf '%s' "$files"
 }
 
 run_check_process() {
@@ -1081,17 +1104,31 @@ while :; do
   # hook land seconds apart, and reporting them as separate actionable wakes
   # costs a full consigliere turn each. The re-scan also picks up a newer
   # signature for an already-pending file (last write wins below).
+  #
+  # The grace LENGTH is chosen from what the first scan already proves, because
+  # the two purposes of waiting are not the same:
+  #   - A no-verb signal (a bare turn-end, a working: note) waits the full
+  #     SIGNAL_GRACE. Here the wait decides the outcome: a boss-relevant line
+  #     landing inside the window turns one costly triage into one wake.
+  #   - A signal ALREADY carrying a boss-relevant verb is surfacing no matter
+  #     what the re-scan adds, so waiting cannot change the verdict - only the
+  #     coalescing still matters. It takes SIGNAL_GRACE_ACTIONABLE, long enough
+  #     for the same turn's turn-end hook and no longer, because the rest of the
+  #     window is pure latency on a decision, a blocker, or a review-ready PR
+  #     that consigliere and the boss are already waiting on.
+  # A status line written mid-turn is unaffected either way: its turn-end hook
+  # lands minutes later, outside every grace window.
   pending=$(scan_signals)
   if [ -n "$pending" ]; then
-    sleep "$SIGNAL_GRACE"
+    # shellcheck disable=SC2046  # deliberate word split: a space-separated status-path list (ids carry no spaces)
+    if signal_reason_is_actionable $(signal_files_of "$pending"); then
+      grace=$SIGNAL_GRACE_ACTIONABLE
+    else
+      grace=$SIGNAL_GRACE
+    fi
+    sleep "$grace"
     pending=$(printf '%s\n%s' "$pending" "$(scan_signals)")
-    files=""
-    while IFS=$(printf '\t') read -r sf sig f; do
-      [ -n "$sf" ] || continue
-      case " $files " in *" $f "*) ;; *) files="$files $f" ;; esac
-    done <<EOF
-$pending
-EOF
+    files=$(signal_files_of "$pending")
     reason="signal:$files"
     # Triage: a signal is ACTIONABLE when any of these holds (cheapest first):
     #   - the away-mode daemon owns triage (afk) and wants every wake;

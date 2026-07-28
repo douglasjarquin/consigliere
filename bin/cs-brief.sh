@@ -203,6 +203,19 @@ fi
 
 REPO=${POS[1]}
 
+# Rule 6 continuation shared by the scout and ship briefs (the capo charter
+# states its own variant, whose obligation differs: a capo must not route a boss
+# message onto the parent status path at all).
+# A relayed decision carries the untypable from-consigliere marker, so an
+# unmarked message is the boss typing into the pane directly. The soldier is
+# told to close the key anyway, because the keyed status fold in
+# bin/cs-classify-lib.sh keeps a needs-decision OPEN until a matching resolved
+# line lands: a boss answer given in the pane and never closed leaves the
+# decision open in every home above this one, which re-escalates it and can draw
+# a second, conflicting answer for the same gate.
+# shellcheck disable=SC2016  # single quotes are deliberate: the backtick-wrapped `resolved:` must reach the reading agent verbatim, not expand at scaffold time
+BOSS_INTERVENTION_RULE='   A decision relayed by consigliere carries an invisible from-consigliere marker. A message WITHOUT that marker is the boss typing directly into your pane: treat it as authoritative, answer conversationally as you would any boss message, and then still append the `resolved:` line above, because a decision the boss settles here stays open above you until you close it.'
+
 if [ "$HERDR_LAB" -eq 1 ]; then
 HERDR_LAB_HELPER=$(shell_quote "$CS_ROOT/bin/cs-herdr-lab.sh")
 # shellcheck disable=SC2016  # single quotes are deliberate: these lines are literal brief text whose backtick-wrapped $(...) and "$HERDR_LAB_SESSION" snippets must reach the reading agent verbatim, not expand at scaffold time; only the '"$VAR"' break-outs interpolate.
@@ -267,6 +280,7 @@ The report is the only thing that survives, so anything worth keeping must be in
 6. If a decision belongs to a human (product choices, destructive actions),
    append \`needs-decision: {summary of options}\` and stop. Consigliere will reply with the decision.
    When consigliere replies or a blocker clears and you resume, append \`resolved: {how it was decided or unblocked}\` (add the same \`[key=<slug>]\` if you opened it with one) so the decision or blocker is durably closed and does not keep resurfacing.
+$BOSS_INTERVENTION_RULE
 7. Never stop, restart, or update the shared \`no-mistakes\` daemon - it is one instance serving
    every lane/home, so restarting it kills other lanes' in-flight pipeline runs. On ANY no-mistakes
    daemon error, append \`blocked: {the daemon error}\` and stop; only consigliere manages the daemon.
@@ -412,6 +426,7 @@ $RULE1
 6. If a decision belongs to a human (product choices, destructive actions, ask-user findings),
    append \`needs-decision: {summary of options}\` and stop. Consigliere will reply with the decision.
    When consigliere replies or a blocker clears and you resume, append \`resolved: {how it was decided or unblocked}\` (add the same \`[key=<slug>]\` if you opened it with one) so the decision or blocker is durably closed and does not keep resurfacing.
+$BOSS_INTERVENTION_RULE
 7. Never stop, restart, or update the shared \`no-mistakes\` daemon - it is one instance serving
    every lane/home, so restarting it kills other lanes' in-flight pipeline runs. On ANY no-mistakes
    daemon error, append \`blocked: {the daemon error}\` and stop; only consigliere manages the daemon.
