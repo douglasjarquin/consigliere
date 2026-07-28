@@ -19,7 +19,7 @@ concurrency:
 jobs:
   lint:
     name: Shell lint
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - name: Install pinned ShellCheck
@@ -35,14 +35,14 @@ jobs:
   # no missing, no duplicate, and live-codex visibly excluded from hosted CI.
   test-coverage:
     name: Test coverage guard
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - run: bin/cs-test-run.sh --check-coverage
 
   portable:
     name: Portable behavior
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
@@ -69,7 +69,7 @@ jobs:
   # real run, and always clean up job-owned lab sessions.
   herdr:
     name: Real Herdr behavior
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -153,7 +153,7 @@ jobs:
 
   invariants:
     name: Repo invariants
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - name: Tracked symlinks must stay symlinks
