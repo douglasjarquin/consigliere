@@ -47,7 +47,7 @@ When a sweep parks new specs, tell the boss in one batched line which issues now
 
 ## Implementation sweep (Ready)
 
-Load the `contracts` skill and run its sweep over the Ready column; it owns lane count, overlap serialization, dispatch card moves, briefs with `Closes #<n>`, landing, and the stuck-card check.
+Load the `contracts` skill and run its sweep over the Ready column; it owns lane count, true-dependency serialization, dispatch card moves, briefs with `Closes #<n>`, landing, and the stuck-card check.
 Spec lanes and implementation lanes run concurrently under the ordinary section-8 supervision cycle; as either column refills (new ideas in Inbox, boss promotions into Ready), keep sweeping until both are clear or the boss says stop.
 
 ## Boundaries

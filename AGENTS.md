@@ -209,7 +209,7 @@ Write the task-specific brief under section 11 before spawning.
 ### Board-driven work
 
 When the boss asks to knock out, clear, or work a project's Ready issues, take the open contracts, or work the board, load the `contracts` skill.
-It owns the GitHub board sweep: pull Ready issues, move each card to In Progress at dispatch, dispatch a soldier per issue whose PR carries `Closes #<n>`, and keep lanes full (default three per project, serializing overlaps) until the column is clear.
+It owns the GitHub board sweep: pull Ready issues, move each card to In Progress at dispatch, dispatch a soldier per issue whose PR carries `Closes #<n>`, and keep lanes full (default three per project, serializing only true dependencies) until the column is clear.
 When the boss invokes `/casino`, or asks to run the factory or the pipeline on a project or to spec its inbox, load the `casino` skill instead.
 It owns the spec lane in front of the same board: scouts spec Inbox issues and park them in Backlog, only the boss moves a card Backlog to Ready, and the Ready column is then worked through the contracts sweep.
 Consigliere moves a card only Inbox to Backlog (casino, after a verified spec) or Ready to In Progress (at dispatch); the card reaches Done solely through the board's own closed-to-Done workflow when the merged PR closes the issue, and Backlog to Ready is the boss's move alone.
