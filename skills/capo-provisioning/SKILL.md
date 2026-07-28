@@ -96,6 +96,8 @@ Keep each home's `data/boss.md` domain-local, and keep every `data/learnings.md`
 
 The same `--sweep` also guarantees liveness: for every live capo meta (`state/<id>.meta` with `kind=capo` and a recorded pane), it probes the pane for a real agent through `bin/cs-herdr-lib.sh` and respawns via `bin/cs-spawn.sh <id> <home> --capo` only on a confident dead reading.
 An inconclusive probe is reported as a `CAPO_LIVENESS:` skip and never acted on, because a false-dead reading would spawn a duplicate supervisor into the same home.
+A `kind=capo` meta with no recorded endpoint is reported as a `CAPO_LIVENESS:` recovery condition and is never respawned by the sweep.
+A registered capo with no meta is the ordinary seeded-but-not-yet-launched state, so the sweep stays silent and does not blind-respawn it from the registry.
 
 ## Marked requests and pending replies
 
@@ -131,7 +133,8 @@ bin/cs-spawn.sh <id> <home> --capo
 ```
 
 Use the recorded `home=` in meta.
-If meta is missing but `data/capos.md` still registers the capo, respawn from the registry entry and its persistent on-disk home (remove any stale `state/<id>.meta` first, because `cs-spawn.sh` refuses a pre-existing record).
+A meta with no recorded endpoint is a reported recovery condition, not permission to search herdr by name or respawn blindly.
+If meta is missing but `data/capos.md` still registers the capo, leave it idle as a seeded-but-not-yet-launched home rather than respawning from the registry entry.
 A restart never re-seeds: the home, charter, and registry entry are durable, and the bootstrap sweep re-converges sync and inherited material on the next session start.
 
 Do not reconstruct a capo's whole tree from the main home.

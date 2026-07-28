@@ -81,6 +81,7 @@ test_published_poll_round_trip_merged_wake() {
 
   # Phase B: the PR merges - the same published artifacts must pass the real
   # cs_pr_poll_artifacts_valid inside cs-watch.sh and surface one merged wake.
+  cp "$state/task.meta" "$dir/meta.before-merge"
   : > "$out"
   rm -f "$state/.last-check"
   watch_bg "$state" "$dir/fakebin" "$out" \
@@ -91,7 +92,43 @@ test_published_poll_round_trip_merged_wake() {
     || fail "merged wake reason was not printed: $(cat "$out")"
   [ "$(count_wakes "$state" check "$state/task.check.sh")" -ge 1 ] \
     || fail "merged check wake was not queued"
-  pass "a cs-pr-check publication passes the watcher's real validation and surfaces exactly the merged wake"
+
+  # The merge is terminal for this poll: its artifacts retire once the wake is
+  # durably queued, so later cycles cannot re-notify the same merge. Task
+  # metadata is teardown's to remove, never retirement's.
+  [ ! -e "$state/task.check.sh" ] || fail "merged poll left its runnable check armed"
+  [ ! -e "$state/task.pr-poll" ] || fail "merged poll left its data sidecar behind"
+  [ ! -e "$state/task.pr-poll-registration" ] || fail "merged poll left its registration behind"
+  assert_present "$state/task.meta" "retirement must not remove task metadata"
+  grep -q '^pr=' "$state/task.meta" || fail "retirement dropped pr= from task metadata"
+  cmp -s "$dir/meta.before-merge" "$state/task.meta" \
+    || fail "retirement modified task metadata: $(diff "$dir/meta.before-merge" "$state/task.meta")"
+  pass "a cs-pr-check publication passes the watcher's real validation, surfaces exactly the merged wake, and retires the poll"
+}
+
+# Retirement is identity-bound: if consigliere re-armed the poll for a
+# different PR between the merged reading and the retirement, the replacement
+# must stay armed rather than being silently disarmed by the older result.
+test_retirement_leaves_a_rearmed_poll_alone() {
+  local dir state
+  dir=$(make_pr_case retire-identity); state="$dir/state"
+  arm_pr_poll "$dir" task https://github.com/o/r/pull/12
+
+  # shellcheck source=bin/cs-pr-lib.sh
+  . "$ROOT/bin/cs-pr-lib.sh"
+
+  cs_pr_poll_retire "$state" task "$POLL" \
+    github https://github.com/o/r/pull/99 99 \
+    && fail "retirement accepted an identity that does not match the armed poll"
+  assert_present "$state/task.check.sh" "a mismatched identity must leave the check armed"
+  assert_present "$state/task.pr-poll" "a mismatched identity must leave the data sidecar"
+  assert_present "$state/task.pr-poll-registration" "a mismatched identity must leave the registration"
+
+  cs_pr_poll_retire "$state" task "$POLL" \
+    github https://github.com/o/r/pull/12 12 \
+    || fail "retirement rejected the exact armed identity"
+  [ ! -e "$state/task.check.sh" ] || fail "matching retirement left the check armed"
+  pass "poll retirement only ever retires the exact identity that produced the merged result"
 }
 
 test_tampered_published_poll_rejected_without_execution() {
@@ -151,5 +188,6 @@ SH
 }
 
 test_published_poll_round_trip_merged_wake
+test_retirement_leaves_a_rearmed_poll_alone
 test_tampered_published_poll_rejected_without_execution
 test_check_registered_via_registrar_accepted_by_watcher

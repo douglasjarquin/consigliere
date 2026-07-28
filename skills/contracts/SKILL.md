@@ -22,12 +22,12 @@ This is ordinary section-7 ship lifecycle with a board front door - the safety c
 2. Read each issue (`gh-axi issue view <n>`) enough to write a real brief: scope, acceptance criteria, and whether it overlaps another issue's subsystem or depends on unlanded work.
 3. Order and gate:
    - **Concurrency cap: 3 lanes per project** by default. The boss can override per sweep ("knock out 5 at once"); honor an explicit number.
-   - **Serialize overlaps.** Two issues that touch the same subsystem, or one that depends on another's unlanded work, never run concurrently - queue the dependent one behind the first and dispatch it when the lane frees. Independent issues fill the remaining lanes freely.
+   - **Serialize only true dependencies.** Same-file or same-subsystem overlap alone does not block concurrent work; queue an issue only for a true semantic dependency, shared mutable external state, incompatible concurrent migration, or another concrete condition that makes independent progress or reconciliation unsafe. Independent issues fill the remaining lanes freely.
 4. For each issue you dispatch (up to the cap):
    a. Move the card at dispatch: `bin/cs-board.sh start <project> <item-id>` (Ready -> In Progress). Do this only once you are actually spawning the soldier, so the board reflects real work.
    b. Scaffold the brief WITH the issue link: `bin/cs-brief.sh <task-id> <project> --issue <n>`, then replace `{TASK}` with the issue's scope, acceptance criteria, and context. The `--issue` flag bakes in the hard `Closes #<n>` PR requirement; do not remove it.
    c. Spawn: `bin/cs-spawn.sh <task-id> <project-dir> --issue <n> [--model .. --effort ..]` (section 4 chooses model/effort). Use a stable task id derived from the issue, e.g. `<project>-<n>`.
-   d. Record the work item in the backlog with the issue link; note the serialized dependents as queued/blocked.
+   d. Record the work item in the backlog with the issue link; note any dependents gated by a concrete condition as queued/blocked.
 5. Supervise every lane under section 8 (the foreground checkpoint). As a lane finishes and tears down, pull the next Ready/queued issue into it and repeat from step 4 until the column is empty or the boss says stop.
 
 ## Landing

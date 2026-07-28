@@ -411,6 +411,32 @@ cs_pr_poll_revoke_final() {
   return "$failed"
 }
 
+# cs_pr_poll_retire <state> <id> <template> <provider> <url> <number>
+# Retire one task's merge poll after its merged result was durably queued so the same merge is not re-notified on every later cycle.
+# Revalidation binds the poll identity across the GitHub query, so a poll re-armed for a different PR while that query is in flight is detected and left alone.
+# The final validate-to-unlink step is not atomic, so a replacement published in that microsecond window could still be removed.
+# This sequence requires a merged PR and a newly armed PR for the same task within microseconds, which the lifecycle does not produce because a merged PR lands and tears down rather than re-arming.
+# The worst case is one missed merge notification, teardown independently verifies landing with GitHub so no unlanded work can be discarded, and re-arming recovers it.
+# Removal order matches cs_pr_poll_revoke_final: the runnable name dies first, so a partial removal can never leave an executable check behind.
+# Task metadata, including pr= and pr_head=, is never touched; teardown owns that.
+# Orphaned data or registration sidecars left by a crash mid-removal are unreachable because the watcher iterates *.check.sh, and teardown cleans them.
+cs_pr_poll_retire() {
+  local state=$1 id=$2 template=$3 provider=$4 url=$5 number=$6
+  local check registration data failed=0
+  cs_pr_poll_artifacts_valid "$state" "$id" "$template" || return 1
+  [ "$CS_PR_DATA_PROVIDER" = "$provider" ] || return 1
+  [ "$CS_PR_DATA_URL" = "$url" ] || return 1
+  [ "$CS_PR_DATA_NUMBER" = "$number" ] || return 1
+  check="$state/$id.check.sh"
+  registration="$state/$id.pr-poll-registration"
+  data="$state/$id.pr-poll"
+  rm -f -- "$check" || failed=1
+  rm -f -- "$registration" || failed=1
+  rm -f -- "$data" || failed=1
+  [ ! -e "$check" ] && [ ! -L "$check" ] || failed=1
+  return "$failed"
+}
+
 cs_pr_poll_prepare() {
   local state=$1 id=$2 provider=$3 url=$4 host=$5 path=$6 number=$7 template=$8
   cs_pr_task_id_valid "$id" || return 1

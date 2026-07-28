@@ -38,6 +38,7 @@ The supervision wait shape is the bounded foreground checkpoint ([`docs/supervis
 
 The watcher executes a task's `state/<id>.check.sh` only from a hash-validated private snapshot bound by `bin/cs-check-register.sh`; everything else is rejected without execution.
 The PR merge poll is byte-static: `bin/cs-pr-check.sh` records canonical `pr=`/`pr_head=` and publishes a validated data sidecar that `bin/cs-pr-poll.sh` (a trusted repository script) revalidates on every dispatch.
+After a merged result is durably queued, the watcher retires that poll's runnable check and sidecars, while task metadata remains for teardown and a re-armed different PR stays protected by identity revalidation.
 GitHub only; GitLab URLs are refused loudly at arm time.
 
 ## Two task shapes, three delivery modes
@@ -49,7 +50,7 @@ Scout tasks leave a report at `data/<id>/report.md`, never push, and their scrat
 ## Capos
 
 A capo is a soldier with an isolated consigliere home (`CS_HOME`) and a charter, not a second architecture: own data/state/config/projects, own session lock, own watcher, workspace `capo-<id>`.
-`bin/cs-home-seed.sh` provisions transactionally and sweeps (fast-forward + liveness respawn) at bootstrap; `data/capos.md` is the routing table; marked requests travel with the byte-compatible `from-consigliere` kind and a `corr=` token, with parent-owned expectations in `bin/cs-pending-reply-lib.sh`.
+`bin/cs-home-seed.sh` provisions transactionally and sweeps (fast-forward plus liveness respawn for recorded endpoints, reporting missing endpoints and staying silent for seeded homes without metadata) at bootstrap; `data/capos.md` is the routing table; marked requests travel with the byte-compatible `from-consigliere` kind and a `corr=` token, with parent-owned expectations in `bin/cs-pending-reply-lib.sh`.
 Inheritance is deliberately tiny: `data/boss-shared.md` (read-only) and the backlog-backend choice (`bin/cs-inherit-lib.sh`).
 
 ## Away mode
