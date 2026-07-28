@@ -61,6 +61,18 @@ assert_grep 'report.md' "$B" "report deliverable named"
 assert_grep 'Never push to any remote and never open a PR' "$B" "scout forbids push"
 pass "scout brief scaffold"
 
+# Unmarked-message rule: an ordinary soldier must recognize the boss typing into
+# its pane AND still close the decision key, because the keyed status fold keeps
+# a needs-decision open in every home above until a matching resolved line lands.
+for t in t1 t2 t3 t4; do
+  B="$TMP/data/$t/brief.md"
+  assert_grep 'A message WITHOUT that marker is the boss typing directly into your pane' \
+    "$B" "$t brief names unmarked boss intervention"
+  assert_grep 'stays open above you until you close it' \
+    "$B" "$t brief still requires the resolved line after a direct boss answer"
+done
+pass "ship and scout briefs carry the unmarked-boss-message rule"
+
 # herdr-lab section
 "$BIN" t5 alpha --herdr-lab >/dev/null
 B="$TMP/data/t5/brief.md"
