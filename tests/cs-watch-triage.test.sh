@@ -7,7 +7,8 @@
 # offline (fake herdr + fake cs-crew-state.sh) to assert the behavioral
 # contract: provably-working no-verb wakes absorbed (no exit, no queue entry,
 # suppressor advanced, beacon fresh), stopped-soldier no-verb wakes surfaced
-# (queue + exit), provably-working stale panes absorbed-then-escalated past the
+# (queue + exit), the coalescing grace chosen by whether the first scan already
+# carries a boss verb, provably-working stale panes absorbed-then-escalated past the
 # threshold with the demand-deep-inspection marker at the consecutive-wedge
 # threshold, declared pauses absorbed on the long bounded cadence, native
 # blocked panes surfaced immediately, the heartbeat backstop fail-safe, check
@@ -126,6 +127,43 @@ test_actionable_signal_surfaced() {
     || fail "actionable signal was not queued"
   [ -s "$state/.hb-surfaced-task" ] || fail "actionable signal did not record the surfaced marker"
   pass "boss-relevant signal is surfaced (queue + exit) and marked surfaced"
+}
+
+# --- the coalescing grace is chosen by what the first scan already proves ------
+
+test_boss_verb_signal_takes_the_short_grace() {
+  local dir state fakebin out status_file pid
+  dir=$(make_case boss-verb-short-grace); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  status_file="$state/task.status"
+  printf 'needs-decision: pick A or B\n' > "$status_file"
+  # A boss-relevant verb is already present, so the re-scan cannot change the
+  # verdict and only the turn-end coalescing is still worth waiting for. With a
+  # long no-verb grace deliberately configured, exiting inside the short window
+  # proves the grace was selected by the verb and not applied unconditionally.
+  watch_bg "$state" "$fakebin" "$out" CS_SIGNAL_GRACE=30 CS_SIGNAL_GRACE_ACTIONABLE=1
+  pid=$!
+  wait_for_exit "$pid" 60 \
+    || fail "a boss-relevant signal waited the long no-verb grace instead of the short one"
+  grep -F "signal: $status_file" "$out" >/dev/null || fail "watcher did not print the actionable signal reason"
+  pass "a signal already carrying a boss verb takes the short coalescing grace"
+}
+
+test_no_verb_signal_keeps_the_long_grace() {
+  local dir state fakebin out status_file pid
+  dir=$(make_case no-verb-long-grace); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  status_file="$state/task.status"
+  printf 'working: compiling step 2\n' > "$status_file"
+  # A no-verb signal from a soldier that is NOT provably working WILL surface,
+  # but only after the full grace: that window is what gives a boss-relevant
+  # line time to land and turn a costly triage into a single wake. Still being
+  # alive well inside the window is the assertion.
+  export CS_FAKE_CREW_STATE='state: unknown · source: none · stopped turn'
+  watch_bg "$state" "$fakebin" "$out" CS_SIGNAL_GRACE=30 CS_SIGNAL_GRACE_ACTIONABLE=1
+  pid=$!
+  wait_live "$pid" 30 || fail "a no-verb signal surfaced early; the long grace was not preserved"
+  reap "$pid"
+  unset CS_FAKE_CREW_STATE
+  pass "a no-verb signal keeps the full grace so a late boss verb can still coalesce"
 }
 
 test_terminal_stale_surfaced() {
@@ -795,6 +833,8 @@ test_turn_ended_provably_working_absorbed
 test_turn_ended_not_working_surfaced
 test_working_note_not_working_surfaced
 test_actionable_signal_surfaced
+test_boss_verb_signal_takes_the_short_grace
+test_no_verb_signal_keeps_the_long_grace
 test_terminal_stale_surfaced
 test_live_headless_scout_stale_absorbed
 test_terminal_headless_scout_surfaced
