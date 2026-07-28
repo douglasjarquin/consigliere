@@ -1056,9 +1056,10 @@ while :; do
         # A merged PR is terminal for its poll: retire the poll only AFTER the
         # wake is durably queued, so the merge is never lost, and never
         # re-notified on every later cycle until teardown. Retirement
-        # revalidates the same identity, so a poll re-armed for another PR in
-        # the meantime stays armed. A failure here is not fatal - the merge is
-        # already queued and teardown still owns full cleanup.
+        # revalidates the same identity before removal. A replacement published
+        # after validation can still race the unlink; see cs_pr_poll_retire for
+        # the bounded lifecycle limitation. A failure here is not fatal - the
+        # merge is already queued and teardown still owns full cleanup.
         if [ -n "$pr_poll_id" ] && [ "$out" = merged ]; then
           cs_pr_poll_retire "$STATE" "$pr_poll_id" "$SCRIPT_DIR/cs-pr-poll.sh" \
             "$provider" "$url" "$number" || true

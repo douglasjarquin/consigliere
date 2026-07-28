@@ -1,6 +1,7 @@
 ---
 name: ask-user-authority
 description: Agent-only decision procedure for ask-user findings. Use before deciding any ask-user finding, regardless of the project's yolo posture, to distinguish corrections within accepted intent from product or engineering contract expansion that requires the boss.
+user-invocable: false
 ---
 
 # ask-user-authority
