@@ -1,12 +1,13 @@
 # Codex verified facts
 
-Verified against codex-cli 0.139-0.144 (upstream firstmate evidence) and re-verified live on 2026-07-22 (spawn, native herdr agent detection, steer).
+Verified against codex-cli 0.139-0.144 (upstream firstmate evidence) and re-verified live on 2026-07-27 with `codex --version` returning `codex-cli 0.145.0`.
+`codex debug models` reported `low,medium,high,xhigh,max,ultra` for both `gpt-5.6-sol` and `gpt-5.6-terra`.
 Re-verify after codex upgrades; `bin/cs-bootstrap.sh` checks presence only, not version.
 
 ## Launch template (the only one)
 
 ```
-codex [--model <m>] [-c 'model_reasoning_effort="<low|medium|high|xhigh>"'] \
+codex [--model <m>] [-c 'model_reasoning_effort="<low|medium|high|xhigh|max|ultra>"'] \
   --dangerously-bypass-approvals-and-sandbox \
   -c "notify=[\"bash\",\"-c\",\"touch state/<id>.turn-ended\"]" \
   "$(bin/cs-operational-input.sh encode launch-brief < data/<id>/brief.md)"
@@ -15,7 +16,7 @@ codex [--model <m>] [-c 'model_reasoning_effort="<low|medium|high|xhigh>"'] \
 - The typed `launch-brief` positional prompt starts the supervised interactive session.
 - `--dangerously-bypass-approvals-and-sandbox` gives the unattended soldier full autonomy (no trust dialog).
 - The `notify` hook fires at every turn end, touching the task's turn-ended signal for the watcher.
-- Effort vocabulary: `low|medium|high|xhigh`; `max` is not in the bundled catalog and is refused by cs-spawn rather than passed.
+- Effort vocabulary: `low|medium|high|xhigh|max|ultra`; Codex supports all six levels and cs-spawn passes the selected value.
 - A capo launch omits the notify hook (a capo is a supervisor, not a supervised turn-taker) and prefixes `CS_HOME=<home>`.
 
 ## Hooks (.codex/hooks.json)

@@ -70,23 +70,23 @@ pass "codex root: harness=codex, codex notify launch, no settings file"
 
 cat > "$HOME_DIR/config/dispatch-policy" <<'EOF'
 # harness kind model effort
-codex scout gpt-5.6-sol xhigh
-codex ship gpt-5.6-terra high
+codex scout gpt-5.6-sol max
+codex ship gpt-5.6-terra ultra
 claude scout opus max
 claude ship sonnet medium
 EOF
 
 launch=$(spawn_one codex t-policy-codex-scout --scout)
 [ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-scout.meta" model)" = gpt-5.6-sol ] || fail "codex scout policy model"
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-scout.meta" effort)" = xhigh ] || fail "codex scout policy effort"
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-scout.meta" effort)" = max ] || fail "codex scout policy effort"
 assert_contains "$launch" "--model 'gpt-5.6-sol'" "codex scout policy model launch"
-assert_contains "$launch" "model_reasoning_effort=\"xhigh\"" "codex scout policy effort launch"
+assert_contains "$launch" "-c 'model_reasoning_effort=\"max\"'" "codex scout policy max effort launch"
 
 launch=$(spawn_one codex t-policy-codex-ship)
 [ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-ship.meta" model)" = gpt-5.6-terra ] || fail "codex ship policy model"
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-ship.meta" effort)" = high ] || fail "codex ship policy effort"
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-ship.meta" effort)" = ultra ] || fail "codex ship policy effort"
 assert_contains "$launch" "--model 'gpt-5.6-terra'" "codex ship policy model launch"
-assert_contains "$launch" "model_reasoning_effort=\"high\"" "codex ship policy effort launch"
+assert_contains "$launch" "-c 'model_reasoning_effort=\"ultra\"'" "codex ship policy ultra effort launch"
 
 launch=$(spawn_one claude t-policy-claude-scout --scout)
 [ "$(cs_meta_get "$HOME_DIR/state/t-policy-claude-scout.meta" model)" = opus ] || fail "claude scout policy model"
@@ -136,5 +136,19 @@ fi
 assert_contains "$output" "invalid codex effort 'too-much'" "malformed policy error is specific"
 assert_absent "$HOME_DIR/state/t-policy-invalid.meta" "malformed policy writes no metadata"
 pass "malformed dispatch policy blocks dispatch"
+
+: > "$HOME_DIR/config/dispatch-policy"
+mkdir -p "$HOME_DIR/data/t-claude-ultra"
+printf 'implement the fixture\n' > "$HOME_DIR/data/t-claude-ultra/brief.md"
+if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude \
+  CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
+  CS_CLAUDE_JSON="$TMP/claude.json" \
+  CS_FAKE_SPAWN_WORKTREE="$TMP/wt-claude-ultra" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-claude-ultra" \
+  "$SPAWN" t-claude-ultra "$REPO" --effort ultra 2>&1); then
+  fail "claude ultra must reject spawn"
+fi
+assert_contains "$output" "claude does not accept effort=ultra; choose default|low|medium|high|xhigh|max" "claude ultra error is specific"
+assert_absent "$HOME_DIR/state/t-claude-ultra.meta" "claude ultra writes no metadata"
+pass "claude ultra blocks dispatch"
 
 pass "cs-spawn harness resolution and launch"

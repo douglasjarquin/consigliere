@@ -44,7 +44,7 @@ One non-comment line has exactly four whitespace-separated fields:
 `harness` is `codex` or `claude`.
 `kind` is `scout` for planning, investigations, and audits, `ship` for implementation, or `capo` for a persistent dispatcher.
 `model` is `default` or an identifier containing letters, numbers, `.`, `_`, `:`, and `-`.
-`effort` is `default`, `low`, `medium`, `high`, or `xhigh` for either harness, with `max` additionally supported by Claude.
+`effort` is `default`, `low`, `medium`, `high`, `xhigh`, or `max` for either harness, with `ultra` additionally supported by Codex.
 Blank lines and lines whose first field begins with `#` are ignored.
 Every record is validated and duplicate `<harness> <kind>` entries stop dispatch with an error.
 

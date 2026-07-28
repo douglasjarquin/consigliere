@@ -4,12 +4,11 @@
 # Usage: cs-spawn.sh <task-id> <project-dir> [--model <name>] [--effort <level>] [--scout] [--base <ref>]
 #        cs-spawn.sh <task-id> <capo-home> --capo [--model <name>] [--effort <level>]
 #
-#   --model <name> and --effort <low|medium|high|xhigh> override the optional
+#   --model <name> and --effort <default|low|medium|high|xhigh|max|ultra> override the optional
 #   config/dispatch-policy entry for the resolved harness and task kind.
 #   The policy's exact format is in docs/configuration.md.
-#   The codex config schema uses model_reasoning_effort with
-#   low|medium|high|xhigh; max is omitted rather than passed as an unsupported
-#   value.
+#   Codex accepts max and ultra through model_reasoning_effort; default omits it.
+#   Claude accepts max but not ultra.
 #   --scout marks the task kind=scout (report deliverable, scratch worktree).
 #   --headless (scout only) runs `codex exec` instead of the interactive TUI:
 #     fire-and-forget for bounded investigations. Turn-end is process exit;
@@ -167,8 +166,8 @@ case "$ID" in
 esac
 cs_spawn_apply_dispatch_policy
 if ! cs_harness_effort_valid "$HARNESS" "$EFFORT"; then
-  case "$EFFORT" in
-    max) echo "error: $HARNESS does not accept effort=max; choose low|medium|high|xhigh" >&2 ;;
+  case "$HARNESS:$EFFORT" in
+    claude:ultra) echo "error: claude does not accept effort=ultra; choose default|low|medium|high|xhigh|max" >&2 ;;
     *) echo "error: unknown effort '$EFFORT'" >&2 ;;
   esac
   exit 2

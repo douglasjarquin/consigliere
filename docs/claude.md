@@ -27,7 +27,7 @@ claude [--model <m>] [--effort <low|medium|high|xhigh|max>] \
   tree and would not be soldier-isolated. `--settings <file>` scopes the hooks to
   the one launch. (`--settings` also accepts a raw JSON string; a file avoids
   shell-escaping the JSON inside the pane launch line.)
-- Effort vocabulary: `low|medium|high|xhigh|max` (claude accepts `max`, unlike codex).
+- Effort vocabulary: `low|medium|high|xhigh|max`; Claude supports `max` but not `ultra`.
 - A capo launch omits the turn-end wiring (a capo is a supervisor, not a supervised
   turn-taker) and prefixes `CS_HOME=<home>`.
 - Headless scout: `claude -p "<brief>"` (process exit = turn end), the analog of `codex exec`.
