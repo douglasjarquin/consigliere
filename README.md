@@ -93,6 +93,15 @@ checks cannot drift from what you run before pushing:
 | Repo invariants | `git ls-files -- .env data state config projects .no-mistakes` prints nothing; tracked symlinks stay symlinks |
 | Coverage guard | `bin/cs-test-run.sh --check-coverage` (proves every `tests/*.test.sh` is in exactly one lane) |
 
+Each lane except repo invariants runs only when the change can affect it.
+`bin/cs-ci-lanes.sh` owns the path-to-lane map and prints the decision for a diff
+(`bin/cs-ci-lanes.sh <base> <head>`, or `--paths-from -` for a path list).
+Repo invariants stay unconditional, because any commit can track a boss-private
+path or flatten a tracked symlink.
+The gate is a job-level `if:` rather than a `paths:` filter, so a skipped lane
+still reports its check instead of hanging pending, and an undeterminable change
+set (force-push, first push, shallow clone) fails open and runs everything.
+
 Pinned-tool owners: ShellCheck version in `bin/cs-lint.sh`; herdr version in
 `bin/cs-install-herdr.sh` (documented in `docs/herdr.md`); herdr protocol floor
 in `bin/cs-herdr-lib.sh` (`CS_HERDR_MIN_PROTOCOL`), which the installer reads.
