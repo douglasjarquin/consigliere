@@ -43,6 +43,14 @@
 #          guarantees as CAPO_LIVENESS: lines. An inconclusive probe is never
 #          acted on: a false-dead reading would spawn a duplicate supervisor,
 #          while a false-alive reading merely waits one more sweep.
+#          A kind=capo meta with no recorded endpoint is a broken record: it is
+#          reported as a CAPO_LIVENESS: line for the recovery path rather than
+#          skipped invisibly, and never respawned, because there is no endpoint
+#          to probe and AGENTS.md section 5 forbids sweeping herdr by name to
+#          find one. A registered capo with no meta at all is NOT reported here:
+#          that is the ordinary seeded-but-not-yet-launched state, and this
+#          sweep cannot distinguish it from a lost record without inventing a
+#          launch marker for a case that has never occurred.
 #       Silent output means every registered capo is current and running.
 #
 # CS_CAPOS_ROOT overrides the capo home pool root (default
@@ -878,8 +886,12 @@ sweep_liveness() {
     id=$(basename "$meta" .meta)
     pane=$(grep '^pane=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
     # A meta with no recorded pane is left to the recovery path (AGENTS.md
-    # section 5 / capo-provisioning); there is no endpoint here to probe.
-    [ -n "$pane" ] || continue
+    # section 5 / capo-provisioning); there is no endpoint here to probe. It is
+    # reported rather than skipped silently so the accounting stays complete.
+    if [ -z "$pane" ]; then
+      echo "CAPO_LIVENESS: capo $id: skipped: local record has no endpoint (recover via capo-provisioning)"
+      continue
+    fi
     if [ "$herdr_ok" != 1 ]; then
       echo "CAPO_LIVENESS: capo $id: skipped: herdr unreachable"
       continue

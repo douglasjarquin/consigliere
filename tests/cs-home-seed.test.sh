@@ -188,4 +188,26 @@ assert_contains "$out" "CAPO_LIVENESS: capo alpha-capo: respawn failed" "failed 
 assert_present "$HOME_DIR/state/alpha-capo.meta" "failed respawn must restore the meta record"
 pass "liveness sweep preserves the meta record when respawn fails"
 
+# 9e. a registered capo with no live record at all is the ordinary
+# seeded-but-not-yet-launched state: it stays silent and is never respawned.
+: > "$TMP/spawn.log"
+mv "$HOME_DIR/state/alpha-capo.meta" "$TMP/alpha-capo.meta.away"
+out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "unrecorded sweep failed: $out"
+[ -z "$out" ] || fail "a seeded-but-unlaunched capo must not produce a liveness line, got: $out"
+[ ! -s "$TMP/spawn.log" ] || fail "a capo with no local record must never be blind-respawned"
+mv "$TMP/alpha-capo.meta.away" "$HOME_DIR/state/alpha-capo.meta"
+pass "sweep stays silent for a registered capo that has no live record yet"
+
+# 9f. a live record with no recorded endpoint is reported, not skipped silently
+: > "$TMP/spawn.log"
+grep -v '^pane=' "$HOME_DIR/state/alpha-capo.meta" > "$TMP/alpha-nopane.meta"
+cp "$HOME_DIR/state/alpha-capo.meta" "$TMP/alpha-capo.meta.orig"
+cp "$TMP/alpha-nopane.meta" "$HOME_DIR/state/alpha-capo.meta"
+out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "no-endpoint sweep failed: $out"
+assert_contains "$out" "CAPO_LIVENESS: capo alpha-capo: skipped: local record has no endpoint" \
+  "a record with no endpoint is reported"
+[ ! -s "$TMP/spawn.log" ] || fail "a record with no endpoint must never trigger a respawn"
+cp "$TMP/alpha-capo.meta.orig" "$HOME_DIR/state/alpha-capo.meta"
+pass "sweep reports a live record that has no endpoint"
+
 pass "cs-home-seed provisioning, rollback, and sweep behavior"

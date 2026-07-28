@@ -1028,6 +1028,7 @@ while :; do
     for c in "$STATE"/*.check.sh; do
       [ -e "$c" ] || continue
       id=$(basename "$c" .check.sh)
+      pr_poll_id=
       if cs_pr_poll_artifacts_valid "$STATE" "$id" "$SCRIPT_DIR/cs-pr-poll.sh"; then
         provider=$CS_PR_DATA_PROVIDER
         url=$CS_PR_DATA_URL
@@ -1037,6 +1038,7 @@ while :; do
         run_check_capture "$SCRIPT_DIR/cs-pr-poll.sh" --validated \
           "$provider" "$url" "$host" "$path" "$number" || exit 1
         out=$CS_CHECK_RESULT
+        pr_poll_id=$id
       elif cs_custom_check_snapshot_prepare "$STATE" "$id"; then
         custom_snapshot=$CS_CUSTOM_CHECK_SNAPSHOT
         run_check_capture "$custom_snapshot" || exit 1
@@ -1051,6 +1053,16 @@ while :; do
         reason="check: $c: $out"
         cs_wake_append check "$c" "$reason" || exit 1
         touch "$STATE/.last-check"
+        # A merged PR is terminal for its poll: retire the poll only AFTER the
+        # wake is durably queued, so the merge is never lost, and never
+        # re-notified on every later cycle until teardown. Retirement
+        # revalidates the same identity, so a poll re-armed for another PR in
+        # the meantime stays armed. A failure here is not fatal - the merge is
+        # already queued and teardown still owns full cleanup.
+        if [ -n "$pr_poll_id" ] && [ "$out" = merged ]; then
+          cs_pr_poll_retire "$STATE" "$pr_poll_id" "$SCRIPT_DIR/cs-pr-poll.sh" \
+            "$provider" "$url" "$number" || true
+        fi
         wake "$reason"
       fi
     done
