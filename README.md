@@ -11,20 +11,68 @@ Consigliere is a from-scratch personal rewrite of [Firstmate](https://github.com
 - one thin harness layer (`bin/cs-harness-lib.sh`), one supervision protocol (bounded foreground checkpoint), one Stop-hook backstop
 - ~9k lines of bash instead of firstmate's ~29k
 
+## Quick start
+
+Requirements: `codex` or `claude`, `herdr` (protocol >= 16), `jq`, `git`, `gh` + `gh-axi` (authenticated). Optional: the other harness, `tasks-axi` (backlog), `no-mistakes` (delivery pipeline), `lavish-axi`, `chrome-devtools-axi`.
+
+1. **Clone the repo.**
+
+   ```
+   git clone https://github.com/douglasjarquin/consigliere.git
+   ```
+
+2. **Install herdr.** Either use your own install, or take CI's pinned, SHA-256-verified build (`bin/cs-install-herdr.sh` is the single owner of that pin; `docs/herdr.md` documents it):
+
+   ```
+   bin/cs-install-herdr.sh ~/.local/bin
+   ```
+
+3. **Install the rest** - `jq`, `git`, `gh`, `gh-axi`, and at least one harness (`codex` or `claude`) - then authenticate GitHub:
+
+   ```
+   gh auth login
+   ```
+
+4. **Check the machine.** `bin/cs-doctor.sh` reports every dependency, its version, the herdr server, and GitHub auth, and suggests an install channel for each gap. It only checks - it never installs anything, since the same tool arrives by brew, npm, or a native installer depending on the machine:
+
+   ```
+   bin/cs-doctor.sh
+   ```
+
+   It exits nonzero while any required dependency or service check is failing.
+
+5. **Start the herdr server** (consigliere spawns every soldier into a herdr workspace, so this comes first - without it the session refuses to dispatch):
+
+   ```
+   herdr
+   ```
+
+6. **From inside a herdr pane, enter the repo and launch the harness:**
+
+   ```
+   cd consigliere
+   codex     # or: claude
+   ```
+
+7. **Let the first session settle.** It runs `bin/cs-session-start.sh` and reports anything still missing or unauthenticated (the same required/optional inventory `cs-doctor.sh` reads). It detects only - it asks before installing anything.
+
+8. **Give it a project.** Consigliere never works a repo it does not know about; tell it to add or create one (it owns the clone into `projects/`, the registry entry, and the delivery mode).
+
 ## Use
 
 ```
+herdr                 # the terminal runtime; soldiers live in its workspaces
 cd consigliere
-codex     # or: claude
+codex                 # or: claude
 ```
 
 `AGENTS.md` is the always-loaded operating contract (claude loads it via the `CLAUDE.md` symlink). The session starts with `bin/cs-session-start.sh` (one digest: lock, bootstrap, wake queue, context, fleet state, supervision block). The root harness is auto-detected (`CLAUDECODE=1` ⇒ claude, else codex; `config/harness` overrides).
 
-Requirements: `codex` or `claude`, `herdr` (protocol >= 16), `jq`, `gh` + `gh-axi` (authenticated). Optional: the other harness, `tasks-axi` (backlog), `no-mistakes` (delivery pipeline), `lavish-axi`, `chrome-devtools-axi`.
+Then talk to it in plain language: describe the work, name the project when it is ambiguous, and it dispatches, supervises, and brings back PRs for your word. It never merges without you (unless a project is explicitly set to `yolo`), never writes to a project itself, and never tears down unlanded work.
 
 ## Layout
 
-- `bin/` - `cs-*` scripts; read each header before first use
+- `bin/` - `cs-*` scripts; read each header before first use (`bin/cs-doctor.sh` for a dependency preflight)
 - `skills/` - agent-loaded procedures (afk, rundown, the-books, stow, capo-provisioning, upstream-review, ...)
 - `docs/` - architecture, configuration schema (owner), supervision protocol, verified herdr/codex/claude facts
 - `tests/` - colocated behavior tests (`bash tests/<name>.test.sh`, or `bin/cs-test-run.sh --portable`; live suites opt in via `CS_TEST_HERDR_LIVE=1` / `CS_TEST_CODEX_LIVE=1`)
@@ -44,6 +92,15 @@ checks cannot drift from what you run before pushing:
 | Real Herdr behavior | `CS_TEST_HERDR_LIVE=1 bin/cs-test-run.sh --herdr` (needs a real herdr + a running default session for the lab tripwire) |
 | Repo invariants | `git ls-files -- .env data state config projects .no-mistakes` prints nothing; tracked symlinks stay symlinks |
 | Coverage guard | `bin/cs-test-run.sh --check-coverage` (proves every `tests/*.test.sh` is in exactly one lane) |
+
+Each lane except repo invariants runs only when the change can affect it.
+`bin/cs-ci-lanes.sh` owns the path-to-lane map and prints the decision for a diff
+(`bin/cs-ci-lanes.sh <base> <head>`, or `--paths-from -` for a path list).
+Repo invariants stay unconditional, because any commit can track a boss-private
+path or flatten a tracked symlink.
+The gate is a job-level `if:` rather than a `paths:` filter, so a skipped lane
+still reports its check instead of hanging pending, and an undeterminable change
+set (force-push, first push, shallow clone) fails open and runs everything.
 
 Pinned-tool owners: ShellCheck version in `bin/cs-lint.sh`; herdr version in
 `bin/cs-install-herdr.sh` (documented in `docs/herdr.md`); herdr protocol floor

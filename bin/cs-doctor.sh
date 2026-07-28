@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+# cs-doctor.sh - preflight dependency report for a human, before a first session.
+#
+# CHECKS ONLY. This script never installs, upgrades, configures, or authenticates
+# anything: the same dependency legitimately arrives by brew, npm, a native
+# installer, or a hand-built binary, and consigliere has no business overriding
+# how this machine is set up. It reports what is present, what version, what is
+# missing, and suggests an install channel for each gap.
+#
+# Relationship to session start: bin/cs-bootstrap.sh performs the same required/
+# optional detection from inside a live session, terse and machine-readable, as a
+# dispatch gate. cs-doctor.sh is the human-readable superset run BEFORE that -
+# versions, the herdr server, gh auth, and the contributor tools bootstrap stays
+# silent about. Both read one inventory (bin/cs-deps-lib.sh), so they cannot
+# disagree about what consigliere depends on.
+#
+# Usage:
+#   cs-doctor.sh            print the report
+#   cs-doctor.sh --help     print this usage
+#
+# Exit status:
+#   0  every required dependency is present and every service check passed
+#   1  at least one required dependency or service check failed; do not dispatch
+# Optional and contributor gaps never fail the run - they are reported as the
+# named capability that is unavailable.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/cs-root-lib.sh
+. "$SCRIPT_DIR/cs-root-lib.sh"
+cs_resolve_root
+# shellcheck source=bin/cs-deps-lib.sh
+. "$SCRIPT_DIR/cs-deps-lib.sh"
+# shellcheck source=bin/cs-herdr-lib.sh
+. "$SCRIPT_DIR/cs-herdr-lib.sh"
+
+case "${1:-}" in
+  -h|--help)
+    # Print the header comment block itself, so help can never drift from it.
+    awk 'NR > 1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
+    exit 0
+    ;;
+  '') ;;
+  *)
+    printf 'cs-doctor.sh: unknown argument "%s" (see --help)\n' "$1" >&2
+    exit 2
+    ;;
+esac
+
+# Stock macOS ships bash 3.2; every script in this repo stays compatible with it,
+# so that is the floor rather than whatever the developer's newer bash provides.
+BASH_FLOOR_MAJOR=3
+BASH_FLOOR_MINOR=2
+
+PROBLEMS=0
+
+say() { printf '%s\n' "$*"; }
+heading() { printf '\n%s\n' "$1"; }
+
+# report <marker> <name> <version-or-dash> <note>
+# The marker column is as wide as the widest marker ("MISSING") so every column
+# stays aligned and the report is greppable line by line.
+report() {
+  printf '  %-7s %-21s %-12s %s\n' "$1" "$2" "${3:--}" "$4"
+}
+
+suggest() {
+  printf '          -> %s\n' "$1"
+}
+
+problem() {
+  PROBLEMS=$((PROBLEMS + 1))
+}
+
+# --- header -------------------------------------------------------------------
+
+say 'consigliere doctor - dependency preflight (checks only; installs nothing)'
+say "repo   $CS_ROOT"
+if [ -n "${CS_HARNESS_OVERRIDE:-}" ]; then
+  say "harness $(cs_harness_detect_root) (from CS_HARNESS_OVERRIDE)"
+elif [ -f "$CONFIG/harness" ]; then
+  say "harness $(cs_harness_detect_root) (from config/harness)"
+else
+  say "harness $(cs_harness_detect_root) (auto-detected; config/harness overrides)"
+fi
+
+# --- required -----------------------------------------------------------------
+
+heading 'REQUIRED - consigliere must not dispatch without these'
+while IFS= read -r tool; do
+  [ -n "$tool" ] || continue
+  if version=$(cs_deps_version "$tool"); then
+    report ok "$tool" "$version" "$(cs_deps_purpose "$tool")"
+  else
+    report MISSING "$tool" - "$(cs_deps_purpose "$tool")"
+    suggest "$(cs_deps_hint "$tool")"
+    problem
+  fi
+done <<EOF
+$(cs_deps_tools required)
+EOF
+
+# --- services -----------------------------------------------------------------
+#
+# Present-on-PATH is not the same as usable: herdr needs a reachable server at or
+# above the protocol floor its runtime owner gates on, and gh needs a live login.
+
+heading 'SERVICES - a present tool is not yet a working one'
+
+if command -v herdr >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  session=$(cs_herdr_session)
+  status=$(cs_herdr status --json 2>/dev/null || true)
+  if [ -z "$status" ]; then
+    report MISSING "herdr server" - "unreachable for session $session"
+    suggest "start it by running: herdr"
+    problem
+  else
+    running=$(printf '%s' "$status" | jq -r '.server.running // false')
+    proto=$(printf '%s' "$status" | jq -r '.server.protocol // 0')
+    if [ "$running" != true ]; then
+      report MISSING "herdr server" - "not running for session $session"
+      suggest "start it by running: herdr"
+      problem
+    elif ! [ "$proto" -ge "$CS_HERDR_MIN_PROTOCOL" ] 2>/dev/null; then
+      report MISSING "herdr server" "protocol $proto" "below the required $CS_HERDR_MIN_PROTOCOL (docs/herdr.md)"
+      suggest "$(cs_deps_hint herdr)"
+      problem
+    else
+      report ok "herdr server" "protocol $proto" "running for session $session"
+    fi
+  fi
+else
+  report SKIP "herdr server" - 'not checked: herdr or jq is missing'
+fi
+
+if command -v gh >/dev/null 2>&1; then
+  if gh auth status >/dev/null 2>&1; then
+    report ok "gh auth" - 'authenticated'
+  else
+    report MISSING "gh auth" - 'gh is installed but not logged in'
+    suggest 'gh auth login'
+    problem
+  fi
+else
+  report SKIP "gh auth" - 'not checked: gh is missing'
+fi
+
+if [ "${BASH_VERSINFO[0]}" -gt "$BASH_FLOOR_MAJOR" ] ||
+  { [ "${BASH_VERSINFO[0]}" -eq "$BASH_FLOOR_MAJOR" ] &&
+    [ "${BASH_VERSINFO[1]}" -ge "$BASH_FLOOR_MINOR" ]; }; then
+  report ok bash "${BASH_VERSION%%(*}" "at or above the ${BASH_FLOOR_MAJOR}.${BASH_FLOOR_MINOR} floor"
+else
+  report MISSING bash "${BASH_VERSION%%(*}" "below the required ${BASH_FLOOR_MAJOR}.${BASH_FLOOR_MINOR}"
+  suggest 'brew install bash, or run under a newer bash'
+  problem
+fi
+
+# --- optional -----------------------------------------------------------------
+
+heading 'OPTIONAL - absent means one capability is unavailable, nothing more'
+while IFS= read -r tool; do
+  [ -n "$tool" ] || continue
+  if version=$(cs_deps_version "$tool"); then
+    report ok "$tool" "$version" "$(cs_deps_purpose "$tool")"
+  else
+    report absent "$tool" - "$(cs_deps_purpose "$tool")"
+    suggest "$(cs_deps_hint "$tool")"
+  fi
+done <<EOF
+$(cs_deps_tools optional)
+EOF
+
+# --- contributor --------------------------------------------------------------
+
+heading 'CONTRIBUTOR - only needed to change this repo (lint, tests, push events)'
+pinned_shellcheck=$("$SCRIPT_DIR/cs-lint.sh" --required-version 2>/dev/null || true)
+while IFS= read -r tool; do
+  [ -n "$tool" ] || continue
+  if version=$(cs_deps_version "$tool"); then
+    if [ "$tool" = shellcheck ] && [ -n "$pinned_shellcheck" ] &&
+      [ "$version" != "$pinned_shellcheck" ]; then
+      report WARN "$tool" "$version" "CI pins $pinned_shellcheck exactly; bin/cs-lint.sh refuses another version"
+      suggest "$(cs_deps_hint shellcheck)"
+    else
+      report ok "$tool" "$version" "$(cs_deps_purpose "$tool")"
+    fi
+  else
+    report absent "$tool" - "$(cs_deps_purpose "$tool")"
+    suggest "$(cs_deps_hint "$tool")"
+  fi
+done <<EOF
+$(cs_deps_tools contributor)
+EOF
+
+# --- verdict ------------------------------------------------------------------
+
+printf '\n'
+if [ "$PROBLEMS" -eq 0 ]; then
+  say 'Ready: every required dependency and service check passed.'
+  exit 0
+fi
+if [ "$PROBLEMS" -eq 1 ]; then
+  say '1 required problem above; fix it before starting a session.'
+else
+  say "$PROBLEMS required problems above; fix them before starting a session."
+fi
+say 'This script installs nothing - each -> line is a suggestion, not a command it ran.'
+exit 1

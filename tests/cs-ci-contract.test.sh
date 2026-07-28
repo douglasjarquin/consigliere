@@ -84,6 +84,7 @@ for entry in \
   'bin/cs-install-shellcheck.sh' \
   'bin/cs-install-herdr.sh' \
   'bin/cs-herdr-ci-cleanup.sh' \
+  'bin/cs-ci-lanes.sh' \
   'bin/cs-test-run.sh --check-coverage' \
   'bin/cs-test-run.sh --portable' \
   'bin/cs-test-run.sh --herdr'; do
@@ -108,3 +109,20 @@ pass "hosted CI runs real Herdr but never the live-codex or live-claude suites"
 assert_grep 'contents: read' "$WF" "workflow must use least-privilege contents: read"
 assert_grep 'cancel-in-progress: true' "$WF" "workflow must cancel superseded runs"
 pass "workflow is least-privilege and cancels superseded runs"
+
+# --- lane gating keeps the invariants job unconditional ----------------------
+#
+# The repo-invariants job is the one lane that must run for every change, because
+# any commit at all can track a boss-private path or flatten a tracked symlink.
+# A filter on it would be a silent hole, so assert its block carries no gate.
+invariants_block=$(awk '
+  /^  invariants:/ { inside = 1; next }
+  inside && /^  [a-z][a-z0-9-]*:/ { exit }
+  inside { print }
+' "$WF")
+[ -n "$invariants_block" ] || fail "could not find the invariants job in the workflow"
+assert_not_contains "$invariants_block" 'needs: changes' \
+  "the repo-invariants job must not depend on the lane filter"
+assert_not_contains "$invariants_block" 'if:' \
+  "the repo-invariants job must stay unconditional"
+pass "repo invariants run for every change, including docs-only ones"

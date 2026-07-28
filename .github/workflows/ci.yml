@@ -17,8 +17,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decide which lanes this change can actually affect. bin/cs-ci-lanes.sh is the
+  # single owner of the path-to-lane map, and of the fail-open rule when the change
+  # set cannot be determined, so the mapping is one testable script rather than
+  # `paths:` globs duplicated per job here.
+  #
+  # The gate is a job-level `if:`, never a workflow- or job-level `paths:` filter:
+  # a filtered-out workflow never reports its checks at all, while a skipped job
+  # still reports, so a check can never hang pending forever.
+  changes:
+    name: Changed lanes
+    runs-on: ubuntu-latest
+    outputs:
+      lint: ${{ steps.lanes.outputs.lint }}
+      coverage: ${{ steps.lanes.outputs.coverage }}
+      portable: ${{ steps.lanes.outputs.portable }}
+      herdr: ${{ steps.lanes.outputs.herdr }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Both endpoints of the comparison must be present in the clone.
+          fetch-depth: 0
+      - name: Decide the lanes this change needs
+        id: lanes
+        # The refs arrive as env values, never interpolated into the script body.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          set -eu
+          if [ "$EVENT_NAME" = pull_request ]; then
+            base=$PR_BASE_SHA
+            head=$PR_HEAD_SHA
+          else
+            base=$PUSH_BEFORE
+            head=$PUSH_AFTER
+          fi
+          bin/cs-ci-lanes.sh "$base" "$head" | tee -a "$GITHUB_OUTPUT"
+
   lint:
     name: Shell lint
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -35,6 +78,8 @@ jobs:
   # no missing, no duplicate, and live-codex visibly excluded from hosted CI.
   test-coverage:
     name: Test coverage guard
+    needs: changes
+    if: needs.changes.outputs.coverage == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -42,6 +87,8 @@ jobs:
 
   portable:
     name: Portable behavior
+    needs: changes
+    if: needs.changes.outputs.portable == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -69,6 +116,8 @@ jobs:
   # real run, and always clean up job-owned lab sessions.
   herdr:
     name: Real Herdr behavior
+    needs: changes
+    if: needs.changes.outputs.herdr == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -151,6 +200,10 @@ jobs:
             exit 1
           }
 
+  # UNCONDITIONAL ON PURPOSE: no `needs: changes`, no `if:`. Any commit at all can
+  # track a boss-private path or land a tracked symlink as a resolved regular file,
+  # so this job must run for every change, including a docs-only one. Never move it
+  # behind a lane filter.
   invariants:
     name: Repo invariants
     runs-on: ubuntu-latest

@@ -3,12 +3,11 @@
 # when this session holds the lock.
 #
 # DETECT-ONLY checks (always run; silent when healthy):
-#   MISSING: <tool> ...        a required tool is absent (herdr, the ROOT
-#                              session's harness - codex or claude - jq, gh,
-#                              gh-axi); consigliere must not dispatch until
-#                              present. Optional tools (the other harness,
-#                              tasks-axi, no-mistakes, lavish-axi,
-#                              chrome-devtools-axi) print BOOTSTRAP_INFO instead.
+#   MISSING: <tool> ...        a required tool is absent; consigliere must not
+#                              dispatch until it is present. Optional tools print
+#                              BOOTSTRAP_INFO instead. Both lists come from
+#                              cs-deps-lib.sh, their single owner, which
+#                              bin/cs-doctor.sh reports from as well.
 #   HERDR_DOWN / HERDR_PROTOCOL:  the herdr server is unreachable or below the
 #                              minimum protocol (docs/herdr.md).
 #   NEEDS_GH_AUTH              gh is present but not authenticated.
@@ -34,23 +33,29 @@ PROJECTS="${CS_PROJECTS_OVERRIDE:-$CS_HOME/projects}"
 DETECT_ONLY=${CS_BOOTSTRAP_DETECT_ONLY:-0}
 
 # --- required tools ----------------------------------------------------------
-# The required harness is the ROOT session's own (codex or claude); the other
-# harness is optional. Everything else is unconditionally required.
+# The required/optional inventory (including which harness is required: the ROOT
+# session's own) is owned by cs-deps-lib.sh, shared with bin/cs-doctor.sh, so the
+# in-session gate and the human preflight report can never disagree.
 # shellcheck source=bin/cs-harness-lib.sh
 . "$SCRIPT_DIR/cs-harness-lib.sh"
-ROOT_HARNESS=$(cs_harness_detect_root)
-ROOT_HARNESS_BIN=$(cs_harness_binary "$ROOT_HARNESS")
-OTHER_HARNESS_BIN=$([ "$ROOT_HARNESS" = codex ] && echo claude || echo codex)
+# shellcheck source=bin/cs-deps-lib.sh
+. "$SCRIPT_DIR/cs-deps-lib.sh"
 
 missing=""
-for tool in herdr "$ROOT_HARNESS_BIN" jq gh gh-axi git; do
+while IFS= read -r tool; do
+  [ -n "$tool" ] || continue
   command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
-done
-[ -z "$missing" ] || printf 'MISSING:%s - install before dispatching; consigliere cannot operate without these.\n' "$missing"
+done <<EOF
+$(cs_deps_tools required)
+EOF
+[ -z "$missing" ] || printf 'MISSING:%s - install before dispatching; consigliere cannot operate without these. bin/cs-doctor.sh reports versions and install suggestions.\n' "$missing"
 
-for tool in "$OTHER_HARNESS_BIN" tasks-axi no-mistakes lavish-axi chrome-devtools-axi; do
+while IFS= read -r tool; do
+  [ -n "$tool" ] || continue
   command -v "$tool" >/dev/null 2>&1 || printf 'BOOTSTRAP_INFO: optional tool %s not installed.\n' "$tool"
-done
+done <<EOF
+$(cs_deps_tools optional)
+EOF
 
 # --- herdr server health -------------------------------------------------------
 if command -v herdr >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
