@@ -851,7 +851,7 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
   done < <(cs_watch_event_reader_cmd)
   [ "${#reader[@]}" -gt 0 ] || return 2
 
-  local fifo_dir fifo reader_pid line p ws status agent raw record hit rc=1 reader_rc=0
+  local fifo_dir fifo reader_pid line kind p ws status agent raw record hit rc=1 reader_rc=0
   fifo_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-herdr-eventwait.XXXXXX") || return 2
   fifo="$fifo_dir/events"
   if ! mkfifo "$fifo" 2>/dev/null; then
@@ -886,25 +886,53 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
     done
   fi
 
-  # Drain stream edges until a fresh blocked edge or the timeout. The reader is
-  # killed the instant a blocked edge is found.
-  # Split each raw projected line (pane_id\tworkspace_id\tagent_status\tagent)
+  # Drain stream edges until an actionable one or the timeout. The reader is
+  # killed the instant one is found.
+  # Split each raw projected line (kind\tpane_id\tworkspace_id\tfield3\tfield4)
   # with `cut`, NOT `IFS=$'\t' read`: a tab is IFS-whitespace, so `read` would
   # collapse an empty middle field (e.g. an absent workspace_id) and shift the
-  # status into the wrong column. `cut` preserves empty fields.
+  # remaining columns. `cut` preserves empty fields.
+  #
+  # Field 1 is the event kind, so this never has to infer which subscription
+  # produced a line. An unrecognized kind is ignored rather than misread, which
+  # is what lets the reader add a kind before this side knows about it.
   while [ "$rc" -eq 1 ] && IFS= read -r line <&9; do
     [ -n "$line" ] || continue
-    p=$(printf '%s' "$line" | cut -f1)
-    ws=$(printf '%s' "$line" | cut -f2)
-    status=$(printf '%s' "$line" | cut -f3)
-    agent=$(printf '%s' "$line" | cut -f4)
+    kind=$(printf '%s' "$line" | cut -f1)
+    p=$(printf '%s' "$line" | cut -f2)
+    ws=$(printf '%s' "$line" | cut -f3)
+    status=$(printf '%s' "$line" | cut -f4)
+    agent=$(printf '%s' "$line" | cut -f5)
     [ -n "$p" ] || continue
-    record=$(cs_transition_normalize "$p" "$ws" "$status" "$agent")
-    if hit=$(cs_transition_apply "$state" "$record"); then
-      printf '%s' "$hit"
-      rc=0
-      break
-    fi
+    case "$kind" in
+      status|agent-detected)
+        # An agent appearing in a pane is a relaunch fact rather than an
+        # inference, but it is projected through the same status policy: the
+        # detected event carries the agent's current status.
+        record=$(cs_transition_normalize "$p" "$ws" "$status" "$agent")
+        if hit=$(cs_transition_apply "$state" "$record"); then
+          printf '%s' "$hit"
+          rc=0
+          break
+        fi
+        ;;
+      exited)
+        # The pane's process ended. Polling can only notice this later, as a
+        # pane that no longer exists; this is the moment it happened, and it is
+        # always actionable - a soldier that is gone is never benign.
+        printf 'exited: %s' "$p"
+        rc=0
+        break
+        ;;
+      output)
+        # A requested pattern rendered in the pane. The pattern name carries the
+        # meaning, so the policy lives with whoever configured the pattern.
+        printf 'output: %s %s' "$p" "$status"
+        rc=0
+        break
+        ;;
+      *) continue ;;
+    esac
   done
   if [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
     kill "$reader_pid" 2>/dev/null || true

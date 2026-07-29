@@ -1,30 +1,54 @@
 #!/usr/bin/env python3
-"""Raw AF_UNIX subscriber for herdr's native pane.agent_status_changed stream.
+"""Raw AF_UNIX subscriber for herdr's native push event stream.
 
 This is the WIRE TRANSPORT half of the herdr push-escalation path
 (bin/cs-watch.sh cs_watch_wait_transition). It deliberately does NOT know
 consigliere's supervision policy: it opens ONE connection to a herdr session's
-control socket, subscribes to pane.agent_status_changed for the given panes
-(all statuses, so working/idle/done edges are seen too), and prints one
-projected line per event to stdout, flushing each so the bash caller can react
-sub-second. The bash side normalizes each line through the shared transition
-shape and applies the single-owner policy table (bin/cs-watch.sh); the bash
-side also decides when to stop and kills this reader.
+control socket, subscribes to the kinds below for the given panes, and prints
+one projected line per event to stdout, flushing each so the bash caller can
+react sub-second. The bash side normalizes each line, applies the single-owner
+policy table (bin/cs-watch.sh), decides when to stop, and kills this reader.
 
-Wire protocol (verified: herdr 0.7.3, protocol 16, newline-delimited JSON):
+Subscribed kinds, all per pane:
+  pane.agent_status_changed  every status edge (working/idle/blocked/done)
+  pane.exited                the pane's process ended - a soldier that is gone
+                             rather than quiet, which polling could only infer
+                             from a later "pane not found"
+  pane.agent_detected        an agent appeared in the pane, so a relaunch is a
+                             fact instead of an inference
+  pane.output_matched        the pane rendered text matching a requested
+                             pattern (see CS_HERDR_EVENT_PATTERNS)
+
+Patterns for pane.output_matched come from the CS_HERDR_EVENT_PATTERNS env var
+as `name=regex` pairs separated by newlines. Absent, no output subscription is
+requested. A pattern the server rejects fails the whole subscribe (exit 3) so a
+typo is loud rather than a subscription that silently never fires.
+
+Wire protocol (verified live: herdr 0.7.5, protocol 17, newline-delimited JSON.
+Every kind below was confirmed to return subscription_started against a real
+pane; pane.output_changed is NOT subscribable and the server names the accepted
+set in its rejection):
   request : {"id","method":"events.subscribe","params":{"subscriptions":[
-             {"type":"pane.agent_status_changed","pane_id":P}, ...]}}\n
+             {"type":"pane.agent_status_changed","pane_id":P},
+             {"type":"pane.exited","pane_id":P},
+             {"type":"pane.agent_detected","pane_id":P},
+             {"type":"pane.output_matched","pane_id":P,"source":"recent",
+              "match":{"type":"regex","value":RE}}, ...]}}\n
   ack     : {"id",...,"result":{"type":"subscription_started"}}\n
-  stream  : {"event":"pane.agent_status_changed",
-             "data":{"pane_id","workspace_id","agent_status","agent",...}}\n
+  stream  : {"event":<kind>,"data":{"pane_id","workspace_id",...}}\n
+
+`source` is REQUIRED on pane.output_matched; omitting it is an invalid_request.
 
 Usage: cs-herdr-events.py <socket_path> <timeout_seconds> <pane_id> [<pane_id> ...]
 
-Output (one line per pane.agent_status_changed event, TAB-separated, a raw
-projection - NOT the final normalized record; the bash normalizer adds the
-from_status and builds the canonical shape):
+Output (one line per event, TAB-separated, a raw projection - NOT the final
+normalized record). Field 1 is the event kind, so a consumer never has to infer
+which subscription produced a line:
   @subscribed
-  <pane_id>\t<workspace_id>\t<agent_status>\t<agent>
+  status\t<pane_id>\t<workspace_id>\t<agent_status>\t<agent>
+  exited\t<pane_id>\t<workspace_id>\t<exit_status>\t
+  agent-detected\t<pane_id>\t<workspace_id>\t<agent_status>\t<agent>
+  output\t<pane_id>\t<workspace_id>\t<pattern_name>\t<matched_line>
 
 Exit status:
   0  streamed until the timeout elapsed with no error - a clean bounded wait;
@@ -36,6 +60,7 @@ A non-zero exit tells the bash caller to fall back to plain polling for this
 cycle (the permanent fail-closed backstop), never to go silent.
 """
 import json
+import os
 import socket
 import sys
 import time
@@ -67,6 +92,48 @@ def _read_line(sock, buf, deadline):
     return line, buf, "line"
 
 
+# Event name -> the stable kind token this reader prints as field 1. A kind the
+# bash side does not know is ignored there, so adding one here is safe.
+_KINDS = {
+    "pane.agent_status_changed": "status",
+    "pane.exited": "exited",
+    "pane.agent_detected": "agent-detected",
+    "pane.output_matched": "output",
+}
+
+
+def _patterns():
+    """[(name, regex)] from CS_HERDR_EVENT_PATTERNS `name=regex` lines."""
+    raw = os.environ.get("CS_HERDR_EVENT_PATTERNS", "")
+    out = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        name, regex = line.split("=", 1)
+        name, regex = name.strip(), regex.strip()
+        if name and regex:
+            out.append((name, regex))
+    return out
+
+
+def _pattern_name(patterns, data):
+    """Best-effort label for which requested pattern matched. The server echoes
+    the matcher back when it can; otherwise a single configured pattern is
+    unambiguous, and more than one falls back to a generic label rather than
+    guessing wrong."""
+    echoed = data.get("match") or data.get("pattern")
+    if isinstance(echoed, dict):
+        echoed = echoed.get("value")
+    if echoed:
+        for name, regex in patterns:
+            if regex == echoed:
+                return name
+    if len(patterns) == 1:
+        return patterns[0][0]
+    return "output"
+
+
 def _clean(value):
     return str(value).replace("\t", " ").replace("\r", " ").replace("\n", " ")
 
@@ -90,9 +157,23 @@ def main(argv):
     except OSError:
         return 2
 
-    subscriptions = [
-        {"type": "pane.agent_status_changed", "pane_id": pane} for pane in panes
-    ]
+    patterns = _patterns()
+    subscriptions = []
+    for pane in panes:
+        subscriptions.append({"type": "pane.agent_status_changed", "pane_id": pane})
+        subscriptions.append({"type": "pane.exited", "pane_id": pane})
+        subscriptions.append({"type": "pane.agent_detected", "pane_id": pane})
+        for name, regex in patterns:
+            subscriptions.append(
+                {
+                    "type": "pane.output_matched",
+                    "pane_id": pane,
+                    # `source` is required by the server; recent covers output
+                    # that has already scrolled past the visible viewport.
+                    "source": "recent",
+                    "match": {"type": "regex", "value": regex},
+                }
+            )
     request = {
         "id": "cs-eventwait",
         "method": "events.subscribe",
@@ -133,14 +214,25 @@ def main(argv):
             message = json.loads(line.decode("utf-8", "replace"))
         except ValueError:
             continue
-        if message.get("event") != "pane.agent_status_changed":
+        kind = _KINDS.get(message.get("event"))
+        if kind is None:
             continue
         data = message.get("data") or {}
+        if kind == "exited":
+            third, fourth = data.get("exit_status"), ""
+            if third is None:
+                third = data.get("status") or ""
+        elif kind == "output":
+            third = _pattern_name(patterns, data)
+            fourth = data.get("line") or data.get("matched") or ""
+        else:
+            third, fourth = data.get("agent_status") or "", data.get("agent") or ""
         fields = (
+            kind,
             _clean(data.get("pane_id") or ""),
             _clean(data.get("workspace_id") or ""),
-            _clean(data.get("agent_status") or ""),
-            _clean(data.get("agent") or ""),
+            _clean(third),
+            _clean(fourth),
         )
         sys.stdout.write("\t".join(fields) + "\n")
         sys.stdout.flush()

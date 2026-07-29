@@ -715,7 +715,7 @@ test_event_splice_blocked_edge_and_dedupe_clear() {
 #!/usr/bin/env bash
 # args: <socket> <timeout> <pane...>
 echo "@subscribed"
-printf 'pane-ev-1\tws-1\tblocked\tcodex\n'
+printf 'status\tpane-ev-1\tws-1\tblocked\tcodex\n'
 sleep 2
 exit 0
 SH
@@ -738,7 +738,7 @@ SH
   cat > "$reader" <<'SH'
 #!/usr/bin/env bash
 echo "@subscribed"
-printf 'pane-ev-1\tws-1\tworking\tcodex\n'
+printf 'status\tpane-ev-1\tws-1\tworking\tcodex\n'
 sleep 0.3
 exit 0
 SH
@@ -802,6 +802,74 @@ SH
 }
 
 # --- watcher singleton lock ---------------------------------------------------
+
+test_event_splice_exit_output_and_unknown_kinds() {
+  local dir state fakebin reader rec rc
+  dir=$(make_case event-kinds); state="$dir/state"; fakebin="$dir/fakebin"
+  reader="$fakebin/fake-reader"
+  export CS_FAKE_HERDR_SOCKET="$dir/fake.sock"
+  export CS_FAKE_HERDR_AGENT_STATUS=working   # level reconcile finds nothing
+
+  # A pane whose process exited is always actionable: a soldier that is GONE is
+  # never benign, and polling could only infer this later from a missing pane.
+  cat > "$reader" <<'SH'
+#!/usr/bin/env bash
+echo "@subscribed"
+printf 'exited\tpane-ev-9\tws-1\t0\t\n'
+sleep 2
+exit 0
+SH
+  chmod +x "$reader"
+  rec=$(
+    cd "$dir" || exit 2
+    # shellcheck disable=SC1090,SC1091
+    PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
+    CS_HERDR_EVENT_READER="$reader" PATH="$fakebin:$PATH" cs_watch_wait_transition 1 "$state" pane-ev-9
+  ); rc=$?
+  expect_code 0 "$rc" "an exited pane must be actionable immediately"
+  assert_contains "$rec" "exited: pane-ev-9" "the exit reason must name the pane"
+
+  # A requested output pattern matched: the pattern NAME carries the meaning, so
+  # it has to reach the supervisor rather than just the raw line.
+  cat > "$reader" <<'SH'
+#!/usr/bin/env bash
+echo "@subscribed"
+printf 'output\tpane-ev-9\tws-1\tharness-busy\tesc to interrupt\n'
+sleep 2
+exit 0
+SH
+  chmod +x "$reader"
+  rec=$(
+    cd "$dir" || exit 2
+    # shellcheck disable=SC1090,SC1091
+    PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
+    CS_HERDR_EVENT_READER="$reader" PATH="$fakebin:$PATH" cs_watch_wait_transition 1 "$state" pane-ev-9
+  ); rc=$?
+  expect_code 0 "$rc" "a matched output pattern must be actionable"
+  assert_contains "$rec" "output: pane-ev-9 harness-busy" "the output reason must name the pattern"
+
+  # An unknown kind is IGNORED, never misread as a status edge. This is what
+  # lets the reader add a kind before this side knows about it.
+  cat > "$reader" <<'SH'
+#!/usr/bin/env bash
+echo "@subscribed"
+printf 'brand-new-kind\tpane-ev-9\tws-1\tblocked\tcodex\n'
+sleep 0.3
+exit 0
+SH
+  chmod +x "$reader"
+  set +e
+  rec=$(
+    cd "$dir" || exit 2
+    # shellcheck disable=SC1090,SC1091
+    PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
+    CS_HERDR_EVENT_READER="$reader" PATH="$fakebin:$PATH" cs_watch_wait_transition 1 "$state" pane-ev-9
+  ); rc=$?
+  set -e
+  expect_code 1 "$rc" "an unknown event kind must be ignored, leaving a clean bounded wait"
+  [ -z "$rec" ] || fail "an unknown kind must produce no record, got: $rec"
+  pass "the splice handles exited and output kinds and ignores an unknown one"
+}
 
 test_duplicate_watcher_noops_through_singleton_lock() {
   local dir state fakebin out out2 pid i
@@ -909,3 +977,4 @@ test_event_splice_level_reconcile_catches_already_blocked
 test_duplicate_watcher_noops_through_singleton_lock
 test_capo_worker_event_surfaced_without_the_capo_taking_a_turn
 test_capo_worker_event_deduped_and_scoped
+test_event_splice_exit_output_and_unknown_kinds

@@ -56,3 +56,44 @@ So consigliere's shape is: one home workspace (`consigliere`, or `capo-<id>`) wh
 - No `workspace move` CLI (method exists in `api schema`); consigliere does not order workspaces, so no shim is ported.
 - Tab labels are not unique; list-live matching stays defensive (scope to this home's workspace ids from meta, never by label sweep).
 - `herdr integration install codex` exists; not used yet — codex is launched directly with explicit flags so the launch template stays under consigliere's control.
+
+## Push event subscriptions (verified live 2026-07-29, herdr 0.7.5, protocol 17)
+
+`events.subscribe` accepts one or more subscription specs on the session control socket and streams newline-delimited JSON. Probed each spec against a real pane and recorded the server's own answer:
+
+```text
+output_matched substring+source   ACK subscription_started
+output_matched regex+source       ACK subscription_started
+pane.exited                       ACK subscription_started
+pane.agent_detected               ACK subscription_started
+worktree.removed                  ACK subscription_started
+pane.closed                       ACK subscription_started
+pane.output_changed               ERR invalid_request: unknown variant
+```
+
+The rejection is the authoritative capability list, because the server enumerates what it will accept:
+
+```text
+workspace.created workspace.updated workspace.metadata_updated workspace.renamed
+workspace.moved workspace.closed workspace.focused worktree.created
+worktree.opened worktree.removed tab.created tab.closed tab.focused tab.renamed
+tab.moved pane.created pane.closed pane.updated pane.focused pane.moved
+pane.exited pane.agent_detected pane.output_matched pane.agent_status_changed
+pane.scroll_changed layout.updated
+```
+
+- `pane.output_changed` is a real internal event kind but is NOT subscribable. Source reading alone is misleading here: the exclusion list in `src/api/schema/events.rs` governs plugin hooks, not subscriptions. Probe the socket, do not infer from the source.
+- `pane.output_matched` REQUIRES a `source` field (`visible`, `recent`, or `recent-unwrapped`); omitting it is `invalid_request`, not a default.
+- `bin/cs-herdr-events.py` subscribes to `pane.agent_status_changed`, `pane.exited`, and `pane.agent_detected` per pane, plus `pane.output_matched` for each pattern in `CS_HERDR_EVENT_PATTERNS`.
+
+### Protocol precondition
+
+`CS_HERDR_MIN_PROTOCOL` in `bin/cs-herdr-lib.sh` is the floor (16); the live server reports 17.
+
+Every capability above was verified at protocol 17 only, because that is the running server. They are NOT verified at 16, and this repo has no protocol-16 server to test against. So the floor deliberately stays at 16 and each new capability is gated at runtime instead of by version arithmetic: the subscribe either returns `subscription_started` or it does not, and `bin/cs-watch.sh` already treats any reader failure as "fall back to polling for this cycle". Raising the floor would trade a working fallback for a hard refusal, and would do it on an unverified assumption about which protocol first carried each event.
+
+Re-probe after a herdr upgrade rather than trusting this table.
+
+### Pattern policy trap
+
+A configured `pane.output_matched` pattern means "wake the supervisor". Do not configure a benign high-volume pattern: the harness busy signature (`CS_HARNESS_BUSY_RE`, `[Ee]sc to interrupt`) renders continuously during every turn, so subscribing to it would fire an actionable wake on every frame of normal work. The intended first pattern is the claude permission prompt under `--permission-mode auto|acceptEdits`, which currently surfaces only through the slow stale path - but its exact rendered text is NOT yet verified, so no pattern ships by default. Capture it from a real pane that has stopped on a prompt, record the string here with its command and output, then configure it.
