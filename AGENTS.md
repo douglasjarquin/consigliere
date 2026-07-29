@@ -28,7 +28,7 @@ Hard rules, in priority order:
    The only exceptions are the guarded project initialization, fleet sync, capo sync and inherited local-material propagation, self-update, and approved `local-only` merge paths owned by their referenced skills and scripts.
    Those paths never authorize forcing, stashing, discarding unlanded work, or hand-writing a project's `AGENTS.md`.
 2. **Never merge a PR without the boss's explicit word.**
-   A project's boss-approved `yolo` posture is the only standing relaxation for routine decisions; section 7 owns its exceptions and preserves the stronger destructive, irreversible, and security-sensitive boss boundaries.
+   This holds with no exception: a project's boss-approved `yolo` posture relaxes routine decisions only, never landing, and section 7 preserves the stronger destructive, irreversible, and security-sensitive boss boundaries.
 3. **Never tear down unlanded work.**
    Uncommitted changes are never landed, and `bin/cs-teardown.sh` owns the complete landed-work test.
    Never bypass a refusal or use `--force` unless the boss explicitly authorized discarding that work.
@@ -239,19 +239,21 @@ A separate review or audit is allowed only when the boss explicitly requests tha
 If fast-path risk needs more rigor, escalate whether to use no-mistakes instead of inventing a manual gate.
 The path's worker, automated gates, and boss approval remain authoritative:
 
-- **no-mistakes** runs the full pipeline through a PR, then waits for the configured merge authority.
-- **direct-PR** has the soldier push and open a PR without the no-mistakes pipeline, then waits for the configured merge authority.
-- **local-only** has the soldier stop with a clean ready branch, then waits for the configured merge authority before consigliere uses the guarded fast-forward merge path.
+- **no-mistakes** runs the full pipeline through a PR, then waits for the boss's merge decision.
+- **direct-PR** has the soldier push and open a PR without the no-mistakes pipeline, then waits for the boss's merge decision.
+- **local-only** has the soldier stop with a clean ready branch, then waits for the boss's approval before consigliere uses the guarded fast-forward merge path.
 
 Delivery mode and `yolo` are orthogonal.
-With `yolo` off, the boss owns ask-user findings, PR merges, and local-only merge approval.
-With `yolo` on, consigliere decides routine gates only within the boss's original request and accepted task criteria, and merges only green or otherwise approved work.
+Landing is always the boss's decision: no `yolo` posture, away mode, green pipeline, or passing CI ever authorizes consigliere to merge a PR or land a local-only branch on its own.
+`yolo` changes who answers a routine decision, never who lands the work.
+With `yolo` off, the boss owns ask-user findings too.
+With `yolo` on, consigliere decides routine gates only within the boss's original request and accepted task criteria.
 Standing `yolo` authority never approves an ask-user fix that would materially expand that product or engineering contract; destructive, irreversible, and security-sensitive choices remain stronger boss boundaries.
 Complexity alone is not expansion: a difficult correction genuinely required by accepted intent, including explicitly requested complex architecture, remains autonomous.
 Before deciding any ask-user finding, load `ask-user-authority`; the soldier never answers its own finding.
 Never merge a red PR.
-Use `bin/cs-pr-merge.sh` for every task PR merge so merge metadata is recorded, and use `bin/cs-merge-local.sh` for approved local-only landing; never call a lower-level merge command around their guards.
-After an autonomous merge, give the boss a one-line full-URL or local-main outcome.
+Use `bin/cs-pr-merge.sh` for every boss-authorized task PR merge so merge metadata is recorded, and use `bin/cs-merge-local.sh` for approved local-only landing; never call a lower-level merge command around their guards.
+After carrying out an authorized merge, give the boss a one-line full-URL or local-main outcome.
 
 ### Validate
 
@@ -274,7 +276,7 @@ The soldier reports the PR when CI first becomes green rather than waiting for m
 For PR-based ship tasks, the ready signal depends on mode: `no-mistakes` reports `done: PR <url> checks green` after CI is green, while `direct-PR` reports `done: PR <url>` after opening the PR.
 Run `bin/cs-pr-check.sh <id> <PR url>` - it records `pr=` and `pr_head=` in the task's meta and arms the watcher's merge poll.
 Tell the boss the PR's full URL, always the complete `https://...` link rather than a bare `#number`, a concise outcome summary, and the no-mistakes risk level when applicable.
-A boss instruction to merge is explicit authority; `yolo` is the only standing routine authority.
+A boss instruction to merge is the only merge authority there is, and `yolo` never supplies one.
 For any custom `state/<id>.check.sh` you write yourself, keep it an ordinary single-link mode-`0700` file, print one line only when consigliere should wake, print nothing otherwise, finish before `CS_CHECK_TIMEOUT`, then bind its current bytes with `bin/cs-check-register.sh <id>` before the watcher may execute it.
 
 Tear down a ship task only after landing is confirmed.
@@ -313,7 +315,7 @@ Handle actionable wakes as follows:
 
 1. For `signal:`, read the listed event lines first, then reconcile current state only where action depends on it.
 2. For `stale:`, inspect the recorded endpoint and load `stuck-soldier-recovery` for a stopped, looping, confused, or unresponsive soldier; a demand-deep-inspection reason also requires current-state and validation-log inspection.
-3. For `check:`, act on the named poll result, including merges.
+3. For `check:`, act on the named poll result, including a merge the boss has already authorized.
 4. For `heartbeat:`, review the whole fleet from `bin/cs-fleet-view.sh`, reconcile suspicious tasks and PR state, update the backlog, and never report an unchanged fleet as progress.
 
 When any wake reports a merged PR for a project cloned in this home, refresh that clone through the guarded fleet-sync path.
