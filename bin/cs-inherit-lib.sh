@@ -48,6 +48,15 @@ _cs_inherit_ordinary_file() {  # <path> - 0 if a plain non-symlink regular file
   [ -f "$1" ] && [ ! -L "$1" ]
 }
 
+# A main-side SOURCE is only ever read, so a symlink resolving to a regular file
+# is safe and lets a home keep the file under external configuration management.
+# `-f` follows the link, so this also rejects an unresolved symlink. Destinations
+# keep the stricter _cs_inherit_ordinary_file test: propagation WRITES there, and
+# following a link out of the capo home is the hazard that test exists for.
+_cs_inherit_readable_source() {  # <path> - 0 if it resolves to a regular file
+  [ -f "$1" ]
+}
+
 _cs_inherit_dir_safe() {  # <dir> - existing (or creatable) non-symlink dir
   local dir=$1
   if [ -e "$dir" ] || [ -L "$dir" ]; then
@@ -103,8 +112,8 @@ cs_inherit_shared_boss() {
   [ -n "$label" ] || label=${dest_data%/data}
 
   if [ -e "$src" ] || [ -L "$src" ]; then
-    _cs_inherit_ordinary_file "$src" || {
-      echo "cs-inherit: error: unsafe main source $src (symlink or not a regular file)" >&2
+    _cs_inherit_readable_source "$src" || {
+      echo "cs-inherit: error: unusable main source $src (not a regular file, or an unresolved symlink)" >&2
       return 1
     }
     _cs_inherit_dir_safe "$dest_data" || {
@@ -170,8 +179,8 @@ cs_inherit_backlog_backend() {
   src="$src_config/backlog-backend"
   dest="$dest_config/backlog-backend"
   if [ -e "$src" ] || [ -L "$src" ]; then
-    _cs_inherit_ordinary_file "$src" || {
-      echo "cs-inherit: error: unsafe main source $src (symlink or not a regular file)" >&2
+    _cs_inherit_readable_source "$src" || {
+      echo "cs-inherit: error: unusable main source $src (not a regular file, or an unresolved symlink)" >&2
       return 1
     }
     _cs_inherit_dir_safe "$dest_config" || {
