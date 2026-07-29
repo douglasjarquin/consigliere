@@ -93,6 +93,15 @@ case "${1:-}" in
         if [ "${CS_FAKE_HERDR_BUSY:-0}" = 1 ]; then printf 'work in progress\nesc to interrupt\n'
         else printf 'all quiet\n> \n'; fi
         exit 0 ;;
+      process-info)
+        # CS_FAKE_HERDR_PROC: agent = an agent process runs here; husk = the
+        # table reads cleanly with no agent; unset = process-info unavailable,
+        # the case the husk predicate must fail closed on.
+        case "${CS_FAKE_HERDR_PROC:-}" in
+          agent) printf '{"result":{"process_info":{"shell_pid":10,"foreground_processes":[{"pid":11,"argv0":"codex"}]}}}\n'; exit 0 ;;
+          husk)  printf '{"result":{"process_info":{"shell_pid":10,"foreground_processes":[{"pid":12,"argv0":"bash"}]}}}\n'; exit 0 ;;
+          *) exit 1 ;;
+        esac ;;
     esac ;;
   agent)
     case "${2:-}" in
@@ -142,9 +151,10 @@ reset_fakes() {
   CS_FAKE_HERDR_BUSY=0
   CS_FAKE_HERDR_MISSING=0
   CS_FAKE_HERDR_AGENT_STATUS=""
+  CS_FAKE_HERDR_PROC=""
   CS_FAKE_CI_LOGS=""
   export CS_FAKE_AXI_STATUS CS_FAKE_AXI_STATUS_RUN CS_FAKE_RUNS_LIST
-  export CS_FAKE_HERDR_BUSY CS_FAKE_HERDR_MISSING CS_FAKE_HERDR_AGENT_STATUS CS_FAKE_CI_LOGS
+  export CS_FAKE_HERDR_BUSY CS_FAKE_HERDR_MISSING CS_FAKE_HERDR_AGENT_STATUS CS_FAKE_HERDR_PROC CS_FAKE_CI_LOGS
 }
 
 # --- run-object fixtures (TOON, as `no-mistakes axi status` emits) -----------
@@ -1199,6 +1209,52 @@ test_missing_run_head_falls_back_to_current_state() {
   pass "missing run head falls back instead of matching by branch"
 }
 
+
+# --- pane process evidence: agent gone vs agent alive vs unreadable ----------
+
+test_husk_pane_is_named_when_nothing_else_knows() {
+  local d out
+  reset_fakes
+  d=$(new_case husk); make_repo_on_branch "$d/wt" cs/husk
+  make_fakebin "$d" >/dev/null
+  cs_write_meta "$d/state/husk.meta" "pane=p-husk" "workspace=w-husk" "worktree=$d/wt" "kind=ship"
+  # No run, no boss-relevant log verb, pane readable but its agent exited.
+  printf 'resolved: decision closed\n' > "$d/state/husk.status"
+  CS_FAKE_HERDR_PROC=husk
+  out=$(run_crew_state "$d" husk)
+  assert_contains "$out" "source: pane-process" "a husk must be reported from process evidence"
+  assert_contains "$out" "husk" "the detail must say the pane outlived its agent"
+  pass "a pane that outlived its agent is named instead of reported as unknown with no source"
+}
+
+test_live_agent_process_is_not_a_husk() {
+  local d out
+  reset_fakes
+  d=$(new_case not-husk); make_repo_on_branch "$d/wt" cs/nothusk
+  make_fakebin "$d" >/dev/null
+  cs_write_meta "$d/state/nothusk.meta" "pane=p-nothusk" "workspace=w-nothusk" "worktree=$d/wt" "kind=ship"
+  printf 'resolved: decision closed\n' > "$d/state/nothusk.status"
+  CS_FAKE_HERDR_PROC=agent
+  out=$(run_crew_state "$d" nothusk)
+  assert_not_contains "$out" "husk" "an agent that is still running must never be called a husk"
+  pass "a pane with a live agent process is not a husk"
+}
+
+test_unreadable_process_table_fails_closed() {
+  local d out
+  reset_fakes
+  d=$(new_case proc-unreadable); make_repo_on_branch "$d/wt" cs/procun
+  make_fakebin "$d" >/dev/null
+  cs_write_meta "$d/state/procun.meta" "pane=p-procun" "workspace=w-procun" "worktree=$d/wt" "kind=ship"
+  printf 'resolved: decision closed\n' > "$d/state/procun.status"
+  # process-info unavailable (old herdr, socket error, unsupported): "could not
+  # read" must never be reported as "the agent is gone".
+  out=$(run_crew_state "$d" procun)
+  assert_not_contains "$out" "husk" "an unreadable process table must not be reported as a dead agent"
+  assert_contains "$out" "source: none" "with no usable source the answer stays honestly unknown"
+  pass "an unreadable process table fails closed instead of declaring the agent dead"
+}
+
 test_active_run_is_authoritative
 test_stale_needs_decision_superseded
 test_stale_blocked_superseded
@@ -1246,5 +1302,9 @@ test_historical_same_branch_rewritten_head_not_current
 test_active_run_descendant_fix_head_remains_current
 test_local_advanced_past_run_head_invalidates
 test_missing_run_head_falls_back_to_current_state
+
+test_husk_pane_is_named_when_nothing_else_knows
+test_live_agent_process_is_not_a_husk
+test_unreadable_process_table_fails_closed
 
 echo "all cs-crew-state tests passed"

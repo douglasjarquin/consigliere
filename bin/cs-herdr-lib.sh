@@ -192,6 +192,58 @@ cs_herdr_agent_alive() { # <pane_id>  - is a real agent (codex or claude) in the
   printf '%s' "$out" | jq -e '.result.agent.agent // empty | select(. != "")' >/dev/null 2>&1
 }
 
+# --- pane process evidence -------------------------------------------------
+# `agent get` reports what herdr BELIEVES about a pane's agent; process-info
+# reports what is actually running in it. The two answer different questions,
+# and the gap between them is where a wedge hides: an agent that exited leaves a
+# pane whose agent_status reads idle or unknown, indistinguishable by status
+# alone from an agent that is simply between turns.
+#
+# Verified live (herdr 0.7.5, protocol 17): `pane process-info --pane <id>`
+# returns result.process_info with shell_pid and foreground_processes[], each
+# carrying pid, argv0, argv, cmdline, and cwd. Note the flag form: the pane is
+# passed as `--pane <id>`, NOT positionally.
+cs_herdr_pane_process_info() { # <pane_id> -> raw JSON
+  cs_herdr pane process-info --pane "$1" 2>/dev/null
+}
+
+# Print "<pid>\t<argv0>" for a supported agent running in the pane's foreground,
+# rc 1 when no agent process is there. rc 1 with a readable pane is the
+# interesting case: the pane survives, the agent does not.
+cs_herdr_pane_agent_process() { # <pane_id> -> <pid>\t<argv0>, rc 1 if absent
+  local out
+  out=$(cs_herdr_pane_process_info "$1") || return 1
+  [ -n "$out" ] || return 1
+  printf '%s' "$out" | jq -er '
+    .result.process_info.foreground_processes // []
+    | map(select((.argv0 // "") | test("^(codex|claude)$")))
+    | first
+    | select(. != null)
+    | "\(.pid)\t\(.argv0)"
+  ' 2>/dev/null
+}
+
+# 0 when the pane is readable, its process table was READ SUCCESSFULLY, and no
+# agent process is running in it - a husk left behind by an agent that exited.
+#
+# Fails closed on purpose. "Could not read the process table" and "read it, no
+# agent there" are completely different claims, and only the second is a husk.
+# Treating an unreadable answer as a husk would report a healthy soldier as dead
+# on any herdr that lacks process-info, any transient socket error, and every
+# test stub - the loudest possible wrong answer. So the process_info object with
+# its foreground_processes array must actually be present before this concludes
+# anything.
+cs_herdr_pane_is_agent_husk() { # <pane_id>
+  local out
+  cs_herdr_pane_exists "$1" || return 1
+  out=$(cs_herdr_pane_process_info "$1") || return 1
+  [ -n "$out" ] || return 1
+  printf '%s' "$out" \
+    | jq -e '.result.process_info.foreground_processes | arrays' >/dev/null 2>&1 || return 1
+  cs_herdr_pane_agent_process "$1" >/dev/null 2>&1 && return 1
+  return 0
+}
+
 cs_herdr_agent_wait() { # <pane_id> <status> <timeout-ms>
   cs_herdr agent wait "$1" --status "$2" --timeout "$3"
 }

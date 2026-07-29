@@ -105,3 +105,18 @@ A configured `pane.output_matched` pattern means "wake the supervisor". Do not c
 3. Whether the prompt persists in `recent` after scrolling, which decides the `source` value.
 
 Until all three are recorded, no pattern is configured. A pattern that matches nothing is indistinguishable from a working subscription, which is why guessing is worse than waiting.
+
+## Pane process evidence (verified live 2026-07-29, herdr 0.7.5, protocol 17)
+
+`herdr pane process-info --pane <id>` - note the flag form; the pane is NOT positional (`herdr pane process-info w48:p1` returns `unknown option`).
+
+Returns `result.process_info` with `shell_pid` and `foreground_processes[]`, each carrying `pid`, `argv0`, `argv`, `cmdline`, and `cwd`. Sampled against two live soldier panes:
+
+```text
+w48:p1   agent process: 24722  codex
+w49:p1   agent process: 42289  codex
+```
+
+This answers a question `agent get` cannot. `agent get` reports what herdr BELIEVES about a pane's agent; process-info reports what is actually running. An agent that exited leaves a pane whose `agent_status` reads idle or unknown - indistinguishable by status alone from an agent between turns. `cs_herdr_pane_agent_process` and `cs_herdr_pane_is_agent_husk` in `bin/cs-herdr-lib.sh` close that gap, and `bin/cs-crew-state.sh` reports a husk as `source: pane-process`.
+
+**The husk predicate fails closed, deliberately.** "Could not read the process table" and "read it, no agent there" are different claims and only the second is a husk. Treating an unreadable answer as a husk would report a healthy soldier as dead on any herdr without process-info, on any transient socket error, and in every test stub. The `foreground_processes` array must be present before the predicate concludes anything. This was caught by an existing test rather than by review: the first implementation reported every stubbed pane as a dead agent.
