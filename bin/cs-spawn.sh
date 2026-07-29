@@ -87,9 +87,17 @@ HARNESS=$(cs_harness_detect_root)
 cs_spawn_apply_dispatch_policy() {
   local file="$CONFIG/dispatch-policy" line entry_harness entry_kind entry_model entry_effort extra
   local line_no=0 seen='|' match_model='' match_effort=''
-  [ ! -e "$file" ] && [ ! -L "$file" ] && return 0
-  if [ ! -f "$file" ] || [ -L "$file" ]; then
-    echo "error: dispatch policy must be a regular file: $file" >&2
+  # A symlink is allowed as long as it resolves to a regular file, so a home may
+  # keep its policy under external configuration management. A symlink that does
+  # not resolve stops dispatch rather than falling back to the harness default:
+  # silently ignoring a broken policy is indistinguishable from having none.
+  if [ -L "$file" ] && [ ! -e "$file" ]; then
+    echo "error: dispatch policy symlink does not resolve: $file" >&2
+    exit 2
+  fi
+  [ -e "$file" ] || return 0
+  if [ ! -f "$file" ]; then
+    echo "error: dispatch policy must be a regular file or a symlink to one: $file" >&2
     exit 2
   fi
 

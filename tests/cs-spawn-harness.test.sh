@@ -160,6 +160,33 @@ assert_contains "$output" "invalid codex effort 'too-much'" "malformed policy er
 assert_absent "$HOME_DIR/state/t-policy-invalid.meta" "malformed policy writes no metadata"
 pass "malformed dispatch policy blocks dispatch"
 
+# --- policy path shapes: a resolving symlink is honored, a dangling one stops -
+POLICY="$HOME_DIR/config/dispatch-policy"
+rm -f "$POLICY"
+printf 'codex ship gpt-5.6-luna high\n' > "$TMP/external-policy"
+ln -s "$TMP/external-policy" "$POLICY"
+launch=$(spawn_one codex t-policy-symlink)
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-symlink.meta" model)" = gpt-5.6-luna ] || fail "symlinked policy model"
+[ "$(cs_meta_get "$HOME_DIR/state/t-policy-symlink.meta" effort)" = high ] || fail "symlinked policy effort"
+assert_contains "$launch" "--model 'gpt-5.6-luna'" "symlinked policy model launch"
+pass "a dispatch policy symlink resolving to a regular file is honored"
+
+rm -f "$POLICY"
+ln -s "$TMP/no-such-policy" "$POLICY"
+mkdir -p "$HOME_DIR/data/t-policy-dangling"
+printf 'implement the fixture\n' > "$HOME_DIR/data/t-policy-dangling/brief.md"
+if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
+  CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
+  CS_CLAUDE_JSON="$TMP/claude.json" \
+  CS_FAKE_SPAWN_WORKTREE="$TMP/wt-policy-dangling" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-policy-dangling" \
+  "$SPAWN" t-policy-dangling "$REPO" 2>&1); then
+  fail "a dangling dispatch policy symlink must reject spawn"
+fi
+assert_contains "$output" "dispatch policy symlink does not resolve" "dangling symlink error is specific"
+assert_absent "$HOME_DIR/state/t-policy-dangling.meta" "dangling symlink writes no metadata"
+rm -f "$POLICY"
+pass "a dangling dispatch policy symlink blocks dispatch"
+
 : > "$HOME_DIR/config/dispatch-policy"
 mkdir -p "$HOME_DIR/data/t-claude-ultra"
 printf 'implement the fixture\n' > "$HOME_DIR/data/t-claude-ultra/brief.md"
