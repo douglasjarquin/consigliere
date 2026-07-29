@@ -291,6 +291,14 @@ classify_heartbeat() {
   printf 'self|heartbeat (catch-all scan runs in housekeeping)'
 }
 
+# A capo-side worker event is already filtered to boss-relevant verbs by the
+# watcher that produced it, and the capo's own supervisor may be mid-turn and
+# unable to act on it - which is why the parent saw it first. Escalate rather
+# than self-handle.
+classify_capo() {  # <full reason>
+  printf 'escalate|%s' "$1"
+}
+
 # Anything unrecognized is escalated (fail-safe).
 classify_unknown() {  # <reason>
   printf 'escalate|unknown wake: %s' "$1"
@@ -833,7 +841,7 @@ should_force_self() {  # <reason>
 # (log + sleep + continue) so a collision cannot hot-loop escalations.
 is_wake_reason() {  # <reason>
   case "$1" in
-    signal:*|stale:*|check:*|heartbeat|heartbeat:*) return 0 ;;
+    signal:*|stale:*|check:*|capo:*|heartbeat|heartbeat:*) return 0 ;;
   esac
   return 1
 }
@@ -852,6 +860,7 @@ handle_wake() {  # <reason> <state>
     stale:*)  kind=stale; arg="${reason#stale:}"; arg="${arg# }"
               decision=$(classify_stale "$(_stale_pane_of "$arg")" "$state") ;;
     check:*)  decision=$(classify_check "$reason") ;;
+    capo:*)   decision=$(classify_capo "$reason") ;;
     heartbeat|heartbeat:*) decision=$(classify_heartbeat) ;;
     *)        decision=$(classify_unknown "$reason") ;;
   esac
