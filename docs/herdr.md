@@ -97,3 +97,11 @@ Re-probe after a herdr upgrade rather than trusting this table.
 ### Pattern policy trap
 
 A configured `pane.output_matched` pattern means "wake the supervisor". Do not configure a benign high-volume pattern: the harness busy signature (`CS_HARNESS_BUSY_RE`, `[Ee]sc to interrupt`) renders continuously during every turn, so subscribing to it would fire an actionable wake on every frame of normal work. The intended first pattern is the claude permission prompt under `--permission-mode auto|acceptEdits`, which currently surfaces only through the slow stale path - but its exact rendered text is NOT yet verified, so no pattern ships by default. Capture it from a real pane that has stopped on a prompt, record the string here with its command and output, then configure it.
+
+**Open verification item (blocked on environment, not on effort).** The prompt cannot be produced on the machine this was written on: codex runs there with permissions fully enabled, so it never stops to ask. It is reproducible in an environment running claude under `--permission-mode auto`, which is where this must be captured. What to record, so the pattern is written once and correctly:
+
+1. The exact rendered prompt line(s) from `herdr pane read --pane <id>`, ansi included and then stripped, since the subscription matches against a chosen `source` rather than the raw frame.
+2. Whether the text is stable across prompt types (file write vs command execution vs network), because one regex must cover every prompt that parks a soldier, or the ones it misses stay invisible.
+3. Whether the prompt persists in `recent` after scrolling, which decides the `source` value.
+
+Until all three are recorded, no pattern is configured. A pattern that matches nothing is indistinguishable from a working subscription, which is why guessing is worse than waiting.
