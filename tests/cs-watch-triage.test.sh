@@ -828,6 +828,58 @@ test_duplicate_watcher_noops_through_singleton_lock() {
   pass "a duplicate watcher invocation no-ops through the singleton lock"
 }
 
+# --- capo-side worker events are read directly, not waited on ----------------
+
+test_capo_worker_event_surfaced_without_the_capo_taking_a_turn() {
+  local dir state fakebin out capo pid
+  dir=$(make_case capo-worker-event); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  # A capo home this parent owns, with a worker parked on a boss-relevant event.
+  # Nothing in that home is polling - its agent is mid-turn - so the parent has
+  # to find this itself instead of waiting to be told.
+  capo="$dir/capo-home"
+  mkdir -p "$capo/state"
+  : > "$capo/.cs-capo-home"
+  printf 'blocked: pipeline is reverting an approved decision\n' > "$capo/state/w-546.status"
+  cs_write_meta "$state/mycapo.meta" "kind=capo" "home=$capo"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_until 60 grep -q '^capo:' "$out" \
+    || { kill "$pid" 2>/dev/null; cat "$out"; fail "capo-side worker event was never surfaced"; }
+  grep -F 'mycapo/w-546' "$out" >/dev/null || { cat "$out"; fail "the wake must name the capo and its worker"; }
+  grep -F 'reverting an approved decision' "$out" >/dev/null || fail "the wake must carry the worker's own line"
+  grep "$(printf '\tcapo\t')" "$state/.wake-queue" | grep -F 'mycapo/w-546' >/dev/null \
+    || { cat "$state/.wake-queue"; fail "capo wake must be durably queued"; }
+  [ -s "$state/.capo-surfaced-mycapo__w-546" ] || fail "the surfaced marker must be written"
+  kill "$pid" 2>/dev/null || true
+  pass "a boss-relevant capo worker event surfaces without the capo taking a turn"
+}
+
+test_capo_worker_event_deduped_and_scoped() {
+  local dir state fakebin out capo pid
+  dir=$(make_case capo-worker-dedupe); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  capo="$dir/capo-home"
+  mkdir -p "$capo/state"
+  : > "$capo/.cs-capo-home"
+  printf 'blocked: still the same block\n' > "$capo/state/w-1.status"
+  # Already surfaced: a standing block must not re-wake every poll.
+  printf 'blocked: still the same block' > "$state/.capo-surfaced-mycapo__w-1"
+  # A working: line is not boss-relevant, and a directory without the capo-home
+  # marker is not a capo home at all - neither may produce a wake.
+  printf 'working: mid-run\n' > "$capo/state/w-2.status"
+  cs_write_meta "$state/mycapo.meta" "kind=capo" "home=$capo"
+  mkdir -p "$dir/not-a-capo/state"
+  printf 'blocked: must never be read\n' > "$dir/not-a-capo/state/w-9.status"
+  cs_write_meta "$state/bogus.meta" "kind=capo" "home=$dir/not-a-capo"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_live "$pid" 25 || { cat "$out"; fail "an already-surfaced capo block must not wake the watcher"; }
+  kill "$pid" 2>/dev/null || true
+  ! grep -q '^capo:' "$out" || { cat "$out"; fail "surfaced, non-boss-relevant, and unmarked-home cases must all stay quiet"; }
+  ! grep -q 'must never be read' "$out" || fail "a home without the capo-home marker must never be read"
+  pass "capo worker events dedupe on the surfaced line and skip unmarked homes"
+}
+
+
 test_provably_working_signal_absorbed
 test_turn_ended_provably_working_absorbed
 test_turn_ended_not_working_surfaced
@@ -855,3 +907,5 @@ test_afk_present_reverts_watcher_to_one_shot
 test_event_splice_blocked_edge_and_dedupe_clear
 test_event_splice_level_reconcile_catches_already_blocked
 test_duplicate_watcher_noops_through_singleton_lock
+test_capo_worker_event_surfaced_without_the_capo_taking_a_turn
+test_capo_worker_event_deduped_and_scoped

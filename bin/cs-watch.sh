@@ -633,6 +633,53 @@ heartbeat_scan_finds_actionable() {
   return 1
 }
 
+# --- capo-side worker events -------------------------------------------------
+# Reaching INTO a capo home is deliberate and bounded. The alternative - a capo
+# home pushing events up - needs a parent pointer that capo homes do not record,
+# so it would silently do nothing for every home seeded before that pointer
+# existed. Reading is also strictly less dangerous: the parent never writes
+# there, and a capo home that is unreadable or unmarked is skipped, never
+# guessed at.
+_capo_surfaced_path() {  # <capo-id> <worker-task>
+  printf '%s/.capo-surfaced-%s' "$STATE" "$(printf '%s__%s' "$1" "$2" | tr ':/.' '___')"
+}
+
+# Every capo this home actually owns, from its own runtime records: one
+# state/<id>.meta with kind=capo and a home= that still carries the capo-home
+# marker. Registry prose is not consulted - the meta is what dispatch wrote.
+capo_worker_homes() {  # -> <capo-id>\t<capo-state-dir>
+  local m id home
+  for m in "$STATE"/*.meta; do
+    [ -e "$m" ] || continue
+    [ "$(cs_meta_get "$m" kind 2>/dev/null || true)" = capo ] || continue
+    id=$(basename "$m"); id=${id%.meta}
+    home=$(cs_meta_get "$m" home 2>/dev/null || true)
+    [ -n "$home" ] || continue
+    case "$home" in /*) ;; *) continue ;; esac
+    [ -f "$home/.cs-capo-home" ] || continue
+    [ -d "$home/state" ] || continue
+    printf '%s\t%s\n' "$id" "$home/state"
+  done
+}
+
+# Boss-relevant worker events inside this home's capos that this home has not
+# surfaced yet. Emits <capo-id>\t<worker-task>\t<status-line>. A capo's OWN
+# parent-facing status file lives in this home and is already covered by the
+# ordinary signal path, so only its workers are read here.
+scan_capo_worker_events() {
+  local cid cstate f task last surfaced
+  while IFS=$(printf '\t') read -r cid cstate; do
+    [ -n "$cid" ] || continue
+    while IFS=$(printf '\t') read -r f task last; do
+      [ -n "$f" ] || continue
+      surfaced=$(cat "$(_capo_surfaced_path "$cid" "$task")" 2>/dev/null || true)
+      [ "$surfaced" = "$last" ] && continue
+      printf '%s\t%s\t%s\n' "$cid" "$task" "$last"
+    done < <(scan_boss_relevant_statuses "$cstate")
+  done < <(capo_worker_homes)
+  return 0
+}
+
 # --- normalized transition shape + status->action policy ---------------------
 #
 # The NORMALIZED TRANSITION RECORD is the one shape herdr's event stream is
@@ -1170,6 +1217,43 @@ $pending
 EOF
       triage_log "absorbed benign $reason"
     fi
+  fi
+
+  # Layer 1b: capo-side worker events, read directly instead of relayed.
+  # A capo home is watched only while its own agent sits idle on a checkpoint;
+  # the moment that agent does real work, nothing in that home is polling, so a
+  # boss-relevant worker event can wait there for as long as the turn lasts.
+  # This parent already knows every capo home, so it reads those events itself
+  # rather than waiting for the capo to relay them. Cost is one status tail per
+  # capo worker per poll.
+  #
+  # This wake says an event EXISTS, never that the parent should take the work
+  # over: the capo still owns its lane. Dedup is per (capo, worker) on the
+  # surfaced line, so a standing block wakes the parent once, not every poll.
+  capo_pending=$(scan_capo_worker_events)
+  if [ -n "$capo_pending" ]; then
+    capo_reason="capo:"
+    while IFS=$(printf '\t') read -r cid ctask cline; do
+      [ -n "$cid" ] || continue
+      capo_reason="$capo_reason $cid/$ctask: $cline"
+    done <<EOF
+$capo_pending
+EOF
+    while IFS=$(printf '\t') read -r cid ctask cline; do
+      [ -n "$cid" ] || continue
+      cs_wake_append capo "$cid/$ctask" "$cline" || exit 1
+    done <<EOF
+$capo_pending
+EOF
+    # Enqueue before suppress, exactly as the signal path does: a crash between
+    # the two re-fires the wake rather than losing it.
+    while IFS=$(printf '\t') read -r cid ctask cline; do
+      [ -n "$cid" ] || continue
+      printf '%s' "$cline" > "$(_capo_surfaced_path "$cid" "$ctask")"
+    done <<EOF
+$capo_pending
+EOF
+    wake "$capo_reason"
   fi
 
   # Layer 1 backbone: pane staleness. Two consecutive identical hashes with no

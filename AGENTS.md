@@ -98,7 +98,7 @@ state/               volatile runtime signals; gitignored
   .afk               durable away-mode flag; present = daemon may inject escalations
   .watch.lock .wake-queue.lock   watcher singleton and queue serialization locks
   .last-watcher-beat watcher liveness beacon; guard scripts read it
-  .hash-* .count-* .stale-* .paused-* .seen-* .last-*   watcher internals; never touch
+  .hash-* .count-* .stale-* .paused-* .seen-* .last-* .capo-surfaced-*   watcher internals; never touch
   .subsuper-*        away-mode daemon internals; never touch
 .no-mistakes/        local validation state and evidence (`.no-mistakes/evidence`); gitignored
 ```
@@ -316,7 +316,8 @@ Handle actionable wakes as follows:
 1. For `signal:`, read the listed event lines first, then reconcile current state only where action depends on it.
 2. For `stale:`, inspect the recorded endpoint and load `stuck-soldier-recovery` for a stopped, looping, confused, or unresponsive soldier; a demand-deep-inspection reason also requires current-state and validation-log inspection.
 3. For `check:`, act on the named poll result, including a merge the boss has already authorized.
-4. For `heartbeat:`, review the whole fleet from `bin/cs-fleet-view.sh`, reconcile suspicious tasks and PR state, update the backlog, and never report an unchanged fleet as progress.
+4. For `capo:`, treat the named capo's worker event as real now: the capo may be mid-turn and unable to relay it, and the capo still owns the lane.
+5. For `heartbeat:`, review the whole fleet from `bin/cs-fleet-view.sh`, reconcile suspicious tasks and PR state, update the backlog, and never report an unchanged fleet as progress.
 
 When any wake reports a merged PR for a project cloned in this home, refresh that clone through the guarded fleet-sync path.
 A capo's idle endpoint is healthy, and parent supervision relies on its routed status rather than treating a quiet pane as stale.
