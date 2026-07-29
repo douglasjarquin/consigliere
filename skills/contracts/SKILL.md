@@ -33,7 +33,7 @@ This is ordinary section-7 ship lifecycle with a board front door - the safety c
 ## Landing
 
 - A soldier reports done per its delivery mode (`no-mistakes`: `done: PR <url> checks green`; `direct-PR`: `done: PR <url>`). Arm the merge poll with `bin/cs-pr-check.sh <task-id> <PR url>` and relay the full https URL to the boss.
-- On merge (boss authority, or standing `yolo`), the PR's `Closes #<n>` closes the issue and the board workflow moves the card to Done. Consigliere does not touch the card.
+- On the boss's merge - the only merge authority, `yolo` or not - the PR's `Closes #<n>` closes the issue and the board workflow moves the card to Done. Consigliere does not touch the card.
 - After teardown, read-only verify the card is no longer stuck: `bin/cs-board.sh status <project> <item-id>`. If it still reads `In Progress` after the issue is closed, the board's closed->Done workflow is off - warn the boss (with the card and issue) and let them enable it; do not move the card yourself (Done is built-in-only by the boss's choice).
 - For a `local-only` project, after the approved local merge, close the issue yourself (`gh-axi issue close <n>`) so the board workflow can still move its card.
 
