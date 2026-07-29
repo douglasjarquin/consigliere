@@ -70,6 +70,7 @@ docs/                architecture, configuration schema, herdr and codex verifie
 .env                 reserved; LOCAL, gitignored
 config/backlog-backend  backlog backend override; LOCAL; absent or "tasks-axi" = default, "manual" = hand-edit
 config/dispatch-policy  optional per-home model/effort defaults by harness and task kind; exact schema in docs/configuration.md
+config/permission-mode  optional narrower claude launch permission mode; absent = full autonomy; exact schema in docs/configuration.md
 config/upstream      path or URL of the firstmate checkout used by /upstream-review; absent = ../firstmate
 config/wedge-alarm   optional away-mode wedge-alarm directives; absent means auto (macOS Notification Center)
 data/                personal fleet records; LOCAL, gitignored as a whole

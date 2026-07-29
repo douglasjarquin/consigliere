@@ -45,17 +45,22 @@ cs_harness_binary() {
   esac
 }
 
+# cs_harness_config_dir - the config directory of the active home.
+# CS_CONFIG_OVERRIDE (test/escape seam) wins; else <CS_HOME|CS_ROOT|PWD>/config.
+cs_harness_config_dir() {
+  printf '%s\n' "${CS_CONFIG_OVERRIDE:-${CS_HOME:-${CS_ROOT:-$PWD}}/config}"
+}
+
 # cs_harness_detect_root - resolve the ROOT session's harness.
 # Precedence: CS_HARNESS_OVERRIDE (test/escape seam) -> config/harness file ->
 # CLAUDECODE=1 (a Claude Code session) -> CS_HARNESS_DEFAULT (codex).
-# Config dir: CS_CONFIG_OVERRIDE, else <CS_HOME|CS_ROOT|PWD>/config.
 cs_harness_detect_root() {
   local override config_dir file value
   override=${CS_HARNESS_OVERRIDE:-}
   if [ -n "$override" ]; then
     cs_harness_valid "$override" && { printf '%s\n' "$override"; return 0; }
   fi
-  config_dir=${CS_CONFIG_OVERRIDE:-${CS_HOME:-${CS_ROOT:-$PWD}}/config}
+  config_dir=$(cs_harness_config_dir)
   file="$config_dir/harness"
   if [ -f "$file" ]; then
     value=$(tr -d '[:space:]' < "$file" 2>/dev/null || true)
@@ -100,9 +105,81 @@ cs_harness_effort_flag() {
   esac
 }
 
-# cs_harness_autonomy_flag <h> - the unattended full-autonomy flag.
+# cs_harness_permission_mode_valid <h> <mode> - true if <mode> is a launch
+# permission mode this harness accepts AND one an unattended soldier can work
+# under with nobody at the keyboard. Claude's `plan`, `manual`, and `dontAsk`
+# are rejected deliberately: the first cannot edit at all and the others park on
+# a prompt that no supervisor can answer, so both wedge the pane.
+cs_harness_permission_mode_valid() {
+  local h=$1 mode=$2
+  case "$h" in
+    claude)
+      case "$mode" in
+        auto|acceptEdits|bypassPermissions) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# cs_harness_permission_mode <h> - the configured launch permission mode for <h>
+# from config/permission-mode, or empty when the file has no record for it.
+# Fails loudly on a malformed file, an unconfigurable harness, a duplicate
+# record, or a mode that would leave a soldier waiting on a human. Validation
+# covers every record, not just the running harness, so a typo surfaces at the
+# next dispatch instead of silently doing nothing.
+# docs/configuration.md owns the schema.
+cs_harness_permission_mode() {
+  local h=$1 file key mode rest found=''
+  file="$(cs_harness_config_dir)/permission-mode"
+  [ -f "$file" ] || return 0
+  while read -r key mode rest || [ -n "$key" ]; do
+    case "$key" in ''|'#'*) continue ;; esac
+    if [ -z "$mode" ] || [ -n "$rest" ]; then
+      printf 'cs-harness: config/permission-mode needs exactly "<harness> <mode>" per line: %s\n' "$key" >&2
+      return 1
+    fi
+    case "$key" in
+      claude) ;;
+      codex)
+        printf 'cs-harness: config/permission-mode does not configure codex; its autonomy flag is fixed\n' >&2
+        return 1
+        ;;
+      *)
+        printf 'cs-harness: unknown harness "%s" in config/permission-mode\n' "$key" >&2
+        return 1
+        ;;
+    esac
+    if ! cs_harness_permission_mode_valid "$key" "$mode"; then
+      printf 'cs-harness: "%s" is not a usable %s launch permission mode (auto|acceptEdits|bypassPermissions)\n' "$mode" "$key" >&2
+      return 1
+    fi
+    if [ "$key" = "$h" ]; then
+      if [ -n "$found" ]; then
+        printf 'cs-harness: duplicate config/permission-mode record for %s\n' "$h" >&2
+        return 1
+      fi
+      found=$mode
+    fi
+  done < "$file"
+  [ -n "$found" ] || return 0
+  printf '%s\n' "$found"
+}
+
+# cs_harness_autonomy_flag <h> - the unattended full-autonomy flag, or the
+# narrower launch permission mode this home configured instead. A claude home
+# under an org policy that forbids bypassPermissions selects `auto` (or
+# `acceptEdits`) in config/permission-mode; every other home keeps full autonomy.
+# Exactly one flag is emitted, never both.
 cs_harness_autonomy_flag() {
-  case "$1" in
+  local h=$1 mode
+  mode=$(cs_harness_permission_mode "$h") || return 1
+  if [ -n "$mode" ]; then
+    printf -- '--permission-mode %s' "$(cs_harness_shell_quote "$mode")"
+    return 0
+  fi
+  case "$h" in
     codex) printf -- '--dangerously-bypass-approvals-and-sandbox' ;;
     claude) printf -- '--dangerously-skip-permissions' ;;
     *) return 1 ;;
@@ -225,7 +302,7 @@ cs_harness_soldier_launch() {
   local mf ef auto
   mf=$(cs_harness_model_flag "$h" "$model")
   ef=$(cs_harness_effort_flag "$h" "$effort")
-  auto=$(cs_harness_autonomy_flag "$h")
+  auto=$(cs_harness_autonomy_flag "$h") || return 1
   # The launch STRING is data run later in the pane; its $(...), $?, and \" are
   # literal and must not expand here. SC2016 disabled deliberately.
   case "$h" in
@@ -251,7 +328,7 @@ cs_harness_scout_launch() {
   local mf ef auto bin
   mf=$(cs_harness_model_flag "$h" "$model")
   ef=$(cs_harness_effort_flag "$h" "$effort")
-  auto=$(cs_harness_autonomy_flag "$h")
+  auto=$(cs_harness_autonomy_flag "$h") || return 1
   case "$h" in
     codex) bin='codex exec' ;;
     claude) bin='claude -p' ;;
@@ -269,7 +346,7 @@ cs_harness_capo_launch() {
   local mf ef auto bin
   mf=$(cs_harness_model_flag "$h" "$model")
   ef=$(cs_harness_effort_flag "$h" "$effort")
-  auto=$(cs_harness_autonomy_flag "$h")
+  auto=$(cs_harness_autonomy_flag "$h") || return 1
   bin=$(cs_harness_binary "$h")
   # shellcheck disable=SC2016
   printf 'CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_HOME=%s %s %s%s%s "$(%s encode launch-brief < %s)"' \

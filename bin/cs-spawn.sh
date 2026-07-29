@@ -9,6 +9,10 @@
 #   The policy's exact format is in docs/configuration.md.
 #   Codex accepts max and ultra through model_reasoning_effort; default omits it.
 #   Claude accepts max but not ultra.
+#   A claude home whose account policy forbids --dangerously-skip-permissions
+#   selects a narrower launch mode in config/permission-mode (auto|acceptEdits|
+#   bypassPermissions); an unusable or malformed record blocks the dispatch.
+#   The exact format is in docs/configuration.md.
 #   --scout marks the task kind=scout (report deliverable, scratch worktree).
 #   --headless (scout only) runs `codex exec` instead of the interactive TUI:
 #     fire-and-forget for bounded investigations. Turn-end is process exit;
@@ -172,6 +176,10 @@ if ! cs_harness_effort_valid "$HARNESS" "$EFFORT"; then
   esac
   exit 2
 fi
+# Resolve config/permission-mode up front. The launch builders read it too, but
+# they run after the worktree and metadata exist; validating here keeps a
+# malformed file from leaving a half-created task behind.
+cs_harness_permission_mode "$HARNESS" >/dev/null || exit 2
 if [ "$HEADLESS" -eq 1 ] && [ "$KIND" != scout ]; then
   echo "error: --headless applies only to --scout tasks" >&2
   exit 2
