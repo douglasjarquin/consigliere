@@ -871,6 +871,43 @@ SH
   pass "the splice handles exited and output kinds and ignores an unknown one"
 }
 
+test_snapshot_answers_panes_and_absence_falls_back() {
+  local dir state fakebin out pid
+  dir=$(make_case snapshot-path); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  # The discriminator: the snapshot says working while a per-pane `agent get`
+  # would say idle. A busy read can therefore only have come from the snapshot.
+  printf 'working: long tool call\n' > "$state/snap.status"
+  cs_write_meta "$state/snap.meta" "pane=pane-snap" "kind=ship"
+  export CS_FAKE_HERDR_AGENT_STATUS=idle
+  export CS_FAKE_HERDR_SNAPSHOT_PANE=pane-snap
+  export CS_FAKE_HERDR_SNAPSHOT_STATUS=working
+  export CS_FAKE_CREW_STATE='state: working · source: pane · harness busy'
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  # A pane the snapshot reports as working is provably working, so a no-verb
+  # signal is absorbed: the watcher keeps running and advances its suppressor.
+  wait_until 60 test -e "$state/.seen-snap_status" \
+    || { kill "$pid" 2>/dev/null; cat "$out"; fail "the snapshot-sourced status never drove a cycle"; }
+  wait_live "$pid" 10 || { cat "$out"; fail "a snapshot-working pane must not surface a wake"; }
+  kill "$pid" 2>/dev/null || true
+  pass "the per-cycle snapshot answers pane status without a per-pane query"
+
+  # A pane ABSENT from the snapshot must fall back to asking directly, never be
+  # read as a negative: it may simply have been created after the snapshot.
+  dir=$(make_case snapshot-absent); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  printf 'needs-decision: pick one\n' > "$state/other.status"
+  cs_write_meta "$state/other.meta" "pane=pane-other" "kind=ship"
+  export CS_FAKE_HERDR_SNAPSHOT_PANE=pane-not-this-one
+  export CS_FAKE_HERDR_SNAPSHOT_STATUS=working
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_until 60 grep -q '^signal:' "$out" \
+    || { kill "$pid" 2>/dev/null; cat "$out"; fail "a pane absent from the snapshot must still be evaluated directly"; }
+  kill "$pid" 2>/dev/null || true
+  unset CS_FAKE_HERDR_SNAPSHOT_PANE CS_FAKE_HERDR_SNAPSHOT_STATUS
+  pass "a pane absent from the snapshot falls back to a direct query"
+}
+
 test_duplicate_watcher_noops_through_singleton_lock() {
   local dir state fakebin out out2 pid i
   dir=$(make_case singleton-lock); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
@@ -978,3 +1015,4 @@ test_duplicate_watcher_noops_through_singleton_lock
 test_capo_worker_event_surfaced_without_the_capo_taking_a_turn
 test_capo_worker_event_deduped_and_scoped
 test_event_splice_exit_output_and_unknown_kinds
+test_snapshot_answers_panes_and_absence_falls_back

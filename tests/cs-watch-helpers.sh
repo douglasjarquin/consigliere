@@ -24,6 +24,16 @@ make_case() {
 #                               exported EMPTY = no agent in the pane)
 set -u
 case "${1:-} ${2:-}" in
+  "api snapshot")
+    # CS_FAKE_HERDR_SNAPSHOT_STATUS: when set, the snapshot answers for
+    # CS_FAKE_HERDR_SNAPSHOT_PANE with this status. Unset = no snapshot
+    # available, which is the per-pane fallback path.
+    if [ -n "${CS_FAKE_HERDR_SNAPSHOT_STATUS:-}" ]; then
+      printf '{"snapshot":{"workspaces":[{"panes":[{"pane_id":"%s","agent_status":"%s","agent":"codex","agent_session":{"value":"sess-1"},"state_change_seq":7}]}]},"type":"session_snapshot"}\n' \
+        "${CS_FAKE_HERDR_SNAPSHOT_PANE:-pane-1}" "$CS_FAKE_HERDR_SNAPSHOT_STATUS"
+      exit 0
+    fi
+    exit 1 ;;
   "pane read")
     if [ -n "${CS_FAKE_HERDR_CAPTURE:-}" ]; then
       cat "$CS_FAKE_HERDR_CAPTURE" 2>/dev/null

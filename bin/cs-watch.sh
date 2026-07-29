@@ -201,7 +201,29 @@ hash_pane() {
 # immediate blocked escalation and the stale machinery. cs_herdr_agent_busy_state
 # owns the codex corroboration policy (a native idle/unknown is re-checked
 # against the rendered busy signature before a soldier may be read as stopped).
+# One session snapshot per poll cycle, refreshed by snapshot_refresh at the top
+# of the loop. Empty means "no snapshot this cycle" and every read falls back to
+# a per-pane query - the pre-snapshot behavior, never a wrong answer.
+CS_WATCH_SNAPSHOT=""
+
+snapshot_refresh() {
+  CS_WATCH_SNAPSHOT=$(cs_herdr_snapshot_fetch 2>/dev/null) || CS_WATCH_SNAPSHOT=""
+}
+
 pane_busy_state() {  # <pane> -> busy|idle|blocked|done|unknown
+  local raw=""
+  # Prefer this cycle's snapshot: it already answered every pane in one call.
+  # A pane ABSENT from the snapshot is not a negative answer - it may have been
+  # created after the snapshot was taken - so that falls through to asking
+  # directly rather than being read as idle.
+  if [ -n "$CS_WATCH_SNAPSHOT" ]; then
+    raw=$(cs_herdr_snapshot_pane_field "$CS_WATCH_SNAPSHOT" "$1" agent_status 2>/dev/null) || raw=""
+  fi
+  if [ -n "$raw" ]; then
+    # Same corroboration policy, same owner, different transport.
+    cs_herdr_busy_state_from_raw "$1" "$raw" 2>/dev/null || printf 'unknown'
+    return 0
+  fi
   cs_herdr_agent_busy_state "$1" 2>/dev/null || printf 'unknown'
 }
 
@@ -1101,6 +1123,11 @@ while :; do
   # Liveness beacon for guard scripts: a fresh mtime here means a watcher is
   # alive. Supervision scripts warn when this goes stale with tasks in flight.
   touch "$STATE/.last-watcher-beat"
+
+  # One session snapshot for this whole cycle, so N panes cost one round-trip
+  # instead of N. Best-effort: on failure every pane read falls back to its own
+  # query, which is exactly the pre-snapshot behavior.
+  snapshot_refresh
 
   # Parent-owned capo pending-reply reconciliation (once its library lands):
   # resolve correlated parent reports, observe turn completion, send one

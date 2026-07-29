@@ -120,3 +120,44 @@ w49:p1   agent process: 42289  codex
 This answers a question `agent get` cannot. `agent get` reports what herdr BELIEVES about a pane's agent; process-info reports what is actually running. An agent that exited leaves a pane whose `agent_status` reads idle or unknown - indistinguishable by status alone from an agent between turns. `cs_herdr_pane_agent_process` and `cs_herdr_pane_is_agent_husk` in `bin/cs-herdr-lib.sh` close that gap, and `bin/cs-crew-state.sh` reports a husk as `source: pane-process`.
 
 **The husk predicate fails closed, deliberately.** "Could not read the process table" and "read it, no agent there" are different claims and only the second is a husk. Treating an unreadable answer as a husk would report a healthy soldier as dead on any herdr without process-info, on any transient socket error, and in every test stub. The `foreground_processes` array must be present before the predicate concludes anything. This was caught by an existing test rather than by review: the first implementation reported every stubbed pane as a dead agent.
+
+## One snapshot instead of N pane reads (verified live 2026-07-29, protocol 17)
+
+`herdr api snapshot` returns every pane in one payload, each carrying `agent_status`, `agent`, `agent_session`, `cwd`, `tab_id`, `workspace_id`, `revision`, and `state_change_seq`. Sampled against the live session (23292 bytes, 10 panes):
+
+```text
+w48:p1   status=idle     agent=codex  state_change_seq=650
+w49:p1   status=working  agent=codex  state_change_seq=674
+w44:p1   ABSENT
+```
+
+`bin/cs-watch.sh` takes one snapshot per poll cycle (`snapshot_refresh`) and answers every pane status from it, so N panes cost one round-trip instead of N. Two rules make that safe:
+
+- A pane ABSENT from the snapshot (like `w44:p1` above) is NOT a negative answer - it may have been created after the snapshot was taken - so it falls back to a direct query.
+- A failed snapshot falls back to per-pane queries, which is exactly the pre-snapshot behavior.
+
+The corroboration policy did not move: `cs_herdr_busy_state_from_raw` applies it to a raw status from either transport, so one owner covers both.
+
+`state_change_seq` is `last_agent_state_change_seq` - it advances on agent STATE changes, not on terminal output (`src/app/actions.rs` increments it in the agent-state path). It is therefore a monotonic dedupe key for status transitions, NOT a replacement for output hashing. An early reading of this field as an output counter was wrong.
+
+## Agent session identity and detection explain (verified live 2026-07-29)
+
+`agent_session.value` is the agent instance's own session id, reported by herdr's official integrations (`herdr integration status` shows claude v7 and codex v6 installed here). Distinct per pane:
+
+```text
+w48:p1   session=019fac44-4d34-71f0-8da1-b916934c9b9a
+w49:p1   session=019fae39-1f27-71b0-9557-840999f18487
+```
+
+This makes "did this soldier restart?" a fact rather than an inference: an unchanged id across a wedge proves the ORIGINAL instance is still there and no relaunch happened, while a changed id proves a different instance owns the pane. An absent id means no integration reported one, which is not an error and must not be read as a negative.
+
+`herdr agent explain <pane>` names the rule behind herdr's classification, e.g.:
+
+```text
+agent: codex
+state: working
+manifest: remote:.../agent-detection/remote/codex.toml 2026.07.18.1
+rule: osc_title_working (region=osc_title priority=1050)
+```
+
+That matters because consigliere's busy-signature corroboration exists precisely because `agent get` alone was not trusted; `explain` turns a disagreement into a named rule instead of a guess.
