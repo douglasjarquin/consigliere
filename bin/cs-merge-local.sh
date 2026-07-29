@@ -5,9 +5,10 @@
 # This is consigliere's merge gate-action (the boss's merge authority applied
 # locally instead of via a GitHub PR). It is the one sanctioned exception to
 # hard rule #1 "never run state-changing git in projects/", and it is narrow:
-# it only runs for mode=local-only tasks, only after the boss approves (or
-# yolo=on auto-approves), and only as a clean fast-forward - it refuses a
-# diverged branch and tells you to have the soldier rebase.
+# it only runs for mode=local-only tasks, only after the boss approves, and
+# only as a clean fast-forward - it refuses a diverged branch and tells you to
+# have the soldier rebase. `yolo` does not approve a landing and never has any
+# bearing on this script: landing is the boss's alone (AGENTS.md section 7).
 # Usage: cs-merge-local.sh <task-id>
 set -eu
 

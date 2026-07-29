@@ -12,10 +12,12 @@
 #   no-mistakes  full pipeline -> PR -> boss merge (default)
 #   direct-PR    push + PR via gh-axi, no pipeline -> boss merge
 #   local-only   local branch, no remote/PR -> boss approve -> guarded local merge
-# yolo (orthogonal) = when on, consigliere makes approval decisions itself (PR
-#   merges, ask-user findings, local-only merge approval) without checking the
-#   boss - except anything destructive/irreversible/security-sensitive, which
-#   still escalates.
+# yolo (orthogonal) = when on, consigliere answers routine gate decisions itself
+#   (ask-user findings within the accepted task contract) instead of waiting on
+#   the boss. It never authorizes landing: a PR merge and a local-only merge are
+#   the boss's alone, yolo or not. Anything destructive, irreversible, or
+#   security-sensitive still escalates, and so does a fix that would materially
+#   expand the product or engineering contract. AGENTS.md section 7 is the owner.
 #
 # An unknown/missing project or unknown mode falls back to "no-mistakes off" and
 # warns to stderr, so a typo never silently drops the gate.
