@@ -96,8 +96,9 @@ state/               volatile runtime signals; gitignored
   pending-replies/   parent-owned capo pending-reply records; cs-pending-reply-lib.sh
   .wake-queue        durable queued wakes: epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload
   .afk               durable away-mode flag; present = daemon may inject escalations
-  .watch.lock .wake-queue.lock   watcher singleton and queue serialization locks
+  .watch.lock .wake-queue.lock .monitor.lock   watcher, queue, and monitor singleton locks
   .last-watcher-beat watcher liveness beacon; guard scripts read it
+  .last-monitor-beat .monitor.log .monitor-stop   persistent monitor liveness, lifecycle log, and stop request; cs-monitor.sh
   .hash-* .count-* .stale-* .paused-* .seen-* .last-* .capo-surfaced-*   watcher internals; never touch
   .subsuper-*        away-mode daemon internals; never touch
 .no-mistakes/        local validation state and evidence (`.no-mistakes/evidence`); gitignored
@@ -302,6 +303,7 @@ Scratch commits and debug edits never ride along, and a reproduced bug becomes t
 Fleet supervision is an always-loaded operational contract; `docs/supervision.md` and script help own mechanisms and recipes.
 
 Whenever work is under way, keep exactly one live supervision cycle: the bounded foreground checkpoint `bin/cs-watch-checkpoint.sh`.
+The checkpoint also keeps this home's persistent monitor alive, so the home stays watched while you work rather than only while you wait; it reports queued wakes and never drains them.
 Codex cannot reason during a foreground tool call, so the checkpoint returns on the first actionable wake or at the bounded interval; handle the wake, then start the next checkpoint in the same turn.
 Do not use shell `&`, background tasks, or a second cycle when a healthy one already exists.
 No turn ends blind while work is under way, including turns described as holding or waiting; the harness Stop hook (codex or claude) is the structural backstop, not permission to omit the live cycle.

@@ -14,7 +14,9 @@
 #       exit 0.
 #     - a quiet checkpoint (watcher timed out, RC 124) -> print
 #       "checkpoint: no actionable wake within <n>s" and exit 124.
-#     - "watcher: already running" -> exit 1 with a checkpoint note on stderr.
+#     - queued wakes are printed WITHOUT being consumed (bin/cs-wake-drain.sh
+#       owns draining), and a home with no startable monitor still watches
+#       inline for the bound rather than not at all.
 #
 # Hermetic: reuses the offline cs-watch fixtures (fake herdr + fake
 # cs-crew-state.sh) so the real cs-watch.sh runs with no live backend. The
@@ -97,5 +99,40 @@ expect_code 0 "$rc" "an actionable wake should exit 0"
 assert_contains "$out" "signal:" "actionable wake passes the watcher signal reason through"
 assert_contains "$out" "task.status" "actionable wake names the status file that woke it"
 pass "cs-watch-checkpoint passes an actionable watcher wake through and exits 0"
+
+# --- runtime: the queue is shown, never consumed ------------------------------
+
+# 8. a wake already sitting in the durable queue returns immediately, and the
+#    queue still holds it afterwards: draining belongs to cs-wake-drain.sh, so a
+#    checkpoint that consumed rows would lose wakes the agent never saw.
+dir=$(make_case prequeued); state="$dir/state"; fakebin="$dir/fakebin"
+printf '%s\t1\tsignal\ttask.status\tsignal: /tmp/task.status\n' "$(date +%s)" > "$state/.wake-queue"
+set +e
+out=$(env PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
+  CS_CREW_STATE_BIN="$fakebin/cs-crew-state.sh" CS_HERDR_EVENTS_FORCE=0 \
+  CS_POLL=1 "$CHECKPOINT" --seconds 5 2>&1); rc=$?
+set -e
+expect_code 0 "$rc" "an already-queued wake should exit 0"
+assert_contains "$out" "signal: task.status" "the queued wake is reported"
+[ -s "$state/.wake-queue" ] || fail "the checkpoint must not consume the queue"
+pass "cs-watch-checkpoint reports queued wakes without consuming them"
+
+# --- runtime: no startable monitor still watches inline ----------------------
+
+# 9. when no monitor can be started the checkpoint says so and falls back to
+#    watching inline for this bound. Degrading to the old behavior is the point:
+#    a monitor that cannot launch must not mean nothing is watching.
+dir=$(make_case no-monitor); state="$dir/state"; fakebin="$dir/fakebin"
+printf 'needs-decision: pick A or B\n' > "$state/task.status"
+set +e
+out=$(env PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
+  CS_CREW_STATE_BIN="$fakebin/cs-crew-state.sh" CS_HERDR_EVENTS_FORCE=0 \
+  CS_CHECKPOINT_MONITOR_BIN="$dir/no-such-monitor" \
+  CS_POLL=1 CS_SIGNAL_GRACE=1 "$CHECKPOINT" --seconds 20 2>&1); rc=$?
+set -e
+expect_code 0 "$rc" "the inline fallback should still surface an actionable wake"
+assert_contains "$out" "no persistent monitor could be started" "the fallback is announced, never silent"
+assert_contains "$out" "signal:" "the inline fallback still passes the wake through"
+pass "cs-watch-checkpoint falls back to inline watching when no monitor can start"
 
 pass "cs-watch-checkpoint bounded-checkpoint behavior characterized"

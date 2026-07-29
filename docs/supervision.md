@@ -7,12 +7,16 @@ Codex cannot reason during a foreground tool call, so a background watcher that 
 
 1. Drain first: `bin/cs-wake-drain.sh` at the start of every wake-handling turn.
 2. Run one checkpoint: `bin/cs-watch-checkpoint.sh --seconds "${CS_WATCH_CHECKPOINT:-180}"`.
+   It ensures `bin/cs-monitor.sh` is alive for this home, reviving it on a stale `state/.last-monitor-beat`, then waits for `state/.wake-queue` to carry something.
 3. Actionable wake (`signal:` / `stale:` / `check:` / `heartbeat`): drain, handle, start the next checkpoint in the same turn.
 4. Quiet checkpoint (`checkpoint:` line, exit 124): drain anyway, process any queued boss message, start the next checkpoint.
 5. Never `&`, never background tasks, never a second cycle beside a healthy one.
 6. Failure or missing cycle only: drain, inspect, start a fresh checkpoint.
 
-`bin/cs-watch.sh` is the zero-token classifier under the checkpoint: it absorbs benign wakes in bash (no model turn) and exits with a reason line only for actionable ones.
+`bin/cs-watch.sh` is the zero-token classifier: it absorbs benign wakes in bash (no model turn) and exits with a reason line only for actionable ones.
+`bin/cs-monitor.sh` owns that watcher and outlives any single turn, which is the property the checkpoint alone could never provide: a checkpoint exists only while its agent waits on it, so before monitors a home went unwatched the moment its agent started working (2h10m observed on a live capo home).
+The monitor never injects and never reasons - the durable queue is the entire handoff - and it stands down while away mode holds, because that daemon owns the watcher instead.
+A monitor that dies is revived by the next checkpoint, so an unexplained death costs one checkpoint interval rather than a session; if no monitor can be started at all, the checkpoint says so and watches inline for that bound.
 Wakes are appended durably to `state/.wake-queue` before detector state advances, so a missed process exit is recovered by the next drain.
 
 ## Wake vocabulary
