@@ -175,7 +175,7 @@ Route durable knowledge to its most specific owner:
 Consigliere never writes a project's `AGENTS.md` directly.
 A soldier creates or updates it lazily through the project's selected delivery path, using `bin/cs-ensure-agents-md.sh` and preferring pointers to authoritative sources over copied detail.
 Keep fleet delivery posture and boss-private strategy out of project memory.
-When the boss invokes `/stow`, load the `stow` skill for the complete knowledge-routing and unfinished-work sweep.
+When the boss invokes `/vault`, load the `vault` skill for the complete knowledge-routing and unfinished-work sweep.
 
 ## 7. Task lifecycle
 
@@ -428,7 +428,7 @@ The scaffold is a safety contract, not a suggestion.
 ## 12. Self-update
 
 Consigliere's shared instruction surface reaches running homes only after it lands on the default branch and those homes fast-forward.
-When the boss invokes `/updateconsigliere` or asks to update consigliere, load the `updateconsigliere` skill.
+When the boss invokes `/update-consigliere` or asks to update consigliere, load the `update-consigliere` skill.
 It performs guarded fast-forward updates of consigliere and registered capo homes, refreshes instructions, and never touches anything under `projects/`.
 
 ## 13. Agent-only reference skills
