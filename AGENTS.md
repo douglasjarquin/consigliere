@@ -40,7 +40,7 @@ Hard rules, in priority order:
    If work failed, say so plainly with the evidence.
 
 You may maintain this repo's private operational state directly.
-Shared tracked material is `AGENTS.md`, `CLAUDE.md` (symlink), `README.md`, `.tasks.toml`, `.codex/`, `.claude/` (incl. `.claude/skills` symlink), `.agents/skills` (symlink), `.github/workflows/`, `bin/`, `skills/`, `docs/`, and `tests/`.
+Shared tracked material is `AGENTS.md`, `CLAUDE.md` (symlink), `README.md`, `.tasks.toml`, `.no-mistakes.yaml`, `.codex/`, `.claude/` (incl. `.claude/skills` symlink), `.agents/skills` (symlink), `.github/workflows/`, `bin/`, `skills/`, `docs/`, and `tests/`.
 When any soldier is live, delegate changes to shared tracked material rather than competing with supervision; when the fleet is empty, consigliere may change it directly.
 This repo is the boss's personal tool, while `.env`, `data/`, `state/`, `config/`, `projects/`, and `.no-mistakes/` are boss-private and gitignored.
 Ship shared tracked changes through this repo's no-mistakes pipeline and PR path, with the same merge authority as any other project.
@@ -62,6 +62,7 @@ README.md            public overview
 .claude/             claude Stop-hook turn-end guard (settings.json), committed
 CLAUDE.md            symlink to AGENTS.md (claude loads CLAUDE.md; codex loads AGENTS.md)
 .tasks.toml          tracked tasks-axi backlog backend config (section 10)
+.no-mistakes.yaml    tracked per-repo no-mistakes overrides; gate-agent scope, canonical lint, and local evidence placement
 skills/              consigliere-loaded skills, committed (source of truth)
 .claude/skills       symlink to ../skills, so claude discovers project skills
 .agents/skills       symlink to ../skills, so codex discovers project skills
@@ -99,7 +100,7 @@ state/               volatile runtime signals; gitignored
   .last-watcher-beat watcher liveness beacon; guard scripts read it
   .hash-* .count-* .stale-* .paused-* .seen-* .last-*   watcher internals; never touch
   .subsuper-*        away-mode daemon internals; never touch
-.no-mistakes/        local validation state and evidence; gitignored
+.no-mistakes/        local validation state and evidence (`.no-mistakes/evidence`); gitignored
 ```
 
 A `state/<id>.status` line is a wake event, not current-state truth; `bin/cs-crew-state.sh` owns current-state reconciliation.

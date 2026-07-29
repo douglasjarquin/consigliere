@@ -1,0 +1,53 @@
+# Per-repo no-mistakes overrides.
+
+# consigliere's AGENTS.md (loaded as CLAUDE.md through the tracked symlink) installs
+# the consigliere identity: a fleet supervisor that holds a session lock, spawns and
+# steers soldiers, and owns merge authority. A no-mistakes review/fix/document/test/
+# lint/pr/rebase/ci agent must never adopt that identity, take the lock, or dispatch
+# work while validating a branch. Disabling project-level agent settings and
+# instructions for gate agents keeps them scoped to the diff in front of them.
+# Trusted-only: a pushed branch cannot turn this off, so it is honored from the
+# default-branch copy of this file.
+disable_project_settings: true
+
+# Trusted documentation placement policy for the Document step. The coding guideline
+# owns the decision tree; this stays a pointer so gate instructions cannot drift into
+# a second copy of that policy.
+document:
+  instructions: |
+    Read skills/consigliere-coding-guidelines/SKILL.md before changing any
+    documentation, and apply its knowledge-placement decision tree: AGENTS.md for
+    every-session operating facts, skills/ for situation-triggered procedure,
+    docs/ for reference and verified-facts detail, and a script's own header plus
+    --help for exact flags, commands, and paths.
+    Honor the one-owner rule: state a contract in full exactly once and make every
+    other mention a one-line cross-reference.
+    AGENTS.md costs every fleet session on every turn, so route conditional or
+    reference detail out of it rather than appending.
+    docs/claude.md, docs/codex.md, and docs/herdr.md record empirical evidence
+    only: date, version, exact commands, exact output. Never write an assumption
+    into one.
+    Tracked Markdown is one full sentence per line, plain dash, never an em dash.
+
+# Pin lint to the canonical gate instead of leaving it to no-mistakes' default
+# handling, which does not invoke this repository's own lint definition.
+# bin/cs-lint.sh owns the complete definition, .github/workflows/ci.yml invokes it
+# directly, and tests/cs-ci-contract.test.sh asserts that parity.
+#
+# commands.test is deliberately NOT pinned to a full tests/*.test.sh walk. Local
+# no-mistakes Test is intent-targeted validation of whether this change meets its
+# brief; .github/workflows/ci.yml owns broad regression through bin/cs-test-run.sh
+# (portable, real-Herdr, coverage) plus the repo-invariant lanes. A full-suite
+# override here would duplicate CI and defeat the targeted Test contract.
+commands:
+  lint: 'bin/cs-lint.sh'
+
+# Keep test evidence in the repo, under the gitignored local operational directory.
+# .gitignore already excludes .no-mistakes/, so evidence stays on this machine
+# beside the rest of this home's private validation state and is never committed or
+# pushed. This replaces the .omo/evidence artifacts left behind by an earlier
+# evidence-gathering tool, which are removed in the same change.
+test:
+  evidence:
+    store_in_repo: true
+    dir: .no-mistakes/evidence
