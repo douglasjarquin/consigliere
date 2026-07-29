@@ -36,6 +36,8 @@ Inheritance into capo homes: `data/boss-shared.md` is propagated read-only, and 
 
 `config/dispatch-policy` is optional and local to one Consigliere home.
 It sets default model and effort values for the resolved harness and task kind.
+The path may be a regular file or a symlink that resolves to one, so a home may keep its policy under external configuration management.
+A symlink that does not resolve stops dispatch, because silently ignoring a broken policy is indistinguishable from having none.
 One non-comment line has exactly four whitespace-separated fields:
 
 ```text
