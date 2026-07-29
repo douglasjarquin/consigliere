@@ -1,10 +1,10 @@
 ---
-name: stow
-description: Sweep the current session for uncaptured durable knowledge and file it to disk before a context reset. Use when the boss invokes /stow (e.g. "/stow", "stow what you've learned"), before a session reset or context compaction, or periodically to keep operational memory current.
+name: vault
+description: Put the session's durable knowledge in the vault - sweep this conversation for anything worth keeping and file it to disk before a context reset. Use when the boss invokes /vault (e.g. "/vault", "put that in the vault", "vault what you've learned", and the retired "/stow" phrasing), before a session reset or context compaction, or periodically to keep operational memory current.
 user-invocable: true
 ---
 
-# stow
+# vault
 
 Sweep this session for durable knowledge that only exists in conversation right now, and write it to the disk locations consigliere already prints in the next session-start context digest.
 The goal is a session that is safe to reset or destroy because everything durable has already been captured.
@@ -49,13 +49,13 @@ The goal is a session that is safe to reset or destroy because everything durabl
    Do not invent other graduation paths.
 
 5. **Report to the boss.**
-   Summarize, in plain outcome language (section 9): what was stowed and where, what was filed to the backlog, and whether the session is now safe to reset or destroy - i.e. whether every durable finding from this sweep now lives on disk rather than only in this conversation.
+   Summarize, in plain outcome language (section 9): what went into the vault and where, what was filed to the backlog, and whether the session is now safe to reset or destroy - i.e. whether every durable finding from this sweep now lives on disk rather than only in this conversation.
    If something could not be captured yet (for example, project-intrinsic knowledge waiting on a soldier to land it), say so explicitly rather than reporting the session fully safe.
 
 ## Scope exclusion: no skill storage
 
-`/stow` must **never** store, create, or edit a skill as a destination for any finding.
+`/vault` must **never** store, create, or edit a skill as a destination for any finding.
 There is no "graduate this to a skill" move in this skill's routing.
-This is a deliberate, standing exclusion, not an oversight: a stow sweep is a memory-routing operation, not a way to author or mutate skills.
+This is a deliberate, standing exclusion, not an oversight: a vault sweep is a memory-routing operation, not a way to author or mutate skills.
 Writing learnings into `skills/` would risk mixing fleet-local material with shared consigliere behavior.
 Until a human deliberately scopes a skill change as consigliere repo work, route knowledge about consigliere itself to the shared `AGENTS.md` (or other shared, tracked material) via the pipeline, and fleet-local knowledge to `data/`, never to a skill.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Self-update a running consigliere and its capos to the latest origin.
 #
-# Mechanical half of the /updateconsigliere skill. Fast-forwards the running
+# Mechanical half of the /update-consigliere skill. Fast-forwards the running
 # consigliere repo's default branch from origin, then delegates the capo-home
 # fast-forward to bin/cs-home-seed.sh --sweep (one FF implementation for capo
 # homes, not two). FAST-FORWARD ONLY: never force, never create a merge

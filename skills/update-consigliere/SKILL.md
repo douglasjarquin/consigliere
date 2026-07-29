@@ -1,6 +1,6 @@
 ---
-name: updateconsigliere
-description: Self-update a running consigliere and its capos to the latest from origin. Use when the boss invokes /updateconsigliere or asks to update consigliere or pull the latest. Fast-forwards this repo's default branch and every capo home (fast-forward only, never forced, never disruptive), then re-reads AGENTS.md and nudges each updated capo to do the same.
+name: update-consigliere
+description: Self-update a running consigliere and its capos to the latest from origin. Use when the boss invokes /update-consigliere or asks to update consigliere or pull the latest. Fast-forwards this repo's default branch and every capo home (fast-forward only, never forced, never disruptive), then re-reads AGENTS.md and nudges each updated capo to do the same.
 ---
 
 # Update consigliere
