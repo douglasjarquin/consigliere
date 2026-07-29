@@ -25,6 +25,7 @@ Test and script overrides: `CS_ROOT_OVERRIDE`, `CS_STATE_OVERRIDE` narrow a sing
 |---|---|
 | `config/backlog-backend` | absent or `tasks-axi` = tasks-axi against `data/backlog.md` (`.tasks.toml` owns schema); `manual` = hand-edit the markdown |
 | `config/dispatch-policy` | optional per-home profiles for task dispatch; `bin/cs-spawn.sh` owns its strict four-column schema below |
+| `config/permission-mode` | optional narrower claude launch permission mode for homes whose org policy forbids full bypass; absent = full autonomy; `bin/cs-harness-lib.sh` owns the two-column schema below |
 | `config/upstream` | path or URL of the firstmate checkout for `/upstream-review`; absent = `../firstmate` |
 | `config/wedge-alarm` | away-mode wedge-alarm active-alert directives; absent = auto (macOS Notification Center when available) |
 
@@ -58,6 +59,39 @@ claude ship     sonnet         high
 
 An explicit `cs-spawn.sh --model` or `--effort` value overrides only that policy axis for that task.
 An absent policy or absent matching line retains the existing harness default.
+
+### Permission mode
+
+`config/permission-mode` is optional and local to one Consigliere home.
+It exists for a claude home on a Claude account whose managed policy forbids `--dangerously-skip-permissions`: without it, every soldier pane would start in the harness default and need a human to widen it by hand.
+One non-comment line has exactly two whitespace-separated fields:
+
+```text
+<harness> <mode>
+```
+
+`harness` is `claude`; `codex` is rejected because its autonomy flag is not configurable.
+`mode` is `auto`, `acceptEdits`, or `bypassPermissions`.
+Blank lines and lines whose first field begins with `#` are ignored.
+
+```text
+# harness mode
+claude auto
+```
+
+An absent file, or a file with no record for the resolved harness, keeps the harness default: full autonomy through `--dangerously-skip-permissions` (claude) or `--dangerously-bypass-approvals-and-sandbox` (codex).
+A configured mode replaces that flag; exactly one of the two ever reaches a launch.
+
+Claude's remaining modes are refused deliberately.
+`plan` cannot edit files at all, and `manual` and `dontAsk` park on a prompt no supervisor can answer, so each one wedges an unattended pane.
+Every record is validated, not just the one matching the running harness, so a typo stops the next dispatch instead of silently doing nothing.
+A malformed file, an unknown harness, an unusable mode, or a duplicate record fails the launch rather than falling back to full autonomy.
+
+The mode is resolved from the home that builds the launch, so a capo launched by a configured home inherits that home's mode.
+`config/permission-mode` itself is not seeded into a capo home; set it there too if that capo spawns its own soldiers.
+
+Operational consequence: under `auto` or `acceptEdits` a soldier can still stop on a permission prompt.
+That pane looks busy rather than failed, so it surfaces through the ordinary stale-liveness path in `docs/supervision.md` instead of as an immediate failure.
 
 ## data/ and state/
 

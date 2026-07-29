@@ -2,7 +2,8 @@
 
 Verified live against claude 2.1.218 on 2026-07-24 (launch-scoped Stop hook fires
 and blocks; `--settings` accepts a file or JSON string; no trust prompt under
-`--dangerously-skip-permissions`).
+`--dangerously-skip-permissions`), and against claude 2.1.220 on 2026-07-28
+(`--permission-mode auto` keeps the launch-scoped Stop hook firing).
 Re-verify after claude upgrades; `bin/cs-bootstrap.sh` checks presence only, not
 version. The launch template and per-harness facts live in `bin/cs-harness-lib.sh`.
 
@@ -10,13 +11,18 @@ version. The launch template and per-harness facts live in `bin/cs-harness-lib.s
 
 ```
 claude [--model <m>] [--effort <low|medium|high|xhigh|max>] \
-  --dangerously-skip-permissions \
+  <--dangerously-skip-permissions | --permission-mode <mode>> \
   --settings <state/<id>.claude-settings.json> \
   "$(bin/cs-operational-input.sh encode launch-brief < data/<id>/brief.md)"
 ```
 
 - The typed `launch-brief` positional prompt starts the supervised interactive session.
 - `--dangerously-skip-permissions` gives the unattended soldier full autonomy (no permission prompts).
+- `--permission-mode <auto|acceptEdits|bypassPermissions>` is the alternative for a home
+  whose Claude account policy forbids the bypass flag; `config/permission-mode` selects it
+  and `docs/configuration.md` owns that schema. It is the flag form of the interactive
+  Shift+Tab mode cycle, so a pane starts in the chosen mode with no keystrokes.
+  Exactly one of the two flags is emitted, never both.
 - Turn-end is wired via the `--settings` Stop hook, NOT an inline flag: claude has
   no codex-style `-c notify=`. cs-spawn writes a per-soldier settings file whose
   `Stop` hook touches `state/<id>.turn-ended` every turn and then runs
@@ -67,6 +73,40 @@ between horizontal rules with no ghost/placeholder text, so the codex ghost stri
 is a harmless no-op; a bare `❯` reads `empty`, `❯ <text>` reads `pending`. The
 away-mode daemon can therefore inject escalation digests into a claude composer,
 same as codex.
+
+## Permission modes (verified 2026-07-28, claude 2.1.220)
+
+`claude --help` lists the launch flag and its accepted values:
+
+```
+  --permission-mode <mode>              Permission mode to use for the session
+                                        (choices: "acceptEdits", "auto",
+                                        "bypassPermissions", "manual",
+                                        "dontAsk", "plan")
+```
+
+A configured mode must not cost the turn-end signal, so the Stop hook was verified
+against it directly. In a scratch directory holding a `settings.json` whose `Stop`
+hook touches `./turn-ended`:
+
+```
+$ claude --permission-mode auto --settings settings.json -p "Reply with exactly: OK"
+OK
+$ echo $?
+0
+$ ls turn-ended
+turn-ended
+```
+
+The hook fired under `--permission-mode auto`, so `auto` keeps the same turn-end
+wiring as `--dangerously-skip-permissions`. Only the three modes an unattended
+soldier can actually work under are accepted by `config/permission-mode`;
+`plan`, `manual`, and `dontAsk` are refused for the reasons in
+`docs/configuration.md`.
+
+NOT verified: the behavior of `--permission-mode` and `--dangerously-skip-permissions`
+passed together. `cs_harness_autonomy_flag` emits exactly one of them, so the
+combination never occurs in a consigliere launch.
 
 ## Native features deliberately available to consigliere
 

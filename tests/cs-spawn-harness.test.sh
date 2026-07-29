@@ -123,6 +123,29 @@ assert_no_grep 'cs-turnend-guard' "$SETTINGS" "soldier settings must not run the
 assert_contains "$launch" "$SETTINGS" "claude launch references the settings file"
 pass "claude root: harness=claude, --settings launch, settings file written"
 
+# --- config/permission-mode reaches a real spawn ----------------------------
+# End-to-end, not just the launch-string unit: proves the home's config dir
+# resolves the same way for the harness lib as it does for cs-spawn itself.
+printf 'claude auto\n' > "$HOME_DIR/config/permission-mode"
+launch=$(spawn_one claude t-claude-permmode)
+assert_contains "$launch" "--permission-mode 'auto'" "configured permission mode reaches the spawn launch"
+assert_not_contains "$launch" '--dangerously-skip-permissions' "configured mode replaces the bypass flag"
+
+printf 'claude plan\n' > "$HOME_DIR/config/permission-mode"
+mkdir -p "$HOME_DIR/data/t-permmode-invalid"
+printf 'implement the fixture\n' > "$HOME_DIR/data/t-permmode-invalid/brief.md"
+if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude \
+  CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
+  CS_CLAUDE_JSON="$TMP/claude.json" \
+  CS_FAKE_SPAWN_WORKTREE="$TMP/wt-permmode-invalid" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-permmode-invalid" \
+  "$SPAWN" t-permmode-invalid "$REPO" 2>&1); then
+  fail "an unusable permission mode must reject spawn"
+fi
+assert_contains "$output" "not a usable claude launch permission mode" "unusable mode error is specific"
+assert_absent "$HOME_DIR/state/t-permmode-invalid.meta" "unusable mode writes no metadata"
+rm -f "$HOME_DIR/config/permission-mode"
+pass "config/permission-mode selects the claude launch mode and blocks an unusable one"
+
 printf 'codex ship gpt-5.6-sol too-much\n' > "$HOME_DIR/config/dispatch-policy"
 mkdir -p "$HOME_DIR/data/t-policy-invalid"
 printf 'implement the fixture\n' > "$HOME_DIR/data/t-policy-invalid/brief.md"
