@@ -89,7 +89,29 @@ assert_contains "$out" "unsafe destination" "symlink refusal names the reason"
 rm "$DEST"
 pass "a symlinked capo copy refuses propagation"
 
-# 7. backlog-backend: seed copy converges value and mirrors absence
+# 7. a symlinked MAIN SOURCE is read through: propagation is a read, and a home
+#    may keep the authoritative file under external configuration management.
+printf 'shared from dotfiles\n' > "$TMP/external-boss-shared.md"
+rm -f "$MAIN/data/boss-shared.md"
+ln -s "$TMP/external-boss-shared.md" "$MAIN/data/boss-shared.md"
+out=$(cs_inherit_converge "$MAIN" "$CAPO" 2>&1) || fail "symlinked main source must propagate: $out"
+assert_grep 'shared from dotfiles' "$DEST" "capo copy carries the symlinked source content"
+assert_grep 'DO NOT EDIT' "$DEST" "symlinked source still renders the do-not-edit header"
+[ ! -L "$DEST" ] || fail "destination must be a real file, never a link back to the source"
+pass "a symlinked main source resolving to a regular file is propagated"
+
+# 8. an unresolved main-source symlink stops propagation instead of mirroring
+#    absence: a broken link is a broken configuration, not a deliberate removal.
+rm -f "$MAIN/data/boss-shared.md"
+ln -s "$TMP/no-such-boss-shared.md" "$MAIN/data/boss-shared.md"
+out=$(cs_inherit_converge "$MAIN" "$CAPO" 2>&1) && fail "an unresolved main source must refuse"
+assert_contains "$out" "unusable main source" "unresolved source refusal names the reason"
+assert_grep 'shared from dotfiles' "$DEST" "a refused run leaves the capo copy untouched"
+rm -f "$MAIN/data/boss-shared.md"
+printf 'shared again\n' > "$MAIN/data/boss-shared.md"
+pass "an unresolved main-source symlink blocks propagation"
+
+# 9. backlog-backend: seed copy converges value and mirrors absence
 printf 'tasks-axi\n' > "$MAIN/config/backlog-backend"
 cs_inherit_backlog_backend "$MAIN/config" "$CAPO/config" || fail "backend copy failed"
 [ "$(cat "$CAPO/config/backlog-backend")" = tasks-axi ] || fail "backend value must converge at seed"
