@@ -13,7 +13,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/cs-watch-helpers.sh"
 # cs_path_mtime, for the beacon-freshness assertions.
 # shellcheck source=bin/cs-wake-lib.sh
-CS_STATE_OVERRIDE="$TMPDIR" . "$ROOT/bin/cs-wake-lib.sh"
+CS_STATE_OVERRIDE="${TMPDIR:-/tmp}" . "$ROOT/bin/cs-wake-lib.sh"
 
 MONITOR="$ROOT/bin/cs-monitor.sh"
 TMP_ROOT=$(cs_test_tmproot cs-monitor)
