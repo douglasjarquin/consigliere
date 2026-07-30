@@ -103,34 +103,58 @@ test_second_monitor_noops() {
   pass "a second monitor in the same home no-ops through its singleton lock"
 }
 
-# 4. Away mode owns the watcher through its daemon, so the monitor must stand
-#    down rather than double-watch - while still proving it is alive.
-test_away_mode_stands_down() {
-  local dir state fakebin pid beat_before
-  dir=$(make_case afk); state="$dir/state"; fakebin="$dir/fakebin"
+# 4. Away mode's FLAG is not its daemon. Deferring to an owner that is not there
+#    left a home unwatched with the flag present and the daemon gone - the exact
+#    combination observed on 2026-07-30.
+test_away_flag_without_a_live_daemon_is_covered() {
+  local dir state fakebin pid
+  dir=$(make_case afk-orphan); state="$dir/state"; fakebin="$dir/fakebin"
   : > "$state/.afk"
+  # A pid that cannot be alive: away mode flagged, nobody home.
+  printf '999999\n' > "$state/.subsuper-daemon.pid"
+  printf 'blocked: needs a decision\n' > "$state/t1.status"
+  monitor_bg "$state" "$fakebin"
+  pid=$!
+  wait_until 100 test -s "$state/.wake-queue" || {
+    kill "$pid" 2>/dev/null || true
+    cat "$state/.monitor.log" 2>/dev/null
+    fail "an unattended away flag must not stop the monitor from covering the home"
+  }
+  grep -F 'daemon is NOT alive' "$state/.monitor.log" >/dev/null \
+    || fail "the monitor must say why it covered instead of standing down"
+  monitor_stop "$state" "$pid"
+  pass "an away flag with no live daemon is covered, not deferred to"
+}
+
+# 5. With a LIVE daemon the stand-down still holds, or two supervisors would
+#    both drive the watcher.
+test_away_flag_with_a_live_daemon_still_stands_down() {
+  local dir state fakebin pid sleeper
+  dir=$(make_case afk-live); state="$dir/state"; fakebin="$dir/fakebin"
+  : > "$state/.afk"
+  sleep 120 & sleeper=$!
+  printf '%s\n' "$sleeper" > "$state/.subsuper-daemon.pid"
   printf 'blocked: would wake a watcher\n' > "$state/t1.status"
   monitor_bg "$state" "$fakebin"
   pid=$!
   wait_until 60 test -e "$state/.last-monitor-beat" || {
-    kill "$pid" 2>/dev/null || true
+    kill "$pid" "$sleeper" 2>/dev/null || true
     fail "a stood-down monitor must still publish its beacon"
   }
-  beat_before=$(cs_path_mtime "$state/.last-monitor-beat")
   sleep 4
   [ ! -s "$state/.wake-queue" ] || {
-    kill "$pid" 2>/dev/null || true
-    fail "the monitor ran a watcher while away mode held the watcher"
+    kill "$pid" "$sleeper" 2>/dev/null || true
+    fail "the monitor ran a watcher while a LIVE away daemon owned it"
   }
-  [ "$(cs_path_mtime "$state/.last-monitor-beat")" -ge "$beat_before" ] \
-    || fail "a stood-down monitor must keep proving it is alive"
   monitor_stop "$state" "$pid"
-  pass "the monitor stands down while away mode owns the watcher"
+  kill "$sleeper" 2>/dev/null || true
+  pass "a live away daemon still gets the watcher to itself"
 }
 
 test_event_reaches_the_queue_with_nobody_waiting
 test_standing_event_does_not_grow_the_queue
 test_second_monitor_noops
-test_away_mode_stands_down
+test_away_flag_without_a_live_daemon_is_covered
+test_away_flag_with_a_live_daemon_still_stands_down
 
 pass "cs-monitor persistent supervision contract"

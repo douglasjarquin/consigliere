@@ -27,6 +27,7 @@ cs_resolve_root
 . "$SCRIPT_DIR/cs-wake-lib.sh"
 
 MONITOR="${CS_CHECKPOINT_MONITOR_BIN:-$SCRIPT_DIR/cs-monitor.sh}"
+DETACH="${CS_CHECKPOINT_DETACH_BIN:-$SCRIPT_DIR/cs-detach.py}"
 MONITOR_BEAT="$STATE/.last-monitor-beat"
 # A monitor refreshes its beacon every cycle (default 5s). Treat a beacon older
 # than this as no monitor at all and revive.
@@ -149,8 +150,20 @@ monitor_alive() {
 ensure_monitor() {
   monitor_alive && return 0
   [ -x "$MONITOR" ] || return 1
-  nohup "$MONITOR" >>"$STATE/.monitor.err" 2>&1 &
-  disown 2>/dev/null || true
+  # Start it in its OWN session, not merely immune to SIGHUP. `nohup ... &
+  # disown` does not survive teardown of this tool call's process group, and a
+  # checkpoint always runs inside one: measured over a night, a monitor launched
+  # that way died and was revived 213 times in seven hours in one home, while
+  # the same binary with a surviving parent ran 9h20m without a single restart.
+  # bin/cs-detach.py double-forks through setsid(2), which macOS exposes no
+  # binary for. If python3 is missing (doctor reports it) fall back to the old
+  # launch: degraded to the churn above, never to no monitor at all.
+  if [ -x "$DETACH" ] && command -v python3 >/dev/null 2>&1; then
+    python3 "$DETACH" --stdout "$STATE/.monitor.err" -- "$MONITOR" >/dev/null 2>&1
+  else
+    nohup "$MONITOR" >>"$STATE/.monitor.err" 2>&1 &
+    disown 2>/dev/null || true
+  fi
   local i=0
   while [ "$i" -lt 30 ]; do
     monitor_alive && return 0

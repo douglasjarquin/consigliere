@@ -109,6 +109,15 @@ trap 'log "monitor stopping on signal"; exit 0' HUP INT TERM
 
 log "monitor starting (pid ${BASHPID:-$$}); home=$CS_HOME; tick=${TICK}s; watcher=$WATCH"
 
+# Is away mode's daemon actually running? Its pid file is written at startup and
+# its lock names the holder; a pid that is gone means the flag outlived its owner.
+away_daemon_alive() {
+  local pid
+  pid=$(cat "$STATE/.subsuper-daemon.pid" 2>/dev/null) || return 1
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null
+}
+
 watcher_alive() {
   [ -n "${WATCHER_PID:-}" ] && kill -0 "$WATCHER_PID" 2>/dev/null
 }
@@ -129,14 +138,31 @@ supervise_cycle() {
   # still visibly alive and never revived on top of itself.
   touch "$BEAT" 2>/dev/null || true
 
-  if [ -e "$STATE/.afk" ]; then
+  # Stand down for away mode ONLY while its daemon is actually alive. The flag
+  # alone is not enough: the away daemon has died seconds after arming on every
+  # recorded occasion, and deferring to a dead owner left the home with nobody
+  # watching at all - flag present, daemon gone, monitor politely idle. Verified
+  # the hard way on 2026-07-30, when the main home sat unwatched until the flag
+  # was removed by hand.
+  if [ -e "$STATE/.afk" ] && away_daemon_alive; then
     if watcher_alive; then
       kill "$WATCHER_PID" 2>/dev/null || true
       wait "$WATCHER_PID" 2>/dev/null || true
       WATCHER_PID=""
-      log "standing down: away mode holds and its daemon owns the watcher"
+      log "standing down: away mode holds and its daemon (pid $(cat "$STATE/.subsuper-daemon.pid" 2>/dev/null)) owns the watcher"
     fi
     return 0
+  fi
+  if [ -e "$STATE/.afk" ]; then
+    # Away mode is flagged but unattended. Cover the home rather than defer to a
+    # supervisor that is not there; the daemon reclaims the watcher through the
+    # singleton lock if it ever comes back.
+    if [ ! -e "$STATE/.monitor-afk-orphan" ]; then
+      : > "$STATE/.monitor-afk-orphan"
+      log "away mode is flagged but its daemon is NOT alive; covering the home instead of standing down"
+    fi
+  elif [ -e "$STATE/.monitor-afk-orphan" ]; then
+    rm -f "$STATE/.monitor-afk-orphan" 2>/dev/null || true
   fi
 
   if ! watcher_alive; then
