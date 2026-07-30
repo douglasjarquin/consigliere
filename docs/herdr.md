@@ -151,6 +151,14 @@ w49:p1   session=019fae39-1f27-71b0-9557-840999f18487
 
 This makes "did this soldier restart?" a fact rather than an inference: an unchanged id across a wedge proves the ORIGINAL instance is still there and no relaunch happened, while a changed id proves a different instance owns the pane. An absent id means no integration reported one, which is not an error and must not be read as a negative.
 
+**Presence is less stable than "may be absent" suggests** (measured over a 7h soak, 210 samples, 26 distinct panes, 2026-07-30):
+
+- Most agent panes reported a session in every single sample (210/210).
+- `w48:p1`, a live codex soldier that HAD reported a session the previous afternoon, reported none in all 210 samples. Presence can be lost permanently while the agent keeps running, and both transports agree when it is (`agent get` and `api snapshot` both returned `codex/idle/none`), so this is the integration ceasing to report, not a snapshot defect.
+- `w4B:p1` and `w4R:p1` flapped between present and absent within a few samples.
+
+So absence is common and carries no information, which the recovery playbook already assumes. What is NOT yet established is whether a value that disappears and is later re-reported comes back IDENTICAL. Until that is measured, treat "changed id" as proof of a new instance only when both readings are present; a present -> absent -> present sequence is not a change, it is two observations with a gap. The soak that would have answered it recorded no usable timestamps on its per-pane rows, so the ordering was lost - a harness defect, not a herdr one.
+
 `herdr agent explain <pane>` names the rule behind herdr's classification, e.g.:
 
 ```text
