@@ -169,6 +169,49 @@ cs_herdr_agent_status_raw() { # <pane_id> -> idle|working|blocked|done|unknown
   printf '%s' "$out" | jq -r '.result.agent.agent_status // "unknown"'
 }
 
+# --- session snapshot ------------------------------------------------------
+# One `api snapshot` carries EVERY pane's agent_status, agent, agent_session,
+# cwd, tab/workspace ids, revision, and state_change_seq. A supervision cycle
+# that reads N panes individually pays N round-trips for what one call already
+# answered.
+#
+# Verified live (herdr 0.7.5, protocol 17): `herdr api snapshot` returns
+# {"snapshot":{...},"type":...} with pane objects carrying the fields above.
+cs_herdr_snapshot_fetch() { # -> raw JSON, rc 1 when unavailable
+  local out
+  out=$(cs_herdr api snapshot 2>/dev/null) || return 1
+  [ -n "$out" ] || return 1
+  printf '%s' "$out" | jq -e . >/dev/null 2>&1 || return 1
+  printf '%s' "$out"
+}
+
+# Pull one pane's field out of a snapshot already in hand. rc 1 when the pane is
+# absent from it, which the caller must treat as "ask directly" rather than as a
+# negative answer: a pane created since the snapshot is not a missing pane.
+cs_herdr_snapshot_pane_field() { # <snapshot-json> <pane_id> <field>
+  printf '%s' "$1" | jq -er --arg p "$2" --arg f "$3" '
+    [ .. | objects | select(.pane_id? == $p) ] | first
+    | select(. != null) | .[$f] // empty
+  ' 2>/dev/null
+}
+
+# The corroboration policy itself, applied to a raw status obtained ANYWHERE -
+# a per-pane `agent get` or a session snapshot. Split out so the policy has one
+# owner no matter which transport produced the reading.
+cs_herdr_busy_state_from_raw() { # <pane_id> <raw-status> -> busy|idle|blocked|done|unknown
+  local pane=$1 raw=$2
+  case "$raw" in
+    working) printf 'busy\n'; return 0 ;;
+    blocked) printf 'blocked\n'; return 0 ;;
+    done)    printf 'done\n'; return 0 ;;
+  esac
+  if cs_herdr_capture "$pane" 40 text 2>/dev/null | grep -Eq "$CS_CODEX_BUSY_RE"; then
+    printf 'busy\n'
+    return 0
+  fi
+  printf '%s\n' "${raw:-unknown}"
+}
+
 cs_herdr_agent_busy_state() { # <pane_id> -> busy|idle|blocked|done|unknown
   # Applies the corroboration policy: idle/unknown re-checks the rendered
   # busy signature so a long foreground tool call is never read as stopped.
@@ -190,6 +233,97 @@ cs_herdr_agent_alive() { # <pane_id>  - is a real agent (codex or claude) in the
   local out
   out=$(cs_herdr agent get "$1" 2>/dev/null) || return 1
   printf '%s' "$out" | jq -e '.result.agent.agent // empty | select(. != "")' >/dev/null 2>&1
+}
+
+# --- agent session identity ------------------------------------------------
+# The agent instance occupying a pane, as reported by herdr's official agent
+# integrations (claude and codex are installed; `herdr integration status`
+# lists them). It changes when a NEW agent instance takes the pane, so it turns
+# "did this soldier restart?" from an inference into a fact:
+#
+#   same id across a wedge   -> the ORIGINAL agent is still sitting there, so a
+#                               relaunch never happened and a "resumed" claim is
+#                               false.
+#   changed id               -> a different instance now owns the pane, so its
+#                               context is not the one that was wedged.
+#
+# Verified live (herdr 0.7.5, protocol 17): pane objects carry agent_session as
+# {"agent","kind","source","value"}; the value is the agent's own session id.
+# Absent when no official integration reported one, which is not an error.
+cs_herdr_agent_session_id() { # <pane_id> -> session value, rc 1 when unreported
+  local out
+  out=$(cs_herdr agent get "$1" 2>/dev/null) || return 1
+  printf '%s' "$out" | jq -er '
+    .result.agent.agent_session.value // empty | select(. != "")
+  ' 2>/dev/null
+}
+
+# Same identity from a snapshot already in hand, so a cycle that took one costs
+# nothing extra.
+cs_herdr_snapshot_agent_session() { # <snapshot-json> <pane_id>
+  printf '%s' "$1" | jq -er --arg p "$2" '
+    [ .. | objects | select(.pane_id? == $p) ] | first
+    | select(. != null) | .agent_session.value // empty | select(. != "")
+  ' 2>/dev/null
+}
+
+# Why herdr classified a pane's agent state as it did. Diagnostic only - the
+# corroboration policy above exists because `agent get` alone was not trusted,
+# and this is how a disagreement gets explained instead of guessed at.
+cs_herdr_agent_explain() { # <pane_id> -> raw explain output
+  cs_herdr agent explain "$1" 2>/dev/null
+}
+
+# --- pane process evidence -------------------------------------------------
+# `agent get` reports what herdr BELIEVES about a pane's agent; process-info
+# reports what is actually running in it. The two answer different questions,
+# and the gap between them is where a wedge hides: an agent that exited leaves a
+# pane whose agent_status reads idle or unknown, indistinguishable by status
+# alone from an agent that is simply between turns.
+#
+# Verified live (herdr 0.7.5, protocol 17): `pane process-info --pane <id>`
+# returns result.process_info with shell_pid and foreground_processes[], each
+# carrying pid, argv0, argv, cmdline, and cwd. Note the flag form: the pane is
+# passed as `--pane <id>`, NOT positionally.
+cs_herdr_pane_process_info() { # <pane_id> -> raw JSON
+  cs_herdr pane process-info --pane "$1" 2>/dev/null
+}
+
+# Print "<pid>\t<argv0>" for a supported agent running in the pane's foreground,
+# rc 1 when no agent process is there. rc 1 with a readable pane is the
+# interesting case: the pane survives, the agent does not.
+cs_herdr_pane_agent_process() { # <pane_id> -> <pid>\t<argv0>, rc 1 if absent
+  local out
+  out=$(cs_herdr_pane_process_info "$1") || return 1
+  [ -n "$out" ] || return 1
+  printf '%s' "$out" | jq -er '
+    .result.process_info.foreground_processes // []
+    | map(select((.argv0 // "") | test("^(codex|claude)$")))
+    | first
+    | select(. != null)
+    | "\(.pid)\t\(.argv0)"
+  ' 2>/dev/null
+}
+
+# 0 when the pane is readable, its process table was READ SUCCESSFULLY, and no
+# agent process is running in it - a husk left behind by an agent that exited.
+#
+# Fails closed on purpose. "Could not read the process table" and "read it, no
+# agent there" are completely different claims, and only the second is a husk.
+# Treating an unreadable answer as a husk would report a healthy soldier as dead
+# on any herdr that lacks process-info, any transient socket error, and every
+# test stub - the loudest possible wrong answer. So the process_info object with
+# its foreground_processes array must actually be present before this concludes
+# anything.
+cs_herdr_pane_is_agent_husk() { # <pane_id>
+  local out
+  cs_herdr_pane_exists "$1" || return 1
+  out=$(cs_herdr_pane_process_info "$1") || return 1
+  [ -n "$out" ] || return 1
+  printf '%s' "$out" \
+    | jq -e '.result.process_info.foreground_processes | arrays' >/dev/null 2>&1 || return 1
+  cs_herdr_pane_agent_process "$1" >/dev/null 2>&1 && return 1
+  return 0
 }
 
 cs_herdr_agent_wait() { # <pane_id> <status> <timeout-ms>

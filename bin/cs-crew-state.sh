@@ -16,7 +16,7 @@
 # fixed mapping logic, no heuristics and no LLM. Output is one stable, parseable,
 # token-tight line consigliere can read every heartbeat:
 #
-#   state: <working|parked|done|blocked|paused|failed|unknown> · source: <run-step|pane|status-log|none> · <detail>
+#   state: <working|parked|done|blocked|paused|failed|unknown> · source: <run-step|pane|status-log|pane-process|none> · <detail>
 #
 # Logic, in order:
 #   1. Resolve worktree + pane + kind from state/<id>.meta.
@@ -595,6 +595,16 @@ if [ -n "$LOG_VERB" ]; then
   if [ "$LOG_STATE" != unknown ]; then
     emit "$LOG_STATE" status-log "$(status_line_note "$LOG_LINE")"
   fi
+fi
+
+# Last resort before giving up: ask what is actually RUNNING in the pane. A pane
+# that survives its agent reads idle-or-unknown through `agent get`, which is
+# indistinguishable by status alone from an agent between turns - and every
+# source above has already declined, so there is nothing to lose by looking.
+# Placed here deliberately, AFTER the status log: a soldier that finished and
+# then exited must still report `done` from its log, not be relabelled a husk.
+if cs_herdr_pane_is_agent_husk "$PANE"; then
+  emit unknown pane-process "agent process gone; pane $PANE survives as a husk"
 fi
 
 emit unknown none "no current-state source available"

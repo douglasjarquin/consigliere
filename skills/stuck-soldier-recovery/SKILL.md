@@ -41,9 +41,18 @@ If the worktree or ownership cannot be reconciled safely, leave all state intact
 Escalate in order:
 
 1. Peek the pane with `bin/cs-peek.sh <id>`.
+   Then settle the question a peek cannot answer: is the agent still THERE?
+   `bin/cs-crew-state.sh <id>` reports `source: pane-process` with a `husk` detail when the pane survived its agent, so a wedge and a dead agent stop looking alike.
+   A husk is not recoverable by redirection - there is nothing running to redirect - so skip straight to the relaunch path below.
+   "Could not read the process table" is never reported as a husk, so absence of that detail is not evidence the agent is alive.
 2. If the soldier is waiting on a question its brief already answers, answer in one line: `CS_HOME=<this-consigliere-home> bin/cs-send.sh <id> '<answer>'` from an active consigliere session unless `CS_HOME` is already set to the active consigliere home.
 3. If the soldier is confused or looping, interrupt with Escape, then redirect with one corrective line:
    `CS_HOME=<this-consigliere-home> bin/cs-send.sh <id> --key Escape`, then a single `cs-send` steer.
+4. Before relaunching, record the pane's agent session id (`cs_herdr_agent_session_id` in `bin/cs-herdr-lib.sh`); after the relaunch, read it again.
+   An UNCHANGED id means the original instance is still sitting there and the relaunch did not happen, however healthy the pane looks - do not report a recovery on that evidence.
+   A CHANGED id proves a different instance owns the pane, so the wedged context is gone and any "resumed its work" claim needs its own proof.
+   An unreported id (no official integration answered) is not a failure; fall back to the other evidence rather than treating absence as a negative.
+   When herdr's own reading disagrees with what the pane appears to be doing, `cs_herdr_agent_explain` names the detection rule that decided it, so the disagreement is explained rather than guessed at.
 4. If the soldier is genuinely wedged after redirection, exit the agent (`/exit` via `cs-send`, or close and reopen through the recovery path above) and bring it back with the harness resume command (`codex resume --last` / `claude --continue`) in the same worktree (its session and context survive the exit); only cold-relaunch with the brief plus a `progress so far` note if no session is resumable.
    Genuine wedging means looping, unresponsive, repeating the same obstacle, or truly dead.
    A low context reading is not wedging; both harnesses auto-compact and keep going.

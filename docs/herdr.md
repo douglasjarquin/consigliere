@@ -56,3 +56,108 @@ So consigliere's shape is: one home workspace (`consigliere`, or `capo-<id>`) wh
 - No `workspace move` CLI (method exists in `api schema`); consigliere does not order workspaces, so no shim is ported.
 - Tab labels are not unique; list-live matching stays defensive (scope to this home's workspace ids from meta, never by label sweep).
 - `herdr integration install codex` exists; not used yet — codex is launched directly with explicit flags so the launch template stays under consigliere's control.
+
+## Push event subscriptions (verified live 2026-07-29, herdr 0.7.5, protocol 17)
+
+`events.subscribe` accepts one or more subscription specs on the session control socket and streams newline-delimited JSON. Probed each spec against a real pane and recorded the server's own answer:
+
+```text
+output_matched substring+source   ACK subscription_started
+output_matched regex+source       ACK subscription_started
+pane.exited                       ACK subscription_started
+pane.agent_detected               ACK subscription_started
+worktree.removed                  ACK subscription_started
+pane.closed                       ACK subscription_started
+pane.output_changed               ERR invalid_request: unknown variant
+```
+
+The rejection is the authoritative capability list, because the server enumerates what it will accept:
+
+```text
+workspace.created workspace.updated workspace.metadata_updated workspace.renamed
+workspace.moved workspace.closed workspace.focused worktree.created
+worktree.opened worktree.removed tab.created tab.closed tab.focused tab.renamed
+tab.moved pane.created pane.closed pane.updated pane.focused pane.moved
+pane.exited pane.agent_detected pane.output_matched pane.agent_status_changed
+pane.scroll_changed layout.updated
+```
+
+- `pane.output_changed` is a real internal event kind but is NOT subscribable. Source reading alone is misleading here: the exclusion list in `src/api/schema/events.rs` governs plugin hooks, not subscriptions. Probe the socket, do not infer from the source.
+- `pane.output_matched` REQUIRES a `source` field (`visible`, `recent`, or `recent-unwrapped`); omitting it is `invalid_request`, not a default.
+- `bin/cs-herdr-events.py` subscribes to `pane.agent_status_changed`, `pane.exited`, and `pane.agent_detected` per pane, plus `pane.output_matched` for each pattern in `CS_HERDR_EVENT_PATTERNS`.
+
+### Protocol precondition
+
+`CS_HERDR_MIN_PROTOCOL` in `bin/cs-herdr-lib.sh` is the floor (16); the live server reports 17.
+
+Every capability above was verified at protocol 17 only, because that is the running server. They are NOT verified at 16, and this repo has no protocol-16 server to test against. So the floor deliberately stays at 16 and each new capability is gated at runtime instead of by version arithmetic: the subscribe either returns `subscription_started` or it does not, and `bin/cs-watch.sh` already treats any reader failure as "fall back to polling for this cycle". Raising the floor would trade a working fallback for a hard refusal, and would do it on an unverified assumption about which protocol first carried each event.
+
+Re-probe after a herdr upgrade rather than trusting this table.
+
+### Pattern policy trap
+
+A configured `pane.output_matched` pattern means "wake the supervisor". Do not configure a benign high-volume pattern: the harness busy signature (`CS_HARNESS_BUSY_RE`, `[Ee]sc to interrupt`) renders continuously during every turn, so subscribing to it would fire an actionable wake on every frame of normal work. The intended first pattern is the claude permission prompt under `--permission-mode auto|acceptEdits`, which currently surfaces only through the slow stale path - but its exact rendered text is NOT yet verified, so no pattern ships by default. Capture it from a real pane that has stopped on a prompt, record the string here with its command and output, then configure it.
+
+**Open verification item (blocked on environment, not on effort).** The prompt cannot be produced on the machine this was written on: codex runs there with permissions fully enabled, so it never stops to ask. It is reproducible in an environment running claude under `--permission-mode auto`, which is where this must be captured. What to record, so the pattern is written once and correctly:
+
+1. The exact rendered prompt line(s) from `herdr pane read --pane <id>`, ansi included and then stripped, since the subscription matches against a chosen `source` rather than the raw frame.
+2. Whether the text is stable across prompt types (file write vs command execution vs network), because one regex must cover every prompt that parks a soldier, or the ones it misses stay invisible.
+3. Whether the prompt persists in `recent` after scrolling, which decides the `source` value.
+
+Until all three are recorded, no pattern is configured. A pattern that matches nothing is indistinguishable from a working subscription, which is why guessing is worse than waiting.
+
+## Pane process evidence (verified live 2026-07-29, herdr 0.7.5, protocol 17)
+
+`herdr pane process-info --pane <id>` - note the flag form; the pane is NOT positional (`herdr pane process-info w48:p1` returns `unknown option`).
+
+Returns `result.process_info` with `shell_pid` and `foreground_processes[]`, each carrying `pid`, `argv0`, `argv`, `cmdline`, and `cwd`. Sampled against two live soldier panes:
+
+```text
+w48:p1   agent process: 24722  codex
+w49:p1   agent process: 42289  codex
+```
+
+This answers a question `agent get` cannot. `agent get` reports what herdr BELIEVES about a pane's agent; process-info reports what is actually running. An agent that exited leaves a pane whose `agent_status` reads idle or unknown - indistinguishable by status alone from an agent between turns. `cs_herdr_pane_agent_process` and `cs_herdr_pane_is_agent_husk` in `bin/cs-herdr-lib.sh` close that gap, and `bin/cs-crew-state.sh` reports a husk as `source: pane-process`.
+
+**The husk predicate fails closed, deliberately.** "Could not read the process table" and "read it, no agent there" are different claims and only the second is a husk. Treating an unreadable answer as a husk would report a healthy soldier as dead on any herdr without process-info, on any transient socket error, and in every test stub. The `foreground_processes` array must be present before the predicate concludes anything. This was caught by an existing test rather than by review: the first implementation reported every stubbed pane as a dead agent.
+
+## One snapshot instead of N pane reads (verified live 2026-07-29, protocol 17)
+
+`herdr api snapshot` returns every pane in one payload, each carrying `agent_status`, `agent`, `agent_session`, `cwd`, `tab_id`, `workspace_id`, `revision`, and `state_change_seq`. Sampled against the live session (23292 bytes, 10 panes):
+
+```text
+w48:p1   status=idle     agent=codex  state_change_seq=650
+w49:p1   status=working  agent=codex  state_change_seq=674
+w44:p1   ABSENT
+```
+
+`bin/cs-watch.sh` takes one snapshot per poll cycle (`snapshot_refresh`) and answers every pane status from it, so N panes cost one round-trip instead of N. Two rules make that safe:
+
+- A pane ABSENT from the snapshot (like `w44:p1` above) is NOT a negative answer - it may have been created after the snapshot was taken - so it falls back to a direct query.
+- A failed snapshot falls back to per-pane queries, which is exactly the pre-snapshot behavior.
+
+The corroboration policy did not move: `cs_herdr_busy_state_from_raw` applies it to a raw status from either transport, so one owner covers both.
+
+`state_change_seq` is `last_agent_state_change_seq` - it advances on agent STATE changes, not on terminal output (`src/app/actions.rs` increments it in the agent-state path). It is therefore a monotonic dedupe key for status transitions, NOT a replacement for output hashing. An early reading of this field as an output counter was wrong.
+
+## Agent session identity and detection explain (verified live 2026-07-29)
+
+`agent_session.value` is the agent instance's own session id, reported by herdr's official integrations (`herdr integration status` shows claude v7 and codex v6 installed here). Distinct per pane:
+
+```text
+w48:p1   session=019fac44-4d34-71f0-8da1-b916934c9b9a
+w49:p1   session=019fae39-1f27-71b0-9557-840999f18487
+```
+
+This makes "did this soldier restart?" a fact rather than an inference: an unchanged id across a wedge proves the ORIGINAL instance is still there and no relaunch happened, while a changed id proves a different instance owns the pane. An absent id means no integration reported one, which is not an error and must not be read as a negative.
+
+`herdr agent explain <pane>` names the rule behind herdr's classification, e.g.:
+
+```text
+agent: codex
+state: working
+manifest: remote:.../agent-detection/remote/codex.toml 2026.07.18.1
+rule: osc_title_working (region=osc_title priority=1050)
+```
+
+That matters because consigliere's busy-signature corroboration exists precisely because `agent get` alone was not trusted; `explain` turns a disagreement into a named rule instead of a guess.

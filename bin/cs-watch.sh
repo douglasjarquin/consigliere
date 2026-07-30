@@ -201,7 +201,29 @@ hash_pane() {
 # immediate blocked escalation and the stale machinery. cs_herdr_agent_busy_state
 # owns the codex corroboration policy (a native idle/unknown is re-checked
 # against the rendered busy signature before a soldier may be read as stopped).
+# One session snapshot per poll cycle, refreshed by snapshot_refresh at the top
+# of the loop. Empty means "no snapshot this cycle" and every read falls back to
+# a per-pane query - the pre-snapshot behavior, never a wrong answer.
+CS_WATCH_SNAPSHOT=""
+
+snapshot_refresh() {
+  CS_WATCH_SNAPSHOT=$(cs_herdr_snapshot_fetch 2>/dev/null) || CS_WATCH_SNAPSHOT=""
+}
+
 pane_busy_state() {  # <pane> -> busy|idle|blocked|done|unknown
+  local raw=""
+  # Prefer this cycle's snapshot: it already answered every pane in one call.
+  # A pane ABSENT from the snapshot is not a negative answer - it may have been
+  # created after the snapshot was taken - so that falls through to asking
+  # directly rather than being read as idle.
+  if [ -n "$CS_WATCH_SNAPSHOT" ]; then
+    raw=$(cs_herdr_snapshot_pane_field "$CS_WATCH_SNAPSHOT" "$1" agent_status 2>/dev/null) || raw=""
+  fi
+  if [ -n "$raw" ]; then
+    # Same corroboration policy, same owner, different transport.
+    cs_herdr_busy_state_from_raw "$1" "$raw" 2>/dev/null || printf 'unknown'
+    return 0
+  fi
   cs_herdr_agent_busy_state "$1" 2>/dev/null || printf 'unknown'
 }
 
@@ -851,7 +873,7 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
   done < <(cs_watch_event_reader_cmd)
   [ "${#reader[@]}" -gt 0 ] || return 2
 
-  local fifo_dir fifo reader_pid line p ws status agent raw record hit rc=1 reader_rc=0
+  local fifo_dir fifo reader_pid line kind p ws status agent raw record hit rc=1 reader_rc=0
   fifo_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-herdr-eventwait.XXXXXX") || return 2
   fifo="$fifo_dir/events"
   if ! mkfifo "$fifo" 2>/dev/null; then
@@ -886,25 +908,53 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
     done
   fi
 
-  # Drain stream edges until a fresh blocked edge or the timeout. The reader is
-  # killed the instant a blocked edge is found.
-  # Split each raw projected line (pane_id\tworkspace_id\tagent_status\tagent)
+  # Drain stream edges until an actionable one or the timeout. The reader is
+  # killed the instant one is found.
+  # Split each raw projected line (kind\tpane_id\tworkspace_id\tfield3\tfield4)
   # with `cut`, NOT `IFS=$'\t' read`: a tab is IFS-whitespace, so `read` would
   # collapse an empty middle field (e.g. an absent workspace_id) and shift the
-  # status into the wrong column. `cut` preserves empty fields.
+  # remaining columns. `cut` preserves empty fields.
+  #
+  # Field 1 is the event kind, so this never has to infer which subscription
+  # produced a line. An unrecognized kind is ignored rather than misread, which
+  # is what lets the reader add a kind before this side knows about it.
   while [ "$rc" -eq 1 ] && IFS= read -r line <&9; do
     [ -n "$line" ] || continue
-    p=$(printf '%s' "$line" | cut -f1)
-    ws=$(printf '%s' "$line" | cut -f2)
-    status=$(printf '%s' "$line" | cut -f3)
-    agent=$(printf '%s' "$line" | cut -f4)
+    kind=$(printf '%s' "$line" | cut -f1)
+    p=$(printf '%s' "$line" | cut -f2)
+    ws=$(printf '%s' "$line" | cut -f3)
+    status=$(printf '%s' "$line" | cut -f4)
+    agent=$(printf '%s' "$line" | cut -f5)
     [ -n "$p" ] || continue
-    record=$(cs_transition_normalize "$p" "$ws" "$status" "$agent")
-    if hit=$(cs_transition_apply "$state" "$record"); then
-      printf '%s' "$hit"
-      rc=0
-      break
-    fi
+    case "$kind" in
+      status|agent-detected)
+        # An agent appearing in a pane is a relaunch fact rather than an
+        # inference, but it is projected through the same status policy: the
+        # detected event carries the agent's current status.
+        record=$(cs_transition_normalize "$p" "$ws" "$status" "$agent")
+        if hit=$(cs_transition_apply "$state" "$record"); then
+          printf '%s' "$hit"
+          rc=0
+          break
+        fi
+        ;;
+      exited)
+        # The pane's process ended. Polling can only notice this later, as a
+        # pane that no longer exists; this is the moment it happened, and it is
+        # always actionable - a soldier that is gone is never benign.
+        printf 'exited: %s' "$p"
+        rc=0
+        break
+        ;;
+      output)
+        # A requested pattern rendered in the pane. The pattern name carries the
+        # meaning, so the policy lives with whoever configured the pattern.
+        printf 'output: %s %s' "$p" "$status"
+        rc=0
+        break
+        ;;
+      *) continue ;;
+    esac
   done
   if [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
     kill "$reader_pid" 2>/dev/null || true
@@ -1073,6 +1123,11 @@ while :; do
   # Liveness beacon for guard scripts: a fresh mtime here means a watcher is
   # alive. Supervision scripts warn when this goes stale with tasks in flight.
   touch "$STATE/.last-watcher-beat"
+
+  # One session snapshot for this whole cycle, so N panes cost one round-trip
+  # instead of N. Best-effort: on failure every pane read falls back to its own
+  # query, which is exactly the pre-snapshot behavior.
+  snapshot_refresh
 
   # Parent-owned capo pending-reply reconciliation (once its library lands):
   # resolve correlated parent reports, observe turn completion, send one
