@@ -48,6 +48,12 @@ The goal is a session that is safe to reset or destroy because everything durabl
    Graduation moves are limited to exactly three: promote a learning to the shared `AGENTS.md` via PR, fold it into the boss-preference destination selected by AGENTS.md, or delete a stale entry.
    Do not invent other graduation paths.
 
+   `data/boss.md`, `data/boss-shared.md`, and `data/learnings.md` are startup memory: every session of this home reads them in full at every start, so their size is a standing cost paid whether or not a session uses them.
+   When the session-start digest reported one of them over its startup-memory budget, bringing it back under budget is part of this sweep rather than a later chore.
+   Consolidate by merging duplicate entries, rewriting a multi-line note down to the durable fact it is really asserting, and deleting entries that are obsolete or now owned by a more specific destination under `AGENTS.md` section 6.
+   Never get under budget by dropping a fact that is still true and still belongs here.
+   If the file cannot fit without losing such a fact, leave it over budget and say so in the report, so the boss can decide between raising the budget and retiring the material.
+
 5. **Report to the boss.**
    Summarize, in plain outcome language (section 9): what went into the vault and where, what was filed to the backlog, and whether the session is now safe to reset or destroy - i.e. whether every durable finding from this sweep now lives on disk rather than only in this conversation.
    If something could not be captured yet (for example, project-intrinsic knowledge waiting on a soldier to land it), say so explicitly rather than reporting the session fully safe.

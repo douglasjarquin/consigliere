@@ -117,6 +117,7 @@ The complete field-level inventory lives in AGENTS.md section 2; producing scrip
 | `CS_CHECK_TIMEOUT` | cs-watch | per-check timeout for registered `state/<id>.check.sh` |
 | `CS_STALE_ESCALATE_SECS` | cs-watch, cs-daemon | wedge escalation threshold |
 | `CS_BUSY_TURN_MAX_SECS` | cs-watch | how long a pane may run busy with no completed turn before it enters the wedge timer; default 3600 |
+| `CS_STARTUP_MEMORY_MAX_BYTES` | cs-session-start | per-file budget for `data/boss.md`, `data/boss-shared.md`, and `data/learnings.md`; over budget is reported in the digest, never truncated. Default 8192 |
 | `CS_PAUSE_RESURFACE_SECS` | cs-watch, cs-daemon | declared external-wait recheck cadence |
 | `CS_MAX_DEFER_SECS` | cs-daemon | away-mode escalation max-defer alarm |
 | `CS_LOCK_HARNESS_RE` | cs-lock | test-only harness ancestry override |

@@ -19,6 +19,9 @@
 #                      data/boss-shared.md, data/learnings.md, each with an
 #                      explicit ABSENT marker when missing (absence is
 #                      meaningful and never confused with empty-but-present).
+#                      The three curated startup-memory files also report when
+#                      they exceed CS_STARTUP_MEMORY_MAX_BYTES, since every
+#                      session of the home pays their cost; /vault consolidates.
 #   6. fleet state   - compact backlog listing, every state/*.meta with a
 #                      cheap endpoint liveness read, bounded status tails
 #                      (wake-EVENT history, not current state), orphan status
@@ -71,6 +74,33 @@ print_file_or_absent() {
   else
     printf 'ABSENT\n'
   fi
+}
+
+# Startup memory - data/boss.md, data/boss-shared.md, data/learnings.md - is
+# read IN FULL at every session start of every home, so its cost is paid by
+# every session whether or not that session ever uses it. Unlike the registries
+# printed alongside it, whose size is bounded by how many projects and capos
+# exist, curated prose has no natural ceiling: each sweep adds and nothing
+# forces a prune, so it grows monotonically and the digest quietly gets more
+# expensive forever.
+#
+# The budget makes that visible at the one place every session already reads,
+# and names its owner. It is a REPORT, never a truncation: this script will not
+# decide which of the boss's own preferences to drop. /vault owns consolidation.
+STARTUP_MEMORY_MAX_BYTES=${CS_STARTUP_MEMORY_MAX_BYTES:-8192}
+case "$STARTUP_MEMORY_MAX_BYTES" in ''|*[!0-9]*|0) STARTUP_MEMORY_MAX_BYTES=8192 ;; esac
+
+print_startup_memory() {  # <path> <label> - print, then report if over budget
+  local path=$1 label=$2 size
+  print_file_or_absent "$path" "$label"
+  [ -f "$path" ] || return 0
+  size=$(wc -c < "$path" 2>/dev/null | tr -d '[:space:]')
+  case "$size" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$size" -gt "$STARTUP_MEMORY_MAX_BYTES" ] || return 0
+  printf '\nOVER STARTUP-MEMORY BUDGET: %s bytes against a %s-byte budget.\n' \
+    "$size" "$STARTUP_MEMORY_MAX_BYTES"
+  printf 'Every session of this home pays this cost on every start.\n'
+  printf 'Load /vault and consolidate this file back under budget (owner: skills/vault).\n'
 }
 
 backlog_backend() {
@@ -255,9 +285,9 @@ section "CONTEXT"
 print_file_or_absent "$DATA/projects.md" "data/projects.md"
 print_file_or_absent "$DATA/boards.md" "data/boards.md (GitHub board mapping for the contracts and casino skills)"
 print_file_or_absent "$DATA/capos.md" "data/capos.md"
-print_file_or_absent "$DATA/boss.md" "data/boss.md"
-print_file_or_absent "$DATA/boss-shared.md" "data/boss-shared.md (shared, main-authoritative, read-only in capo homes)"
-print_file_or_absent "$DATA/learnings.md" "data/learnings.md"
+print_startup_memory "$DATA/boss.md" "data/boss.md"
+print_startup_memory "$DATA/boss-shared.md" "data/boss-shared.md (shared, main-authoritative, read-only in capo homes)"
+print_startup_memory "$DATA/learnings.md" "data/learnings.md"
 
 # --- 6. fleet-state digest ---------------------------------------------
 section "FLEET STATE"
