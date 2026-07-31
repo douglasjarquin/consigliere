@@ -152,6 +152,25 @@ BUSY_REGEX=${CS_BUSY_REGEX:-$CS_CODEX_BUSY_RE}
 # every wake) and never double-triages - and never runs the costly
 # provably-working read.
 STALE_ESCALATE_SECS=${CS_STALE_ESCALATE_SECS:-240}  # idle secs before a provably-working stale escalates as a possible wedge
+# A busy pane is otherwise UNBOUNDED proof of liveness: the whole stale/wedge
+# machinery below is skipped while pane_is_busy holds, and a busy pane's hash
+# keeps changing anyway (the harness renders a ticking elapsed counter), so no
+# stale hash ever repeats. A hung foreground tool call is therefore invisible
+# for as long as it hangs. (Upstream firstmate hit exactly this in 2026-07: a
+# catastrophic-backtracking regex hung one bash call for 25 hours behind an
+# unchanging "Working..." footer, with no escalation the entire time.)
+#
+# CS_BUSY_TURN_MAX_SECS bounds how long a pane may run busy with NO COMPLETED
+# TURN. The reference is state/<id>.turn-ended, touched by the harness turn-end
+# hook at every turn end, falling back to the spawn record before any turn has
+# completed. Past the bound the pane enters the ordinary wedge timer and so
+# reuses the identical stale reason, escalation counter, and
+# demand-deep-inspection marker as every other wedge.
+#
+# This is for HUMAN INSPECTION only. Nothing here interrupts, signals, or
+# restarts the soldier or its tool process; a genuinely long turn is surfaced,
+# not killed. Any completed turn resets the age.
+BUSY_TURN_MAX_SECS=${CS_BUSY_TURN_MAX_SECS:-3600}
 # A soldier that declared a pause is idling on a known external wait, so its
 # stale pane is absorbed rather than wedge-escalated.
 # A boss-held or paused soldier whose agent has confidently exited uses the same
@@ -330,6 +349,26 @@ wake() {
 # hash state resets to genuinely active (see the two rm-on-reset call sites
 # below).
 CS_WEDGE_DEMAND_INSPECT_COUNT=${CS_WEDGE_DEMAND_INSPECT_COUNT:-3}
+
+# busy_turn_age <task>: seconds since this task last COMPLETED a turn, or rc=1
+# when that cannot be read. See CS_BUSY_TURN_MAX_SECS above for why a busy pane
+# needs a bound at all.
+#
+# state/<id>.turn-ended is touched by the harness turn-end hook (codex notify /
+# claude Stop) at every turn end, so its mtime is the last completed turn. Before
+# any turn has completed it does not exist yet, and the spawn record stands in -
+# otherwise a soldier that hangs inside its very first turn would have no
+# reference at all and would be exempt from the bound for good.
+busy_turn_age() {  # <task> -> seconds since last completed turn
+  local task=$1 ref since
+  [ -n "$task" ] || return 1
+  ref="$STATE/$task.turn-ended"
+  [ -e "$ref" ] || ref="$STATE/$task.meta"
+  [ -e "$ref" ] || return 1
+  since=$(stat_mtime "$ref") || return 1
+  case "$since" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$(( $(date +%s) - since ))"
+}
 
 # Repeat-poll wedge-timer bookkeeping for an already-classified stale hash
 # absorbed as provably-working - repairs a missing/corrupt timer (self-heals a
@@ -1365,6 +1404,25 @@ EOF
     ssf="$STATE/.stale-since-$key"
     ewf="$STATE/.wedge-escalations-$key"
     pf="$STATE/.paused-$key"   # flag: this key's stale is using the bounded pause cadence
+    btf="$STATE/.busy-turn-since-$key"  # wedge timer for a busy pane whose turn never ends
+
+    # Busy-turn bound (see CS_BUSY_TURN_MAX_SECS). This runs BEFORE and
+    # independently of the hash comparison below, because a busy pane's hash
+    # keeps changing - the elapsed counter ticks - so the stale path it would
+    # otherwise reach is unreachable by construction. A capo's pane is a
+    # supervisor's, not a supervised turn-taker's, so it is exempt.
+    if [ "$kind" != capo ] && pane_is_busy "$bs" "$tail40"; then
+      if bage=$(busy_turn_age "$task") && [ "$bage" -ge "$BUSY_TURN_MAX_SECS" ]; then
+        wedge_timer_check "$w" "$btf" "busy ${bage}s with no completed turn" "$ewf"
+      else
+        # Within the bound, or unreadable: no wedge in progress.
+        rm -f "$btf"
+      fi
+    else
+      # Not busy: the ordinary stale machinery below owns this pane.
+      rm -f "$btf"
+    fi
+
     prev=$(cat "$hf" 2>/dev/null || true)
     if [ "$h" = "$prev" ]; then
       n=$(( $(cat "$cf" 2>/dev/null || echo 0) + 1 ))

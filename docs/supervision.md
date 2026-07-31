@@ -23,6 +23,8 @@ Wakes are appended durably to `state/.wake-queue` before detector state advances
 
 - `signal: <files>` - status/turn-end signals; surfaced when a listed status has a boss-relevant verb OR a no-verb signal's soldier is not provably working.
 - `stale: <pane>` - endpoint went quiet; absorb-only-when-provably-working, wedge escalation past `CS_STALE_ESCALATE_SECS` with an escalation count and a `demand-deep-inspection` marker at `CS_WEDGE_DEMAND_INSPECT_COUNT` consecutive escalations.
+  A pane that stays *busy* is bounded too: past `CS_BUSY_TURN_MAX_SECS` (default 3600) with no completed turn it enters the same wedge timer, because a busy signal alone cannot distinguish real work from a hung foreground tool call.
+  The escalation is for inspection only and never interrupts or restarts the soldier; any completed turn resets the age.
 - `check: <script>: <out>` - authenticated poll output (PR merge poll, registered custom checks); always actionable. Unauthenticated state checks are rejected without execution.
 - `capo: <capo>/<worker>: <line>` - a boss-relevant status a worker inside one of this home's capo homes raised, read directly by this watcher rather than waited on.
   A capo home is polled only while its own agent sits idle on a checkpoint, so an event there can otherwise wait as long as that agent's turn lasts.
