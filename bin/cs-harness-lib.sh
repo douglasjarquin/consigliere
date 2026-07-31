@@ -294,27 +294,55 @@ if isinstance(doc, dict) and isinstance(doc.get("projects"), dict):
 PY
 }
 
+# cs_harness_launch_env <h> - environment assignments that must ride the launch
+# line itself, with a trailing space, or nothing.
+#
+# A pane is created by the long-lived herdr daemon, which does NOT inherit the
+# environment of the consigliere process asking for it. So an environment
+# variable that selects WHICH credential store the harness reads has to be
+# re-stated on the launch line or the agent comes up against a different store
+# than consigliere is authenticated with.
+#
+# claude: CLAUDE_CONFIG_DIR. Under a work-vs-personal subscription split, a bare
+# `claude` in the pane falls back to the default ~/.claude store and launches
+# unauthenticated, blocking the agent before it can do any work. Unset is the
+# single-store default and adds no prefix. This is the same store
+# cs_harness_claude_json_path already resolves folder-trust against, so trust
+# and credentials cannot land in two different config directories.
+#
+# codex: nothing. Its credential store is not environment-selected here.
+cs_harness_launch_env() {
+  case "$1" in
+    claude)
+      [ -n "${CLAUDE_CONFIG_DIR:-}" ] || return 0
+      printf 'CLAUDE_CONFIG_DIR=%s ' "$(cs_harness_shell_quote "$CLAUDE_CONFIG_DIR")"
+      ;;
+    *) return 0 ;;
+  esac
+}
+
 # cs_harness_soldier_launch <h> <model> <effort> <sq_op> <sq_brief> <sq_turnend> <sq_settings>
 # Full launch string for an interactive supervised soldier (or interactive scout).
 # codex wires turn-end inline via `-c notify=`; claude via the --settings Stop hook.
 cs_harness_soldier_launch() {
   local h=$1 model=$2 effort=$3 sq_op=$4 sq_brief=$5 sq_turnend=$6 sq_settings=$7
-  local mf ef auto
+  local mf ef auto env
   mf=$(cs_harness_model_flag "$h" "$model")
   ef=$(cs_harness_effort_flag "$h" "$effort")
   auto=$(cs_harness_autonomy_flag "$h") || return 1
+  env=$(cs_harness_launch_env "$h")
   # The launch STRING is data run later in the pane; its $(...), $?, and \" are
   # literal and must not expand here. SC2016 disabled deliberately.
   case "$h" in
     codex)
       # shellcheck disable=SC2016
-      printf 'codex %s%s%s -c "notify=[\\"bash\\",\\"-c\\",\\"touch %s\\"]" "$(%s encode launch-brief < %s)"' \
-        "$mf" "$ef" "$auto" "$sq_turnend" "$sq_op" "$sq_brief"
+      printf '%scodex %s%s%s -c "notify=[\\"bash\\",\\"-c\\",\\"touch %s\\"]" "$(%s encode launch-brief < %s)"' \
+        "$env" "$mf" "$ef" "$auto" "$sq_turnend" "$sq_op" "$sq_brief"
       ;;
     claude)
       # shellcheck disable=SC2016
-      printf 'claude %s%s%s --settings %s "$(%s encode launch-brief < %s)"' \
-        "$mf" "$ef" "$auto" "$sq_settings" "$sq_op" "$sq_brief"
+      printf '%sclaude %s%s%s --settings %s "$(%s encode launch-brief < %s)"' \
+        "$env" "$mf" "$ef" "$auto" "$sq_settings" "$sq_op" "$sq_brief"
       ;;
     *) return 1 ;;
   esac
@@ -325,32 +353,34 @@ cs_harness_soldier_launch() {
 # appends the terminal done/failed status event.
 cs_harness_scout_launch() {
   local h=$1 model=$2 effort=$3 sq_op=$4 sq_brief=$5 sq_status=$6
-  local mf ef auto bin
+  local mf ef auto bin env
   mf=$(cs_harness_model_flag "$h" "$model")
   ef=$(cs_harness_effort_flag "$h" "$effort")
   auto=$(cs_harness_autonomy_flag "$h") || return 1
+  env=$(cs_harness_launch_env "$h")
   case "$h" in
     codex) bin='codex exec' ;;
     claude) bin='claude -p' ;;
     *) return 1 ;;
   esac
   # shellcheck disable=SC2016
-  printf 'if %s %s%s%s "$(%s encode launch-brief < %s)"; then echo '\''done: headless scout finished; read the report'\'' >> %s; else echo "failed: %s exited $?" >> %s; fi' \
-    "$bin" "$mf" "$ef" "$auto" "$sq_op" "$sq_brief" "$sq_status" "$bin" "$sq_status"
+  printf 'if %s%s %s%s%s "$(%s encode launch-brief < %s)"; then echo '\''done: headless scout finished; read the report'\'' >> %s; else echo "failed: %s exited $?" >> %s; fi' \
+    "$env" "$bin" "$mf" "$ef" "$auto" "$sq_op" "$sq_brief" "$sq_status" "$bin" "$sq_status"
 }
 
 # cs_harness_capo_launch <h> <model> <effort> <sq_op> <sq_brief> <sq_home>
 # A capo is a supervisor, not a supervised turn-taker: no turn-end wiring.
 cs_harness_capo_launch() {
   local h=$1 model=$2 effort=$3 sq_op=$4 sq_brief=$5 sq_home=$6
-  local mf ef auto bin
+  local mf ef auto bin env
   mf=$(cs_harness_model_flag "$h" "$model")
   ef=$(cs_harness_effort_flag "$h" "$effort")
   auto=$(cs_harness_autonomy_flag "$h") || return 1
   bin=$(cs_harness_binary "$h")
+  env=$(cs_harness_launch_env "$h")
   # shellcheck disable=SC2016
-  printf 'CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_HOME=%s %s %s%s%s "$(%s encode launch-brief < %s)"' \
-    "$sq_home" "$bin" "$mf" "$ef" "$auto" "$sq_op" "$sq_brief"
+  printf '%sCS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_HOME=%s %s %s%s%s "$(%s encode launch-brief < %s)"' \
+    "$env" "$sq_home" "$bin" "$mf" "$ef" "$auto" "$sq_op" "$sq_brief"
 }
 
 # cs_harness_busy_re <h> - the rendered-banner busy signature used ONLY to
