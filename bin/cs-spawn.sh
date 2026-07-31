@@ -315,7 +315,8 @@ if [ "$KIND" = capo ]; then
   [ -f "$BRIEF" ] || { echo "error: charter brief missing at $BRIEF; scaffold with cs-brief.sh --capo first" >&2; exit 1; }
   HOME_ABS=$(cd "$HOME_DIR" && pwd -P)
 
-  WS=$(cs_herdr_home_workspace_ensure "capo-$ID" "$HOME_ABS")
+  WS=$(cs_herdr_home_workspace_ensure "capo-$ID" "$HOME_ABS") || {
+    echo "error: cannot resolve a single workspace for capo home '$HOME_ABS' (see the herdr diagnostic above)" >&2; exit 1; }
   # The home workspace root pane is the capo's supervisor pane.
   PANE=$(cs_herdr_workspace_root_pane "$WS") || {
     echo "error: cannot resolve a pane in capo workspace $WS" >&2; exit 1; }

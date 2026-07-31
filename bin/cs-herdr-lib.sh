@@ -57,21 +57,41 @@ cs_herdr_protocol_check() {
 
 # --- workspaces ------------------------------------------------------------
 
-cs_herdr_workspace_find() { # <label> -> workspace_id or rc=1
-  local label=$1 out id
+cs_herdr_workspace_find() { # <label> -> workspace_id; rc=1 none, rc=2 ambiguous
+  # Herdr enforces NO workspace-label uniqueness (docs/herdr.md), so a label is
+  # a hint, never an identity. Returning the FIRST match silently binds a home
+  # to whichever duplicate happens to come back first - the caller then operates
+  # on a workspace the boss is not watching, with no signal that a choice was
+  # even made. Two candidates refuse instead of adopting either.
+  local label=$1 out ids n
   out=$(cs_herdr workspace list 2>/dev/null) || return 1
-  id=$(printf '%s' "$out" | jq -r --arg l "$label" \
-    '[.result.workspaces[] | select(.label == $l) | .workspace_id] | first // empty' 2>/dev/null)
-  [ -n "$id" ] || return 1
-  printf '%s\n' "$id"
+  ids=$(printf '%s' "$out" | jq -r --arg l "$label" \
+    '.result.workspaces[] | select(.label == $l) | .workspace_id' 2>/dev/null)
+  [ -n "$ids" ] || return 1
+  n=$(printf '%s\n' "$ids" | grep -c .)
+  if [ "$n" -gt 1 ]; then
+    printf 'cs-herdr: workspace label "%s" matches %s workspaces (%s); refusing to guess which one is the home\n' \
+      "$label" "$n" "$(printf '%s' "$ids" | tr '\n' ' ')" >&2
+    return 2
+  fi
+  printf '%s\n' "$ids"
 }
 
 cs_herdr_home_workspace_ensure() { # <home-label> [cwd] -> workspace_id
   # Finds or creates the home workspace (label "consigliere" or "capo-<id>").
   # A created home workspace seeds a default tab; that root pane is the home
   # supervisor pane, so nothing is pruned here.
-  local label=$1 cwd=${2:-$PWD} ws out
-  ws=$(cs_herdr_workspace_find "$label") && { printf '%s\n' "$ws"; return 0; }
+  #
+  # An AMBIGUOUS label is a hard stop, not a create: adding a third workspace
+  # with the same label would deepen the ambiguity, and adopting one of the two
+  # would be the silent guess this refuses to make. The boss resolves it by
+  # closing or relabelling the duplicate.
+  local label=$1 cwd=${2:-$PWD} ws out rc=0
+  ws=$(cs_herdr_workspace_find "$label") || rc=$?
+  case $rc in
+    0) printf '%s\n' "$ws"; return 0 ;;
+    2) return 1 ;;
+  esac
   out=$(cs_herdr workspace create --cwd "$cwd" --label "$label" --no-focus) || return 1
   printf '%s' "$out" | jq -re '.result.workspace.workspace_id'
 }
