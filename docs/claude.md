@@ -10,13 +10,20 @@ version. The launch template and per-harness facts live in `bin/cs-harness-lib.s
 ## Launch template (the only one)
 
 ```
-claude [--model <m>] [--effort <low|medium|high|xhigh|max>] \
+[CLAUDE_CONFIG_DIR=<dir>] claude [--model <m>] [--effort <low|medium|high|xhigh|max>] \
   <--dangerously-skip-permissions | --permission-mode <mode>> \
   --settings <state/<id>.claude-settings.json> \
   "$(bin/cs-operational-input.sh encode launch-brief < data/<id>/brief.md)"
 ```
 
 - The typed `launch-brief` positional prompt starts the supervised interactive session.
+- `CLAUDE_CONFIG_DIR` is restated on the launch line whenever consigliere itself runs
+  under one. A pane is created by the long-lived herdr daemon, which does NOT inherit
+  the environment of the consigliere process that requested it, so under a
+  work-vs-personal subscription split a bare `claude` would read the default
+  `~/.claude` store and come up unauthenticated. Unset is the single-store default and
+  emits no prefix. This is the same store folder-trust is written to, so credentials
+  and trust cannot land in two different config directories.
 - `--dangerously-skip-permissions` gives the unattended soldier full autonomy (no permission prompts).
 - `--permission-mode <auto|acceptEdits|bypassPermissions>` is the alternative for a home
   whose Claude account policy forbids the bypass flag; `config/permission-mode` selects it
@@ -35,8 +42,10 @@ claude [--model <m>] [--effort <low|medium|high|xhigh|max>] \
   shell-escaping the JSON inside the pane launch line.)
 - Effort vocabulary: `low|medium|high|xhigh|max`; Claude supports `max` but not `ultra`.
 - A capo launch omits the turn-end wiring (a capo is a supervisor, not a supervised
-  turn-taker) and prefixes `CS_HOME=<home>`.
+  turn-taker) and prefixes `CS_HOME=<home>`; the `CLAUDE_CONFIG_DIR` prefix, when
+  emitted, precedes those assignments.
 - Headless scout: `claude -p "<brief>"` (process exit = turn end), the analog of `codex exec`.
+  The env prefix goes between the enclosing `if` and the binary.
 
 ## Hooks (.claude/settings.json)
 

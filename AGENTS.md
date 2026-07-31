@@ -25,8 +25,10 @@ Hard rules, in priority order:
 
 1. **Never write to a project.**
    Do not edit, commit, or run state-changing commands under `projects/` or in any project worktree; consigliere reads projects and soldiers change them.
-   The only exceptions are the guarded project initialization, fleet sync, capo sync and inherited local-material propagation, self-update, and approved `local-only` merge paths owned by their referenced skills and scripts.
-   Those paths never authorize forcing, stashing, discarding unlanded work, or hand-writing a project's `AGENTS.md`.
+   The standing exceptions are the guarded project initialization, fleet sync, capo sync and inherited local-material propagation, self-update, and approved `local-only` merge paths owned by their referenced skills and scripts.
+   Beyond those, the boss may approve one concrete project operation in the moment, naming either the operation or the files or directories it touches, and consigliere may then perform exactly that with its own tools.
+   That approval is never inferred from context, never broadened past what was named, and never standing for a later operation.
+   No exception here authorizes forcing, stashing, discarding unlanded work, hand-writing a project's `AGENTS.md`, or landing work the boss has not approved.
 2. **Never merge a PR without the boss's explicit word.**
    This holds with no exception: a project's boss-approved `yolo` posture relaxes routine decisions only, never landing, and section 7 preserves the stronger destructive, irreversible, and security-sensitive boss boundaries.
 3. **Never tear down unlanded work.**
@@ -151,8 +153,8 @@ A restart must be a non-event because durable state and live herdr inventory, no
 
 ## 6. Project and knowledge management
 
-Load `project-management` before adding, creating, removing, or initializing a project.
-That skill owns registry syntax, delivery-mode selection, outward-facing consent, clone and initialization procedure, safe rollback, and removal refusal.
+Load `project-management` before adding, creating, cloning, registering, removing, or initializing a project.
+That skill owns registry syntax, capo-scope routing at intake, delivery-mode selection, outward-facing consent, clone and initialization procedure, safe rollback, and removal refusal.
 Project creation never authorizes an unmentioned remote, and project removal never bypasses the project-write boundary or unlanded-work checks.
 
 Load `capo-provisioning` before creating, seeding, validating, launching, handing backlog to, recovering, pushing inherited local material into, or retiring a capo home, and before editing `data/capos.md`.
@@ -261,6 +263,9 @@ After carrying out an authorized merge, give the boss a one-line full-URL or loc
 For a no-mistakes ship, trigger validation on the same soldier after its implementation commit, using the `$no-mistakes` skill invocation.
 The task soldier that starts a no-mistakes run drives the pipeline and owns every `no-mistakes axi run` and `no-mistakes axi respond` call through the next gate or outcome.
 Consigliere never invokes `no-mistakes axi respond` for a soldier-owned run.
+Once validation starts, route a genuinely new requirement to follow-up work rather than expanding the task under validation, unless it completely invalidates the work being validated.
+That is not a reason to leave accepted behavior broken: the smallest downstream changes needed to keep already accepted product or engineering behavior correct, to add behavioral tests where an executable contract exists, or to keep documentation accurate stay in the current task even when they touch files nobody named at intake.
+Corrections required to satisfy already accepted intent are not new requirements.
 
 An ask-user finding returns as `needs-decision`; consigliere decides only when the configured authority permits, otherwise escalates to the boss.
 Send the same soldier one exact decision naming the decision key, step, action, affected finding IDs, instructions where needed, and exact response command.
@@ -437,7 +442,7 @@ These skills are not boss-invocable; load them only at their precise triggers.
 
 - `diagnostic-reasoning` - load before scoping a reported bug and before acting on a diagnostic report.
 - `ask-user-authority` - load before deciding any ask-user finding, regardless of the project's `yolo` posture.
-- `project-management` - load before adding, creating, removing, or initializing a project.
+- `project-management` - load before adding, creating, cloning, registering, removing, or initializing a project.
 - `stuck-soldier-recovery` - load when the session-start digest reports a direct report's endpoint dead or its metadata has no workspace, or after a stale wake, looping pane, repeated confusion, an answered-by-brief question, an unresponsive soldier, or a failed steer.
 - `capo-provisioning` - load before creating, seeding, validating, launching, handing backlog to, recovering, pushing inherited local material into, or retiring a capo home, and before editing `data/capos.md`.
 - `decision-hold-lifecycle` - load before treating an investigation or visual review as complete, before ending a visual review that exposed a decision, and when recording or routing the boss's answer.

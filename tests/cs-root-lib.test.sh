@@ -108,6 +108,72 @@ done
 [ "$mismatch" -eq 0 ] || fail "cs_resolve_root diverged from the inline reference for some override combination"
 pass "all 32 override combinations resolve byte-identically to the inline reference"
 
+# --- relative inputs are anchored, never handed on relative -------------------
+#
+# These values do not stay inside one process: they are baked into durable
+# soldier briefs and capo charters and restated on launch lines and daemon
+# handoffs that other processes run from a different working directory. A
+# relative value would silently name a different directory in each of them.
+
+TMP=$(cs_test_tmproot cs-root-lib)
+mkdir -p "$TMP"
+# TMPDIR can carry a trailing slash, which $PWD normalizes away; compare against
+# the same normalized form the resolver will produce.
+TMP=$(cd "$TMP" && pwd)
+mkdir -p "$TMP/homes/alpha" "$TMP/elsewhere"
+
+# A relative CS_HOME resolves against the resolving process's cwd, and every
+# derived path inherits that anchor.
+out=$(cd "$TMP/homes" && CS_ROOT_OVERRIDE='' CS_HOME='alpha' \
+  CS_DATA_OVERRIDE='' CS_STATE_OVERRIDE='' CS_CONFIG_OVERRIDE='' lib_resolve)
+read_resolved "$out"
+case "$g_home" in
+  /*) ;;
+  *) fail "a relative CS_HOME must resolve absolute, got '$g_home'" ;;
+esac
+[ "$g_home" = "$TMP/homes/alpha" ] || fail "relative CS_HOME anchored to '$g_home', expected $TMP/homes/alpha"
+[ "$g_data" = "$TMP/homes/alpha/data" ] || fail "DATA did not follow the anchored home: $g_data"
+[ "$g_state" = "$TMP/homes/alpha/state" ] || fail "STATE did not follow the anchored home: $g_state"
+[ "$g_config" = "$TMP/homes/alpha/config" ] || fail "CONFIG did not follow the anchored home: $g_config"
+pass "a relative CS_HOME is anchored, and data/state/config follow it"
+
+# The anchored value is what a later process at a DIFFERENT cwd would receive.
+# Re-resolving that absolute value from elsewhere must land in the same place -
+# which is exactly what a bare relative value would have failed to do.
+out=$(cd "$TMP/elsewhere" && CS_ROOT_OVERRIDE='' CS_HOME="$g_home" \
+  CS_DATA_OVERRIDE='' CS_STATE_OVERRIDE='' CS_CONFIG_OVERRIDE='' lib_resolve)
+read_resolved "$out"
+[ "$g_home" = "$TMP/homes/alpha" ] || fail "the anchored home moved when re-resolved from another cwd: $g_home"
+# Counterproof: the raw relative value really would have moved.
+out=$(cd "$TMP/elsewhere" && CS_ROOT_OVERRIDE='' CS_HOME='alpha' \
+  CS_DATA_OVERRIDE='' CS_STATE_OVERRIDE='' CS_CONFIG_OVERRIDE='' lib_resolve)
+read_resolved "$out"
+[ "$g_home" = "$TMP/elsewhere/alpha" ] ||
+  fail "expected the relative value to anchor to the second cwd, got '$g_home'"
+pass "an anchored home survives a handoff to a process with a different cwd"
+
+# A relative state/data override is anchored on its own, not only via CS_HOME.
+out=$(cd "$TMP/elsewhere" && CS_ROOT_OVERRIDE='' CS_HOME="$TMP/homes/alpha" \
+  CS_DATA_OVERRIDE='rel-data' CS_STATE_OVERRIDE='rel-state' CS_CONFIG_OVERRIDE='' lib_resolve)
+read_resolved "$out"
+[ "$g_data" = "$TMP/elsewhere/rel-data" ] || fail "relative CS_DATA_OVERRIDE not anchored: $g_data"
+[ "$g_state" = "$TMP/elsewhere/rel-state" ] || fail "relative CS_STATE_OVERRIDE not anchored: $g_state"
+pass "relative data and state overrides are anchored independently of CS_HOME"
+
+# Anchoring must not require the directory to exist: DATA/STATE/CONFIG are
+# routinely resolved before anything has created them.
+out=$(cd "$TMP/elsewhere" && CS_ROOT_OVERRIDE='' CS_HOME='not-created-yet' \
+  CS_DATA_OVERRIDE='' CS_STATE_OVERRIDE='' CS_CONFIG_OVERRIDE='' lib_resolve) ||
+  fail "resolution must not require the home to exist yet"
+read_resolved "$out"
+[ "$g_home" = "$TMP/elsewhere/not-created-yet" ] || fail "absent home not anchored: $g_home"
+pass "anchoring does not require the directory to exist"
+
+# cs_abs_path itself: absolute passes through byte-identical, empty refuses.
+[ "$(cs_abs_path /a/b)" = "/a/b" ] || fail "an absolute path must pass through unchanged"
+if cs_abs_path '' 2>/dev/null; then fail "cs_abs_path must refuse an empty path"; fi
+pass "cs_abs_path passes absolute paths through and refuses an empty one"
+
 # --- idempotent double-source -----------------------------------------------
 # Sourcing again must not error or clobber the function (guard returns early).
 . "$ROOT/bin/cs-root-lib.sh"

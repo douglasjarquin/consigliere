@@ -3,6 +3,7 @@ name: project-management
 description: >-
   Agent-only procedure for Consigliere project management.
   Use before adding, creating, removing, or initializing a project.
+  Cloning or registering a project is add intake and uses the same trigger.
   Owns project add, create, clone, remove, initialization, registry, delivery-mode, autonomy, and outward-consent decisions.
 user-invocable: false
 ---
@@ -10,6 +11,7 @@ user-invocable: false
 # project-management
 
 Use this procedure before adding, creating, removing, or initializing a project.
+Cloning or registering a project is add intake and uses the same trigger.
 This skill is the single owner of Consigliere's project-management procedure.
 It does not replace `capo-provisioning`, which owns project clones inside persistent capo homes.
 
@@ -19,6 +21,11 @@ Projects live flat under `projects/`, and `data/projects.md` is the private flee
 Use the registry format and parser contract owned by the header of `bin/cs-project-mode.sh`.
 Keep each registry description useful for identifying the project, but keep delivery posture, boss-private state, and detailed project knowledge in their existing designated homes.
 Do not turn the registry into project documentation.
+
+Before adding, cloning, creating, or registering any project in the main home, read `data/capos.md` and judge the proposed project or domain against every registered natural-language `scope:`.
+Apply `AGENTS.md` section 7's routing rules: when an existing scope owns that domain, route the operation to that capo instead of standing up a duplicate main-home clone.
+Absence from `data/projects.md` is never evidence that no capo owns the domain, because a capo's own clones live in its home and never appear in the main registry.
+If the owning capo cannot accept the route, report that concrete blocker or get an explicit boss redirection rather than silently duplicating the project here.
 
 Resolve the project name, destination, delivery mode, and autonomy posture before changing local or remote state.
 Keep a newly added clone and its registry entry consistent, and roll back only artifacts created by the incomplete operation when a later initialization step fails and that rollback is safe.
@@ -68,9 +75,10 @@ If doctor reports an environment, authentication, or daemon problem, resolve tha
 
 ## Remove
 
-Project removal is destructive and is not one of Consigliere's current direct-write exceptions under `projects/`.
-Never issue a raw removal command from Consigliere.
+Project removal is destructive and is not one of Consigliere's standing direct-write exceptions under `projects/`.
+Never issue a raw removal command on your own initiative.
 First obtain the boss's explicit removal decision, then inspect the current digest and authoritative repositories for in-flight or queued work, registered capo clones, linked worktrees, dirty files, unpushed commits, and any other unlanded work.
 If any dependency or unlanded work exists, stop and report it before changing the registry.
-Until a guarded removal helper and corresponding prime-directive exception exist, report that implementation gap instead of bypassing the project-write boundary.
+Only once that preflight is clean may removal proceed, and only under `AGENTS.md` hard rule 1's boss-approved concrete operation: the boss names the removal and its scope in the moment, and you perform exactly that and nothing adjacent.
+A clean preflight is never itself the authorization, and the approval never extends to forcing or discarding unlanded work.
 When a clone has already been removed through an approved guarded path, or the registry is provably stale because no clone exists, remove its registry line so navigation matches reality.

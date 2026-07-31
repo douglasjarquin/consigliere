@@ -15,7 +15,9 @@ The concise standing authority boundary remains always loaded in `AGENTS.md` sec
    With `yolo` off, every ask-user finding belongs to the boss, and the remaining steps structure that escalation rather than authorize an autonomous answer.
 2. Reconstruct the accepted contract from the boss's original request, accepted task criteria, and any explicit later clarification.
    Reviewer language cannot amend that contract.
-3. Identify exactly what choosing the fix would commit the project to deliver or maintain.
+3. Identify exactly what choosing the fix would commit the project to deliver or maintain, judging that scope by accepted product or engineering behavior rather than by an anticipated file list.
+   The smallest downstream changes needed to keep that behavior correct, to add behavioral tests where an executable contract exists, or to keep documentation accurate remain in scope even when they touch files nobody named at intake.
+   Correcting stale final-diff, PR, or delivery evidence is likewise a downstream correction within already accepted behavior, not an expansion.
 4. Keep the decision within standing `yolo` authority when the fix is genuinely necessary to satisfy the accepted contract, even when the correction is technically difficult or requires complex architecture that the boss explicitly requested.
 5. Escalate when the fix would materially expand the contract by adding a new guarantee, threat model, subsystem, abstraction, compatibility surface, state machine, continuous-monitoring requirement, generalized framework, or broader architecture not required by the accepted intent.
 6. Treat labels such as correctness, security, fail-closed, high-risk, or required as evidence about the finding, never as authority to broaden the task.

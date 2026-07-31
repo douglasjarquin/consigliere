@@ -22,6 +22,17 @@ Re-verify this table after any herdr upgrade; `bin/cs-bootstrap.sh` gates on the
 
 So consigliere's shape is: one home workspace (`consigliere`, or `capo-<id>`) where the supervisor runs, plus one workspace per task, created by `worktree create` and labeled with the task id.
 
+### Workspace labels are not unique
+
+Herdr enforces no uniqueness on workspace labels: two workspaces may both be labeled `consigliere` or `capo-<id>`, and `workspace list` returns both.
+A label is therefore a hint, never an identity.
+
+Task placement is immune to this by construction - every ship and scout task gets a brand-new workspace from `worktree create`, so nothing is resolved by label search.
+The one label lookup left is the home workspace (`cs_herdr_workspace_find` / `cs_herdr_home_workspace_ensure`), used when launching a capo.
+Returning the first match there would silently bind the capo to whichever duplicate came back first, so two candidates refuse with both workspace ids named, and an ambiguous label never creates a third workspace.
+The boss resolves it by closing or relabelling the duplicate.
+This is the same rule already applied to tab labels below: scope to this home's workspace ids from metadata, never adopt by label sweep.
+
 ## Worktree lifecycle safety (D1 verification)
 
 - `worktree remove --workspace <id>` on a dirty worktree fails closed: `dirty_worktree_requires_force`. `--force` is the only override.

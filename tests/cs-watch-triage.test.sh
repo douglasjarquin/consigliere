@@ -645,6 +645,127 @@ test_heartbeat_backstop_surfaces_unsurfaced_status() {
   pass "heartbeat backstop fail-safe surfaces a boss-relevant status the per-wake path missed"
 }
 
+# --- a busy pane whose turn never ends is bounded -----------------------------
+#
+# A busy pane is otherwise unconditional, unbounded proof of liveness: the whole
+# stale/wedge path is skipped while the pane looks busy, and a busy pane's hash
+# keeps changing anyway (the harness renders a ticking elapsed counter), so no
+# stale hash ever repeats and the timer is unreachable by construction. A hung
+# foreground tool call therefore stays invisible for as long as it hangs.
+# CS_BUSY_TURN_MAX_SECS bounds busy-with-no-completed-turn instead.
+
+# The rendered footer both harnesses show during a live turn; pane_is_busy
+# matches it when the native agent read is ambiguous.
+BUSY_PANE_TEXT='running the test suite
+esc to interrupt'
+
+test_busy_pane_within_the_turn_bound_is_left_alone() {
+  local dir state fakebin out capture_file pane key pid
+  dir=$(make_case busy-within-bound); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"
+  pane="pane-busy-ok"
+  key=$(pane_key "$pane")
+  printf '%s' "$BUSY_PANE_TEXT" > "$capture_file"
+  cs_write_meta "$state/busyok.meta" "pane=$pane" "kind=ship"
+  printf 'working: compiling\n' > "$state/busyok.status"
+  printf '%s' "$(seen_sig "$state/busyok.status")" > "$state/.seen-busyok_status"
+  # A turn completed moments ago: this is ordinary work, not a wedge. Prime its
+  # seen-marker too, so the ordinary turn-end signal path stays out of the way
+  # and this test isolates the busy-turn bound.
+  : > "$state/busyok.turn-ended"
+  printf '%s' "$(seen_sig "$state/busyok.turn-ended")" > "$state/.seen-busyok_turn-ended"
+  export CS_FAKE_HERDR_CAPTURE="$capture_file"
+
+  watch_bg "$state" "$fakebin" "$out" CS_BUSY_TURN_MAX_SECS=3600
+  pid=$!
+  absorbed_alive "$pid" "$state/.last-watcher-beat" ||
+    { reap "$pid"; fail "watcher exited on an ordinary busy pane: $(cat "$out")"; }
+  [ ! -e "$state/.busy-turn-since-$key" ] ||
+    { reap "$pid"; fail "a busy pane within the turn bound must not start a wedge timer"; }
+  [ ! -s "$state/.wake-queue" ] ||
+    { reap "$pid"; fail "a busy pane within the turn bound must not enqueue a wake"; }
+  reap "$pid"
+  unset CS_FAKE_HERDR_CAPTURE
+  pass "a busy pane whose turn completed recently is left alone"
+}
+
+test_busy_pane_past_the_turn_bound_wedge_escalates() {
+  local dir state fakebin out capture_file pane key pid
+  dir=$(make_case busy-past-bound); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"
+  pane="pane-busy-hung"
+  key=$(pane_key "$pane")
+  printf '%s' "$BUSY_PANE_TEXT" > "$capture_file"
+  cs_write_meta "$state/hung.meta" "pane=$pane" "kind=ship"
+  printf 'working: running the suite\n' > "$state/hung.status"
+  printf '%s' "$(seen_sig "$state/hung.status")" > "$state/.seen-hung_status"
+  # The pane has looked busy for two hours without ever completing a turn - the
+  # signature of a hung foreground tool call behind a live-looking footer.
+  : > "$state/hung.turn-ended"
+  backdate "$state/hung.turn-ended" 7200
+  printf '%s' "$(seen_sig "$state/hung.turn-ended")" > "$state/.seen-hung_turn-ended"
+  export CS_FAKE_HERDR_CAPTURE="$capture_file"
+
+  # Phase A: past the bound, so the wedge timer starts - but absorbed for now.
+  watch_bg "$state" "$fakebin" "$out" CS_BUSY_TURN_MAX_SECS=3600 CS_STALE_ESCALATE_SECS=999
+  pid=$!
+  if ! absorbed_alive "$pid" "$state/.busy-turn-since-$key"; then
+    reap "$pid"; fail "a busy pane past the turn bound did not start a wedge timer: $(cat "$out")"
+  fi
+  [ ! -s "$state/.wake-queue" ] ||
+    { reap "$pid"; fail "the busy-turn bound surfaced before its wedge threshold elapsed"; }
+  reap "$pid"
+
+  # Phase B: the wedge timer itself elapses; now it must escalate.
+  echo $(( $(date +%s) - 500 )) > "$state/.busy-turn-since-$key"
+  : > "$out"
+  watch_bg "$state" "$fakebin" "$out" CS_BUSY_TURN_MAX_SECS=3600 CS_STALE_ESCALATE_SECS=240
+  pid=$!
+  wait_for_exit "$pid" 60 ||
+    fail "watcher did not escalate a busy pane hung past the turn bound"
+  grep -F "stale: $pane" "$out" >/dev/null ||
+    fail "the busy-turn escalation did not print a stale wake"
+  grep -F "possible wedge" "$out" >/dev/null ||
+    fail "the busy-turn escalation did not flag a possible wedge"
+  [ "$(count_wakes "$state" stale "$pane")" -ge 1 ] ||
+    fail "the busy-turn escalation was not queued durably"
+  unset CS_FAKE_HERDR_CAPTURE
+  pass "a busy pane with no completed turn past the bound wedge-escalates for inspection"
+}
+
+test_completed_turn_resets_the_busy_bound() {
+  local dir state fakebin out capture_file pane key pid
+  dir=$(make_case busy-turn-reset); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"
+  pane="pane-busy-resumed"
+  key=$(pane_key "$pane")
+  printf '%s' "$BUSY_PANE_TEXT" > "$capture_file"
+  cs_write_meta "$state/resumed.meta" "pane=$pane" "kind=ship"
+  printf 'working: back at it\n' > "$state/resumed.status"
+  printf '%s' "$(seen_sig "$state/resumed.status")" > "$state/.seen-resumed_status"
+  # A wedge timer is already running from an earlier hung stretch...
+  echo $(( $(date +%s) - 500 )) > "$state/.busy-turn-since-$key"
+  # ...but a turn has since COMPLETED, so the pane is demonstrably taking turns.
+  : > "$state/resumed.turn-ended"
+  printf '%s' "$(seen_sig "$state/resumed.turn-ended")" > "$state/.seen-resumed_turn-ended"
+  export CS_FAKE_HERDR_CAPTURE="$capture_file"
+
+  # A threshold this low would escalate instantly if the timer were still live.
+  watch_bg "$state" "$fakebin" "$out" CS_BUSY_TURN_MAX_SECS=3600 CS_STALE_ESCALATE_SECS=1
+  pid=$!
+  # Wait on the condition itself: the beacon is written before the stale loop
+  # reaches this pane, so beacon-then-check would race the first cycle.
+  wait_until 50 test ! -e "$state/.busy-turn-since-$key" ||
+    { reap "$pid"; fail "a completed turn must clear the busy-turn wedge timer"; }
+  kill -0 "$pid" 2>/dev/null ||
+    { fail "watcher exited after a completed turn should have cleared the bound: $(cat "$out")"; }
+  [ ! -s "$state/.wake-queue" ] ||
+    { reap "$pid"; fail "a completed turn must not leave the busy-turn escalation armed"; }
+  reap "$pid"
+  unset CS_FAKE_HERDR_CAPTURE
+  pass "a completed turn resets the busy-turn bound"
+}
+
 # --- beacon stays fresh while absorbing ---------------------------------------
 
 test_beacon_stays_fresh_while_absorbing() {
@@ -1000,6 +1121,9 @@ test_nonterminal_stale_provably_working_absorbed_then_escalated
 test_wedge_escalation_marks_demand_deep_inspection_after_threshold
 test_nonterminal_stale_not_working_surfaced
 test_nonterminal_stale_paused_absorbed_then_resurfaced
+test_busy_pane_within_the_turn_bound_is_left_alone
+test_busy_pane_past_the_turn_bound_wedge_escalates
+test_completed_turn_resets_the_busy_bound
 test_blocked_pane_surfaces_immediately
 test_blocked_pane_declared_pause_absorbed
 test_registered_check_runs_from_snapshot

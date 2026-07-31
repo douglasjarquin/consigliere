@@ -119,6 +119,9 @@ fi
 pass "config/permission-mode fails closed on unusable, unknown, and duplicate records"
 
 # --- launch strings ---------------------------------------------------------
+# Pin the credential-store selector so launch assertions never depend on the
+# environment the developer happens to be running under.
+unset CLAUDE_CONFIG_DIR
 op=$(cs_harness_shell_quote /root/bin/cs-operational-input.sh)
 br=$(cs_harness_shell_quote /home/data/t/brief.md)
 te=$(cs_harness_shell_quote /home/state/t.turn-ended)
@@ -176,6 +179,49 @@ for role in soldier scout capo; do
 done
 rm -f "$PM/permission-mode"
 pass "configured permission mode reaches every claude launch role and fails closed"
+
+# --- credential-store forwarding ---------------------------------------------
+# A pane is created by the long-lived herdr daemon, which does NOT inherit the
+# environment of the consigliere process that asked for it. Under a
+# work-vs-personal claude subscription split, a bare `claude` in that pane reads
+# the default ~/.claude store and comes up unauthenticated, blocking the agent
+# before it can do any work. Every claude launch role must restate
+# CLAUDE_CONFIG_DIR on the launch line itself.
+build_launch() {  # <role> -> launch string for that role
+  case $1 in
+    soldier) cs_harness_soldier_launch claude default default "$op" "$br" "$te" "$se" ;;
+    scout) cs_harness_scout_launch claude default default "$op" "$br" "$st" ;;
+    capo) cs_harness_capo_launch claude default default "$op" "$br" "$hm" ;;
+  esac
+}
+
+export CLAUDE_CONFIG_DIR=/work/config/.claude
+for role in soldier scout capo; do
+  line=$(build_launch "$role")
+  assert_contains "$line" "CLAUDE_CONFIG_DIR='/work/config/.claude' " \
+    "claude $role forwards the credential store onto the launch line"
+  # The prefix must leave the line runnable, not just present in it.
+  bash -n -c "$line" 2>/dev/null ||
+    fail "claude $role launch line must stay parseable with the env prefix"
+done
+# The prefix precedes the binary in every role, including the capo line that
+# already carries its own CS_HOME assignment.
+assert_contains "$(build_launch capo)" \
+  "CLAUDE_CONFIG_DIR='/work/config/.claude' CS_ROOT_OVERRIDE=" \
+  "capo keeps the credential store ahead of its own home assignments"
+
+# codex selects no credential store by environment here, so it gets no prefix
+# even when the claude variable is set.
+codex_line=$(cs_harness_soldier_launch codex default default "$op" "$br" "$te" "")
+assert_not_contains "$codex_line" 'CLAUDE_CONFIG_DIR' "codex launch is unaffected"
+
+# Unset is the single-store default and must add nothing.
+unset CLAUDE_CONFIG_DIR
+for role in soldier scout capo; do
+  assert_not_contains "$(build_launch "$role")" 'CLAUDE_CONFIG_DIR' \
+    "claude $role adds no prefix when the store is not overridden"
+done
+pass "claude launch roles forward the selected credential store"
 
 # --- settings json ----------------------------------------------------------
 # A soldier's Stop hook touches the turn-end signal ONLY - the analog of codex's

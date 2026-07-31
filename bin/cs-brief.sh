@@ -238,13 +238,13 @@ HERDR_SECTION=$(printf '%s\n' \
 'Never bypass the helper, even for a read-only lifecycle probe or cleanup after failure.' \
 'The boss fleet uses the running `default` session.')
 else
-HERDR_SECTION=$(cat <<'EOF'
+IFS= read -r -d '' HERDR_SECTION <<'EOF' || true
 # Herdr lifecycle declaration - NOT ENABLED
 **HARD SAFETY GATE:** this scaffold cannot inspect the task text that replaces `{TASK}` later.
 If the task will start, stop, delete, restart, profile, or otherwise drive herdr lifecycle behavior, stop and regenerate the brief with `--herdr-lab` before dispatch.
 Do not add herdr lifecycle commands to this unguarded brief by hand.
 EOF
-)
+HERDR_SECTION=${HERDR_SECTION%$'\n'}
 fi
 
 if [ "$KIND" = scout ]; then
@@ -306,19 +306,18 @@ case "$MODE" in
   direct-PR)
     SETUP2=""
     RULE1='1. Never push to the default branch (push only your `cs/'"$ID"'` branch). Never merge a PR.'
-    DOD=$(cat <<EOF
+    IFS= read -r -d '' DOD <<EOF || true
 # Definition of done
 This project ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
 The task is complete only when committed on your branch.
 When it is implemented and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file and stop.
 Do NOT run /no-mistakes. The configured merge authority decides whether to merge the PR; consigliere relays the outcome.
 EOF
-)
     ;;
   local-only)
     SETUP2=""
     RULE1="1. Never push to any remote and never open a PR. Work only on your \`cs/$ID\` branch; consigliere handles the merge into local \`main\`."
-    DOD=$(cat <<EOF
+    IFS= read -r -d '' DOD <<EOF || true
 # Definition of done
 This project ships **local-only**: no remote, no PR, no pipeline.
 The task is complete only when committed on your branch \`cs/$ID\`. Do NOT push, do NOT open a PR, do NOT merge.
@@ -326,13 +325,12 @@ Keep your branch a clean fast-forward onto the current default branch - if \`mai
 When it is implemented and committed, append \`done: ready in branch cs/$ID\` to the status file and stop.
 The configured merge authority approves the ready branch, then consigliere merges it into local \`main\` through the guarded fast-forward path.
 EOF
-)
     ;;
   *)  # no-mistakes (default)
     SETUP2="
 2. Run \`no-mistakes doctor\`; if it reports the repo is not initialized here, run \`no-mistakes init\`."
     RULE1='1. Never push to the default branch. Never merge a PR.'
-    DOD=$(cat <<EOF
+    IFS= read -r -d '' DOD <<EOF || true
 # Definition of done
 The task is complete only when committed on your branch.
 When you believe it is complete, append \`done: {summary}\` to the status file and stop.
@@ -349,22 +347,25 @@ Two consigliere-specific rules layer on top of that guidance:
 
 After \$no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), append \`done: PR {url} checks green\` and stop. You are finished.
 EOF
-)
     ;;
 esac
 
+# read -r -d '' preserves the heredoc's trailing newline that a $(...) command
+# substitution would have stripped. Drop that one newline so generated briefs
+# keep their exact prior shape.
+DOD=${DOD%$'\n'}
+
 if [ -n "$ISSUE" ]; then
   if [ "$MODE" = local-only ]; then
-    ISSUE_SECTION=$(cat <<EOF
+    IFS= read -r -d '' ISSUE_SECTION <<EOF || true
 # Board issue #$ISSUE
 This task implements GitHub issue #$ISSUE.
 This project ships local-only (no PR), so you cannot close the issue with a PR keyword.
 Do the work as usual; consigliere closes issue #$ISSUE after it lands the approved local merge.
 Do NOT close the issue yourself and do NOT move its board card - the board's own workflow handles the card once the issue is closed.
 EOF
-)
   elif [ "$MODE" = no-mistakes ]; then
-    ISSUE_SECTION=$(cat <<EOF
+    IFS= read -r -d '' ISSUE_SECTION <<EOF || true
 # Board issue #$ISSUE - THE PR MUST CLOSE IT
 This task implements GitHub issue #$ISSUE.
 The merged PR MUST close this issue via the GitHub closing keyword \`Closes #$ISSUE\`, so that the board's built-in workflow moves its card to Done. This is a hard requirement, not a nicety: if the PR does not close the issue, the card is stranded in In Progress.
@@ -373,17 +374,16 @@ You do NOT open the PR - the no-mistakes pipeline owns push and PR creation. So 
 - Include "This PR closes #$ISSUE." in the \`--intent\` you pass to \`no-mistakes axi run\`, so the pipeline's PR step writes the closing keyword into the PR description.
 Do NOT edit the project board yourself and do NOT close the issue by hand - the merge does both through \`Closes #$ISSUE\`.
 EOF
-)
   else
-    ISSUE_SECTION=$(cat <<EOF
+    IFS= read -r -d '' ISSUE_SECTION <<EOF || true
 # Board issue #$ISSUE - PR MUST CLOSE IT
 This task implements GitHub issue #$ISSUE.
 The PR description you open MUST contain the line \`Closes #$ISSUE\` (a GitHub closing keyword) so that merging the PR closes the issue and the board's built-in workflow moves its card to Done.
 This is a hard requirement, not a nicety: if the PR does not close the issue, the card is stranded in In Progress.
 Do NOT edit the project board yourself and do NOT close the issue by hand - the merge does both through \`Closes #$ISSUE\`.
 EOF
-)
   fi
+  ISSUE_SECTION=${ISSUE_SECTION%$'\n'}
 else
   ISSUE_SECTION=""
 fi
