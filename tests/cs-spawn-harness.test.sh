@@ -33,6 +33,15 @@ case "${1:-} ${2:-}" in
     printf '{"result":{"workspace":{"workspace_id":"w1"},"root_pane":{"pane_id":"w1:p1"},"worktree":{"path":"%s","branch":"%s"}}}\n' "$CS_FAKE_SPAWN_WORKTREE" "$branch"
     ;;
   "pane run") printf '%s' "${4:-}" > "$CS_FAKE_SPAWN_LAUNCH" ;;
+  "agent get")
+    # cs-spawn now requires an agent to actually APPEAR after the launch line,
+    # because `pane run` reports success even when a not-ready shell swallowed
+    # it. CS_FAKE_SPAWN_NO_AGENT=1 reproduces that swallowed launch.
+    if [ "${CS_FAKE_SPAWN_NO_AGENT:-0}" = 1 ]; then
+      printf '{"result":{"agent":{}}}\n'
+    else
+      printf '{"result":{"agent":{"agent":"codex","agent_status":"idle"}}}\n'
+    fi ;;
   *) printf '{}\n' ;;
 esac
 SH
@@ -200,5 +209,26 @@ fi
 assert_contains "$output" "claude does not accept effort=ultra; choose default|low|medium|high|xhigh|max" "claude ultra error is specific"
 assert_absent "$HOME_DIR/state/t-claude-ultra.meta" "claude ultra writes no metadata"
 pass "claude ultra blocks dispatch"
+
+# --- the swallowed launch ----------------------------------------------------
+# `pane run` hands the launch line to the pane's SHELL and reports success
+# whether or not the shell was ready to read it. A freshly created worktree pane
+# often is not, and the line is then lost unrecoverably (the same hazard
+# tests/cs-herdr-lib-live.test.sh works around by re-submitting an idempotent
+# probe). Before this check, cs-spawn printed "spawned", consigliere recorded
+# the task as under way, and the pane sat at a bare prompt until the stale timer
+# eventually noticed: a soldier that reported success and never existed.
+mkdir -p "$HOME_DIR/data/t-swallowed"
+printf 'implement the fixture\n' > "$HOME_DIR/data/t-swallowed/brief.md"
+if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
+  CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
+  CS_FAKE_SPAWN_WORKTREE="$TMP/wt-swallowed" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-swallowed" \
+  CS_FAKE_SPAWN_NO_AGENT=1 CS_SPAWN_LAUNCH_WAIT_SECS=2 \
+  "$SPAWN" t-swallowed "$REPO" 2>&1); then
+  fail "spawn must fail when no agent appears after the launch"
+fi
+assert_contains "$output" "no agent appeared" "the swallowed launch must be named, not silently reported as spawned"
+assert_not_contains "$output" "spawned t-swallowed" "a swallowed launch must never print a spawn success line"
+pass "a launch line the shell swallowed fails loudly instead of reporting a spawn"
 
 pass "cs-spawn harness resolution and launch"

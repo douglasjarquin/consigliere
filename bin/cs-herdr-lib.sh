@@ -265,6 +265,24 @@ cs_herdr_agent_alive() { # <pane_id>  - is a real agent (codex or claude) in the
   printf '%s' "$out" | jq -e '.result.agent.agent // empty | select(. != "")' >/dev/null 2>&1
 }
 
+# Wait for an agent to actually appear in a pane, bounded. rc=1 on timeout.
+#
+# A launch line is delivered to a pane's SHELL with `pane run`, and a freshly
+# created worktree pane's shell may not be ready to read yet - the line is then
+# silently swallowed and no re-read can recover it (the same hazard
+# tests/cs-herdr-lib-live.test.sh works around by re-submitting an idempotent
+# probe). `pane run` reports success either way, so without this the caller
+# cannot tell "launched" from "typed into a void".
+cs_herdr_agent_wait_present() { # <pane_id> [timeout-secs]
+  local pane=$1 limit=${2:-60} waited=0
+  while [ "$waited" -lt "$limit" ]; do
+    cs_herdr_agent_alive "$pane" && return 0
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
 # --- agent session identity ------------------------------------------------
 # The agent instance occupying a pane, as reported by herdr's official agent
 # integrations (claude and codex are installed; `herdr integration status`

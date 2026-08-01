@@ -65,6 +65,7 @@ This is the same rule already applied to tab labels below: scope to this home's 
 
 - `pane read <pane> --lines N --format text|ansi` returned exactly N lines on 0.7.4; the upstream small-`--lines` truncation bug was NOT reproduced. `cs-herdr-lib.sh` passes `--lines` through directly; if a regression appears, re-add the read-wide-then-tail workaround from firstmate's adapter.
 - `pane run <pane> '<text>'` submits text plus Enter atomically (verified launching codex and steering it).
+  It reports success whether or not the pane's SHELL was ready to read the line. A freshly created worktree pane frequently is not, and the line is then lost with no way to recover it from the buffer - `tests/cs-herdr-lib-live.test.sh` works around this by re-submitting an idempotent probe, and `bin/cs-spawn.sh` guards against it by requiring an agent to actually appear afterwards (`cs_herdr_agent_wait_present`). Never treat a `pane run` exit status as proof the command ran.
 - Machine input uses U+2063 INVISIBLE SEPARATOR because it survives UTF-8 terminal input; the upstream herdr 0.7.3 incident showed ASCII 0x1f was stripped from the composer. `bin/cs-operational-input.sh` owns the exact bytes.
 
 ## Push events
