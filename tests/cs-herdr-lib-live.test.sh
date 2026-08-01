@@ -93,11 +93,18 @@ if herdr agent wait "$task_pane" --status idle --timeout 200 >/dev/null 2>&1; th
 fi
 pass "herdr rejects 'agent wait --status' (the flag cs-herdr-lib must not use)"
 
-# --until against a pane with no agent must fail cleanly, not hang or usage-error.
-cs_herdr_agent_wait "$task_pane" idle 500 >/dev/null 2>&1
-rc=$?
-[ "$rc" -ne 2 ] || fail "cs_herdr_agent_wait produced a usage error (rc=2); its flag is wrong again"
-pass "cs_herdr_agent_wait invokes herdr with a flag herdr accepts (rc=$rc, not a usage error)"
+# The wrapper must not produce a FLAG error. Assert on the message, not the
+# exit code: this pane has no agent, so a non-zero rc is expected and normal,
+# and rc=2 covers both "unknown option" and "no agent here" - conflating them
+# is what made the first version of this assertion fail in CI for the wrong
+# reason. Only "unknown option" proves the flag is wrong.
+wait_err=$(cs_herdr_agent_wait "$task_pane" idle 500 2>&1 >/dev/null || true)
+case "$wait_err" in
+  *"unknown option"*)
+    fail "cs_herdr_agent_wait passed a flag herdr rejects: $wait_err"
+    ;;
+esac
+pass "cs_herdr_agent_wait passes a flag herdr accepts (no 'unknown option' in: ${wait_err:-<silent>})"
 
 rm "$task_path/dirty.txt"
 cs_herdr_worktree_remove "$task_ws" >/dev/null || fail "clean worktree remove"
