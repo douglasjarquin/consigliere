@@ -107,6 +107,7 @@ The complete field-level inventory lives in AGENTS.md section 2; producing scrip
 - `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `model=`, `effort=`, `kind=` (ship|scout|capo), `mode=` (no-mistakes|direct-PR|local-only), `yolo=`, `harness=` (codex|claude, inherited from the root session); `kind=capo` also records `home=`; `cs-spawn.sh` also records `issue=` for board-driven work and `headless=1` for a headless scout (`codex exec` / `claude -p`); `cs-pr-check.sh` appends `pr=` and `pr_head=`.
 - `state/<id>.status` - appended by soldiers; wake events, never current state. `bin/cs-classify-lib.sh` owns the verb vocabulary.
 - `state/.wake-queue` - `epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload`; `bin/cs-wake-lib.sh` owns it.
+- `state/.subsuper-daemon-beat` - the away daemon's proof that it is supervising, written by `bin/cs-daemon.sh` at the BOTTOM of each loop pass, so the early-continue paths (pane gone, watcher crash backoff) deliberately do not write it. Contents are a strictly increasing pass counter; mtime is its freshness. `bin/cs-afk-verify.sh` requires the counter to ADVANCE before away mode is armed; `bin/cs-monitor.sh` requires it fresh before standing down. A live pid is not proof: it survives a recycled pid and a daemon wedged off its loop.
 
 ## Environment variables
 
@@ -124,6 +125,8 @@ The complete field-level inventory lives in AGENTS.md section 2; producing scrip
 | `CS_BOARD_SWEEP_LANES` | cs-board-watch | default lane cap baked into a new sweep record; default 3, matching the `contracts` skill |
 | `CS_BOARD_SWEEP_RESURFACE` | cs-board-watch | default seconds before a still-full column is reported again; default 1800. Only a default for `arm`; each record stores its own value |
 | `CS_MAX_DEFER_SECS` | cs-daemon | away-mode escalation max-defer alarm |
+| `CS_AFK_BEAT_STALE` | cs-monitor | seconds before the away daemon's completed-pass counter reads stale and the monitor covers the home instead of standing down; default 180, deliberately above the daemon's own 60s crash backoff |
+| `CS_AFK_VERIFY_TICKS` | cs-afk-verify | 0.1s ticks to wait for the counter to advance before rolling away mode back; default 150 |
 | `CS_LOCK_HARNESS_RE` | cs-lock | test-only harness ancestry override |
 | `CS_HARNESS_OVERRIDE` | cs-harness-lib | force the root harness (codex\|claude); highest precedence, test/escape seam |
 | `CS_ROOT_OVERRIDE` `CS_STATE_OVERRIDE` | single scripts | test-only resolution overrides |
