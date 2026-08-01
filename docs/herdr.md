@@ -1,6 +1,7 @@
 # Herdr verified facts
 
-Verified against herdr 0.7.4 (protocol 16) on 2026-07-22 in an isolated lab session.
+Verified against herdr 0.7.4 (protocol 16) on 2026-07-22, and re-verified against the current pin herdr 0.7.5 (protocol 17) on 2026-08-01, both in isolated lab sessions.
+The CI pin (`bin/cs-install-herdr.sh`) is 0.7.5 so the required herdr lane exercises the same CLI contract the fleet runs; it was 0.7.4 until an `agent wait` flag rename broke the fleet while CI stayed green.
 Re-verify this table after any herdr upgrade; `bin/cs-bootstrap.sh` gates on the minimum protocol.
 
 ## Session discipline
@@ -46,7 +47,18 @@ This is the same rule already applied to tab labels below: scope to this home's 
 
 - `agent list` / `agent get <pane>` detect codex automatically (`"agent":"codex"`) with `agent_status`: `idle|working|blocked|done|unknown`.
 - Mid-turn status reads `working`; after the turn ends it reads `idle`.
-- `agent wait <pane> --status idle --timeout <ms>` blocks until the status is reached (verified ~5s wait resolving on turn end); use it for submit confirmation and bounded single-target waits.
+- `agent wait <pane> --until <status> --timeout <ms>` blocks until the status is reached (verified ~5s wait resolving on turn end); use it for submit confirmation and bounded single-target waits.
+  **The flag was RENAMED between releases: 0.7.4 took `--status`, 0.7.5 takes `--until`, and each rejects the other outright.**
+
+  ```text
+  $ herdr agent wait bogus999 --status idle --timeout 200   # on 0.7.5
+  unknown option: --status
+  rc=2
+  ```
+
+  This is the only recorded case of a herdr CLI contract moving under a running fleet, and it cost real supervision: consigliere shipped `--status` (correct for 0.7.4, recorded verified here), herdr self-updated the boss's machine to 0.7.5, and because `cs_herdr_submit_confirm` discards both streams the usage error read as "the turn never started" - every steer burned its Enter-retry loop and reported "not confirmed" even on success, and the away daemon's strict undelivered path stayed on. CI pinned 0.7.4 and never saw it.
+  Guarded three ways now: the CI pin is 0.7.5, `tests/cs-herdr-lib-live.test.sh` asserts the current spelling works AND that `--status` is rejected, and the offline fakes reject `--status` too, because a fake that matched only the subcommand is what let it ship.
+
 - Known upstream gap (firstmate evidence, docs/herdr-backend.md): `agent get` can read `idle` during a LONG foreground tool call. Policy: native `working` is trusted outright; native `idle`/`unknown` must be corroborated against the codex busy signature (`esc to interrupt`) before a soldier is declared not-working. Single constant in `cs-herdr-lib.sh`.
 
 ## Capture

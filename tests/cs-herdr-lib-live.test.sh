@@ -83,6 +83,33 @@ done
 assert_contains "$out" "cs-capture-probe" "pane run output visible in capture"
 pass "pane run + capture round-trip"
 
+# The submit-confirmation flag, pinned against the REAL binary at the pinned
+# version. `agent wait` renamed this flag between 0.7.4 (--status) and 0.7.5
+# (--until); consigliere shipped --status, herdr updated the fleet to 0.7.5, and
+# every steer silently stopped confirming while CI stayed green on the old pin.
+# CI now pins 0.7.5 so this lane exercises the contract the fleet runs.
+#
+# Assert on the MESSAGE, never the exit code: this pane has no agent, so any
+# spelling exits non-zero, and only "unknown option" distinguishes a bad flag
+# from a normal no-agent result. An earlier version conflated the two and failed
+# for the wrong reason.
+wait_err=$(cs_herdr_agent_wait "$task_pane" idle 500 2>&1 >/dev/null || true)
+case "$wait_err" in
+  *"unknown option"*)
+    fail "cs_herdr_agent_wait passed a flag this herdr ($(herdr --version 2>/dev/null)) rejects: $wait_err"
+    ;;
+esac
+pass "cs_herdr_agent_wait uses a flag the pinned herdr accepts"
+
+# And the OLD spelling must now be rejected, which is what proves the pin and
+# the code agree. If this ever passes, herdr changed again - re-verify before
+# touching cs_herdr_agent_wait.
+if herdr agent wait "$task_pane" --status idle --timeout 200 2>&1 | grep -q -- "unknown option"; then
+  pass "the pre-0.7.5 spelling --status is rejected, so code and pin agree"
+else
+  fail "this herdr still accepts 'agent wait --status'; the pin may have moved backwards - re-verify docs/herdr.md"
+fi
+
 rm "$task_path/dirty.txt"
 cs_herdr_worktree_remove "$task_ws" >/dev/null || fail "clean worktree remove"
 [ ! -d "$task_path" ] || fail "worktree dir remains after clean remove"

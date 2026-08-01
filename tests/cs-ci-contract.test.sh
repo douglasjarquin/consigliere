@@ -70,10 +70,18 @@ floor=$(awk -F= '/^CS_HERDR_MIN_PROTOCOL=/ { gsub(/[^0-9]/, "", $2); print $2; e
 [ -n "$floor" ] || fail "cs-herdr-lib.sh must define CS_HERDR_MIN_PROTOCOL"
 assert_grep 'CS_HERDR_MIN_PROTOCOL=' "$ROOT/bin/cs-install-herdr.sh" \
   "cs-install-herdr.sh must read the protocol floor from cs-herdr-lib.sh"
-assert_grep 'CS_HERDR_CI_VERSION=0.7.4' "$ROOT/bin/cs-install-herdr.sh" \
-  "cs-install-herdr.sh must pin the documented Herdr version"
-assert_grep '0.7.4' "$ROOT/docs/herdr.md" \
-  "docs/herdr.md documents the pinned Herdr version"
+# Derive the pin instead of restating it. cs-install-herdr.sh's header calls
+# itself "the single owner of the exact Herdr version"; a hard-coded copy here
+# is a second owner that has to be remembered on every bump, and this assertion
+# previously pinned 0.7.4 purely because nobody updated it.
+herdr_pin=$(awk -F= '/^CS_HERDR_CI_VERSION=/ { print $2; exit }' "$ROOT/bin/cs-install-herdr.sh" | tr -d '[:space:]')
+case "$herdr_pin" in
+  ''|*[!0-9.]*) fail "cs-install-herdr.sh must define CS_HERDR_CI_VERSION as a bare version, got '${herdr_pin:-<empty>}'" ;;
+esac
+assert_grep "$herdr_pin" "$ROOT/docs/herdr.md" \
+  "docs/herdr.md must document the pinned Herdr version ($herdr_pin)"
+assert_grep "\"\$version\" = \"$herdr_pin\"" "$ROOT/.github/workflows/ci.yml" \
+  "ci.yml's post-install version gate must assert the same pin ($herdr_pin)"
 pass "Herdr version pinned and protocol floor has one owner (cs-herdr-lib.sh)"
 
 # --- workflow calls only the repository-owned entrypoints -------------------

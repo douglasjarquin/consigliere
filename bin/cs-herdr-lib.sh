@@ -153,7 +153,7 @@ cs_herdr_worktree_list() { # <repo-or-worktree-path> -> JSON
 # --- panes -----------------------------------------------------------------
 
 cs_herdr_capture() { # <pane_id> [lines] [format]
-  # --lines N verified exact on 0.7.4; if the upstream truncation bug
+  # --lines N verified exact on 0.7.4 and 0.7.5; if the upstream truncation bug
   # reappears, re-add the read-wide-then-tail workaround here (docs/herdr.md).
   local pane=$1 lines=${2:-200} format=${3:-text}
   cs_herdr pane read "$pane" --lines "$lines" --format "$format"
@@ -346,8 +346,22 @@ cs_herdr_pane_is_agent_husk() { # <pane_id>
   return 0
 }
 
+# The flag is --until. herdr RENAMED it between releases: 0.7.4 took --status,
+# 0.7.5 takes --until, and each rejects the other outright ("unknown option",
+# exit 2). Consigliere shipped --status - correct for 0.7.4, recorded verified
+# in docs/herdr.md - and herdr self-updated the fleet to 0.7.5 underneath it.
+#
+# What that cost: the only caller discards both streams, so a usage error read
+# as "the turn never started". Every steer burned its full Enter-retry loop and
+# reported "not confirmed" even when delivery had worked, and the away daemon's
+# strict undelivered path was permanently on. CI never noticed because it pinned
+# 0.7.4, where the old flag was still right.
+#
+# The pin is now 0.7.5 (bin/cs-install-herdr.sh), so CI exercises the same CLI
+# contract the fleet runs, and tests/cs-herdr-lib-live.test.sh pins this flag
+# against the real binary in the herdr lane.
 cs_herdr_agent_wait() { # <pane_id> <status> <timeout-ms>
-  cs_herdr agent wait "$1" --status "$2" --timeout "$3"
+  cs_herdr agent wait "$1" --until "$2" --timeout "$3"
 }
 
 cs_herdr_submit_confirm() { # <pane_id> [timeout-ms]
