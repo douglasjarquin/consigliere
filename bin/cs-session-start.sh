@@ -285,6 +285,16 @@ EOF
 fi
 
 # --- 5. context digest -----------------------------------------------------
+# Record THIS home's own agent pane, durably. bin/cs-activate.sh needs a target
+# to prompt when the queue sits, and session start is the one place that runs
+# inside the home's own pane, where HERDR_PANE_ID proves which pane that is.
+# It is a hint, never an identity: herdr recycles pane ids, so cs-activate.sh
+# revalidates (pane exists, still has an agent, still rooted in this home)
+# before it will prompt anything.
+if [ -n "${HERDR_PANE_ID:-}" ]; then
+  printf '%s\n' "$HERDR_PANE_ID" > "$STATE/.home-pane" 2>/dev/null || true
+fi
+
 section "CONTEXT"
 print_file_or_absent "$DATA/projects.md" "data/projects.md"
 print_file_or_absent "$DATA/boards.md" "data/boards.md (GitHub board mapping for the contracts and casino skills)"

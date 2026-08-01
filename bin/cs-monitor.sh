@@ -44,6 +44,7 @@
 #   CS_MONITOR_TICK        seconds between supervise cycles (default 5)
 #   CS_MONITOR_LOG_MAX     bytes before the log is trimmed (default 262144)
 #   CS_MONITOR_WATCH_BIN   watcher override (tests)
+#   CS_MONITOR_ACTIVATE_BIN  per-home activation override (tests)
 #   CS_AFK_BEAT_STALE      seconds before the away daemon's completed-pass
 #                          counter reads stale and this monitor covers the home
 #                          instead of standing down (default 180)
@@ -91,6 +92,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 WATCH="${CS_MONITOR_WATCH_BIN:-$SCRIPT_DIR/cs-watch.sh}"
+# Per-home activation owner; see supervise_cycle. Overridable for tests.
+ACTIVATE="${CS_MONITOR_ACTIVATE_BIN:-$SCRIPT_DIR/cs-activate.sh}"
 [ -x "$WATCH" ] || { echo "error: watcher not found or not executable: $WATCH" >&2; exit 1; }
 
 TICK=${CS_MONITOR_TICK:-5}
@@ -235,6 +238,16 @@ supervise_cycle() {
     fi
   elif [ -e "$STATE/.monitor-afk-orphan" ]; then
     rm -f "$STATE/.monitor-afk-orphan" 2>/dev/null || true
+  fi
+
+  # Per-home activation. The monitor does NOT decide anything here and does not
+  # inject: bin/cs-activate.sh owns scope, debounce, target validation, and the
+  # guards, and it exits 0 and fast in the overwhelmingly common "not due" case.
+  # Keeping the policy out of this file preserves the property that makes this
+  # monitor safe to run everywhere - it never injects, never reasons, and so
+  # needs no arbitration with the away daemon.
+  if [ -x "$ACTIVATE" ]; then
+    "$ACTIVATE" >/dev/null 2>&1 || true
   fi
 
   if ! watcher_alive; then

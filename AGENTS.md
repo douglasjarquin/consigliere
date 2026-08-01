@@ -101,6 +101,8 @@ state/               volatile runtime signals; gitignored
   <id>.turn-ended    touched every turn end by the harness turn-end hook (codex notify / claude Stop-hook)
   <id>.meta          written by cs-spawn: workspace=, pane=, worktree=, project=, model=, effort=, kind=, mode=, yolo=; cs-pr-check records pr= and pr_head=
   <id>.check.sh      authenticated slow poll; watcher runs registered checks from hash-validated snapshots only
+  .home-pane         this home's own agent pane, recorded at session start; revalidated before any activation
+  .activation-stalled  present when this home cannot self-activate (pane gone or agent dead); needs recovery
   <id>.check-trust   content binding created by cs-check-register.sh
   <id>.pr-poll       validated data sidecar for the byte-static PR merge poll
   pending-replies/   parent-owned capo pending-reply records; cs-pending-reply-lib.sh
@@ -340,6 +342,10 @@ When any wake reports a merged PR for a project cloned in this home, refresh tha
 A capo's idle endpoint is healthy, and parent supervision relies on its routed status rather than treating a quiet pane as stale.
 Waiting on a healthy supervision cycle is silent; empty polls, elapsed time, and no-change updates are not boss-facing progress.
 Never broadly kill watchers; a forced repair must use the home-scoped restart path in `docs/supervision.md`.
+
+Every home activates itself: when its wake queue has sat unattended, its own monitor prompts its own agent through `bin/cs-activate.sh`, so a capo no longer depends on a parent injecting into its pane.
+Scope is `config/activation` - capo homes are `always`, everywhere else is `afk-only` by default, because the main pane is the one the boss types in.
+A `state/.activation-stalled` marker means that home cannot start its own turns and needs recovery; treat it as a blocker, not a warning.
 
 Guard warnings do not replace the contract.
 Queued wakes must be drained before other action, stale liveness must be repaired through the documented protocol, and the worktree-tangle warning must be resolved without touching unlanded work.

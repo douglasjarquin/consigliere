@@ -716,6 +716,12 @@ seed_home() {
   fi
 
   mkdir -p "$DATA" "$home/data" "$home/state" "$home/config" "$home/projects"
+  # A capo home activates ALWAYS, not only while the boss is away. Its queue
+  # rots whenever its parent is busy - measured 8h11m on 2026-08-01 with both
+  # capo watchers healthy and 28 wakes undrained - and nobody types directly
+  # into a capo pane, so the composer race that forces afk-only in the main
+  # home does not apply here. bin/cs-activate.sh owns the semantics.
+  printf 'always\n' > "$home/config/activation" 2>/dev/null || true
   if [ -f "$home/data/projects.md" ]; then
     SEED_SUB_REG_EXISTED=1
     cp "$home/data/projects.md" "$SEED_BACKUP_DIR/sub-projects.md"

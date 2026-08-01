@@ -163,6 +163,16 @@ cs_herdr_run() { # <pane_id> <text>  - text plus Enter, atomic
   cs_herdr pane run "$1" "$2"
 }
 
+# Agent-aware atomic submit. Preferred over cs_herdr_run for prompting an AGENT
+# (rather than a shell): it is agent-state-aware, and it delivers multiline text
+# as ONE message instead of submitting at the first newline.
+# It does NOT check the composer and will concatenate onto existing text, and it
+# reports success for prompts it never delivers - bin/cs-prompt-lib.sh owns both
+# guards and is the only thing that should call this.
+cs_herdr_agent_prompt() { # <pane_id> <text>
+  cs_herdr agent prompt "$1" "$2"
+}
+
 cs_herdr_send_text() { # <pane_id> <text>  - literal, no submit
   cs_herdr pane send-text "$1" "$2"
 }
