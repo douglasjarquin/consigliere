@@ -18,17 +18,30 @@ This is ordinary section-7 ship lifecycle with a board front door - the safety c
 
 ## Sweep
 
-1. List the ready work: `bin/cs-board.sh ready <project>` -> `<item-id>\t<number>\t<url>\t<title>` per open Ready issue. If empty, tell the boss the column is clear and stop.
-2. Read each issue (`gh-axi issue view <n>`) enough to write a real brief: scope, acceptance criteria, and whether it overlaps another issue's subsystem or depends on unlanded work.
-3. Order and gate:
+1. Arm the sweep before listing anything: `bin/cs-board-watch.sh arm <project> [--lanes <n>]`.
+   This records the boss's standing intent to work that board and arms a poll that reports column depth on the ordinary watcher cadence.
+   Without it the sweep exists only in this conversation, and a column that refills after step 2's one listing - a boss promotion into Ready, a lane that frees after this session ends - sits untouched until the boss asks again.
+   Pass the boss's explicit lane number when they gave one, so the durable record carries the same cap this sweep runs at.
+2. List the ready work: `bin/cs-board.sh ready <project>` -> `<item-id>\t<number>\t<url>\t<title>` per open Ready issue. If empty, tell the boss the column is clear and stop.
+3. Read each issue (`gh-axi issue view <n>`) enough to write a real brief: scope, acceptance criteria, and whether it overlaps another issue's subsystem or depends on unlanded work.
+4. Order and gate:
    - **Concurrency cap: 3 lanes per project** by default. The boss can override per sweep ("knock out 5 at once"); honor an explicit number.
    - **Serialize only true dependencies.** Same-file or same-subsystem overlap alone does not block concurrent work; queue an issue only for a true semantic dependency, shared mutable external state, incompatible concurrent migration, or another concrete condition that makes independent progress or reconciliation unsafe. Independent issues fill the remaining lanes freely.
-4. For each issue you dispatch (up to the cap):
+5. For each issue you dispatch (up to the cap):
    a. Move the card at dispatch: `bin/cs-board.sh start <project> <item-id>` (Ready -> In Progress). Do this only once you are actually spawning the soldier, so the board reflects real work.
    b. Scaffold the brief WITH the issue link: `bin/cs-brief.sh <task-id> <project> --issue <n>`, then replace `{TASK}` with the issue's scope, acceptance criteria, and context. The `--issue` flag bakes in the hard `Closes #<n>` PR requirement; do not remove it.
    c. Spawn: `bin/cs-spawn.sh <task-id> <project-dir> --issue <n> [--model .. --effort ..]` (section 4 chooses model/effort). Use a stable task id derived from the issue, e.g. `<project>-<n>`.
    d. Record the work item in the backlog with the issue link; note any dependents gated by a concrete condition as queued/blocked.
-5. Supervise every lane under section 8 (the foreground checkpoint). As a lane finishes and tears down, pull the next Ready/queued issue into it and repeat from step 4 until the column is empty or the boss says stop.
+6. Supervise every lane under section 8 (the foreground checkpoint). As a lane finishes and tears down, pull the next Ready/queued issue into it and repeat from step 5 until the column is empty or the boss says stop.
+7. When the sweep genuinely ends - the column is clear, or the boss stops it - run `bin/cs-board-watch.sh disarm <project>`. An armed sweep for work nobody intends to do keeps reporting depth that consigliere will not act on. Under `casino` this step does not apply: that skill's factory is standing, and it owns when its sweep ends.
+
+## Board wake
+
+A `check:` wake naming a board sweep carries the project's current Ready and Inbox depth.
+The poll reports depth only; it never dispatches, never moves a card, and never judges lane capacity.
+Reconcile live lanes with `bin/cs-crew-state.sh`, then resume from step 5 for each free lane, honoring the same cap and true-dependency rules.
+Lanes already full is a silent no-op: the sweep is working as intended, and an unchanged fleet is not boss-facing progress.
+The poll goes quiet on its own once both columns are clear, and stays quiet while consigliere's own dispatch is what shrank the column, so a wake means work arrived or work has been sitting.
 
 ## Landing
 

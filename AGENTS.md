@@ -90,6 +90,7 @@ data/                personal fleet records; LOCAL, gitignored as a whole
   learnings.md       fleet-local operational facts; dated, evidence-backed, curated; created lazily
   projects.md        thin fleet navigation registry (section 6)
   boards.md          per-project GitHub Projects board mapping for the contracts and casino skills (section 7); parsed by bin/cs-board.sh
+  sweeps.md          standing board sweeps that outlive the session that started one; armed, converged, and retired only by bin/cs-board-watch.sh
   capos.md           capo routing table; maintained by cs-home-seed.sh (section 6)
   upstream-review.md last-reviewed firstmate SHA plus dated review entries (section 14)
   <id>/brief.md      per-task soldier brief, or per-capo charter brief when kind=capo
@@ -225,6 +226,7 @@ It owns the GitHub board sweep: pull Ready issues, move each card to In Progress
 When the boss invokes `/casino`, or asks to run the factory or the pipeline on a project or to spec its inbox, load the `casino` skill instead.
 It owns the spec lane in front of the same board: scouts spec Inbox issues and park them in Backlog, only the boss moves a card Backlog to Ready, and the Ready column is then worked through the contracts sweep.
 Consigliere moves a card only Inbox to Backlog (casino, after a verified spec) or Ready to In Progress (at dispatch); the card reaches Done solely through the board's own closed-to-Done workflow when the merged PR closes the issue, and Backlog to Ready is the boss's move alone.
+A board sweep is durable, not conversational: both skills arm one through `bin/cs-board-watch.sh` so a column that refills after the session ends returns as a `check:` wake instead of silence, and the `contracts` skill owns handling that wake.
 Everything else stays the ordinary ship lifecycle below.
 
 ### Dispatch and supervision handoff

@@ -24,10 +24,17 @@
 #   cs-board.sh inbox <project>            same TSV for open Inbox issues
 #                                          (draft cards are never listed; convert
 #                                          a draft to an issue to make it workable)
+#   cs-board.sh counts <project>           "ready=<n>" and "inbox=<n>" from ONE
+#                                          item-list call, for the cheap sweep
+#                                          poll armed by cs-board-watch.sh
 #   cs-board.sh start <project> <item-id>  set the card's Status -> In Progress
 #   cs-board.sh specced <project> <item-id> set the card's Status -> Backlog
 #                                          (after a verified spec; casino skill)
 #   cs-board.sh status <project> <item-id> print the card's current Status name
+#   cs-board.sh mapped <project>           exit 0 if the project has a mapping
+#                                          line; no network, no output. Callers
+#                                          ask here instead of re-parsing
+#                                          boards.md themselves.
 #   cs-board.sh check <project>            read-only board sanity + a reminder
 #                                          that the closed->Done workflow must
 #                                          be enabled (built-in-only Done move)
@@ -114,14 +121,16 @@ resolve_ids() {
   BACKLOG_OPT=$(printf '%s' "$fj" | jq -r --arg n "$STATUS_FIELD" --arg o "$BACKLOG_LABEL" '.fields[] | select(.name==$n) | .options[]? | select(.name==$o) | .id' | head -1)
 }
 
-# list_open_issues <column-label>: TSV of open Issues whose Status matches.
-# The single-select field value renders under the lowercased field name key
-# in gh's item JSON (e.g. "status"); filter client-side so the command works
+# open_issues_of <items-json> <column-label>: TSV of open Issues whose Status
+# matches. The single-select field value renders under the lowercased field name
+# key in gh's item JSON (e.g. "status"); filter client-side so the command works
 # regardless of whether the API host supports server-side --query.
-list_open_issues() {
-  local col=$1 key
+# Taking the JSON as an argument lets a caller that needs two columns pay for
+# one item-list call instead of two (see cmd_counts).
+open_issues_of() {
+  local json=$1 col=$2 key
   key=$(printf '%s' "$STATUS_FIELD" | tr '[:upper:] ' '[:lower:]_')
-  items_json | jq -r --arg col "$col" --arg key "$key" '
+  printf '%s' "$json" | jq -r --arg col "$col" --arg key "$key" '
     .items[]
     | select((.[$key] // .status) == $col)
     | select(.content.type == "Issue")
@@ -129,6 +138,10 @@ list_open_issues() {
     | [.id, (.content.number|tostring), .content.url, .content.title]
     | @tsv
   '
+}
+
+list_open_issues() {
+  open_issues_of "$(items_json)" "$1"
 }
 
 item_status() {
@@ -149,6 +162,19 @@ cmd_inbox() {
   local project=$1
   resolve_board "$project"
   list_open_issues "$INBOX_LABEL"
+}
+
+# Depth of the two columns a sweep pulls from, in one item-list call, as
+# "ready=<n>" and "inbox=<n>". This is what the armed sweep poll runs every
+# watcher check interval, so it must stay to a single API round trip and must
+# never move a card. A board with no Inbox column simply reports inbox=0.
+cmd_counts() {
+  local project=$1 json ready inbox
+  resolve_board "$project"
+  json=$(items_json)
+  ready=$(open_issues_of "$json" "$READY_LABEL" | grep -c . || true)
+  inbox=$(open_issues_of "$json" "$INBOX_LABEL" | grep -c . || true)
+  printf 'ready=%s\ninbox=%s\n' "$ready" "$inbox"
 }
 
 validate_board_options() {
@@ -225,6 +251,14 @@ In Progress after merge and warn if any are stuck, but it never sets Done itself
 EOF
 }
 
+# Mapping existence only, so a caller can fail closed on an unmapped project
+# without duplicating the boards.md format. resolve_board already dies with the
+# actionable message, so this only has to silence its success path.
+cmd_mapped() {
+  local project=$1
+  resolve_board "$project" >/dev/null
+}
+
 cmd_ids() {
   local project=$1
   resolve_board "$project"
@@ -237,10 +271,12 @@ case "${1:-}" in
   -h|--help|'') usage; exit 0 ;;
   ready)   [ $# -ge 2 ] || die "usage: cs-board.sh ready <project>"; cmd_ready "$2" ;;
   inbox)   [ $# -ge 2 ] || die "usage: cs-board.sh inbox <project>"; cmd_inbox "$2" ;;
+  counts)  [ $# -ge 2 ] || die "usage: cs-board.sh counts <project>"; cmd_counts "$2" ;;
   start)   [ $# -ge 3 ] || die "usage: cs-board.sh start <project> <item-id>"; cmd_start "$2" "$3" ;;
   specced) [ $# -ge 3 ] || die "usage: cs-board.sh specced <project> <item-id>"; cmd_specced "$2" "$3" ;;
   status)  [ $# -ge 3 ] || die "usage: cs-board.sh status <project> <item-id>"; cmd_status "$2" "$3" ;;
+  mapped)  [ $# -ge 2 ] || die "usage: cs-board.sh mapped <project>"; cmd_mapped "$2" ;;
   check)   [ $# -ge 2 ] || die "usage: cs-board.sh check <project>"; cmd_check "$2" ;;
   ids)     [ $# -ge 2 ] || die "usage: cs-board.sh ids <project>"; cmd_ids "$2" ;;
-  *) die "unknown command '$1' (ready|inbox|start|specced|status|check|ids)" ;;
+  *) die "unknown command '$1' (ready|inbox|counts|start|specced|status|mapped|check|ids)" ;;
 esac
