@@ -134,6 +134,10 @@ case "${1:-} ${2:-}" in
   "pane run")
     printf '%s' "${4:-}" > "$CS_FAKE_SPAWN_LAUNCH"
     ;;
+  "agent get")
+    # cs-spawn requires an agent to actually appear after the launch: `pane run`
+    # reports success even when a not-ready shell swallowed the line.
+    printf '{"result":{"agent":{"agent":"codex","agent_status":"idle"}}}\n' ;;
   *) printf '{}\n' ;;
 esac
 SH

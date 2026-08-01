@@ -131,6 +131,7 @@ The complete field-level inventory lives in AGENTS.md section 2; producing scrip
 | `CS_BOARD_SWEEP_RESURFACE` | cs-board-watch | default seconds before a still-full column is reported again; default 1800. Only a default for `arm`; each record stores its own value |
 | `CS_MAX_DEFER_SECS` | cs-daemon | away-mode escalation max-defer alarm |
 | `CS_AFK_BEAT_STALE` | cs-monitor | seconds before the away daemon's completed-pass counter reads stale and the monitor covers the home instead of standing down; default 180, deliberately above the daemon's own 60s crash backoff |
+| `CS_SPAWN_LAUNCH_WAIT_SECS` | cs-spawn | seconds to wait for an agent to actually appear after the launch line is delivered, before treating the launch as swallowed; default 60 |
 | `CS_ACTIVATE_QUIET_SECS` | cs-activate | the wake queue must have been still this long before activating, so one burst of wakes produces one turn; default 60 |
 | `CS_ACTIVATE_COOLDOWN_SECS` | cs-activate | minimum seconds between activations in a home; also the recursion guard; default 600 |
 | `CS_PROMPT_CONFIRM_WAIT_MS` | cs-prompt-lib | ms to wait for the idle->working transition that proves a prompt was delivered; default 8000 |

@@ -150,6 +150,11 @@ MODEL=
 EFFORT=
 BASE=
 HEADLESS=0
+# Seconds to wait for an agent to appear after the launch line is delivered.
+# Generous on purpose: a cold codex/claude start on a busy machine is slow, and
+# a false abort tears down a worktree that was about to work.
+LAUNCH_WAIT=${CS_SPAWN_LAUNCH_WAIT_SECS:-60}
+case "$LAUNCH_WAIT" in ''|*[!0-9]*|0) LAUNCH_WAIT=60 ;; esac
 ISSUE=
 POS=()
 while [ "$#" -gt 0 ]; do
@@ -338,6 +343,13 @@ if [ "$KIND" = capo ]; then
   sq_home=$(shell_quote "$HOME_ABS")
   LAUNCH=$(cs_harness_capo_launch "$HARNESS" "${MODEL:-default}" "${EFFORT:-default}" "$sq_operational" "$sq_brief" "$sq_home")
   cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
+  # `pane run` reports success even when a not-yet-ready shell swallowed the
+  # line, so a capo could be recorded as provisioned while its pane sits at a
+  # bare prompt forever. Require the agent to actually appear.
+  if ! cs_herdr_agent_wait_present "$PANE" "$LAUNCH_WAIT"; then
+    echo "error: capo $ID launched into $PANE but no agent appeared within ${LAUNCH_WAIT}s; the launch line was likely swallowed by a shell that was not ready. The home and its workspace are left intact - retry the spawn." >&2
+    exit 1
+  fi
   echo "spawned $ID kind=capo home=$HOME_ABS workspace=$WS pane=$PANE"
   exit 0
 fi
@@ -428,6 +440,25 @@ else
   LAUNCH=$(cs_harness_soldier_launch "$HARNESS" "$MODEL_ARG" "$EFFORT_ARG" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings")
 fi
 cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
+
+# Verify the launch actually started something. `pane run` hands the line to the
+# pane's SHELL and reports success whether or not the shell was ready to read
+# it; a freshly created worktree pane frequently is not, and the line is then
+# lost with no way to recover it from the buffer. Without this check cs-spawn
+# prints "spawned", consigliere records the task as under way, and the pane sits
+# at a prompt until the stale timer eventually notices - a soldier that reported
+# success and never existed.
+#
+# Interactive soldiers are gated on agent detection. A HEADLESS scout is not: it
+# runs `codex exec` / `claude -p`, a plain process rather than an interactive
+# agent taking the pane, so herdr agent detection is not a valid signal for it.
+# Its swallowed-launch case is caught instead by the absence of the terminal
+# done:/failed: status event its launch line appends, via the ordinary stale
+# path - slower, but not silent. Gating headless properly needs a verified
+# process-level signal and is deliberately not guessed at here.
+if [ "$HEADLESS" -eq 0 ] && ! cs_herdr_agent_wait_present "$PANE" "$LAUNCH_WAIT"; then
+  abort_task "launched $ID into $PANE but no agent appeared within ${LAUNCH_WAIT}s; the launch line was likely swallowed by a shell that was not ready"
+fi
 
 HEADLESS_NOTE=""
 [ "$HEADLESS" -eq 1 ] && HEADLESS_NOTE=" headless=1"

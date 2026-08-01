@@ -44,6 +44,10 @@ case "${1:-} ${2:-}" in
     printf '{"result":{"workspace":{"workspace_id":"w1"},"root_pane":{"pane_id":"w1:p1"},"worktree":{"path":"%s","branch":"%s"}}}\n' "$CS_FAKE_SPAWN_WORKTREE" "$branch"
     ;;
   "pane run") printf '%s' "${4:-}" > "$CS_FAKE_SPAWN_LAUNCH" ;;
+  "agent get")
+    # cs-spawn requires an agent to actually appear after the launch: `pane run`
+    # reports success even when a not-ready shell swallowed the line.
+    printf '{"result":{"agent":{"agent":"codex","agent_status":"idle"}}}\n' ;;
   *) printf '{}\n' ;;
 esac
 SH
