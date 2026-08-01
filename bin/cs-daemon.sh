@@ -53,11 +53,11 @@
 #   - Composer-guard: inject ONLY into an affirmatively EMPTY codex composer
 #     (bin/cs-composer-lib.sh, ANSI ghost-text aware); 'pending' and 'unknown'
 #     both defer, preserving the buffer.
-#   - Type ONCE, then submit with Enter; NEVER retype (a swallowed Enter leaves
-#     our text in the composer, and retyping would concatenate two digests).
-#     Submit confirmation is native: cs_herdr_submit_confirm waits for the
-#     agent's idle->working transition. Enter alone is retried up to
-#     CS_INJECT_CONFIRM_RETRIES times; unconfirmed = undelivered (strict).
+#   - Submit atomically via `herdr agent prompt` (bin/cs-prompt-lib.sh), which
+#     also delivers a multiline digest as ONE message. Submit confirmation is
+#     native: the agent's idle->working transition. `agent_prompted` alone is
+#     NOT delivery - herdr reports it for prompts it never delivered - so
+#     unconfirmed = undelivered (strict) and the buffer is preserved.
 #
 # Robustness shell: single-instance portable lock (bin/cs-wake-lib.sh, no
 # flock), crash-loop backoff for a crashing watcher child, pane-gone guard,
@@ -94,8 +94,8 @@
 #                              nothing. Defaults to "discard" when this file is
 #                              SOURCED so no test posts a real notification.
 #     CS_WEDGE_ALARM_TIMEOUT_SECS  per-notifier watchdog (default 10)
-#     CS_INJECT_CONFIRM_RETRIES    Enter-only retries (default 3)
-#     CS_INJECT_CONFIRM_WAIT_MS    native submit-confirm wait (default 4000)
+#     CS_PROMPT_CONFIRM_WAIT_MS    native submit-confirm wait (default 8000,
+#                                  bin/cs-prompt-lib.sh)
 #     CS_LOG_MAX_BYTES / CS_LOG_KEEP_LINES / CS_CRASH_*   log + crash guards
 #     CS_STATE_OVERRIDE        alternate state dir (testing)
 #   Logs to state/.subsuper-daemon.log (size-capped). Single instance via the
@@ -120,6 +120,9 @@ cs_resolve_root
 # Codex-only composer-emptiness classifier (needs cs-herdr-lib above).
 # shellcheck source=bin/cs-composer-lib.sh
 . "$CS_DAEMON_DIR/cs-composer-lib.sh"
+# The guarded submit, shared with per-home activation (needs both libs above).
+# shellcheck source=bin/cs-prompt-lib.sh
+. "$CS_DAEMON_DIR/cs-prompt-lib.sh"
 # state/<id>.meta readers (pane_for_task below).
 # shellcheck source=bin/cs-meta-lib.sh
 . "$CS_DAEMON_DIR/cs-meta-lib.sh"
@@ -132,8 +135,6 @@ HOUSEKEEPING_TICK_DEFAULT=15
 MAX_DEFER_SECS_DEFAULT=300
 WEDGE_ALARM_TIMEOUT_SECS_DEFAULT=10
 INJECT_FAIL_SLEEP_DEFAULT=30
-INJECT_CONFIRM_RETRIES_DEFAULT=3
-INJECT_CONFIRM_WAIT_MS_DEFAULT=4000
 CRASH_THRESHOLD_DEFAULT=10
 CRASH_WINDOW_DEFAULT=60
 CRASH_BACKOFF_DEFAULT=60
@@ -778,7 +779,7 @@ daemon_target_pane() {  # <state>
 # affirmatively empty, afk is inactive, or the submit cannot be confirmed. On
 # non-zero the caller preserves the buffer.
 inject_msg() {  # <message> [state]
-  local msg=$1 state pane bs composer retries wait_ms attempt
+  local msg=$1 state pane
   state="${2:-$(_state_root)}"
   # (1) Presence-gate: inject ONLY while afk is active.
   afk_active "$state" || { log "inject deferred: afk inactive"; return 1; }
@@ -787,38 +788,14 @@ inject_msg() {  # <message> [state]
   msg=$(_collapse_newlines "$msg")
   cs_operational_input_construct away-supervisor "$msg" msg
   cs_herdr_pane_exists "$pane" || { log "inject deferred: supervisor pane '$pane' gone"; return 1; }
-  # (3) Busy-guard: never inject into a mid-turn or human-blocked pane.
-  bs=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || bs=unknown
-  case "$bs" in
-    busy|blocked)
-      log "inject deferred: supervisor pane busy (agent state=$bs)"
-      return 1 ;;
-  esac
-  # (4) Composer-guard: only an affirmatively EMPTY codex composer is a safe
-  # target. 'pending' protects half-typed or swallowed input; 'unknown'
-  # protects unreadable panes and dead-shell prompts. Both defer.
-  composer=$(cs_composer_state "$pane" 2>/dev/null)
-  if [ "$composer" != empty ]; then
-    log "inject deferred: supervisor composer not confirmed-empty (state=${composer:-unknown})"
-    return 1
+  # (3)-(6) Busy-guard, composer-guard, atomic submit, and native confirmation
+  # all live in bin/cs-prompt-lib.sh, which is shared with per-home activation
+  # (bin/cs-activate.sh) so the guards cannot drift between the two callers.
+  # The Enter-retry loop is gone: `agent prompt` submits atomically, so there is
+  # no swallowed-Enter half-state left to recover.
+  if cs_prompt_guarded "$pane" "$msg" log; then
+    return 0
   fi
-  # (5) Type ONCE, then submit with Enter; retry Enter only, never retype.
-  # Native confirmation: the agent's idle->working transition.
-  if ! cs_herdr_send_text "$pane" "$msg" >/dev/null 2>&1; then
-    log "inject failed: send-text to '$pane' failed"
-    return 1
-  fi
-  retries=${CS_INJECT_CONFIRM_RETRIES:-$INJECT_CONFIRM_RETRIES_DEFAULT}
-  wait_ms=${CS_INJECT_CONFIRM_WAIT_MS:-$INJECT_CONFIRM_WAIT_MS_DEFAULT}
-  attempt=0
-  while [ "$attempt" -le "$retries" ]; do
-    cs_herdr_send_keys "$pane" Enter >/dev/null 2>&1 || true
-    if cs_herdr_submit_confirm "$pane" "$wait_ms"; then
-      return 0
-    fi
-    attempt=$((attempt + 1))
-  done
-  log "inject failed: submit unconfirmed after $retries Enter retries (text may be in composer)"
   return 1
 }
 

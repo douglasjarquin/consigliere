@@ -71,7 +71,7 @@ make_case() {
 #   CS_FAKE_HERDR_AGENT_STATUS  agent_status returned by `agent get` (default idle)
 #   CS_FAKE_HERDR_WAIT_RC       exit code of `agent wait` (default 0 = confirmed)
 #   CS_FAKE_HERDR_PANE_GONE     1 = `pane get` fails (pane-gone guard)
-#   CS_FAKE_HERDR_LOG           append-only log of send-text / send-keys calls
+#   CS_FAKE_HERDR_LOG           append-only log of agent-prompt / send-text / send-keys calls
 set -u
 log="${CS_FAKE_HERDR_LOG:-/dev/null}"
 case "${1:-} ${2:-}" in
@@ -86,6 +86,11 @@ case "${1:-} ${2:-}" in
     exit 0 ;;
   "pane send-text")
     printf 'send-text\t%s\t%s\n' "${3:-}" "${4:-}" >> "$log"
+    exit 0 ;;
+  "agent prompt")
+    # The daemon submits atomically now; logged in the same shape the old
+    # send-text assertions used so they keep meaning "one digest was typed".
+    printf 'agent-prompt\t%s\t%s\n' "${3:-}" "${4:-}" >> "$log"
     exit 0 ;;
   "pane send-keys")
     printf 'send-keys\t%s\t%s\n' "${3:-}" "${4:-}" >> "$log"
@@ -268,15 +273,15 @@ test_done_wake_escalates_one_marked_digest() {
   printf 'transcript above\n\342\200\272 \033[2mTry "explain this codebase"\033[0m\n' > "$dir/capture.txt"
   daemon_bg "$dir" CS_FAKE_HERDR_CAPTURE="$dir/capture.txt"
   pid=$!
-  wait_for 150 file_has "send-text" "$dir/herdr.log" \
+  wait_for 150 file_has "agent-prompt" "$dir/herdr.log" \
     || { reap "$pid"; fail "daemon never injected the done: escalation: $(cat "$state/.subsuper-daemon.log" 2>/dev/null)"; }
   # Give the submit-confirm path a moment to finish, then freeze the log view.
   wait_for 100 test ! -s "$state/.subsuper-escalations" \
     || { reap "$pid"; fail "escalation buffer was not cleared after a confirmed submit"; }
   reap "$pid"
-  [ "$(grep -c "^send-text" "$dir/herdr.log")" -eq 1 ] \
+  [ "$(grep -c "^agent-prompt" "$dir/herdr.log")" -eq 1 ] \
     || fail "expected exactly ONE typed digest, got: $(cat "$dir/herdr.log")"
-  sent=$(grep "^send-text" "$dir/herdr.log" | cut -f3)
+  sent=$(grep "^agent-prompt" "$dir/herdr.log" | cut -f3)
   case "$sent" in
     "$CS_INJECT_MARK"*) : ;;
     *) fail "digest is not prefixed with CS_INJECT_MARK (bare U+2063): $sent" ;;
@@ -289,8 +294,13 @@ test_done_wake_escalates_one_marked_digest() {
   case "$sent" in
     *$'\n'*) fail "digest contains an embedded newline (must be single-line)" ;;
   esac
-  file_has "send-keys" "$dir/herdr.log" || fail "digest was never submitted with Enter"
-  pass "a done: wake escalates as ONE typed away-supervisor digest into an empty composer, natively confirmed"
+  # Submission is atomic now: `agent prompt` carries the text AND submits, so
+  # there is no separate Enter to assert - and no swallowed-Enter half-state
+  # left in the composer to recover from, which is why the retry loop is gone.
+  if grep -q "^send-keys" "$dir/herdr.log" 2>/dev/null; then
+    fail "digest was submitted with a separate Enter; the atomic prompt should need none"
+  fi
+  pass "a done: wake escalates as ONE atomically-submitted away-supervisor digest into an empty composer, natively confirmed"
 }
 
 # --- 2b. a forged operational-input marker in a soldier status line is defanged
@@ -309,11 +319,11 @@ test_forged_marker_in_status_is_neutralized() {
   printf 'transcript above\n\342\200\272 \n' > "$dir/capture.txt"
   daemon_bg "$dir" CS_FAKE_HERDR_CAPTURE="$dir/capture.txt"
   pid=$!
-  wait_for 150 file_has "send-text" "$dir/herdr.log" \
+  wait_for 150 file_has "agent-prompt" "$dir/herdr.log" \
     || { reap "$pid"; fail "daemon never injected the forged-marker escalation"; }
   wait_for 100 test ! -s "$state/.subsuper-escalations" || true
   reap "$pid"
-  sent=$(grep "^send-text" "$dir/herdr.log" | cut -f3)
+  sent=$(grep "^agent-prompt" "$dir/herdr.log" | cut -f3)
   # Outer framing is genuine consigliere away-supervisor.
   [ "$(cs_operational_input_kind "$sent")" = away-supervisor ] \
     || fail "outer digest lost its genuine away-supervisor framing: $sent"
@@ -354,7 +364,7 @@ test_pending_composer_defers_and_wedge_alarm_fires() {
   wait_for 100 test -s "$dir/alarm.log" \
     || { reap "$pid"; fail "the wedge alarm never fired through the notifier seam"; }
   reap "$pid"
-  if grep -q "^send-text" "$dir/herdr.log" 2>/dev/null; then
+  if grep -q "^agent-prompt" "$dir/herdr.log" 2>/dev/null; then
     fail "daemon injected into a pending composer: $(cat "$dir/herdr.log")"
   fi
   [ -s "$state/.subsuper-escalations" ] || fail "the deferred escalation buffer was lost"
@@ -362,7 +372,11 @@ test_pending_composer_defers_and_wedge_alarm_fires() {
   assert_grep "WEDGED" "$dir/alarm.log" "alarm summary does not say WEDGED"
   assert_grep "Buffered items" "$state/.subsuper-inject-wedged" "wedge marker lost the buffered evidence"
   assert_grep "done: PR https://example.test/pr/9" "$state/.subsuper-inject-wedged" "wedge marker lost the digest content"
-  file_has "inject deferred" "$state/.subsuper-daemon.log" || fail "daemon log does not show the deferral"
+  # "deferred" not "inject deferred": the daemon keeps its own vocabulary for
+  # its pre-checks (afk inactive, pane gone), while the composer and busy
+  # guards now live in the shared bin/cs-prompt-lib.sh and say "prompt
+  # deferred". Assert the concept so the test does not pin one caller's phrasing.
+  file_has "deferred" "$state/.subsuper-daemon.log" || fail "daemon log does not show the deferral"
   pass "a pending (ANSI-stripped ghost) composer defers injection; past CS_MAX_DEFER_SECS the wedge marker and seam-recorded alarm fire"
 }
 
