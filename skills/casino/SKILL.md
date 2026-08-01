@@ -25,6 +25,9 @@ This is ordinary section-7 lifecycle with a board front door - the safety contra
 
 ## Spec sweep (Inbox)
 
+0. Arm the sweep first: `bin/cs-board-watch.sh arm <project> [--lanes <n>]`, exactly as the `contracts` sweep does.
+   One armed sweep covers both columns, so arming here also makes the Ready column durable, and re-arming from the implementation sweep is harmless.
+   Without it the factory runs only while this conversation lives: new ideas dropped into Inbox after step 1's listing, and boss promotions into Ready, both go unnoticed.
 1. List the raw work: `bin/cs-board.sh inbox <project>` -> `<item-id>\t<number>\t<url>\t<title>` per open Inbox issue.
    Draft cards are never listed; once per sweep, tell the boss which drafts need converting to issues before the factory can touch them.
 2. Skip any issue whose spec task is already recorded in the backlog (under way or done-but-unmoved); the card stays in Inbox while its spec is being written, so the durable record is the dedup guard.
@@ -47,8 +50,10 @@ When a sweep parks new specs, tell the boss in one batched line which issues now
 
 ## Implementation sweep (Ready)
 
-Load the `contracts` skill and run its sweep over the Ready column; it owns lane count, true-dependency serialization, dispatch card moves, briefs with `Closes #<n>`, landing, and the stuck-card check.
+Load the `contracts` skill and run its sweep over the Ready column; it owns lane count, true-dependency serialization, dispatch card moves, briefs with `Closes #<n>`, landing, the board wake, and the stuck-card check.
 Spec lanes and implementation lanes run concurrently under the ordinary section-8 supervision cycle; as either column refills (new ideas in Inbox, boss promotions into Ready), keep sweeping until both are clear or the boss says stop.
+Between sessions that refilling arrives as the armed sweep's `check:` wake, which reports both depths at once: pull Inbox into free spec lanes and Ready into free implementation lanes from the same wake.
+Disarm only when the boss ends the factory, not when a column merely empties - Inbox refills on its own, and Backlog specs the boss has not yet promoted are exactly what the sweep is waiting for.
 
 ## Boundaries
 

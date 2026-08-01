@@ -102,6 +102,8 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
 The complete field-level inventory lives in AGENTS.md section 2; producing scripts own mutation:
 
 - `data/boards.md` - per-project GitHub Projects (v2) board mapping for the `contracts` and `casino` skills, kept beside `data/projects.md` and keyed by the same project name. Blank lines and `#` comments ignored; every other line is `<project> <owner> <number> [ready-label] [in-progress-label] [status-field] [inbox-label] [backlog-label]`. Labels/field default to `Ready` / `In Progress` / `Status` / `Inbox` / `Backlog`; use `_` for spaces in a label token. `<owner>` is a user/org login or `@me`. `bin/cs-board.sh` reads it; the board mapping is optional (only projects worked via the board need a line), and the Inbox/Backlog columns matter only to `casino`.
+- `data/sweeps.md` - the boss's standing intent to work a project's board, so a sweep outlives the session that started it. Written only by `bin/cs-board-watch.sh`; blank lines and `#` comments ignored, every other line is `<project> <lane-cap> <resurface-secs> <armed-utc>`. Each record arms `state/sweep-<project>.check.sh`, an ordinary hash-bound custom watcher check that reports column depth and never moves a card. `cs-board-watch.sh sync` converges the two in both directions and runs at every locked session start.
+- `state/sweep-<project>.board-seen` - the sweep poll's own memory: last reported Ready count, Inbox count, and epoch, one per line. It is what makes the poll silent on a column consigliere shrank and loud on one the boss grew. Deleted on arm and disarm; safe to delete by hand, which only costs one extra report.
 - `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `model=`, `effort=`, `kind=` (ship|scout|capo), `mode=` (no-mistakes|direct-PR|local-only), `yolo=`, `harness=` (codex|claude, inherited from the root session); `kind=capo` also records `home=`; `cs-spawn.sh` also records `issue=` for board-driven work and `headless=1` for a headless scout (`codex exec` / `claude -p`); `cs-pr-check.sh` appends `pr=` and `pr_head=`.
 - `state/<id>.status` - appended by soldiers; wake events, never current state. `bin/cs-classify-lib.sh` owns the verb vocabulary.
 - `state/.wake-queue` - `epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload`; `bin/cs-wake-lib.sh` owns it.
@@ -119,6 +121,8 @@ The complete field-level inventory lives in AGENTS.md section 2; producing scrip
 | `CS_BUSY_TURN_MAX_SECS` | cs-watch | how long a pane may run busy with no completed turn before it enters the wedge timer; default 3600 |
 | `CS_STARTUP_MEMORY_MAX_BYTES` | cs-session-start | per-file budget for `data/boss.md`, `data/boss-shared.md`, and `data/learnings.md`; over budget is reported in the digest, never truncated. Default 8192 |
 | `CS_PAUSE_RESURFACE_SECS` | cs-watch, cs-daemon | declared external-wait recheck cadence |
+| `CS_BOARD_SWEEP_LANES` | cs-board-watch | default lane cap baked into a new sweep record; default 3, matching the `contracts` skill |
+| `CS_BOARD_SWEEP_RESURFACE` | cs-board-watch | default seconds before a still-full column is reported again; default 1800. Only a default for `arm`; each record stores its own value |
 | `CS_MAX_DEFER_SECS` | cs-daemon | away-mode escalation max-defer alarm |
 | `CS_LOCK_HARNESS_RE` | cs-lock | test-only harness ancestry override |
 | `CS_HARNESS_OVERRIDE` | cs-harness-lib | force the root harness (codex\|claude); highest precedence, test/escape seam |

@@ -22,10 +22,14 @@
 #                      The three curated startup-memory files also report when
 #                      they exceed CS_STARTUP_MEMORY_MAX_BYTES, since every
 #                      session of the home pays their cost; /vault consolidates.
-#   6. fleet state   - compact backlog listing, every state/*.meta with a
-#                      cheap endpoint liveness read, bounded status tails
-#                      (wake-EVENT history, not current state), orphan status
-#                      logs, and the afk flag.
+#   6. fleet state   - compact backlog listing, standing board sweeps, every
+#                      state/*.meta with a cheap endpoint liveness read,
+#                      bounded status tails (wake-EVENT history, not current
+#                      state), orphan status logs, and the afk flag. The board
+#                      sweep block also converges polls to records when locked
+#                      (cs-board-watch.sh sync), so a sweep the boss started in
+#                      an earlier session survives a wiped state/ or an
+#                      interrupted arm instead of going quiet.
 #   7. next step     - points back at the supervision block; this script never
 #                      starts supervision itself.
 #
@@ -293,6 +297,15 @@ print_startup_memory "$DATA/learnings.md" "data/learnings.md"
 section "FLEET STATE"
 print_backlog_compact "$DATA/backlog.md" "data/backlog.md"
 
+subsection "Board sweeps (data/sweeps.md)"
+if [ "$READ_ONLY" -eq 1 ]; then
+  printf 'read-only session: reporting sweeps without converging their polls.\n'
+else
+  SWEEP_SYNC=$("$SCRIPT_DIR/cs-board-watch.sh" sync 2>&1) || true
+  [ -n "$SWEEP_SYNC" ] && printf '%s\n' "$SWEEP_SYNC"
+fi
+"$SCRIPT_DIR/cs-board-watch.sh" list 2>&1 || true
+
 subsection "Work under way (state/*.meta)"
 META_FOUND=0
 for meta in "$STATE"/*.meta; do
@@ -369,8 +382,9 @@ EOF
 fi
 cat <<'EOF'
 The digest above is complete for this session start. Do NOT re-read
-data/projects.md, data/boards.md, data/capos.md, data/boss.md, data/boss-shared.md,
-data/learnings.md, or state/*.meta now - they were just printed in full.
+data/projects.md, data/boards.md, data/sweeps.md, data/capos.md, data/boss.md,
+data/boss-shared.md, data/learnings.md, or state/*.meta now - they were just
+printed in full.
 Do NOT bulk-read data/backlog.md now either: the compact listing was just
 printed with a pointer for targeted full-body follow-up.
 Do NOT bulk-read state/*.status now either: their bounded tails were just
