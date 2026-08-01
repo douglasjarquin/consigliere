@@ -17,8 +17,14 @@
 # Ownership: while this monitor holds its lock it is the watcher's only owner,
 # and bin/cs-watch-checkpoint.sh waits on the queue instead of running a watcher
 # of its own. One owner, so there is no lock contention to arbitrate. While away
-# mode holds (state/.afk) the away daemon owns the watcher, so this monitor
-# stands down to a quiet tick rather than double-watching.
+# mode holds (state/.afk) AND its daemon is provably supervising, the away
+# daemon owns the watcher, so this monitor stands down to a quiet tick rather
+# than double-watching. The flag alone never earns that stand-down: see
+# away_daemon_alive.
+#
+# Self-replacement: this process outlives the code it started from - it runs for
+# days - so it re-execs itself whenever bin/cs-monitor.sh changes on disk.
+# Without that, a landed fix never reaches the monitor that needs it.
 #
 # Death is expected to be survivable, not impossible. A monitor that dies is
 # revived by the next checkpoint (it re-launches on a stale beacon), so an
@@ -38,6 +44,8 @@
 #   CS_MONITOR_TICK        seconds between supervise cycles (default 5)
 #   CS_MONITOR_LOG_MAX     bytes before the log is trimmed (default 262144)
 #   CS_MONITOR_WATCH_BIN   watcher override (tests)
+#   CS_AFK_BEAT_STALE      seconds before the away daemon's pass counter reads
+#                          stale and this monitor covers the home (default 180)
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,12 +55,34 @@ cs_resolve_root
 # shellcheck source=bin/cs-wake-lib.sh
 . "$SCRIPT_DIR/cs-wake-lib.sh"
 
+# Captured before the arg loop consumes "$@", so a re-exec relaunches this
+# monitor exactly as it was invoked. The array guards keep stock macOS Bash 3.2
+# from tripping over an empty array under `set -u`.
+SELF="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+SELF_ARGS=()
+if [ "$#" -gt 0 ]; then SELF_ARGS=("$@"); fi
+
+# Content fingerprint of this script. cksum keeps it portable and cheap enough
+# to run every tick. It deliberately reports the STARTUP value when the file
+# cannot be read (mid-checkout, branch switch, deleted): an unreadable script
+# must read as unchanged, so the monitor keeps running old code instead of
+# exec'ing something that is not there.
+self_fingerprint() {
+  local fp
+  if [ -r "$SELF" ] && fp=$(cksum < "$SELF" 2>/dev/null) && [ -n "$fp" ]; then
+    printf '%s\n' "$fp"
+  else
+    printf '%s\n' "${SELF_FP:-}"
+  fi
+}
+SELF_FP=$(self_fingerprint)
+
 ONCE=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --once) ONCE=1 ;;
     -h|--help)
-      sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) echo "error: unknown argument: $1" >&2; exit 2 ;;
@@ -67,6 +97,8 @@ TICK=${CS_MONITOR_TICK:-5}
 case "$TICK" in ''|*[!0-9]*|0) TICK=5 ;; esac
 LOG_MAX=${CS_MONITOR_LOG_MAX:-262144}
 case "$LOG_MAX" in ''|*[!0-9]*) LOG_MAX=262144 ;; esac
+BEAT_STALE=${CS_AFK_BEAT_STALE:-180}
+case "$BEAT_STALE" in ''|*[!0-9]*|0) BEAT_STALE=180 ;; esac
 
 LOCK="$STATE/.monitor.lock"
 BEAT="$STATE/.last-monitor-beat"
@@ -109,13 +141,25 @@ trap 'log "monitor stopping on signal"; exit 0' HUP INT TERM
 
 log "monitor starting (pid ${BASHPID:-$$}); home=$CS_HOME; tick=${TICK}s; watcher=$WATCH"
 
-# Is away mode's daemon actually running? Its pid file is written at startup and
-# its lock names the holder; a pid that is gone means the flag outlived its owner.
+# Is away mode's daemon actually SUPERVISING? Two independent proofs, because
+# each covers a hole the other leaves:
+#   - the pid file's process must exist, which catches the daemon simply gone;
+#   - its pass counter (state/.subsuper-daemon-beat) must be fresh, which
+#     catches a recycled pid reading as alive forever and a daemon that is
+#     nominally running but no longer coming around its loop.
+# The freshness bound is generous on purpose: the daemon's own backoff paths
+# (pane gone, watcher crash) legitimately pause a whole minute between passes,
+# so anything under those would false-alarm on a healthy daemon.
 away_daemon_alive() {
-  local pid
+  local pid beat_age
   pid=$(cat "$STATE/.subsuper-daemon.pid" 2>/dev/null) || return 1
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
-  kill -0 "$pid" 2>/dev/null
+  kill -0 "$pid" 2>/dev/null || return 1
+  # cs_path_age (cs-wake-lib) reports 999999 for a file that does not exist, so
+  # a daemon that never wrote a beat fails this the same way a dead one does.
+  beat_age=$(cs_path_age "$STATE/.subsuper-daemon-beat")
+  case "$beat_age" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$beat_age" -le "$BEAT_STALE" ]
 }
 
 watcher_alive() {
@@ -137,6 +181,28 @@ supervise_cycle() {
   # Liveness first, so a monitor that is alive but standing down (away mode) is
   # still visibly alive and never revived on top of itself.
   touch "$BEAT" 2>/dev/null || true
+
+  # A monitor outlives the code it started from. This one runs for days, so a
+  # fix that lands in the meantime never reaches the process that needs it:
+  # on 2026-08-01 a monitor started 13 hours before the away-mode liveness gate
+  # was written kept the old flag-only stand-down and left the home unwatched
+  # for 8h11m while faithfully refreshing its own beacon the whole time. Its
+  # own beacon looked healthy, so nothing else could tell either.
+  # Re-exec on a changed script so the running monitor converges on disk.
+  if [ -x "$SELF" ] && [ "$(self_fingerprint)" != "$SELF_FP" ]; then
+    log "monitor script changed on disk; re-executing to pick it up"
+    if [ -n "${WATCHER_PID:-}" ]; then
+      kill "$WATCHER_PID" 2>/dev/null || true
+      wait "$WATCHER_PID" 2>/dev/null || true
+      WATCHER_PID=""
+    fi
+    # The lock is keyed on pid and exec keeps ours, so the replacement would
+    # find the lock "held by a live pid" - itself - and exit as a duplicate.
+    # Release first. Losing the microsecond race to another monitor is benign:
+    # that one is running current code, which is the whole point.
+    cs_lock_release "$LOCK" 2>/dev/null || true
+    exec "$SELF" ${SELF_ARGS[@]+"${SELF_ARGS[@]}"}
+  fi
 
   # Stand down for away mode ONLY while its daemon is actually alive. The flag
   # alone is not enough: the away daemon has died seconds after arming on every

@@ -1044,8 +1044,21 @@ cs_daemon_main() {
     WATCHER_PID=$!
   }
 
+  # Proof-of-life for anything that has to decide whether this daemon is really
+  # supervising. A pid alone is not that proof: the daemon has died within a
+  # second of launch on every recorded arm, and a recycled pid reads as alive
+  # forever. The beat is written at the TOP of every iteration - including the
+  # pane-gone and watcher-backoff paths, which are alive-and-working - and its
+  # contents are a strictly increasing pass counter, so an observer can tell
+  # "started" from "completed a full pass" without guessing at timing.
+  local BEAT="$STATE/.subsuper-daemon-beat" PASS=0
+  rm -f "$BEAT" 2>/dev/null || true
+
   local rc reason
   while true; do
+    PASS=$((PASS + 1))
+    printf '%s\n' "$PASS" > "$BEAT" 2>/dev/null || true
+
     # --- pane-gone guard -----------------------------------------------------
     # Self-handling needs no pane, but escalation has nowhere to go without
     # one, and consigliere itself is the consumer. Back off; catch-up signals

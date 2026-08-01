@@ -16,6 +16,9 @@ Codex cannot reason during a foreground tool call, so a background watcher that 
 `bin/cs-watch.sh` is the zero-token classifier: it absorbs benign wakes in bash (no model turn) and exits with a reason line only for actionable ones.
 `bin/cs-monitor.sh` owns that watcher and outlives any single turn, which is the property the checkpoint alone could never provide: a checkpoint exists only while its agent waits on it, so before monitors a home went unwatched the moment its agent started working (2h10m observed on a live capo home).
 The monitor never injects and never reasons - the durable queue is the entire handoff - and it stands down while away mode holds, because that daemon owns the watcher instead.
+That stand-down is earned, not assumed: the daemon must have a live pid AND a pass counter (`state/.subsuper-daemon-beat`) refreshed within `CS_AFK_BEAT_STALE`, otherwise the monitor covers the home itself and records `state/.monitor-afk-orphan`.
+A flag with a dead or wedged owner behind it cost 8h11m of unwatched fleet on 2026-08-01.
+The monitor also re-execs itself whenever `bin/cs-monitor.sh` changes on disk, because it runs for days and would otherwise keep executing whatever code existed when it started - the same incident ran a monitor 13 hours older than the fix that would have caught it.
 A monitor that dies is revived by the next checkpoint, so an unexplained death costs one checkpoint interval rather than a session; if no monitor can be started at all, the checkpoint says so and watches inline for that bound.
 Wakes are appended durably to `state/.wake-queue` before detector state advances, so a missed process exit is recovered by the next drain.
 

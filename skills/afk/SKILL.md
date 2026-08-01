@@ -21,8 +21,14 @@ batched digest rather than per-wake injections.
    id is the daemon's one injection target; it writes the durable
    `state/.afk` flag, records the pane in `state/.subsuper-target`, clears
    the prior away session's stale delivery artifacts on a fresh entry only,
-   starts `bin/cs-daemon.sh` headless, and verifies the daemon came alive
-   (rolling `state/.afk` back if it did not).
+   starts `bin/cs-daemon.sh` headless, and certifies it in two steps: a live
+   pid, then an ADVANCING pass counter proving the daemon completed a full
+   supervision loop.
+   Failing either step stops the daemon and rolls `state/.afk` back, so a
+   non-zero exit means away mode is NOT on - relay that to the boss and stay
+   on the ordinary supervision cycle rather than walking away.
+   A live pid alone used to be the whole check, and it passed on every arm
+   that then died seconds later and left the fleet unwatched overnight.
    Re-running while the daemon is alive is a refresh: the current session's
    buffered escalations are preserved.
    The flag survives a consigliere restart, so recovery re-enters afk when it

@@ -474,6 +474,45 @@ test_afk_start_and_return_lifecycle() {
   pass "cs-afk-start arms and verifies the headless daemon (refresh preserved); cs-afk-return stops it and clears .afk in order"
 }
 
+# A daemon that starts and then never comes around its loop is the exact
+# failure that has hit every recorded away session: the pid was alive, arming
+# said "armed", and the home went unwatched all night. Coming alive is not
+# enough - the pass counter has to advance.
+test_afk_start_rolls_back_a_daemon_that_never_completes_a_pass() {
+  local dir state fakebin out rc pid
+  dir=$(make_case start-no-pass); state="$dir/state"; fakebin="$dir/fakebin"
+
+  # A daemon that claims the lock and records its pid exactly like the real one,
+  # then hangs without ever writing a pass counter.
+  cat > "$fakebin/stillborn-daemon.sh" <<SH
+#!/usr/bin/env bash
+set -u
+. "$ROOT/bin/cs-wake-lib.sh"
+STATE="\$CS_STATE_OVERRIDE"
+cs_lock_try_acquire "\$STATE/.subsuper-daemon.lock" || exit 1
+printf '%s\n' "\$\$" > "\$STATE/.subsuper-daemon.pid"
+sleep 300
+SH
+  chmod +x "$fakebin/stillborn-daemon.sh"
+
+  out=$(env HERDR_PANE_ID=w9:p9 PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
+    CS_AFK_DAEMON="$fakebin/stillborn-daemon.sh" \
+    CS_AFK_START_PASS_WAIT_TICKS=5 \
+    CS_FAKE_HERDR_LOG="$dir/herdr.log" "$AFK_START" 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "arming must fail when the daemon never completes a pass"
+  assert_contains "$out" "never completed a supervision pass" \
+    "the rollback did not name the missing pass as the reason"
+  assert_absent "$state/.afk" "away mode must be rolled back, not left armed without an engine"
+  pid=$(cat "$state/.subsuper-daemon.pid" 2>/dev/null || true)
+  if [ -n "$pid" ]; then
+    STARTED_PIDS+=("$pid")
+    wait_for_death "$pid" 50 \
+      || fail "the rollback left a wedged daemon holding the lock; the next arm would report it as already running"
+  fi
+  pass "cs-afk-start rolls back a daemon that comes alive but never completes a supervision pass"
+}
+
 test_composer_classifier
 test_routine_wake_self_handled
 test_done_wake_escalates_one_marked_digest
@@ -483,3 +522,4 @@ test_buffer_survives_kill_and_return_flushes
 test_return_gate_blocks_on_open_blocker
 test_afk_start_refuses_outside_herdr_pane
 test_afk_start_and_return_lifecycle
+test_afk_start_rolls_back_a_daemon_that_never_completes_a_pass

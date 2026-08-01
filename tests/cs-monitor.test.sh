@@ -134,6 +134,8 @@ test_away_flag_with_a_live_daemon_still_stands_down() {
   : > "$state/.afk"
   sleep 120 & sleeper=$!
   printf '%s\n' "$sleeper" > "$state/.subsuper-daemon.pid"
+  # A live daemon proves itself with a fresh pass counter, not a pid alone.
+  printf '1\n' > "$state/.subsuper-daemon-beat"
   printf 'blocked: would wake a watcher\n' > "$state/t1.status"
   monitor_bg "$state" "$fakebin"
   pid=$!
@@ -151,10 +153,78 @@ test_away_flag_with_a_live_daemon_still_stands_down() {
   pass "a live away daemon still gets the watcher to itself"
 }
 
+# 6. A pid outlives its purpose. The away daemon's pid can read as alive while
+#    the daemon has stopped supervising - a recycled pid, or a process wedged
+#    off its loop - and deferring to it costs a whole night. Only a FRESH pass
+#    counter earns the stand-down.
+test_away_daemon_with_a_stale_beat_is_covered() {
+  local dir state fakebin pid sleeper
+  dir=$(make_case afk-stale-beat); state="$dir/state"; fakebin="$dir/fakebin"
+  : > "$state/.afk"
+  sleep 120 & sleeper=$!
+  printf '%s\n' "$sleeper" > "$state/.subsuper-daemon.pid"
+  printf '1\n' > "$state/.subsuper-daemon-beat"
+  printf 'blocked: would wake a watcher\n' > "$state/t1.status"
+  # CS_AFK_BEAT_STALE=1 makes the counter above stale within a second.
+  monitor_bg "$state" "$fakebin" CS_AFK_BEAT_STALE=1
+  pid=$!
+  wait_until 60 test -s "$state/.wake-queue" || {
+    kill "$pid" "$sleeper" 2>/dev/null || true
+    fail "a live pid with a stale pass counter must not stop the monitor from covering the home"
+  }
+  assert_present "$state/.monitor-afk-orphan" "the monitor did not record the unattended away flag"
+  monitor_stop "$state" "$pid"
+  kill "$sleeper" 2>/dev/null || true
+  pass "an away daemon whose pass counter went stale is covered, not deferred to"
+}
+
+# 7. A monitor runs for days, so it outlives the code it started from. On
+#    2026-08-01 one started 13 hours before the away-mode liveness gate landed
+#    kept the old flag-only stand-down and left the home unwatched for 8h11m,
+#    beacon fresh the whole time. It must converge on the code that is on disk.
+test_monitor_reexecs_when_its_script_changes() {
+  local dir state fakebin bindir pid f
+  dir=$(make_case self-replace); state="$dir/state"; fakebin="$dir/fakebin"
+  # A private bin/ whose cs-monitor.sh is a real copy: the libraries stay
+  # symlinked so only the monitor's own bytes change under it.
+  bindir="$dir/bin"; mkdir -p "$bindir"
+  for f in "$ROOT"/bin/*; do ln -s "$f" "$bindir/$(basename "$f")"; done
+  rm -f "$bindir/cs-monitor.sh"
+  cp "$ROOT/bin/cs-monitor.sh" "$bindir/cs-monitor.sh"
+  chmod +x "$bindir/cs-monitor.sh"
+
+  env PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
+    CS_CREW_STATE_BIN="$fakebin/cs-crew-state.sh" CS_HERDR_EVENTS_FORCE=0 \
+    CS_POLL=1 CS_SIGNAL_GRACE=1 CS_HEARTBEAT=999999 CS_MONITOR_TICK=1 \
+    "$bindir/cs-monitor.sh" >>"$state/.monitor.out" 2>&1 &
+  pid=$!
+  wait_until 60 test -e "$state/.last-monitor-beat" || {
+    kill "$pid" 2>/dev/null || true
+    fail "the monitor never published its beacon"
+  }
+
+  # Replace by atomic rename, exactly as a checkout does, so the running shell
+  # keeps reading its original inode instead of a half-written file.
+  sed 's|^# cs-monitor.sh - .*|&  (replaced under the running process)|' \
+    "$bindir/cs-monitor.sh" > "$dir/monitor.new"
+  chmod +x "$dir/monitor.new"
+  mv -f "$dir/monitor.new" "$bindir/cs-monitor.sh"
+
+  wait_until 60 grep -q "re-executing to pick it up" "$state/.monitor.log" || {
+    kill "$pid" 2>/dev/null || true
+    fail "the monitor kept running stale code after its script changed on disk"
+  }
+  kill -0 "$pid" 2>/dev/null || fail "the monitor died instead of re-executing in place"
+  monitor_stop "$state" "$pid"
+  pass "a monitor whose script changes on disk re-executes onto the new code"
+}
+
 test_event_reaches_the_queue_with_nobody_waiting
 test_standing_event_does_not_grow_the_queue
 test_second_monitor_noops
 test_away_flag_without_a_live_daemon_is_covered
 test_away_flag_with_a_live_daemon_still_stands_down
+test_away_daemon_with_a_stale_beat_is_covered
+test_monitor_reexecs_when_its_script_changes
 
 pass "cs-monitor persistent supervision contract"

@@ -10,10 +10,16 @@
 #       "afk: daemon already running pid=<pid>" and exits 0 (a REFRESH: the
 #       current session's buffered escalations are preserved);
 #     - otherwise clears the PRIOR away session's stale delivery artifacts and
-#       starts bin/cs-daemon.sh nohup'd headless, then verifies it came alive
-#       (daemon lock held by a live pid). A daemon that fails to come alive
-#       rolls back state/.afk and exits non-zero, so away mode is never armed
-#       without its engine.
+#       starts bin/cs-daemon.sh nohup'd headless, then certifies it in TWO
+#       steps: the daemon lock must be held by a live pid, AND the daemon's
+#       pass counter (state/.subsuper-daemon-beat) must then ADVANCE. A daemon
+#       that fails either step is stopped, state/.afk is rolled back, and this
+#       exits non-zero, so away mode is never armed without its engine.
+#
+# Why two steps: a live pid only proves the process started. Every recorded
+# arm passed that check and then died before finishing one loop pass, which
+# left the flag up and the home unwatched for the whole night. Only an advancing
+# counter proves the daemon came back around its loop and is really supervising.
 #
 # This file is sourceable: the BASH_SOURCE guard keeps main from running while
 # exposing the lock helpers and cs_afk_clear_stale_artifacts for tests.
@@ -37,7 +43,7 @@ CS_AFK_DAEMON="${CS_AFK_DAEMON:-$CS_AFK_START_DIR/cs-daemon.sh}"
 . "$CS_AFK_START_DIR/cs-wake-lib.sh"
 
 cs_afk_start_usage() {
-  sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # cs_afk_clear_stale_artifacts: on a FRESH away-session entry, drop the
@@ -50,7 +56,8 @@ cs_afk_clear_stale_artifacts() {  # <state-dir>
   local state=$1
   rm -f "$state/.subsuper-escalations" \
         "$state/.subsuper-escalations.since" \
-        "$state/.subsuper-inject-wedged" 2>/dev/null
+        "$state/.subsuper-inject-wedged" \
+        "$state/.subsuper-daemon-beat" 2>/dev/null
 }
 
 cs_afk_daemon_lock_owner() {
@@ -97,6 +104,25 @@ cs_afk_daemon_alive() {
   cs_afk_daemon_pid_matches "$pid" "$owner"
 }
 
+# The daemon's pass counter, or empty when it has not written one yet. A
+# CHANGED value is the only evidence that a full supervision pass completed;
+# bin/cs-daemon.sh owns the file's contract.
+cs_afk_daemon_beat() {
+  cat "$CS_AFK_STATE/.subsuper-daemon-beat" 2>/dev/null | tr -dc '0-9'
+}
+
+# Roll back a daemon this arm started but could not certify. Leaving a wedged
+# daemon holding the lock would make every later arm report "already running"
+# and re-enter the same silent gap.
+cs_afk_daemon_stop_started() {
+  local owner pid
+  owner=$(cs_afk_daemon_lock_owner) || return 0
+  pid=$(cat "$owner/pid" 2>/dev/null || true)
+  cs_pid_alive "$pid" || return 0
+  cs_afk_daemon_pid_matches "$pid" "$owner" || return 0
+  kill "$pid" 2>/dev/null || true
+}
+
 cs_afk_start_main() {
   case "${1:-}" in
     '' ) ;;
@@ -140,17 +166,43 @@ cs_afk_start_main() {
   # the startup window. Fail closed - away mode without its engine is a
   # silent supervision gap, so roll the flag back.
   local i=0
+  local came_alive=0
   while [ "$i" -lt "${CS_AFK_START_WAIT_TICKS:-50}" ]; do
     if cs_afk_daemon_alive; then
-      pid=$(cs_afk_daemon_lock_pid 2>/dev/null || true)
-      echo "afk: away mode armed; daemon running pid=$pid, injecting into pane $HERDR_PANE_ID"
-      return 0
+      came_alive=1
+      break
     fi
     sleep 0.1
     i=$((i + 1))
   done
+  if [ "$came_alive" -eq 1 ]; then
+    # Alive is not the same as supervising. Every recorded arm passed this
+    # check and then died before finishing one loop pass, leaving the flag up
+    # and the home unwatched all night. Require PROOF OF A COMPLETED PASS: the
+    # daemon's beat counter must advance at least once, which it can only do by
+    # coming back around the loop.
+    local first second
+    first=$(cs_afk_daemon_beat)
+    i=0
+    while [ "$i" -lt "${CS_AFK_START_PASS_WAIT_TICKS:-100}" ]; do
+      second=$(cs_afk_daemon_beat)
+      if [ -n "$second" ] && [ -n "$first" ] && [ "$second" != "$first" ] && cs_afk_daemon_alive; then
+        pid=$(cs_afk_daemon_lock_pid 2>/dev/null || true)
+        echo "afk: away mode armed; daemon running pid=$pid (completed pass $second), injecting into pane $HERDR_PANE_ID"
+        return 0
+      fi
+      [ -n "$first" ] || first=$second
+      sleep 0.1
+      i=$((i + 1))
+    done
+  fi
   rm -f "$CS_AFK_STATE/.afk"
-  echo "error: daemon did not come alive; away mode rolled back (see $CS_AFK_STATE/.subsuper-daemon.err and $CS_AFK_STATE/.subsuper-daemon.log)" >&2
+  cs_afk_daemon_stop_started
+  if [ "$came_alive" -eq 1 ]; then
+    echo "error: daemon started but never completed a supervision pass; away mode rolled back (see $CS_AFK_STATE/.subsuper-daemon.err and $CS_AFK_STATE/.subsuper-daemon.log)" >&2
+  else
+    echo "error: daemon did not come alive; away mode rolled back (see $CS_AFK_STATE/.subsuper-daemon.err and $CS_AFK_STATE/.subsuper-daemon.log)" >&2
+  fi
   return 1
 }
 
