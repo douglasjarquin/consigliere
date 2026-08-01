@@ -45,6 +45,12 @@ SH
 chmod +x "$FAKEBIN/gh"
 export CS_BOARD_GH="$FAKEBIN/gh"
 
+# Branch on uname rather than `stat -f || stat -c`: GNU stat's -f is
+# --file-system, so it succeeds with a filesystem dump instead of failing over.
+file_mode() {
+  if [ "$(uname)" = Darwin ]; then stat -f %Lp "$1"; else stat -c %a "$1"; fi
+}
+
 BIN="$ROOT/bin/cs-board-watch.sh"
 POLL="$STATE/sweep-proj.check.sh"
 TRUST="$STATE/sweep-proj.check-trust"
@@ -96,8 +102,7 @@ assert_contains "$out" "armed: proj board sweep" "arm reports the sweep"
 assert_grep "proj 2 900 " "$DATA/sweeps.md" "sweep record carries project, lanes, resurface"
 assert_present "$POLL" "poll written"
 assert_present "$TRUST" "poll bound to a trust record"
-[ "$(stat -f '%Lp' "$POLL" 2>/dev/null || stat -c '%a' "$POLL")" = 700 ] \
-  || fail "poll must be mode 0700"
+[ "$(file_mode "$POLL")" = 700 ] || fail "poll must be mode 0700"
 out=$("$BIN" list)
 assert_contains "$out" "proj lanes=2 resurface=900s" "list reports the sweep"
 assert_contains "$out" "poll=armed" "list reports the poll as armed"
