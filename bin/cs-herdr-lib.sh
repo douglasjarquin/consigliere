@@ -346,8 +346,16 @@ cs_herdr_pane_is_agent_husk() { # <pane_id>
   return 0
 }
 
+# The flag is --until, NOT --status. herdr rejects --status outright
+# ("unknown option: --status", rc=2), and because the only caller discards both
+# streams, that rejection read as "the turn never started" rather than as a bad
+# invocation. Every steer then burned its full Enter-retry loop and reported
+# "not confirmed" even when delivery had worked, and the away daemon's strict
+# undelivered path was permanently on. Nothing caught it because the test fakes
+# matched the subcommand and ignored the flags; tests/cs-herdr-lib-live.test.sh
+# now pins the real flag against the real binary.
 cs_herdr_agent_wait() { # <pane_id> <status> <timeout-ms>
-  cs_herdr agent wait "$1" --status "$2" --timeout "$3"
+  cs_herdr agent wait "$1" --until "$2" --timeout "$3"
 }
 
 cs_herdr_submit_confirm() { # <pane_id> [timeout-ms]

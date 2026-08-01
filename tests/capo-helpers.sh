@@ -68,6 +68,14 @@ case "${1:-} ${2:-}" in
       echo '{"result":{"agent":{}}}'
     fi ;;
   "agent wait")
+    # Reject --status exactly as the real binary does. A fake that accepts any
+    # flag is how a wrong flag shipped and stayed shipped: submit confirmation
+    # failed against real herdr for every steer while every test passed.
+    for _a in "$@"; do
+      case "$_a" in
+        --status|--status=*) echo "unknown option: --status" >&2; exit 2 ;;
+      esac
+    done
     [ "${FAKE_AGENT_WAIT_FAIL:-0}" = 1 ] && exit 1
     echo '{}' ;;
   "pane read") echo 'quiet prompt' ;;

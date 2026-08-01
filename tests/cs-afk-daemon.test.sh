@@ -95,6 +95,13 @@ case "${1:-} ${2:-}" in
       "${CS_FAKE_HERDR_AGENT_STATUS:-idle}"
     exit 0 ;;
   "agent wait")
+    # Real herdr rejects --status; a permissive fake is what let the wrong flag
+    # ship. Mirror the rejection so a regression fails here, offline.
+    for a in "$@"; do
+      case "$a" in
+        --status|--status=*) echo "unknown option: --status" >&2; exit 2 ;;
+      esac
+    done
     exit "${CS_FAKE_HERDR_WAIT_RC:-0}" ;;
   "status --json")
     printf '{"server":{"protocol":16,"socket":""},"client":{"protocol":16}}\n'

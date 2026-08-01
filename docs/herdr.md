@@ -46,7 +46,18 @@ This is the same rule already applied to tab labels below: scope to this home's 
 
 - `agent list` / `agent get <pane>` detect codex automatically (`"agent":"codex"`) with `agent_status`: `idle|working|blocked|done|unknown`.
 - Mid-turn status reads `working`; after the turn ends it reads `idle`.
-- `agent wait <pane> --status idle --timeout <ms>` blocks until the status is reached (verified ~5s wait resolving on turn end); use it for submit confirmation and bounded single-target waits.
+- `agent wait <pane> --until <status> --timeout <ms>` blocks until the status is reached (verified ~5s wait resolving on turn end); use it for submit confirmation and bounded single-target waits.
+  The flag is `--until`. This entry previously recorded `--status`, and `bin/cs-herdr-lib.sh` was written against it; herdr 0.7.5 rejects that outright:
+
+  ```text
+  $ herdr agent wait bogus999 --status idle --timeout 200
+  unknown option: --status
+  rc=2
+  ```
+
+  Corrected 2026-08-01 against herdr 0.7.5, protocol 17.
+  Because `cs_herdr_submit_confirm` discarded both streams, the usage error read as "the turn never started": every steer burned its Enter-retry loop and reported "not confirmed" even on success, and the away daemon's strict undelivered path was permanently on.
+  `tests/cs-herdr-lib-live.test.sh` now pins the flag against the real binary, and the offline fakes reject `--status` the way herdr does, because a fake that matches only the subcommand is what let this ship.
 - Known upstream gap (firstmate evidence, docs/herdr-backend.md): `agent get` can read `idle` during a LONG foreground tool call. Policy: native `working` is trusted outright; native `idle`/`unknown` must be corroborated against the codex busy signature (`esc to interrupt`) before a soldier is declared not-working. Single constant in `cs-herdr-lib.sh`.
 
 ## Capture

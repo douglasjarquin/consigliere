@@ -83,6 +83,22 @@ done
 assert_contains "$out" "cs-capture-probe" "pane run output visible in capture"
 pass "pane run + capture round-trip"
 
+# The submit-confirmation flag, pinned against the REAL binary. cs-herdr-lib
+# once passed --status here; herdr rejects it, the only caller discarded both
+# streams, and every steer in the fleet reported "not confirmed" while the
+# offline fakes stayed green because they matched the subcommand and ignored
+# the flags. A hermetic test cannot catch a CLI contract drifting - this can.
+if herdr agent wait "$task_pane" --status idle --timeout 200 >/dev/null 2>&1; then
+  fail "herdr now ACCEPTS 'agent wait --status'; the contract changed, re-verify docs/herdr.md and cs_herdr_agent_wait"
+fi
+pass "herdr rejects 'agent wait --status' (the flag cs-herdr-lib must not use)"
+
+# --until against a pane with no agent must fail cleanly, not hang or usage-error.
+cs_herdr_agent_wait "$task_pane" idle 500 >/dev/null 2>&1
+rc=$?
+[ "$rc" -ne 2 ] || fail "cs_herdr_agent_wait produced a usage error (rc=2); its flag is wrong again"
+pass "cs_herdr_agent_wait invokes herdr with a flag herdr accepts (rc=$rc, not a usage error)"
+
 rm "$task_path/dirty.txt"
 cs_herdr_worktree_remove "$task_ws" >/dev/null || fail "clean worktree remove"
 [ ! -d "$task_path" ] || fail "worktree dir remains after clean remove"
