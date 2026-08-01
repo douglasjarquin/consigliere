@@ -16,6 +16,13 @@ Codex cannot reason during a foreground tool call, so a background watcher that 
 `bin/cs-watch.sh` is the zero-token classifier: it absorbs benign wakes in bash (no model turn) and exits with a reason line only for actionable ones.
 `bin/cs-monitor.sh` owns that watcher and outlives any single turn, which is the property the checkpoint alone could never provide: a checkpoint exists only while its agent waits on it, so before monitors a home went unwatched the moment its agent started working (2h10m observed on a live capo home).
 The monitor never injects and never reasons - the durable queue is the entire handoff - and it stands down while away mode holds, because that daemon owns the watcher instead.
+That stand-down is earned, not assumed: the daemon needs a live pid AND a completed-pass counter (`state/.subsuper-daemon-beat`) refreshed within `CS_AFK_BEAT_STALE`, or the monitor covers the home itself and records `state/.monitor-afk-orphan`.
+A flag with a dead owner behind it cost 8h11m of unwatched fleet on 2026-08-01.
+The monitor also re-execs itself when `bin/cs-monitor.sh` changes on disk, because it runs for days and would otherwise keep executing whatever code existed when it started - that same incident ran a monitor 13 hours older than the fix that would have caught it.
+
+Long-lived supervision processes must be started through `bin/cs-detach.py`, never `nohup ... & disown`.
+Both the monitor and the away daemon are launched from inside an agent's bounded tool call, and `nohup` does not survive that call's process-group teardown.
+The monitor learned this on 2026-07-30 (213 revivals in seven hours); the away daemon was left on `nohup` until 2026-08-01 and died within a second of arming on all five recorded away sessions.
 A monitor that dies is revived by the next checkpoint, so an unexplained death costs one checkpoint interval rather than a session; if no monitor can be started at all, the checkpoint says so and watches inline for that bound.
 Wakes are appended durably to `state/.wake-queue` before detector state advances, so a missed process exit is recovered by the next drain.
 

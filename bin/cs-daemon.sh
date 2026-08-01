@@ -1044,6 +1044,21 @@ cs_daemon_main() {
     WATCHER_PID=$!
   }
 
+  # Proof that this daemon is SUPERVISING, for anything that has to decide
+  # whether away mode really has an engine. A pid is not that proof: the daemon
+  # has died within a second of launch on every recorded arm, and a recycled pid
+  # reads as alive forever.
+  #
+  # The counter is written at the BOTTOM of the loop, deliberately. Reaching it
+  # means this pass found a live supervisor pane, has a running watcher, and
+  # completed a housekeeping tick - the actual job. The early-`continue` paths
+  # (pane gone, watcher crash backoff) skip it, so a daemon that is running but
+  # cannot supervise goes stale and bin/cs-monitor.sh covers the home instead of
+  # standing down for it. Beating at the top would have certified exactly the
+  # useless states this exists to detect.
+  local BEAT="$STATE/.subsuper-daemon-beat" PASS=0
+  rm -f "$BEAT" 2>/dev/null || true
+
   local rc reason
   while true; do
     # --- pane-gone guard -----------------------------------------------------
@@ -1097,6 +1112,10 @@ cs_daemon_main() {
       _now > "$STATE/.subsuper-last-housekeep"
       housekeeping "$STATE"
     fi
+
+    # A full pass completed with a pane, a watcher, and housekeeping done.
+    PASS=$((PASS + 1))
+    printf '%s\n' "$PASS" > "$BEAT" 2>/dev/null || true
   done
 }
 

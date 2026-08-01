@@ -10,10 +10,16 @@
 #       "afk: daemon already running pid=<pid>" and exits 0 (a REFRESH: the
 #       current session's buffered escalations are preserved);
 #     - otherwise clears the PRIOR away session's stale delivery artifacts and
-#       starts bin/cs-daemon.sh nohup'd headless, then verifies it came alive
-#       (daemon lock held by a live pid). A daemon that fails to come alive
-#       rolls back state/.afk and exits non-zero, so away mode is never armed
-#       without its engine.
+#       starts bin/cs-daemon.sh DETACHED through bin/cs-detach.py, then checks
+#       it came up (daemon lock held by a live pid). A daemon that never comes
+#       up rolls back state/.afk and exits non-zero.
+#
+# Coming up is NOT being armed. This script cannot certify away mode, because
+# it runs inside the agent tool call that launched the daemon and therefore
+# cannot observe a death caused by that call's own teardown - the failure that
+# cost five away sessions. bin/cs-afk-verify.sh, run as a SEPARATE later step,
+# is what arms away mode or rolls it back. This one always says "not yet
+# certified" on success.
 #
 # This file is sourceable: the BASH_SOURCE guard keeps main from running while
 # exposing the lock helpers and cs_afk_clear_stale_artifacts for tests.
@@ -32,12 +38,13 @@ cs_resolve_root
 CS_AFK_STATE="$STATE"
 CS_AFK_LOCK="$CS_AFK_STATE/.subsuper-daemon.lock"
 CS_AFK_DAEMON="${CS_AFK_DAEMON:-$CS_AFK_START_DIR/cs-daemon.sh}"
+CS_AFK_DETACH="${CS_AFK_DETACH:-$CS_AFK_START_DIR/cs-detach.py}"
 
 # shellcheck source=bin/cs-wake-lib.sh
 . "$CS_AFK_START_DIR/cs-wake-lib.sh"
 
 cs_afk_start_usage() {
-  sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # cs_afk_clear_stale_artifacts: on a FRESH away-session entry, drop the
@@ -97,6 +104,35 @@ cs_afk_daemon_alive() {
   cs_afk_daemon_pid_matches "$pid" "$owner"
 }
 
+# The daemon's completed-pass counter, or empty when it has written none.
+# bin/cs-daemon.sh owns the file's contract; only a CHANGED value proves a pass.
+# "Not written yet" is the normal state for the first second of a daemon's life
+# and must read as empty, not as an error: under `set -e` a failed redirect here
+# would abort the caller mid-certification.
+cs_afk_daemon_beat() {
+  local beat="$CS_AFK_STATE/.subsuper-daemon-beat"
+  [ -r "$beat" ] || return 0
+  tr -dc '0-9' < "$beat" 2>/dev/null || true
+}
+
+# Stop a daemon that could not be certified. Leaving a wedged one holding the
+# lock would make every later arm take the refresh path and report success.
+cs_afk_daemon_stop_uncertified() {
+  local owner pid
+  owner=$(cs_afk_daemon_lock_owner) || return 0
+  pid=$(cat "$owner/pid" 2>/dev/null || true)
+  cs_pid_alive "$pid" || return 0
+  cs_afk_daemon_pid_matches "$pid" "$owner" || return 0
+  kill "$pid" 2>/dev/null || true
+  local i=0
+  while [ "$i" -lt 50 ]; do
+    cs_pid_alive "$pid" || return 0
+    sleep 0.1
+    i=$((i + 1))
+  done
+  kill -9 "$pid" 2>/dev/null || true
+}
+
 cs_afk_start_main() {
   case "${1:-}" in
     '' ) ;;
@@ -119,7 +155,11 @@ cs_afk_start_main() {
   local pid
   pid=$(cs_afk_daemon_lock_pid 2>/dev/null || true)
   if cs_afk_daemon_alive; then
-    echo "afk: daemon already running pid=$pid"
+    # A refresh is still an arm, so it gets the same certification the fresh
+    # path does. Trusting a live pid here was its own instance of the bug this
+    # file exists to close: a daemon wedged off its loop kept every later /afk
+    # reporting success while nothing supervised.
+    echo "afk: daemon already running pid=$pid; certify it with cs-afk-verify.sh before walking away"
     return 0
   fi
 
@@ -132,18 +172,41 @@ cs_afk_start_main() {
   # before the new daemon can surface them.
   cs_afk_clear_stale_artifacts "$CS_AFK_STATE"
 
-  nohup "$CS_AFK_DAEMON" "$HERDR_PANE_ID" \
-    >> "$CS_AFK_STATE/.subsuper-daemon.err" 2>&1 &
-  disown 2>/dev/null || true
+  # Start the daemon in its OWN session, not merely immune to SIGHUP.
+  #
+  # THIS IS THE BUG THAT COST FIVE AWAY SESSIONS. `nohup ... & disown` does not
+  # survive teardown of the launching process group, and cs-afk-start.sh always
+  # runs inside an agent's bounded tool call - precisely such a group. The
+  # daemon was killed with the tool call, seconds after arming, every time: no
+  # `daemon shutting down` line because the TERM handler never ran, and
+  # .subsuper-last-housekeep never written because it died inside pass one. The
+  # scratch-home reproduction looked healthy because a plain shell has no tool
+  # call to tear down.
+  #
+  # bin/cs-detach.py double-forks through setsid(2) and already fixed exactly
+  # this for the persistent monitor (bin/cs-watch-checkpoint.sh); the away
+  # daemon was simply never moved over. Same fallback rule as the monitor: if
+  # python3 is missing, the old launch is degraded, not absent - and the
+  # out-of-band certification in bin/cs-afk-verify.sh is what catches the
+  # degraded case rather than letting it arm silently.
+  if [ -x "$CS_AFK_DETACH" ] && command -v python3 >/dev/null 2>&1; then
+    python3 "$CS_AFK_DETACH" --stdout "$CS_AFK_STATE/.subsuper-daemon.err" \
+      -- "$CS_AFK_DAEMON" "$HERDR_PANE_ID" >/dev/null 2>&1
+  else
+    nohup "$CS_AFK_DAEMON" "$HERDR_PANE_ID" \
+      >> "$CS_AFK_STATE/.subsuper-daemon.err" 2>&1 &
+    disown 2>/dev/null || true
+  fi
 
-  # Verify the daemon came alive: its lock must be held by a live pid within
-  # the startup window. Fail closed - away mode without its engine is a
-  # silent supervision gap, so roll the flag back.
+  # The daemon must at least come up. This is a startup check, NOT the
+  # certification: it runs in the same process group that launched the daemon,
+  # so it cannot see a death caused by that group's teardown. Away mode is not
+  # armed until bin/cs-afk-verify.sh says so from a later, separate call.
   local i=0
   while [ "$i" -lt "${CS_AFK_START_WAIT_TICKS:-50}" ]; do
     if cs_afk_daemon_alive; then
       pid=$(cs_afk_daemon_lock_pid 2>/dev/null || true)
-      echo "afk: away mode armed; daemon running pid=$pid, injecting into pane $HERDR_PANE_ID"
+      echo "afk: daemon started pid=$pid, target pane $HERDR_PANE_ID; NOT yet certified - run cs-afk-verify.sh as a separate step before walking away"
       return 0
     fi
     sleep 0.1

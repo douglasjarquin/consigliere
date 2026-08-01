@@ -21,23 +21,38 @@ batched digest rather than per-wake injections.
    id is the daemon's one injection target; it writes the durable
    `state/.afk` flag, records the pane in `state/.subsuper-target`, clears
    the prior away session's stale delivery artifacts on a fresh entry only,
-   starts `bin/cs-daemon.sh` headless, and verifies the daemon came alive
-   (rolling `state/.afk` back if it did not).
+   starts `bin/cs-daemon.sh` detached, and checks it came up (rolling
+   `state/.afk` back if it did not).
    Re-running while the daemon is alive is a refresh: the current session's
    buffered escalations are preserved.
    The flag survives a consigliere restart, so recovery re-enters afk when it
    is present.
 
-2. **The daemon is presence-gated.**
+   **Starting is not arming.** `cs-afk-start.sh` runs inside this tool call, so
+   it cannot see a daemon that dies when the call ends - the failure that cost
+   five away sessions. It always reports "NOT yet certified".
+
+2. **Certify with `bin/cs-afk-verify.sh`, in a SEPARATE tool call.**
+   Never in the same call as the start: being a later call is the entire
+   mechanism, because only then is the launching process group already gone.
+   It requires a live daemon whose completed-pass counter advances while it
+   watches, and on any failure it stops the daemon, clears `state/.afk`, and
+   exits non-zero.
+   A non-zero exit means away mode is OFF: tell the boss plainly, stay on the
+   ordinary supervision cycle, and do not treat the fleet as watched.
+   Run it on a refresh too - a live pid alone is what used to make a wedged
+   daemon look armed.
+
+3. **The daemon is presence-gated.**
    It injects escalations only while `state/.afk` exists, and stays quiet
    otherwise.
 
-3. **Do not separately arm the watcher or a checkpoint.** The daemon manages
+4. **Do not separately arm the watcher or a checkpoint.** The daemon manages
    `bin/cs-watch.sh` as its one-shot child; the watcher singleton lock no-ops
    a stray arm harmlessly, and while `state/.afk` exists the watcher queues
    and exits on every wake so the daemon owns triage.
 
-4. **Acknowledge** in AGENTS.md section 9 language: "Boss, away mode is
+5. **Acknowledge** in AGENTS.md section 9 language: "Boss, away mode is
    active; I will batch routine updates and surface only decisions, failures,
    credentials, or review-ready work until you return."
 
