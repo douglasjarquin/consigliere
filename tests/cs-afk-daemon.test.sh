@@ -95,8 +95,8 @@ case "${1:-} ${2:-}" in
       "${CS_FAKE_HERDR_AGENT_STATUS:-idle}"
     exit 0 ;;
   "agent wait")
-    # Real herdr rejects --status; a permissive fake is what let the wrong flag
-    # ship. Mirror the rejection so a regression fails here, offline.
+    # Mirror the pinned herdr 0.7.5: reject the pre-0.7.5 --status spelling. A
+    # permissive fake is what let the wrong flag ship.
     for a in "$@"; do
       case "$a" in
         --status|--status=*) echo "unknown option: --status" >&2; exit 2 ;;
