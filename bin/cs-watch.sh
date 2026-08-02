@@ -80,6 +80,11 @@ mkdir -p "$STATE"
 # Custom-check trust validation (hash-bound snapshots; cs-check-register).
 # shellcheck source=bin/cs-check-lib.sh
 . "$SCRIPT_DIR/cs-check-lib.sh"
+# Armed blocking sources: the per-cycle reconcile predicate only. The runner
+# itself (bin/cs-procevent.sh) is invoked as a separate process, never inline,
+# so a blocking source can never run inside this watcher.
+# shellcheck source=bin/cs-procevent-lib.sh
+. "$SCRIPT_DIR/cs-procevent-lib.sh"
 # Parent-owned capo missed-report guards (optional until the library lands;
 # the tick below is skipped when the function is absent).
 if [ -f "$SCRIPT_DIR/cs-pending-reply-lib.sh" ]; then
@@ -1174,6 +1179,22 @@ while :; do
   # missed. No conversation scraping; unresolved records never silently expire.
   if command -v cs_pending_reply_tick >/dev/null 2>&1 || declare -F cs_pending_reply_tick >/dev/null 2>&1; then
     cs_pending_reply_tick "$STATE" || true
+  fi
+
+  # Armed blocking sources (bin/cs-procevent.sh). Liveness repair only: it
+  # republishes captured results that have no durable acknowledgement yet and
+  # restarts a source with no live owner. It never polls a source and never
+  # blocks - the child does the blocking, in its own process group. Guarded by a
+  # predicate so a home with nothing armed pays one directory test per cycle.
+  # A republished result reaches the agent as an ordinary `check` wake on the
+  # durable queue, which the bounded checkpoint, the persistent monitor's
+  # activation path, and session start all already read, so no watcher-side
+  # surfacing machinery is needed to deliver it.
+  # The home is passed explicitly rather than relied on from the environment, so
+  # a capo's watcher can never reconcile against the main home's records.
+  if cs_procevent_needs_reconcile "$STATE"; then
+    CS_HOME="$CS_HOME" CS_STATE_OVERRIDE="$STATE" \
+      "$SCRIPT_DIR/cs-procevent.sh" reconcile >/dev/null 2>&1 || true
   fi
 
   # Slow per-task checks (consigliere writes these, e.g. a merged-PR poll).

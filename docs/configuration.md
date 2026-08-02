@@ -112,7 +112,49 @@ The complete field-level inventory lives in AGENTS.md section 2; producing scrip
 - `state/.home-pane` - the pane id of THIS home's own agent, written by `bin/cs-session-start.sh` from `HERDR_PANE_ID` (the one place that runs inside the home's own pane). A durable HINT, never an identity: herdr recycles pane ids, so `bin/cs-activate.sh` revalidates that the pane still exists, still runs an agent, and is still rooted in this home before it will prompt anything.
 - `state/.last-activation` - cooldown stamp for `bin/cs-activate.sh`; also the recursion guard, since the turn activation starts drains the queue and may append more wakes.
 - `state/.activation-stalled` - durable marker that this home cannot self-activate (pane gone, pane recycled to another home, or no agent). Its whole purpose is that a home with the parent removed from the loop fails loudly instead of rotting.
+- `state/procevent/` and `state/procevent-inbox/` - armed blocking sources and their captured results; see `## Process events` below.
 - `state/.subsuper-daemon-beat` - the away daemon's proof that it is supervising, written by `bin/cs-daemon.sh` at the BOTTOM of each loop pass, so the early-continue paths (pane gone, watcher crash backoff) deliberately do not write it. Contents are a strictly increasing pass counter; mtime is its freshness. `bin/cs-afk-verify.sh` requires the counter to ADVANCE before away mode is armed; `bin/cs-monitor.sh` requires it fresh before standing down. A live pid is not proof: it survives a recycled pid and a daemon wedged off its loop.
+
+## Process events
+
+A process event lets consigliere wait on a BLOCKING external command without holding a conversational turn.
+The driving case is `lavish-axi poll <artifact>`, which long-polls for a human's feedback on a review artifact; `docs/lavish.md` records the verified facts that path depends on.
+`bin/cs-procevent.sh --help` owns every command, flag, and record field; this section owns the layout and the guarantees.
+
+The subsystem adds no second notification control plane.
+A completed result becomes an ordinary `check` wake on the durable queue, which the bounded checkpoint, the persistent monitor's activation path, and session start already read.
+
+### Layout
+
+| path | owner | contents |
+|---|---|---|
+| `state/procevent/<id>.source` | `cs-procevent.sh register` | `adapter=`, `argc=`, `argv:` then one argument per line, mode 0600. argv is executed directly, so there is no shell surface. |
+| `state/procevent/<id>.runner` | the runner | the runner leader's pid while it is running |
+| `state/procevent-inbox/<id>.<seq>.result` | the runner | one captured result, mode 0600. Bounded by `CS_PROCEVENT_MAX_OUTPUT_BYTES`. |
+| `state/procevent-inbox/<id>.<seq>.adapter` | the runner | the adapter that produced it, renamed into place before the result |
+| `state/procevent-inbox/<id>.<seq>.handled` | `cs-procevent.sh handled` | the one durable acknowledgement for that generation |
+| `${XDG_STATE_HOME:-~/.local/state}/consigliere/procevent-claims/<id>.claim` | the runner | machine-wide ownership: home, runner pid, generation token, process identity, registration dir, registration identity, `active` or `terminal` |
+| `.../procevent-claims/<id>.lock` | all of the above | the per-source mutual-exclusion boundary |
+
+The claim root is machine-wide, not per home, because a main home and its capo homes share one machine and one source store.
+`<id>` is derived by the adapter from canonical PHYSICAL source identity, never from a display string, so two names for one artifact cannot become two owners racing destructive polls.
+
+### Guarantees
+
+- **Capture before publish.** Once the child has exited and its output has been read, that output is stored at mode 0600 and renamed into place BEFORE any event referencing it is published.
+- **Identity-only events.** A wake line is `check: procevent <adapter> <id> <seq>`. No source output, path, or caller-supplied text can appear on it; the result stays a file.
+- **Re-announcement until acknowledged.** A captured result with no `handled` record stays eligible for re-announcement across any number of drains and restarts.
+  `handled` is the only terminal state, is atomic, distinguishes first-time from repeat, and refuses unless the matching result and adapter records exist.
+- **One owner per canonical source.** A live owner is never displaced.
+  A crashed leader whose process group still has members is not stale: reconcile stops that group and releases its generation before any replacement starts, and keeps the claim when it cannot prove the group stopped.
+- **Adapter-owned retirement.** The runner never inspects a result.
+  It calls `bin/cs-procevent-<adapter>.sh terminal <result-file>` and treats exit 0 as the only terminal verdict; anything else, including a missing command, keeps the source armed.
+- **Supervision registration.** An armed source counts as work needing supervision in `bin/cs-supervision-lib.sh`, so `bin/cs-guard.sh` and `bin/cs-turnend-guard.sh` will not tell a home whose only work is an armed source that supervision is unnecessary.
+- **Home retirement safety.** `bin/cs-teardown.sh` runs `cs-procevent.sh retire-home` against a capo home before removing it and refuses if anything is left, because a leaked blocking child against a shared external source is real harm.
+
+What it does NOT prove: anything about the source side of the handoff.
+`lavish-axi poll` clears the human's feedback before returning it, so a result lost between that clearing and the runner reading the process output is unrecoverable.
+Never describe this path as at-least-once, no-loss, or lossless.
 
 ## Environment variables
 
@@ -136,6 +178,8 @@ The complete field-level inventory lives in AGENTS.md section 2; producing scrip
 | `CS_ACTIVATE_COOLDOWN_SECS` | cs-activate | minimum seconds between activations in a home; also the recursion guard; default 600 |
 | `CS_PROMPT_CONFIRM_WAIT_MS` | cs-prompt-lib | ms to wait for the idle->working transition that proves a prompt was delivered; default 8000 |
 | `CS_AFK_VERIFY_TICKS` | cs-afk-verify | 0.1s ticks to wait for the counter to advance before rolling away mode back; default 150 |
+| `CS_PROCEVENT_CLAIM_ROOT` | cs-procevent | machine-wide process-event claim root; default `${XDG_STATE_HOME:-~/.local/state}/consigliere/procevent-claims` |
+| `CS_PROCEVENT_MAX_OUTPUT_BYTES` | cs-procevent | cap on one captured result; default 1048576. Over the cap the result is truncated and still captured |
 | `CS_LOCK_HARNESS_RE` | cs-lock | test-only harness ancestry override |
 | `CS_HARNESS_OVERRIDE` | cs-harness-lib | force the root harness (codex\|claude); highest precedence, test/escape seam |
 | `CS_ROOT_OVERRIDE` `CS_STATE_OVERRIDE` | single scripts | test-only resolution overrides |
@@ -145,4 +189,5 @@ Root harness resolution (`cs_harness_detect_root`): `CS_HARNESS_OVERRIDE` → `c
 - `config/harness` - optional; a single line `codex` or `claude` pins the root harness regardless of environment.
 
 Per-harness launch flags and hook facts: `docs/codex.md`, `docs/claude.md`.
+Verified `lavish-axi` facts: `docs/lavish.md`.
 Supervision protocol: `docs/supervision.md`.

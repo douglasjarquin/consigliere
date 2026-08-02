@@ -79,6 +79,6 @@ Keep instructions as the authority and discovery layer, but make repeated execut
 - Never add an agent name as a commit co-author.
 - `bin/*.sh` must pass `shellcheck -x` run from the repo root before a script change is treated as done.
 - Colocate tests with the existing pattern in `tests/`, name them `<subject>.test.sh`, and extend an existing script rather than inventing a new runner.
-- A verified-facts doc (`docs/herdr.md`, `docs/codex.md`, `docs/claude.md`) records empirical facts, not assumptions.
+- A verified-facts doc (`docs/herdr.md`, `docs/codex.md`, `docs/claude.md`, `docs/lavish.md`) records empirical facts, not assumptions.
 - Include the date, version, exact commands run, and exact output.
 - Write incidents the same way, as evidence, not narrative alone.

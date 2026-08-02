@@ -23,8 +23,11 @@
 # proceeds only once the report exists and (when bin/cs-decision-hold.sh is
 # installed) the unresolved-decision completion gate passes.
 # Capos (kind=capo) are retired explicitly. Normal teardown refuses while
-# their home has in-flight soldier meta files; --force is the approved discard
-# path. Removing the home never touches anything under projects/ clones.
+# their home has in-flight soldier meta files, or while it still has armed
+# blocking sources or owns process claims that would leak a child against a
+# shared external source (bin/cs-procevent.sh retire-home is the bounded
+# retirement it runs first); --force is the approved discard path. Removing the
+# home never touches anything under projects/ clones.
 #
 # The herdr `worktree remove` runs only AFTER these proofs pass; its own
 # dirty-refusal is a backstop, never the safety mechanism. A ship remove that
@@ -500,6 +503,21 @@ if [ "$KIND" = capo ]; then
       echo "Found $(basename "$child_meta"). Let that home finish or explicitly discard with --force." >&2
       exit 1
     done
+  fi
+  # Blocking sources this home armed, and claims it owns machine-wide, must be
+  # retired BEFORE the home is removed: the claim root and the external source
+  # both outlive the home, so an abandoned registration leaks a blocking child
+  # against a shared external source and keeps a claim no home can release.
+  if [ -x "$SCRIPT_DIR/cs-procevent.sh" ]; then
+    if ! CS_HOME="$HOME_PATH" CS_STATE_OVERRIDE="$HOME_PATH/state" \
+        "$SCRIPT_DIR/cs-procevent.sh" retire-home >/dev/null; then
+      if [ "$FORCE" != "--force" ]; then
+        echo "REFUSED: capo $ID still holds armed blocking sources or owns process claims." >&2
+        echo "Retire them from that home (bin/cs-procevent.sh retire-home) before cleanup, or explicitly discard with --force." >&2
+        exit 1
+      fi
+      echo "WARNING: capo $ID's blocking sources could not all be retired; --force is removing the home anyway." >&2
+    fi
   fi
   [ -n "$PANE" ] && cs_herdr_pane_close "$PANE" >/dev/null 2>&1 || true
   require_pane_gone "capo $ID's home and records" || exit 1
