@@ -84,6 +84,7 @@ This section is the single owner of the capo sync and inherited-local-material p
 The locked session-start bootstrap runs `bin/cs-home-seed.sh --sweep`, which fast-forwards every registered capo home to the main repo's current default-branch tip.
 That is a purely local detached-HEAD advance, FF-only, never a fetch, force, merge, or stash; dirty or diverged homes are skipped with a `CAPO_SYNC:` line and their work left untouched.
 The fast-forward never touches the gitignored operational dirs, so a capo's backlog, projects, and in-flight work are never disturbed.
+The sweep also converges capo activation according to the contract owned by `bin/cs-home-seed.sh --help`.
 
 Inheritance is deliberately tiny and one-way (`bin/cs-inherit-lib.sh` owns the allowlist):
 
@@ -135,7 +136,7 @@ bin/cs-spawn.sh <id> <home> --capo
 Use the recorded `home=` in meta.
 A meta with no recorded endpoint is a reported recovery condition, not permission to search herdr by name or respawn blindly.
 If meta is missing but `data/capos.md` still registers the capo, leave it idle as a seeded-but-not-yet-launched home rather than respawning from the registry entry.
-A restart never re-seeds: the home, charter, and registry entry are durable, and the bootstrap sweep re-converges sync and inherited material on the next session start.
+A restart never re-seeds: the home, charter, and registry entry are durable, and the bootstrap sweep re-converges the home as described above on the next session start.
 
 Do not reconstruct a capo's whole tree from the main home.
 The main consigliere reconciles only direct reports.

@@ -35,7 +35,10 @@
 #          default-branch tip - a purely local detached-HEAD advance, FF-only,
 #          never forcing, merging, or stashing; dirty or diverged homes are
 #          skipped with a CAPO_SYNC: line and their work left untouched.
-#          The same pass converges the inherited data/boss-shared.md copy.
+#          The same pass converges the inherited data/boss-shared.md copy, and
+#          fills an ABSENT config/activation with "always" so a home seeded
+#          before per-home activation existed stops resolving to afk-only and
+#          can start its own turns. A present value is never overwritten.
 #       2. Liveness-guarantee every live capo meta (state/<id>.meta with
 #          kind=capo): probe the recorded pane for a real agent through
 #          bin/cs-herdr-lib.sh, respawn via cs-spawn.sh <id> <home> --capo
@@ -842,6 +845,28 @@ sweep_ff_home() {  # <id> <home>  - detached-HEAD FF-only advance; CAPO_SYNC lin
   echo "CAPO_SYNC: capo $id: updated $before..$after"
 }
 
+# Converge config/activation for a home seeded before per-home activation
+# existed. A seed-time-only default never reaches an existing home, whose
+# absent value resolves to afk-only and prevents self-started turns.
+# Fill ONLY absence: any present value, including a symlink to externally
+# managed config, is a deliberate choice this sweep must not overwrite.
+sweep_activation_home() {  # <id> <home>  - CAPO_SYNC line only when it acts
+  local id=$1 home=$2
+  local activation="$home/config/activation"
+  _cs_inherit_dir_safe "$home/config" || {
+    echo "CAPO_SYNC: capo $id: skipped: unsafe config/ for activation"
+    return 0
+  }
+  [ ! -e "$activation" ] && [ ! -L "$activation" ] || return 0
+  if (set -C; printf 'always\n' > "$activation") 2>/dev/null; then
+    echo "CAPO_SYNC: capo $id: activation set to always (was unset)"
+  elif [ -e "$activation" ] || [ -L "$activation" ]; then
+    return 0
+  else
+    echo "CAPO_SYNC: capo $id: skipped: cannot write config/activation"
+  fi
+}
+
 sweep_sync() {
   local id home abs_home result seen=""
   while IFS=$'\t' read -r id home; do
@@ -857,6 +882,7 @@ sweep_sync() {
     esac
     seen="$seen $abs_home"
     sweep_ff_home "$id" "$abs_home"
+    sweep_activation_home "$id" "$abs_home"
     cs_inherit_converge "$CS_HOME" "$abs_home" "$id" || {
       echo "CAPO_SYNC: capo $id: skipped: inheritance failed"
     }
