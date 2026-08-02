@@ -106,6 +106,8 @@ state/               volatile runtime signals; gitignored
   <id>.check-trust   content binding created by cs-check-register.sh
   <id>.pr-poll       validated data sidecar for the byte-static PR merge poll
   pending-replies/   parent-owned capo pending-reply records; cs-pending-reply-lib.sh
+  procevent/         armed blocking sources supervised outside a turn; bin/cs-procevent.sh
+  procevent-inbox/   their captured results, adapter records, and handled acknowledgements
   .wake-queue        durable queued wakes: epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload
   .afk               durable away-mode flag; present = daemon may inject escalations
   .watch.lock .wake-queue.lock .monitor.lock   watcher, queue, and monitor singleton locks
@@ -470,7 +472,7 @@ These skills are not boss-invocable; load them only at their precise triggers.
 - `project-management` - load before adding, creating, cloning, registering, removing, or initializing a project.
 - `stuck-soldier-recovery` - load when the session-start digest reports a direct report's endpoint dead or its metadata has no workspace, or after a stale wake, looping pane, repeated confusion, an answered-by-brief question, an unresponsive soldier, or a failed steer.
 - `capo-provisioning` - load before creating, seeding, validating, launching, handing backlog to, recovering, pushing inherited local material into, or retiring a capo home, and before editing `data/capos.md`.
-- `decision-hold-lifecycle` - load before treating an investigation or visual review as complete, before ending a visual review that exposed a decision, and when recording or routing the boss's answer.
+- `decision-hold-lifecycle` - load before treating an investigation or visual review as complete, before ending a visual review that exposed a decision, before waiting on a Lavish review's feedback, and when recording or routing the boss's answer.
 - `consigliere-coding-guidelines` - load before changing consigliere's shared, tracked material, as defined by section 1's list, whether editing directly or briefing a soldier for a consigliere-repo task.
 
 ## 14. Upstream review
