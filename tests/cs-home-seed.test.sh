@@ -240,4 +240,16 @@ rm "$CAPO/config/activation"
 printf 'always\n' > "$CAPO/config/activation"
 pass "sweep preserves a dangling config/activation symlink"
 
+mv "$CAPO/config" "$TMP/capo-config"
+mkdir "$TMP/external-config"
+ln -s "$TMP/external-config" "$CAPO/config"
+out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "config-symlink sweep failed: $out"
+[ -L "$CAPO/config" ] || fail "sweep must preserve a symlinked config directory"
+assert_absent "$TMP/external-config/activation" "sweep must not create activation through a symlinked config directory"
+assert_contains "$out" "CAPO_SYNC: capo alpha-capo: skipped: unsafe config/ for activation" \
+  "a symlinked config directory must be reported as unsafe"
+rm "$CAPO/config"
+mv "$TMP/capo-config" "$CAPO/config"
+pass "sweep rejects a symlinked config directory"
+
 pass "cs-home-seed provisioning, rollback, and sweep behavior"

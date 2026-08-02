@@ -857,11 +857,11 @@ sweep_ff_home() {  # <id> <home>  - detached-HEAD FF-only advance; CAPO_SYNC lin
 sweep_activation_home() {  # <id> <home>  - CAPO_SYNC line only when it acts
   local id=$1 home=$2
   local activation="$home/config/activation"
-  [ ! -e "$activation" ] && [ ! -L "$activation" ] || return 0
-  mkdir -p "$home/config" 2>/dev/null || {
-    echo "CAPO_SYNC: capo $id: skipped: cannot create config/ for activation"
+  _cs_inherit_dir_safe "$home/config" || {
+    echo "CAPO_SYNC: capo $id: skipped: unsafe config/ for activation"
     return 0
   }
+  [ ! -e "$activation" ] && [ ! -L "$activation" ] || return 0
   if (set -C; printf 'always\n' > "$activation") 2>/dev/null; then
     echo "CAPO_SYNC: capo $id: activation set to always (was unset)"
   elif [ -e "$activation" ] || [ -L "$activation" ]; then
