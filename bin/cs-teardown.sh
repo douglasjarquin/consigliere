@@ -289,6 +289,47 @@ quiesce_pane() {
   return 0
 }
 
+# --- confirmed-gone gate (never erase the records of a surviving pane) ------
+
+# The durable records are the only thing tying consigliere to a running soldier.
+# Erase them while the pane is still alive and that soldier is stranded: no
+# status, no metadata, no supervision, and nothing left pointing at it.
+#
+# `pane close` cannot answer this. Its status is discarded by every caller here,
+# and a close that succeeded, a close that was refused, and a close that never
+# reached the server all look identical from the exit code. So removal is gated
+# on a positive structured proof of absence from herdr instead
+# (cs_herdr_pane_presence: only a pane_not_found body counts as dead; present
+# and unknown both refuse). Bounded, because close is asynchronous - herdr may
+# still be tearing the pane down when it returns.
+PANE_PRESENCE_STATE=""
+confirm_pane_gone() { # -> 0 proven gone, 1 not proven
+  local waited=0
+  # No recorded pane means there is nothing that could be stranded.
+  [ -n "$PANE" ] || return 0
+  while :; do
+    PANE_PRESENCE_STATE=$(cs_herdr_pane_presence "$PANE")
+    [ "$PANE_PRESENCE_STATE" = dead ] && return 0
+    [ "$waited" -ge 30 ] && return 1
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+}
+
+# Refuse loudly and retryably. Called before anything irreversible, so the
+# isolated copy, the task branch, every durable record, and the endpoint are all
+# still intact for a plain rerun.
+require_pane_gone() { # <what-is-being-retained>
+  confirm_pane_gone && return 0
+  echo "REFUSED: cannot confirm pane $PANE is gone - herdr reports '${PANE_PRESENCE_STATE:-unknown}'." >&2
+  case "$PANE_PRESENCE_STATE" in
+    present) echo "That pane is still alive. Closing it was refused or has not taken effect; erasing $1 now would strand a running soldier." >&2 ;;
+    *)       echo "herdr could not answer, so absence is unproven; an unreachable server is not evidence the soldier is gone." >&2 ;;
+  esac
+  echo "Nothing was removed. Rerun teardown once the pane is confirmed gone, or use --force after explicit discard approval." >&2
+  return 1
+}
+
 # --- the fail-closed safety check -------------------------------------------
 
 validate_worktree_teardown_safety() {
@@ -443,6 +484,7 @@ if [ "$KIND" = capo ]; then
     done
   fi
   [ -n "$PANE" ] && cs_herdr_pane_close "$PANE" >/dev/null 2>&1 || true
+  [ "$FORCE" = "--force" ] || require_pane_gone "capo $ID's home and records" || exit 1
   [ -n "$WS" ] && cs_herdr workspace close "$WS" >/dev/null 2>&1 || true
   # The capo home is a plain detached worktree of the consigliere repo.
   git -C "$CS_ROOT" worktree remove --force "$HOME_PATH" 2>/dev/null \
@@ -495,6 +537,10 @@ fi
 # and may be dirty, so their remove is forced by design once the report gate
 # above has passed; a ship remove is forced only under --force.
 [ -n "$PANE" ] && cs_herdr_pane_close "$PANE" >/dev/null 2>&1 || true
+
+# Prove the pane is gone BEFORE the first irreversible step, so a refusal leaves
+# the worktree, the branch, and every durable record intact for a plain rerun.
+[ "$FORCE" = "--force" ] || require_pane_gone "task $ID's records" || exit 1
 
 BRANCH=""
 if [ -n "$WT" ] && [ -d "$WT" ]; then

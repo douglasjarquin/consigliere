@@ -26,6 +26,22 @@ case "$1 ${2:-}" in
   "pane close")
     [ -n "${CS_TEST_QUIESCE_CLEAN_FILE:-}" ] && rm -f "$CS_TEST_QUIESCE_CLEAN_FILE"
     echo '{}' ;;
+  # Presence is answered from the response BODY, and herdr puts the error body
+  # on stderr with a non-zero exit (verified 0.7.5/protocol 17), so these arms
+  # reproduce the real stream and status, not a convenient stdout stand-in.
+  "pane get")
+    case "${CS_TEST_PANE_PRESENCE:-dead}" in
+      present)
+        printf '{"result":{"pane":{"pane_id":"%s"}}}\n' "$3" ;;
+      other-error)
+        echo '{"error":{"code":"internal_error","message":"boom"}}' >&2; exit 1 ;;
+      unparseable)
+        echo 'Error: Os { code: 2, kind: NotFound, message: "No such file or directory" }' >&2; exit 1 ;;
+      no-echo)
+        echo '{"result":{"pane":{}}}' ;;
+      *)
+        printf '{"error":{"code":"pane_not_found","message":"pane %s not found"}}\n' "$3" >&2; exit 1 ;;
+    esac ;;
   *) echo '{}' ;;
 esac
 exit 0
@@ -177,5 +193,44 @@ out=$(CS_TEST_QUIESCE_CLEAN_FILE="$TMP/wt-q1/scratch.txt" "$BIN" q1 2>&1) \
 assert_contains "$out" "teardown q1 complete" "frozen worktree reads clean, teardown proceeds"
 assert_absent "$TMP/wt-q1" "worktree removed after quiesce-clean proof"
 pass "pane quiesce runs before the safety proof"
+
+# 9. Durable records are never erased for a pane that is not PROVEN gone.
+# `pane close` reports success for a close that was refused and for a close that
+# never reached the server, so only a structured pane_not_found may authorize
+# removal; "present" and every flavour of "cannot tell" must refuse with the
+# worktree, the branch, and every record intact so a rerun is a plain retry.
+# Control (g0): the identical clean fixture completes when the pane is confirmed
+# absent, pinning that the refusals below come from this gate and not from the
+# landed-work proofs.
+make_task g0 ship
+: > "$TMP/state/g0.status"
+out=$("$BIN" g0 2>&1) || fail "control: clean teardown must complete on a confirmed-gone pane: $out"
+assert_contains "$out" "teardown g0 complete" "control fixture completes on a confirmed-gone pane"
+assert_absent "$TMP/state/g0.meta" "control fixture cleaned its records"
+
+for presence in present other-error unparseable no-echo; do
+  id="g-$presence"
+  make_task "$id" ship
+  : > "$TMP/state/$id.status"
+  out=$(CS_TEST_PANE_PRESENCE="$presence" "$BIN" "$id" 2>&1) \
+    && fail "teardown must refuse when pane presence is '$presence'"
+  assert_contains "$out" "cannot confirm pane" "refusal names the unconfirmed pane ($presence)"
+  assert_present "$TMP/state/$id.meta" "meta retained ($presence)"
+  assert_present "$TMP/state/$id.status" "status retained ($presence)"
+  assert_present "$TMP/wt-$id" "worktree retained ($presence)"
+  git -C "$TMP/proj-$id" show-ref --verify --quiet "refs/heads/cs/$id" \
+    || fail "task branch must survive an unconfirmed-pane refusal ($presence)"
+done
+# A success body that does not echo the pane back is not an answer about THIS
+# pane, so it must refuse rather than read as absence.
+pass "records are retained unless the pane is proven gone"
+
+# --force carries the boss's explicit discard authority and bypasses the gate,
+# matching how every other proof in this script treats --force.
+make_task gf ship
+out=$(CS_TEST_PANE_PRESENCE=present "$BIN" gf --force 2>&1) \
+  || fail "--force must bypass the confirmed-gone gate: $out"
+assert_absent "$TMP/state/gf.meta" "--force clears records despite a live pane"
+pass "--force bypasses the confirmed-gone gate"
 
 pass "cs-teardown landed-work proofs"
