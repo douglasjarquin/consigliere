@@ -307,6 +307,13 @@ confirm_pane_gone() { # -> 0 proven gone, 1 not proven
   local waited=0
   # No recorded pane means there is nothing that could be stranded.
   [ -n "$PANE" ] || return 0
+  # Missing confirmation machinery is a refusal, not a skip. A gate that
+  # disappears silently when its helper is absent is worse than no gate: it
+  # reads as "proven gone" on exactly the broken installs that need it most.
+  if ! command -v cs_herdr_pane_presence >/dev/null 2>&1; then
+    PANE_PRESENCE_STATE="no-presence-helper"
+    return 1
+  fi
   while :; do
     PANE_PRESENCE_STATE=$(cs_herdr_pane_presence "$PANE")
     [ "$PANE_PRESENCE_STATE" = dead ] && return 0
