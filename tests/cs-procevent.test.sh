@@ -247,7 +247,11 @@ pe register fixture srcD -- "$TMP/fast.sh" "$TMP/payload-d" >/dev/null || fail "
 pe reconcile >/dev/null || fail "D: reconcile failed"
 wait_for 20 "D's result" test -f "$INBOX/srcD.1.result"
 wait_for 20 "D's adapter-driven retirement" bash -c "[ ! -e '$REG/srcD.source' ]"
-[ ! -e "$CLAIMS/srcD.claim" ] || fail "D: a retired terminal source must not keep its claim"
+# Retirement drops the registration and releases the claim as two steps inside
+# one lock hold (cs-procevent.sh), so an observer can catch the gap between
+# them. Wait for the whole postcondition rather than asserting the second half
+# the instant the first lands - that race made this fail only under load.
+wait_for 20 "D's claim release" bash -c "[ ! -e '$CLAIMS/srcD.claim' ]"
 assert_grep "procevent fixture srcD 1" "$QUEUE" "D: a terminal result is still published"
 
 OUT=$(pe reconcile) || fail "D: post-retirement reconcile failed"
