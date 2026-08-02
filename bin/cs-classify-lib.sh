@@ -162,10 +162,12 @@ status_is_paused_or_boss_held() {  # <status-line>
 # cannot represent "an earlier decision is still open after a later, unrelated
 # event": a subsequent done/paused/working line silently masks a still-open
 # needs-decision. status_open_decisions is the ONE authoritative statement of
-# the status-fold contract that fixes this - a needs-decision/needs-review/blocked line
-# OPENS a keyed decision, and only an explicit resolution or a verified
-# boss-held backlog transfer referencing that key CLOSES it; a later unrelated
-# terminal line never clears an open boss decision.
+# the status-fold contract that fixes this - a needs-decision/needs-review/blocked
+# line OPENS a keyed decision. An explicit resolution referencing that key
+# closes it. A verified boss-held backlog transfer may close needs-decision or
+# blocked, but never needs-review: the required pre-validation review cannot be
+# transferred away. A later unrelated terminal line never clears an open boss
+# decision.
 #
 # Decision key grammar (backward-compatible with the plain "<verb>: <note>"
 # format): an OPTIONAL "[key=<slug>]" token sits between the verb and the colon,
@@ -215,13 +217,29 @@ $set
 EOF
   printf '%s' "$out"
 }
+_cs_decision_verb() {  # <open-set> <key> -> verb, or empty when not open
+  local set=$1 key=$2 line record_key record_verb
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    IFS=$'\t' read -r record_key record_verb _ <<EOF
+$line
+EOF
+    if [ "$record_key" = "$key" ]; then
+      printf '%s' "$record_verb"
+      return 0
+    fi
+  done <<EOF
+$set
+EOF
+  return 1
+}
 # Fold the WHOLE status stream into the set of decisions still open. Prints one
 # TAB-separated "<key>\t<verb>\t<summary>" line per still-open decision, in
 # most-recently-opened-last order; prints nothing when none are open. Pure read
 # of the file. This is the durable open-set the fleet snapshot and any
 # point-in-time consumer must use instead of trusting the last status line.
 status_open_decisions() {  # <status-file>
-  local f=$1 line verb key note resolve held open='' stripped
+  local f=$1 line verb key note resolve held open='' stripped open_verb
   [ -f "$f" ] || return 0
   resolve=${CS_CLASSIFY_RESOLVE_VERB:-$CS_CLASSIFY_RESOLVE_VERB_DEFAULT}
   held=${CS_CLASSIFY_BOSS_HELD_VERB:-$CS_CLASSIFY_BOSS_HELD_VERB_DEFAULT}
@@ -237,9 +255,16 @@ status_open_decisions() {  # <status-file>
         [ -n "$open" ] && open="${open}"$'\n'
         open="${open}${key}"$'\t'"${verb}"$'\t'"${note}"$'\n'
         ;;
-      "$resolve"|"$held")
+      "$resolve")
         open=$(_cs_decision_drop "$open" "$key")
         [ -n "$open" ] && open="${open}"$'\n'
+        ;;
+      "$held")
+        open_verb=$(_cs_decision_verb "$open" "$key") || open_verb=''
+        if [ "$open_verb" != needs-review ]; then
+          open=$(_cs_decision_drop "$open" "$key")
+          [ -n "$open" ] && open="${open}"$'\n'
+        fi
         ;;
     esac
   done < "$f"

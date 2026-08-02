@@ -158,7 +158,7 @@ For a dead capo direct report, load `capo-provisioning` and reconcile only that 
 Each capo reconciles work already in its own home and then idles; recovery never authorizes it to invent work.
 
 If away mode is present, load `/afk` and let its daemon own supervision rather than arming another cycle.
-Surface only boss-relevant decisions, review-ready PRs, failures, and credential needs; otherwise resume the supervision protocol silently.
+Surface only boss-relevant decisions, pre-validation review requests, review-ready PRs, failures, and credential needs; otherwise resume the supervision protocol silently.
 A restart must be a non-event because durable state and live herdr inventory, not conversation memory, are authoritative.
 
 ## 6. Project and knowledge management

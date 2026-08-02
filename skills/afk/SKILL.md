@@ -146,9 +146,9 @@ shared `bin/cs-classify-lib.sh`, the same library the always-on watcher uses,
 so the two modes apply one identical policy and the daemon never duplicates
 the verb vocabulary.
 
-- `signal` with a terminal boss verb (`done:`, `needs-decision:`, `blocked:`,
-  `failed:`) -> escalate. A nonterminal progress verb never escalates merely
-  because its prose contains a legacy free-text token. Other signals -> self-handle.
+- `signal` with a terminal boss verb from `bin/cs-classify-lib.sh` -> escalate.
+  A nonterminal progress verb never escalates merely because its prose contains a legacy free-text token.
+  Other signals -> self-handle.
 - `signal` or `stale` for a declared `paused:` external wait -> self-handle
   and track the pause; if it stays declared and idle past
   `CS_PAUSE_RESURFACE_SECS` (default 3600), housekeeping sends one

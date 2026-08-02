@@ -555,7 +555,13 @@ if [ "$HAVE_RUN" = 1 ]; then
   # needs-review belongs here for the same reason - once a run exists for this
   # soldier, the review it was waiting on has already been acted on.
   case "$LOG_VERB" in
-    needs-decision|needs-review|blocked)
+    needs-review)
+      # Any attributed validation run proves the pre-validation review was
+      # acted on. The run may itself be parked at a later gate, but the earlier
+      # review request is still superseded.
+      RUN_DETAIL="$RUN_DETAIL${SEP}status-log superseded (validation run exists)"
+      ;;
+    needs-decision|blocked)
       if [ "$RUN_STATE" != parked ]; then
         if [ "$RUN_STATE" = working ]; then
           RUN_DETAIL="$RUN_DETAIL${SEP}status-log superseded by active run"
