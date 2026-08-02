@@ -30,7 +30,12 @@
 #   silent.
 # For ship tasks, the definition of done is shaped by the project's delivery
 # mode (data/projects.md via cs-project-mode.sh):
-#   no-mistakes  implement -> /no-mistakes pipeline -> PR -> boss merge (default)
+#   no-mistakes  implement -> needs-review: (consigliere reviews the commit and
+#                triggers validation) -> pipeline -> PR -> boss merge (default).
+#                The commit is reported as needs-review, never done: a keyed
+#                open state keeps an unreviewed commit visible, where done:
+#                read as finished and let a missed review idle a lane 56m on
+#                2026-08-02 (niceuptime-590).
 #   direct-PR    implement -> push + open PR via gh-axi (no pipeline) -> boss merge
 #   local-only   implement on branch, stop and report "ready in branch" (no
 #                push/PR); boss approves, consigliere merges to local main
@@ -333,8 +338,11 @@ EOF
     IFS= read -r -d '' DOD <<EOF || true
 # Definition of done
 The task is complete only when committed on your branch.
-When you believe it is complete, append \`done: {summary}\` to the status file and stop.
-Consigliere will then instruct you to run \$no-mistakes to validate and ship a PR.
+When you believe it is complete, append \`needs-review: {summary of what you built}\` to the status file and stop.
+Use \`needs-review:\` here, NOT \`done:\` - this mode adds that one state to the list in rule 4.
+Consigliere reviews your commit against the task, then instructs you to run \$no-mistakes to validate and ship a PR.
+\`needs-review:\` stays open above you until consigliere acts on it, so an unreviewed commit cannot be mistaken for finished work; \`done:\` would read as complete and could sit unnoticed.
+When consigliere tells you to validate, append \`resolved: {how it was reviewed or unblocked}\` (carrying the same \`[key=<slug>]\` if you opened one) before you start the run.
 
 You drive no-mistakes by responding to its gates, not by implementing fixes.
 Follow the guidance no-mistakes itself provides for the mechanics: it loads when you invoke \$no-mistakes, and \`no-mistakes axi run --help\` plus the \`help\` lines in each \`axi\` response are authoritative and version-matched to the installed binary.
@@ -346,6 +354,7 @@ Two consigliere-specific rules layer on top of that guidance:
 - Avoid \`--yes\`: the boss, not you, owns the ask-user decisions it would silently auto-resolve.
 
 After \$no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), append \`done: PR {url} checks green\` and stop. You are finished.
+In this mode \`done:\` means exactly that green-PR state and nothing else.
 EOF
     ;;
 esac

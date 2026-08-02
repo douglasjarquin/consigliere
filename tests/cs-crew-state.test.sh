@@ -856,6 +856,28 @@ test_no_run_idle_pane_uses_log() {
   pass "no run + idle pane uses the status-log verb"
 }
 
+# (g'') a no-mistakes soldier that committed and is waiting for consigliere to
+# review it reports needs-review, which must read as PARKED, never done. This is
+# the whole point of the verb: `done:` at the commit was indistinguishable from
+# `done: PR ... checks green`, so a missed review looked like finished work and
+# idled niceuptime-590 for 56m on 2026-08-02.
+test_no_run_idle_pane_needs_review_is_parked() {
+  reset_fakes
+  local d; d=$(new_case needs-review)
+  make_repo_on_branch "$d/wt" cs/feat-review
+  make_fakebin "$d" >/dev/null
+  cs_write_meta "$d/state/feat-review.meta" "pane=p-feat-review" "workspace=w-feat-review" "worktree=$d/wt" "kind=ship"
+  printf 'needs-review: retired the legacy flag; awaiting review before validation\n' > "$d/state/feat-review.status"
+  CS_FAKE_AXI_STATUS=""
+  CS_FAKE_HERDR_BUSY=0
+  local out; out=$(run_crew_state "$d" feat-review)
+  assert_contains "$out" "state: parked" "needs-review log -> parked, not done"
+  case "$out" in
+    *"state: done"*) fail "needs-review must never reconcile to done" ;;
+  esac
+  pass "a committed-but-unreviewed lane reads as parked, not done"
+}
+
 test_no_run_idle_pane_uses_keyed_log() {
   reset_fakes
   local d; d=$(new_case keyed-idle)
@@ -1284,6 +1306,7 @@ test_no_run_unknown_agent_status_uses_pane_capture
 test_no_run_idle_agent_status_corroborated_by_busy_pane
 test_no_run_idle_agent_status_and_idle_pane_stays_idle
 test_no_run_idle_pane_uses_log
+test_no_run_idle_pane_needs_review_is_parked
 test_no_run_idle_pane_uses_keyed_log
 test_no_run_idle_pane_paused
 test_no_run_idle_pane_custom_paused_verb
