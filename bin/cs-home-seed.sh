@@ -856,13 +856,16 @@ sweep_ff_home() {  # <id> <home>  - detached-HEAD FF-only advance; CAPO_SYNC lin
 # managed config, is a deliberate choice this sweep must not overwrite.
 sweep_activation_home() {  # <id> <home>  - CAPO_SYNC line only when it acts
   local id=$1 home=$2
-  [ ! -e "$home/config/activation" ] || return 0
+  local activation="$home/config/activation"
+  [ ! -e "$activation" ] && [ ! -L "$activation" ] || return 0
   mkdir -p "$home/config" 2>/dev/null || {
     echo "CAPO_SYNC: capo $id: skipped: cannot create config/ for activation"
     return 0
   }
-  if printf 'always\n' > "$home/config/activation" 2>/dev/null; then
+  if (set -C; printf 'always\n' > "$activation") 2>/dev/null; then
     echo "CAPO_SYNC: capo $id: activation set to always (was unset)"
+  elif [ -e "$activation" ] || [ -L "$activation" ]; then
+    return 0
   else
     echo "CAPO_SYNC: capo $id: skipped: cannot write config/activation"
   fi

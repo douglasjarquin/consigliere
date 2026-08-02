@@ -230,4 +230,14 @@ out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "deli
 printf 'always\n' > "$CAPO/config/activation"
 pass "sweep never overwrites a present config/activation"
 
+rm -f "$CAPO/config/activation" "$TMP/external-activation"
+ln -s "$TMP/external-activation" "$CAPO/config/activation"
+out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "dangling-symlink sweep failed: $out"
+[ -L "$CAPO/config/activation" ] || fail "sweep must preserve a dangling activation symlink"
+assert_absent "$TMP/external-activation" "sweep must not create a dangling activation symlink target"
+[ -z "$out" ] || fail "leaving a dangling activation symlink alone must be silent, got: $out"
+rm "$CAPO/config/activation"
+printf 'always\n' > "$CAPO/config/activation"
+pass "sweep preserves a dangling config/activation symlink"
+
 pass "cs-home-seed provisioning, rollback, and sweep behavior"
