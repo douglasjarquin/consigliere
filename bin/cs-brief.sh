@@ -30,9 +30,7 @@
 #   silent.
 # For ship tasks, the definition of done is shaped by the project's delivery
 # mode (data/projects.md via cs-project-mode.sh):
-#   no-mistakes  implement -> the SOLDIER starts the pipeline itself -> PR ->
-#                boss merge (default). The soldier never stops at the
-#                implementation commit to wait for a supervisor trigger.
+#   no-mistakes  implement -> /no-mistakes pipeline -> PR -> boss merge (default)
 #   direct-PR    implement -> push + open PR via gh-axi (no pipeline) -> boss merge
 #   local-only   implement on branch, stop and report "ready in branch" (no
 #                push/PR); boss approves, consigliere merges to local main
@@ -334,14 +332,12 @@ EOF
     RULE1='1. Never push to the default branch. Never merge a PR.'
     IFS= read -r -d '' DOD <<EOF || true
 # Definition of done
-The task is complete only when committed on your branch AND validated through the no-mistakes pipeline to a green PR.
-
-When it is implemented and committed, START VALIDATION YOURSELF in the same turn: invoke the no-mistakes skill (\`\$no-mistakes\` on codex, \`/no-mistakes\` on claude) and drive it to its outcome.
-Do NOT stop at the commit, and do NOT wait for consigliere to tell you to validate - nobody is coming to trigger it.
-Append \`working: implementation committed, starting validation\` as you begin, so your supervisor can see the transition.
+The task is complete only when committed on your branch.
+When you believe it is complete, append \`done: {summary}\` to the status file and stop.
+Consigliere will then instruct you to run \$no-mistakes to validate and ship a PR.
 
 You drive no-mistakes by responding to its gates, not by implementing fixes.
-Follow the guidance no-mistakes itself provides for the mechanics: it loads when you invoke that skill, and \`no-mistakes axi run --help\` plus the \`help\` lines in each \`axi\` response are authoritative and version-matched to the installed binary.
+Follow the guidance no-mistakes itself provides for the mechanics: it loads when you invoke \$no-mistakes, and \`no-mistakes axi run --help\` plus the \`help\` lines in each \`axi\` response are authoritative and version-matched to the installed binary.
 Do not hand-edit, commit, or fix findings yourself while a run is active - the pipeline applies every fix.
 
 Two consigliere-specific rules layer on top of that guidance:
@@ -349,8 +345,7 @@ Two consigliere-specific rules layer on top of that guidance:
   When the decision comes back, feed it to the gate with \`no-mistakes axi respond\` and let the pipeline apply it - do not route the question to "the user" or implement the fix yourself.
 - Avoid \`--yes\`: the boss, not you, owns the ask-user decisions it would silently auto-resolve.
 
-After no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), append \`done: PR {url} checks green\` and stop. You are finished.
-In this mode \`done:\` means exactly that green-PR state and nothing else; never report \`done:\` at the implementation commit.
+After \$no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), append \`done: PR {url} checks green\` and stop. You are finished.
 EOF
     ;;
 esac

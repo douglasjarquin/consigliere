@@ -30,13 +30,6 @@ assert_grep 'blocked: launched outside the isolated task worktree' "$B" "isolati
 assert_grep 'no-mistakes doctor' "$B" "no-mistakes setup step present"
 assert_grep 'Herdr lifecycle declaration - NOT ENABLED' "$B" "unguarded herdr declaration present"
 assert_grep 'checks green' "$B" "no-mistakes definition of done"
-# The soldier starts validation itself. The old scaffold stopped it at the
-# implementation commit to wait for a trigger consigliere had to remember to
-# send; a missed trigger idled a lane 56m on 2026-08-02 (niceuptime-590).
-assert_grep 'START VALIDATION YOURSELF' "$B" "no-mistakes brief self-starts validation"
-assert_grep 'do NOT wait for consigliere to tell you to validate' "$B" "no-mistakes brief forbids waiting for a trigger"
-assert_no_grep 'Consigliere will then instruct you' "$B" "no-mistakes brief no longer defers the pipeline start"
-assert_grep 'at the implementation commit' "$B" "no-mistakes brief reserves done: for the green PR"
 pass "ship brief (no-mistakes) scaffold"
 
 # refuse overwrite
