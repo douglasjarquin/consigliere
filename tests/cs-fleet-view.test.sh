@@ -262,6 +262,72 @@ test_capo_bound_disclosed() {
   pass "the capo registry read is bounded and discloses truncation"
 }
 
+# --- registry read fails closed -------------------------------------------------
+
+test_registry_reads_fail_closed() {
+  local reg="$HOME_DIR/data/capos.md" saved
+  saved=$(cat "$reg")
+
+  # A registry whose last line has no trailing newline must keep its last capo.
+  # Dropping it made a registered capo vanish from the review while the same
+  # snapshot still reported truncated:false - a silent, unattributable loss.
+  printf -- '- alpha (home: %s; scope: infra work)\n- gamma (home: %s; scope: lost)' \
+    "$TMP_ROOT/capoA" "$TMP_ROOT/capoC" > "$reg"
+  run_view --json
+  expect_code 0 "$RC" "no-trailing-newline registry view"
+  printf '%s' "$OUT" | jq -e '
+    (.capos.records | length) == 2
+    and ((.capos.records | map(.id)) == ["alpha","gamma"])
+    and (.capos.truncated | not)
+  ' >/dev/null || fail "the last capo was dropped when the registry had no trailing newline: $OUT"
+
+  # A row that does not parse is rendered as a visible unknown, never skipped.
+  printf -- '- alpha (home: %s; scope: infra work)\n- wrecked - no structured suffix\n' \
+    "$TMP_ROOT/capoA" > "$reg"
+  run_view --json
+  printf '%s' "$OUT" | jq -e '
+    (.capos.records | length) == 2
+    and (.capos.records[1] | .id == null and .state == "unknown"
+         and (.reason | contains("malformed registry entry")))
+  ' >/dev/null || fail "a malformed capo row was dropped instead of surfaced: $OUT"
+  run_view
+  assert_contains "$OUT" "malformed registry entry" "the markdown review must show the malformed row"
+
+  # A symlinked registry is refused, never followed.
+  printf '%s\n' "$saved" > "$TMP_ROOT/capos-target.md"
+  rm -f "$reg"
+  ln -s "$TMP_ROOT/capos-target.md" "$reg"
+  run_view --json
+  expect_code 0 "$RC" "symlinked registry view"
+  printf '%s' "$OUT" | jq -e '
+    .capos.present == true and (.capos.records | length) == 0
+    and (.capos.error | contains("symlink"))
+  ' >/dev/null || fail "a symlinked registry was followed or silently reported zero: $OUT"
+  rm -f "$reg"
+  printf '%s\n' "$saved" > "$reg"
+
+  # An unreadable registry must never read as "this fleet has no capos".
+  if [ "$(id -u)" = 0 ]; then
+    pass "unreadable-registry check skipped: running as root, where the mode bits do not apply"
+  else
+    chmod 000 "$reg"
+    run_view --json
+    expect_code 0 "$RC" "unreadable registry view"
+    printf '%s' "$OUT" | jq -e '
+      .capos.present == true and (.capos.records | length) == 0
+      and (.capos.error | contains("unreadable"))
+    ' >/dev/null || fail "an unreadable registry silently reported zero capos: $OUT"
+    run_view
+    assert_contains "$OUT" "UNREADABLE capo registry" "the markdown review must say the registry could not be read"
+    assert_not_contains "$OUT" "Registry present, no registered capos." \
+      "an unreadable registry must never render as an empty fleet"
+    chmod 644 "$reg"
+  fi
+
+  printf '%s\n' "$saved" > "$reg"
+  pass "the capo registry read fails closed: EOF-safe, malformed rows surfaced, symlink and unreadable refused"
+}
+
 test_usage_errors() {
   run_view --bogus
   expect_code 2 "$RC" "unknown flag"
@@ -274,4 +340,5 @@ test_usage_errors() {
 test_markdown_review
 test_json_snapshot
 test_capo_bound_disclosed
+test_registry_reads_fail_closed
 test_usage_errors

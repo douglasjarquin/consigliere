@@ -91,7 +91,7 @@ data/                personal fleet records; LOCAL, gitignored as a whole
   projects.md        thin fleet navigation registry (section 6)
   boards.md          per-project GitHub Projects board mapping for the contracts and casino skills (section 7); parsed by bin/cs-board.sh
   sweeps.md          standing board sweeps that outlive the session that started one; armed, converged, and retired only by bin/cs-board-watch.sh
-  capos.md           capo routing table; maintained by cs-home-seed.sh (section 6)
+  capos.md           capo routing table; maintained by cs-home-seed.sh (section 6); parsed by bin/cs-capo-registry-lib.sh
   upstream-review.md last-reviewed firstmate SHA plus dated review entries (section 14)
   <id>/brief.md      per-task soldier brief, or per-capo charter brief when kind=capo
   <id>/report.md     scout task deliverable, written by the soldier; survives teardown

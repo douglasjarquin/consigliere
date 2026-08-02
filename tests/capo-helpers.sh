@@ -41,6 +41,38 @@ cs_capo_fixture_project() {
   git clone -q "$sandbox/$name-remote.git" "$home/projects/$name"
 }
 
+# cs_capo_registry_line <id> <summary> <home> <scope> [projects] [added] - one
+# canonical data/capos.md row, exactly as bin/cs-home-seed.sh writes it.
+cs_capo_registry_line() {
+  printf -- '- %s - %s (home: %s; scope: %s; projects: %s; added %s)\n' \
+    "$1" "$2" "$3" "$4" "${5:-}" "${6:-2026-01-01}"
+}
+
+# cs_capo_registry_write <file> [--no-final-newline] <line>... - write a capo
+# routing table fixture, each <line> verbatim on its own line.
+# --no-final-newline leaves the LAST line unterminated. That is not an exotic
+# shape: any hand edit can produce it, and it is what used to make every
+# `while read` consumer silently drop the last registered capo.
+cs_capo_registry_write() {
+  local file=$1 final_newline=1 line i=0 total
+  shift
+  if [ "${1:-}" = --no-final-newline ]; then
+    final_newline=0
+    shift
+  fi
+  total=$#
+  mkdir -p "$(dirname "$file")"
+  : > "$file"
+  for line in "$@"; do
+    i=$((i + 1))
+    if [ "$i" -eq "$total" ] && [ "$final_newline" -eq 0 ]; then
+      printf '%s' "$line" >> "$file"
+    else
+      printf '%s\n' "$line" >> "$file"
+    fi
+  done
+}
+
 # cs_capo_fake_herdr <fakebin> - a fake herdr for capo send/liveness paths.
 # Behavior knobs (env):
 #   FAKE_PANE_EXISTS  0 makes `pane get` fail (pane gone); default 1
@@ -59,7 +91,11 @@ case "${1:-} ${2:-}" in
   "status --json") echo '{"server":{"running":true,"protocol":16,"socket":""}}' ;;
   "pane get")
     [ "${FAKE_PANE_EXISTS:-1}" = 1 ] || exit 1
-    echo '{"result":{"pane":{}}}' ;;
+    # Echo the requested pane id back, exactly as herdr 0.7.5 does. The
+    # presence classifier (cs_herdr_pane_presence) reads a success body that
+    # does NOT echo the id as `unknown`, so a body-less stand-in would make any
+    # teardown in a capo suite refuse for the wrong reason.
+    printf '{"result":{"pane":{"pane_id":"%s"}}}\n' "${3:-}" ;;
   "agent get")
     [ "${FAKE_AGENT_GET_FAIL:-0}" = 1 ] && exit 1
     if [ -n "${FAKE_AGENT:-}" ]; then

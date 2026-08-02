@@ -233,4 +233,30 @@ out=$(CS_TEST_PANE_PRESENCE=present "$BIN" gf --force 2>&1) \
 assert_absent "$TMP/state/gf.meta" "--force clears records despite a live pane"
 pass "--force bypasses the confirmed-gone gate"
 
+# 10. Capo retirement removes exactly ONE route. A capo id may contain `.`, and
+# the old `grep -vE "^- $id( |$)"` interpolated it into a pattern, so retiring
+# `a.b` also matched - and DELETED - an unrelated `axb` route, silently
+# unrouting a live capo. The registry here also ends without a trailing
+# newline, the shape an id-less rewrite used to drop.
+CAPO_ROOT="$TMP/capo-root"
+cs_git_init_commit "$CAPO_ROOT"
+mkdir -p "$TMP/capo-ab" "$TMP/capo-axb"
+printf 'a.b\n' > "$TMP/capo-ab/.cs-capo-home"
+printf 'axb\n' > "$TMP/capo-axb/.cs-capo-home"
+{
+  printf -- '- a.b - Dotted domain. (home: %s; scope: dotted work; projects: ; added 2026-01-01)\n' "$TMP/capo-ab"
+  printf -- '- axb - Near miss domain. (home: %s; scope: near-miss work; projects: ; added 2026-01-01)' "$TMP/capo-axb"
+} > "$TMP/data/capos.md"
+cs_write_meta "$TMP/state/a.b.meta" \
+  "workspace=w7" "pane=w7:p7" "kind=capo" "mode=capo" "home=$TMP/capo-ab"
+out=$(CS_ROOT_OVERRIDE="$CAPO_ROOT" "$BIN" a.b 2>&1) || fail "capo retirement failed: $out"
+assert_contains "$out" "teardown a.b complete" "capo retirement reports completion"
+assert_absent "$TMP/capo-ab" "the retired capo home is removed"
+assert_present "$TMP/capo-axb" "an unrelated capo home must survive a near-miss id"
+assert_no_grep '- a.b ' "$TMP/data/capos.md" "the retired capo's route is removed"
+assert_grep '- axb - Near miss domain.' "$TMP/data/capos.md" \
+  "retiring a dotted id must not delete the near-miss route"
+assert_absent "$TMP/state/a.b.meta" "capo records cleared after retirement"
+pass "retiring a dotted capo id leaves the near-miss route intact"
+
 pass "cs-teardown landed-work proofs"

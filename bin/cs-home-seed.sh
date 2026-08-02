@@ -16,6 +16,8 @@
 #       read-only plus config/backlog-backend) is seeded; and the routing
 #       entry is written to data/capos.md as
 #         - <id> - <summary> (home: <path>; scope: <scope>; projects: <csv>; added <date>)
+#       This script writes that line; bin/cs-capo-registry-lib.sh is the single
+#       owner of reading it back, here and in every other consumer.
 #       Pass --no-projects for a project-less domain whose subject is the
 #       consigliere repo itself; it is mutually exclusive with a project list,
 #       and omitting both fails loudly. A project-less seed refuses a home
@@ -27,8 +29,10 @@
 #       inheritance, or registry failure, generated briefs, the new home
 #       worktree, new project clones, and registry edits are all rolled back.
 #   cs-home-seed.sh validate
-#       Refuse duplicate ids, duplicate homes, and nested or overlapping homes
-#       in data/capos.md.
+#       Refuse duplicate ids, duplicate homes, nested or overlapping homes, and
+#       any malformed entry in data/capos.md. A row that does not parse is
+#       refused rather than skipped: a silently dropped row is a binding the
+#       duplicate-home and rebind checks never see.
 #   cs-home-seed.sh --sweep
 #       The locked bootstrap sweep (bin/cs-bootstrap.sh):
 #       1. Fast-forward every registered capo home to this repo's current
@@ -75,6 +79,8 @@ case "${1:-}" in
   -h|--help|'') usage; exit 0 ;;
 esac
 
+# shellcheck source=bin/cs-capo-registry-lib.sh
+. "$SCRIPT_DIR/cs-capo-registry-lib.sh"
 # shellcheck source=bin/cs-inherit-lib.sh
 . "$SCRIPT_DIR/cs-inherit-lib.sh"
 # shellcheck source=bin/cs-herdr-lib.sh
@@ -175,8 +181,28 @@ home_is_worktree_of_root() {  # <home>
 
 # --- registry helpers ---------------------------------------------------------
 
-registry_home_for_line() {
-  sed -n 's/.*(home:[[:space:]]*\([^;)]*\);.*/\1/p' | sed 's/[[:space:]]*$//'
+# Every registry read goes through bin/cs-capo-registry-lib.sh; this is the one
+# place that turns "no registry yet" (a normal pre-first-seed state) into an
+# empty record set and anything else unreadable into a refusal.
+#
+# The records land in a GLOBAL rather than on stdout because the availability
+# reason must be readable by the caller: a $(...) capture would run the check in
+# a subshell and lose it.
+REGISTRY_RECORDS=
+REGISTRY_RECORDS_ERROR=
+load_registry_records() {  # sets REGISTRY_RECORDS; rc=1 sets REGISTRY_RECORDS_ERROR
+  REGISTRY_RECORDS=
+  REGISTRY_RECORDS_ERROR=
+  cs_capo_registry_exists "$REG" || return 0
+  if ! cs_capo_registry_available "$REG"; then
+    REGISTRY_RECORDS_ERROR=$CS_CAPO_REGISTRY_ERROR
+    return 1
+  fi
+  if ! REGISTRY_RECORDS=$(cs_capo_registry_records "$REG"); then
+    REGISTRY_RECORDS_ERROR="capo registry could not be read: $REG"
+    return 1
+  fi
+  return 0
 }
 
 normalize_registry_text() {
@@ -231,32 +257,24 @@ validate_registry_home_text() {
   esac
 }
 
-registry_field_for_id() {  # <id> <field:home> -> value or rc=1
-  local id=$1 line value
-  [ -f "$REG" ] || return 1
-  line=$(grep -E "^- $id( |$)" "$REG" | tail -1 || true)
-  [ -n "$line" ] || return 1
-  value=$(printf '%s\n' "$line" | registry_home_for_line)
-  [ -n "$value" ] || return 1
-  printf '%s\n' "$value"
-}
-
 validate_registry() {
-  local tmp line id registered_home home_key duplicate_homes duplicate_ids overlaps
+  local tmp status id registered_home scope raw home_key
+  local duplicate_homes duplicate_ids overlaps
+  load_registry_records || {
+    echo "error: $REGISTRY_RECORDS_ERROR" >&2
+    return 1
+  }
   tmp=$(mktemp "${TMPDIR:-/tmp}/cs-capos.XXXXXX")
-  if [ -f "$REG" ]; then
-    while IFS= read -r line; do
-      case "$line" in
-        "- "*)
-          id=${line#- }
-          id=${id%% *}
-          registered_home=$(printf '%s\n' "$line" | registry_home_for_line)
-          [ -n "$registered_home" ] || continue
-          home_key=$(resolved_path "$registered_home")
-          printf '%s\t%s\n' "$home_key" "$id" >> "$tmp"
-          ;;
-      esac
-    done < "$REG"
+  if [ -n "$REGISTRY_RECORDS" ]; then
+    while IFS=$'\t' read -r status id registered_home scope raw; do
+      if [ "$status" != ok ]; then
+        rm -f "$tmp"
+        echo "error: malformed capo registry entry in $REG: $raw" >&2
+        return 1
+      fi
+      home_key=$(resolved_path "$registered_home")
+      printf '%s\t%s\n' "$home_key" "$id" >> "$tmp"
+    done <<< "$REGISTRY_RECORDS"
   fi
   duplicate_homes=$(awk -F '\t' '
     {
@@ -315,7 +333,8 @@ validate_registry() {
 }
 
 validate_home_assignment() {  # <id> <home>
-  local id=$1 home=$2 marker_id target line registered_id registered_home registered_key
+  local id=$1 home=$2 marker_id target
+  local status registered_id registered_home scope raw registered_key
   if [ -f "$home/$MARKER" ]; then
     marker_id=$(cat "$home/$MARKER" 2>/dev/null || true)
     if [ "$marker_id" != "$id" ]; then
@@ -323,27 +342,29 @@ validate_home_assignment() {  # <id> <home>
       return 1
     fi
   fi
-  [ -f "$REG" ] || return 0
+  load_registry_records || {
+    echo "error: $REGISTRY_RECORDS_ERROR" >&2
+    return 1
+  }
+  [ -n "$REGISTRY_RECORDS" ] || return 0
   target=$(resolved_path "$home")
-  while IFS= read -r line; do
-    case "$line" in
-      "- "*)
-        registered_id=${line#- }
-        registered_id=${registered_id%% *}
-        registered_home=$(printf '%s\n' "$line" | registry_home_for_line)
-        [ -n "$registered_home" ] || continue
-        registered_key=$(resolved_path "$registered_home")
-        if [ "$registered_id" = "$id" ] && [ "$registered_key" != "$target" ]; then
-          echo "error: capo id $id is already registered to home $registered_key; retire it before assigning $target" >&2
-          return 1
-        fi
-        if [ "$registered_key" = "$target" ] && [ "$registered_id" != "$id" ]; then
-          echo "error: capo home $target is already registered to $registered_id" >&2
-          return 1
-        fi
-        ;;
-    esac
-  done < "$REG"
+  # The here-string keeps this loop in the current shell, so a refusal below
+  # returns from the function instead of dying in a subshell.
+  while IFS=$'\t' read -r status registered_id registered_home scope raw; do
+    if [ "$status" != ok ]; then
+      echo "error: malformed capo registry entry in $REG: $raw" >&2
+      return 1
+    fi
+    registered_key=$(resolved_path "$registered_home")
+    if [ "$registered_id" = "$id" ] && [ "$registered_key" != "$target" ]; then
+      echo "error: capo id $id is already registered to home $registered_key; retire it before assigning $target" >&2
+      return 1
+    fi
+    if [ "$registered_key" = "$target" ] && [ "$registered_id" != "$id" ]; then
+      echo "error: capo home $target is already registered to $registered_id" >&2
+      return 1
+    fi
+  done <<< "$REGISTRY_RECORDS"
   return 0
 }
 
@@ -356,16 +377,27 @@ join_projects() {
 }
 
 write_registry() {  # <id> <home> <projects_csv> <brief>
-  local id=$1 home=$2 projects_csv=$3 brief=$4 scope summary tmp today
+  local id=$1 home=$2 projects_csv=$3 brief=$4 scope summary tmp today line
+  cs_capo_registry_valid_id "$id" || {
+    echo "error: capo id must be [A-Za-z0-9._-]+: '$id'" >&2
+    return 1
+  }
   mkdir -p "$DATA"
   scope=$(registry_scope_for_brief "$brief")
   summary=$(registry_summary_for_brief "$brief")
   today=$(date +%F)
   tmp="$REG.tmp.$$"
-  if [ -f "$REG" ]; then
-    grep -vE "^- $id( |$)" "$REG" > "$tmp" || true
-  else
-    : > "$tmp"
+  : > "$tmp"
+  # Drop this capo's own rows by LITERAL id match. A regex built from the id
+  # would let a dotted id such as `a.b` delete an unrelated `axb` row, and an
+  # id-less rewrite would drop a final line that has no trailing newline.
+  if [ -f "$REG" ] && [ ! -L "$REG" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      if cs_capo_registry_line_is_id "$line" "$id"; then
+        continue
+      fi
+      printf '%s\n' "$line" >> "$tmp"
+    done < "$REG"
   fi
   printf -- '- %s - %s (home: %s; scope: %s; projects: %s; added %s)\n' \
     "$id" "$summary" "$home" "$scope" "$projects_csv" "$today" >> "$tmp"
@@ -773,22 +805,6 @@ seed_home() {
 
 # --- bootstrap sweep -----------------------------------------------------------
 
-sweep_registered_ids_homes() {  # -> "id\thome" per registry line
-  local line id registered_home
-  [ -f "$REG" ] || return 0
-  while IFS= read -r line; do
-    case "$line" in
-      "- "*)
-        id=${line#- }
-        id=${id%% *}
-        registered_home=$(printf '%s\n' "$line" | registry_home_for_line)
-        [ -n "$registered_home" ] || continue
-        printf '%s\t%s\n' "$id" "$registered_home"
-        ;;
-    esac
-  done < "$REG"
-}
-
 # Prints the canonical home on rc=0, or the one-line skip reason on rc=1.
 sweep_validate_home() {  # <id> <home>
   local id=$1 home=$2 abs_home marker_id
@@ -868,9 +884,17 @@ sweep_activation_home() {  # <id> <home>  - CAPO_SYNC line only when it acts
 }
 
 sweep_sync() {
-  local id home abs_home result seen=""
-  while IFS=$'\t' read -r id home; do
-    [ -n "$id" ] || continue
+  local status id home scope raw abs_home result seen=""
+  load_registry_records || {
+    echo "CAPO_SYNC: skipped: $REGISTRY_RECORDS_ERROR"
+    return 0
+  }
+  [ -n "$REGISTRY_RECORDS" ] || return 0
+  while IFS=$'\t' read -r status id home scope raw; do
+    if [ "$status" != ok ]; then
+      echo "CAPO_SYNC: skipped: malformed capo registry entry: $raw"
+      continue
+    fi
     if result=$(sweep_validate_home "$id" "$home"); then
       abs_home=$result
     else
@@ -886,7 +910,7 @@ sweep_sync() {
     cs_inherit_converge "$CS_HOME" "$abs_home" "$id" || {
       echo "CAPO_SYNC: capo $id: skipped: inheritance failed"
     }
-  done < <(sweep_registered_ids_homes)
+  done <<< "$REGISTRY_RECORDS"
 }
 
 sweep_probe_agent() {  # <pane> -> alive|dead|unknown
@@ -929,7 +953,7 @@ sweep_liveness() {
       continue
     fi
     home=$(grep '^home=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
-    [ -n "$home" ] || home=$(registry_field_for_id "$id" home 2>/dev/null || true)
+    [ -n "$home" ] || home=$(cs_capo_registry_field "$REG" "$id" home 2>/dev/null || true)
     verdict=$(sweep_probe_agent "$pane")
     case "$verdict" in
       alive) ;;
