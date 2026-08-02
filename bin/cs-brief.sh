@@ -346,6 +346,7 @@ When consigliere tells you to validate, append \`resolved: {how it was reviewed 
 
 You drive no-mistakes by responding to its gates, not by implementing fixes.
 Follow the guidance no-mistakes itself provides for the mechanics: it loads when you invoke \$no-mistakes, and \`no-mistakes axi run --help\` plus the \`help\` lines in each \`axi\` response are authoritative and version-matched to the installed binary.
+When you start the run, make \`--intent\` preserve all relevant content from this brief's \`# Task\` section plus every later accepted consigliere requirement, clarification, constraint, exclusion, and supersession, carrying only each requirement's current accepted form; retain the direct requirements instead of substituting a summary of your diff, and leave out generic operational, status, delivery, and other scaffold boilerplate unless it is task-specific.
 Do not hand-edit, commit, or fix findings yourself while a run is active - the pipeline applies every fix.
 
 Two consigliere-specific rules layer on top of that guidance:
