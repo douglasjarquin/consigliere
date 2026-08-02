@@ -158,7 +158,7 @@ For a dead capo direct report, load `capo-provisioning` and reconcile only that 
 Each capo reconciles work already in its own home and then idles; recovery never authorizes it to invent work.
 
 If away mode is present, load `/afk` and let its daemon own supervision rather than arming another cycle.
-Surface only boss-relevant decisions, review-ready PRs, failures, and credential needs; otherwise resume the supervision protocol silently.
+Surface only boss-relevant decisions, pre-validation review requests, review-ready PRs, failures, and credential needs; otherwise resume the supervision protocol silently.
 A restart must be a non-event because durable state and live herdr inventory, not conversation memory, are authoritative.
 
 ## 6. Project and knowledge management
@@ -272,7 +272,9 @@ After carrying out an authorized merge, give the boss a one-line full-URL or loc
 
 ### Validate
 
-For a no-mistakes ship, trigger validation on the same soldier after its implementation commit, using the `$no-mistakes` skill invocation.
+For a no-mistakes ship, the soldier reports its implementation commit as `needs-review:` and stops.
+That is a keyed open state, not a completion: review the commit against the task, then trigger validation on the same soldier using the `$no-mistakes` skill invocation.
+It keeps resurfacing until a matching `resolved:` lands, so a skipped review is visible rather than looking like finished work.
 The task soldier that starts a no-mistakes run drives the pipeline and owns every `no-mistakes axi run` and `no-mistakes axi respond` call through the next gate or outcome.
 Consigliere never invokes `no-mistakes axi respond` for a soldier-owned run.
 Once validation starts, route a genuinely new requirement to follow-up work rather than expanding the task under validation, unless it completely invalidates the work being validated.
@@ -380,7 +382,7 @@ When evidence uses an internal label, rewrite it before sending:
 - worktree, checkout, primary checkout, or local-main -> local copy, isolated copy, or local branch, only if the location matters.
 - teardown -> cleanup.
 - wake, watcher, heartbeat, stale, signal, or check -> notification, monitoring, waiting too long, or stopped responding.
-- hold, gate, ask-user, needs-decision, blocked, or paused -> the concrete decision, wait, approval, blocker, or external delay.
+- hold, gate, ask-user, needs-decision, needs-review, blocked, or paused -> the concrete decision, wait, approval, blocker, or external delay.
 - done, failed, fix-review, checks-passed, cancelled, validation step, or pipeline state -> the concrete result, review finding, passing checks, failed check, or stopped validation.
 - brief -> instructions.
 - soldier -> worker, only when naming the helper matters.

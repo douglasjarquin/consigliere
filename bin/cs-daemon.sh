@@ -4,8 +4,8 @@
 # Wraps bin/cs-watch.sh: runs it as a one-shot child, classifies each printed
 # wake reason, and either SELF-HANDLES the routine majority in bash (no
 # consigliere turn) or ESCALATES a batched, distilled digest to consigliere's
-# own pane on boss-relevant events (done/needs-decision/blocked/failed/
-# persistent-wedge/check-output) plus bounded declared-pause rechecks. This is
+# own pane on boss-relevant events classified by bin/cs-classify-lib.sh plus
+# persistent-wedge/check-output and bounded declared-pause rechecks. This is
 # the token-efficient away-mode engine: routine signal/stale/heartbeat wakes
 # cost zero consigliere context; only boss-relevant events reach the LLM, and
 # even then as one pre-read digest per batch window.

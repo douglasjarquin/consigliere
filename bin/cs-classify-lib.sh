@@ -48,7 +48,7 @@ CS_CREW_STATE_BIN="${CS_CREW_STATE_BIN:-$_CS_CLASSIFY_LIB_DIR/cs-crew-state.sh}"
 # for legacy lines that lack a standard terminal verb. status_is_boss_relevant
 # is verb-aware: a nonterminal working: or paused: line never becomes
 # boss-relevant merely because its prose contains one of those tokens.
-CS_CLASSIFY_BOSS_RE_DEFAULT='done:|needs-decision:|blocked:|failed:|PR ready|checks green|ready in branch|merged'
+CS_CLASSIFY_BOSS_RE_DEFAULT='done:|needs-decision:|needs-review:|blocked:|failed:|PR ready|checks green|ready in branch|merged'
 
 # The deliberate-external-wait verb. A soldier (or consigliere steering it)
 # appends "paused: <reason>" to declare it is intentionally idling on a KNOWN
@@ -69,8 +69,9 @@ CS_CLASSIFY_PAUSED_VERB_DEFAULT='paused'
 CS_PAUSE_RESURFACE_SECS_DEFAULT=3600
 
 # The resolution verb and durable-backlog-transfer verb that CLOSE a keyed
-# status decision opened by needs-decision or blocked. See status_open_decisions
-# below for the status-fold contract. The transfer verb is written only after
+# status decision opened by needs-decision, needs-review, or blocked. See
+# status_open_decisions below for the status-fold contract. The transfer verb
+# is written only after
 # cs-decision-hold.sh has verified the corresponding boss-held backlog item.
 CS_CLASSIFY_RESOLVE_VERB_DEFAULT='resolved'
 CS_CLASSIFY_BOSS_HELD_VERB_DEFAULT='captain-held'
@@ -82,15 +83,30 @@ last_status_line() {
   grep -v '^[[:space:]]*$' "$f" 2>/dev/null | tail -1
 }
 
+# The pre-validation review verb. A no-mistakes soldier appends
+# "needs-review: <what it built>" when its implementation is committed and it
+# is waiting for consigliere to review that commit and trigger validation.
+# It exists because `done:` cannot carry that meaning: `done:` also marks the
+# green-PR end state, so a lane awaiting review was indistinguishable from a
+# finished one and a missed review looked exactly like completed work. That is
+# how niceuptime-590 idled 56m on 2026-08-02 with its wake events delivered and
+# its status reading complete. This verb is terminal, boss-relevant, and OPENS
+# a keyed decision that only an explicit resolution closes, so skipping the
+# review is visible instead of silent.
+# The verb is a fixed literal in the cases below rather than an overridable
+# constant: unlike the pause verb, nothing configures it, and a second spelling
+# would let the brief and the classifier disagree about which lanes are open.
+
 # 0 if the given (last) status line's leading verb is a real terminal boss verb
-# (done, needs-decision, blocked, failed). Free-text tokens alone never count
-# here; callers that need legacy free-text matching use status_is_boss_relevant.
+# (done, needs-decision, needs-review, blocked, failed). Free-text tokens alone
+# never count here; callers that need legacy free-text matching use
+# status_is_boss_relevant.
 status_is_terminal_verb() {
   local line=$1 verb
   [ -n "$line" ] || return 1
   verb=$(status_line_verb "$line")
   case "$verb" in
-    done|needs-decision|blocked|failed) return 0 ;;
+    done|needs-decision|needs-review|blocked|failed) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -112,7 +128,7 @@ status_is_boss_relevant() {
   esac
   if [ -z "${CS_BOSS_RE+x}" ]; then
     case "$verb" in
-      done|needs-decision|blocked|failed) return 0 ;;
+      done|needs-decision|needs-review|blocked|failed) return 0 ;;
     esac
   fi
   printf '%s' "$line" | grep -qiE "${CS_BOSS_RE:-$CS_CLASSIFY_BOSS_RE_DEFAULT}"
@@ -146,10 +162,12 @@ status_is_paused_or_boss_held() {  # <status-line>
 # cannot represent "an earlier decision is still open after a later, unrelated
 # event": a subsequent done/paused/working line silently masks a still-open
 # needs-decision. status_open_decisions is the ONE authoritative statement of
-# the status-fold contract that fixes this - a needs-decision/blocked line
-# OPENS a keyed decision, and only an explicit resolution or a verified
-# boss-held backlog transfer referencing that key CLOSES it; a later unrelated
-# terminal line never clears an open boss decision.
+# the status-fold contract that fixes this - a needs-decision/needs-review/blocked
+# line OPENS a keyed decision. An explicit resolution referencing that key
+# closes it. A verified boss-held backlog transfer may close needs-decision or
+# blocked, but never needs-review: the required pre-validation review cannot be
+# transferred away. A later unrelated terminal line never clears an open boss
+# decision.
 #
 # Decision key grammar (backward-compatible with the plain "<verb>: <note>"
 # format): an OPTIONAL "[key=<slug>]" token sits between the verb and the colon,
@@ -199,13 +217,29 @@ $set
 EOF
   printf '%s' "$out"
 }
+_cs_decision_verb() {  # <open-set> <key> -> verb, or empty when not open
+  local set=$1 key=$2 line record_key record_verb
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    IFS=$'\t' read -r record_key record_verb _ <<EOF
+$line
+EOF
+    if [ "$record_key" = "$key" ]; then
+      printf '%s' "$record_verb"
+      return 0
+    fi
+  done <<EOF
+$set
+EOF
+  return 1
+}
 # Fold the WHOLE status stream into the set of decisions still open. Prints one
 # TAB-separated "<key>\t<verb>\t<summary>" line per still-open decision, in
 # most-recently-opened-last order; prints nothing when none are open. Pure read
 # of the file. This is the durable open-set the fleet snapshot and any
 # point-in-time consumer must use instead of trusting the last status line.
 status_open_decisions() {  # <status-file>
-  local f=$1 line verb key note resolve held open='' stripped
+  local f=$1 line verb key note resolve held open='' stripped open_verb
   [ -f "$f" ] || return 0
   resolve=${CS_CLASSIFY_RESOLVE_VERB:-$CS_CLASSIFY_RESOLVE_VERB_DEFAULT}
   held=${CS_CLASSIFY_BOSS_HELD_VERB:-$CS_CLASSIFY_BOSS_HELD_VERB_DEFAULT}
@@ -215,15 +249,22 @@ status_open_decisions() {  # <status-file>
     verb=$(status_line_verb "$line")
     key=$(_cs_decision_key "$line") || continue
     case "$verb" in
-      needs-decision|blocked)
+      needs-decision|needs-review|blocked)
         note=$(status_line_note "$line")
         open=$(_cs_decision_drop "$open" "$key")
         [ -n "$open" ] && open="${open}"$'\n'
         open="${open}${key}"$'\t'"${verb}"$'\t'"${note}"$'\n'
         ;;
-      "$resolve"|"$held")
+      "$resolve")
         open=$(_cs_decision_drop "$open" "$key")
         [ -n "$open" ] && open="${open}"$'\n'
+        ;;
+      "$held")
+        open_verb=$(_cs_decision_verb "$open" "$key") || open_verb=''
+        if [ "$open_verb" != needs-review ]; then
+          open=$(_cs_decision_drop "$open" "$key")
+          [ -n "$open" ] && open="${open}"$'\n'
+        fi
         ;;
     esac
   done < "$f"
@@ -254,7 +295,7 @@ _cs_status_open_activities_stream() {
         [ -n "$open" ] && open="${open}"$'\n'
         open="${open}${key}"$'\t'"${verb}"$'\t'"${note}"$'\n'
         ;;
-      done|failed|needs-decision|blocked|"$resolve"|"$held")
+      done|failed|needs-decision|needs-review|blocked|"$resolve"|"$held")
         open=$(_cs_decision_drop "$open" "$key")
         [ -n "$open" ] && open="${open}"$'\n'
         ;;

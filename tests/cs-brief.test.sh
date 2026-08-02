@@ -30,6 +30,11 @@ assert_grep 'blocked: launched outside the isolated task worktree' "$B" "isolati
 assert_grep 'no-mistakes doctor' "$B" "no-mistakes setup step present"
 assert_grep 'Herdr lifecycle declaration - NOT ENABLED' "$B" "unguarded herdr declaration present"
 assert_grep 'checks green' "$B" "no-mistakes definition of done"
+# The implementation commit is reported as needs-review, never done: a keyed
+# open state keeps an unreviewed commit visible, where done: read as finished.
+assert_grep 'needs-review: {summary of what you built}' "$B" "no-mistakes commit reports needs-review"
+assert_grep 'this mode adds that one state to the list in rule 4' "$B" "no-mistakes brief forbids done: at the commit"
+assert_no_grep 'done: {summary}' "$B" "the ambiguous commit-time done: is gone"
 pass "ship brief (no-mistakes) scaffold"
 
 # refuse overwrite
@@ -52,6 +57,13 @@ B="$TMP/data/t3/brief.md"
 assert_grep 'ready in branch cs/t3' "$B" "local-only done signal"
 assert_grep 'Never push to any remote' "$B" "local-only forbids push"
 pass "ship brief (local-only) scaffold"
+
+# needs-review is mode-specific: direct-PR and local-only have no pre-validation
+# review step, so their briefs must not mention it.
+for t in t2 t3; do
+  assert_no_grep 'needs-review' "$TMP/data/$t/brief.md" "no needs-review outside no-mistakes ($t)"
+done
+pass "needs-review appears only in no-mistakes briefs"
 
 # scout
 "$BIN" t4 alpha --scout >/dev/null

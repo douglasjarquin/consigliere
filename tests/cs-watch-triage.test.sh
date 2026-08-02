@@ -129,6 +129,26 @@ test_actionable_signal_surfaced() {
   pass "boss-relevant signal is surfaced (queue + exit) and marked surfaced"
 }
 
+# A committed-but-unreviewed no-mistakes lane must SURFACE, not be absorbed.
+# This is the enforcement half of the pre-validation review: the soldier stops
+# and waits for consigliere, and the watcher has to treat that as actionable.
+# Before the verb existed the soldier wrote `done:` here, which reads as a
+# finished lane, so a skipped review produced no pressure at all - niceuptime-590
+# idled 56m on 2026-08-02 with its wakes delivered and nobody acting.
+test_needs_review_signal_surfaced() {
+  local dir state fakebin out status_file pid
+  dir=$(make_case needs-review-signal); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  status_file="$state/task.status"
+  printf 'working: setup\nneeds-review: flag retired; awaiting review before validation\n' > "$status_file"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" 60 || fail "watcher did not exit for an actionable needs-review signal"
+  grep -F "signal: $status_file" "$out" >/dev/null || fail "watcher did not print the needs-review signal reason"
+  grep "$(printf '\tsignal\t')" "$state/.wake-queue" | grep -F "task.status" >/dev/null \
+    || fail "needs-review signal was not queued"
+  pass "a committed-but-unreviewed lane is surfaced, never absorbed"
+}
+
 # --- the coalescing grace is chosen by what the first scan already proves ------
 
 test_boss_verb_signal_takes_the_short_grace() {
@@ -1111,6 +1131,7 @@ test_turn_ended_provably_working_absorbed
 test_turn_ended_not_working_surfaced
 test_working_note_not_working_surfaced
 test_actionable_signal_surfaced
+test_needs_review_signal_surfaced
 test_boss_verb_signal_takes_the_short_grace
 test_no_verb_signal_keeps_the_long_grace
 test_terminal_stale_surfaced

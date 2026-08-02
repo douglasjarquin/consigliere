@@ -2,7 +2,8 @@
 # cs-crew-state.sh - deterministic read of a soldier's CURRENT state.
 #
 # Why this exists: state/<id>.status is an append-only, best-effort EVENT LOG.
-# Soldiers append only wake-worthy transitions (done/needs-decision/blocked/paused/failed)
+# Soldiers append only wake-worthy transitions
+# (done/needs-decision/needs-review/blocked/paused/failed)
 # and nothing when they silently resume, so `tail -1` of that log reports the
 # last EVENT, not the current STATE. After consigliere resolves a needs-decision
 # or blocked and the soldier resumes (responds to the gate, the pipeline fixes,
@@ -119,6 +120,7 @@ map_log_state() {  # <line>
   case "$(status_line_verb "$1")" in
     working)        echo working ;;
     needs-decision) echo parked ;;
+    needs-review)   echo parked ;;
     blocked)        echo blocked ;;
     done)           echo "done" ;;
     failed)         echo failed ;;
@@ -547,10 +549,18 @@ if [ "$HAVE_RUN" = 1 ]; then
     fi
   fi
 
-  # Reconcile the status log. A needs-decision/blocked log line that the run-step
-  # has moved past (anything but a genuinely parked run) is deterministically
-  # stale: the gate resolved and the run resumed or finished.
+  # Reconcile the status log. A needs-decision/needs-review/blocked log line
+  # that the run-step has moved past (anything but a genuinely parked run) is
+  # deterministically stale: the gate resolved and the run resumed or finished.
+  # needs-review belongs here for the same reason - once a run exists for this
+  # soldier, the review it was waiting on has already been acted on.
   case "$LOG_VERB" in
+    needs-review)
+      # Any attributed validation run proves the pre-validation review was
+      # acted on. The run may itself be parked at a later gate, but the earlier
+      # review request is still superseded.
+      RUN_DETAIL="$RUN_DETAIL${SEP}status-log superseded (validation run exists)"
+      ;;
     needs-decision|blocked)
       if [ "$RUN_STATE" != parked ]; then
         if [ "$RUN_STATE" = working ]; then

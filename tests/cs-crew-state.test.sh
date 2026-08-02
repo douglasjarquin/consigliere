@@ -372,6 +372,24 @@ test_stale_blocked_superseded() {
   pass "stale blocked over active run is superseded"
 }
 
+# needs-review differs from a pipeline gate: the existence of any attributed
+# run proves the pre-validation review was acted on, even when that run is now
+# parked at a later gate.
+test_needs_review_superseded_once_run_exists() {
+  reset_fakes
+  local d; d=$(new_case needs-review-run-exists)
+  make_repo_on_branch "$d/wt" cs/feat-review-run
+  make_fakebin "$d" >/dev/null
+  cs_write_meta "$d/state/feat-review-run.meta" "pane=p-feat-review-run" "workspace=w-feat-review-run" "worktree=$d/wt" "kind=ship"
+  printf 'needs-review [key=pre-validation]: implementation committed\n' > "$d/state/feat-review-run.status"
+  CS_FAKE_AXI_STATUS="$(run_parked cs/feat-review-run)"
+  local out; out=$(run_crew_state "$d" feat-review-run)
+  assert_contains "$out" "state: parked" "later parked run remains parked"
+  assert_contains "$out" "source: run-step" "run existence is authoritative"
+  assert_contains "$out" "superseded" "needs-review is superseded once any run exists"
+  pass "needs-review is superseded once a validation run exists"
+}
+
 # (c) genuine parked run + needs-decision log AGREE -> parked, NOT superseded
 test_genuine_parked_not_superseded() {
   reset_fakes
@@ -856,6 +874,52 @@ test_no_run_idle_pane_uses_log() {
   pass "no run + idle pane uses the status-log verb"
 }
 
+# (g'') a no-mistakes soldier that committed and is waiting for consigliere to
+# review it reports needs-review, which must read as PARKED, never done. This is
+# the whole point of the verb: `done:` at the commit was indistinguishable from
+# `done: PR ... checks green`, so a missed review looked like finished work and
+# idled niceuptime-590 for 56m on 2026-08-02.
+test_no_run_idle_pane_needs_review_is_parked() {
+  reset_fakes
+  local d; d=$(new_case needs-review)
+  make_repo_on_branch "$d/wt" cs/feat-review
+  make_fakebin "$d" >/dev/null
+  cs_write_meta "$d/state/feat-review.meta" "pane=p-feat-review" "workspace=w-feat-review" "worktree=$d/wt" "kind=ship"
+  printf 'needs-review: retired the legacy flag; awaiting review before validation\n' > "$d/state/feat-review.status"
+  CS_FAKE_AXI_STATUS=""
+  CS_FAKE_HERDR_BUSY=0
+  local out; out=$(run_crew_state "$d" feat-review)
+  assert_contains "$out" "state: parked" "needs-review log -> parked, not done"
+  case "$out" in
+    *"state: done"*) fail "needs-review must never reconcile to done" ;;
+  esac
+  pass "a committed-but-unreviewed lane reads as parked, not done"
+}
+
+test_needs_review_only_resolved_closes_key() {
+  local d status open
+  d=$(new_case needs-review-resolution)
+  status="$d/state/review.status"
+  printf 'needs-review [key=pre-validation]: implementation committed\n' > "$status"
+  printf 'captain-held [key=pre-validation]: parked elsewhere\n' >> "$status"
+  open=$(status_open_decisions "$status")
+  assert_contains "$open" $'pre-validation\tneeds-review\timplementation committed' \
+    "captain-held must not close a required pre-validation review"
+  printf 'resolved [key=other]: unrelated decision closed\n' >> "$status"
+  open=$(status_open_decisions "$status")
+  assert_contains "$open" $'pre-validation\tneeds-review\timplementation committed' \
+    "an unrelated resolution must not close the review key"
+  printf 'resolved [key=pre-validation]: commit reviewed and validation started\n' >> "$status"
+  open=$(status_open_decisions "$status")
+  [ -z "$open" ] || fail "matching resolved: did not close needs-review: $open"
+
+  printf 'needs-decision [key=route]: choose delivery route\n' > "$status"
+  printf 'captain-held [key=route]: transferred to durable boss backlog\n' >> "$status"
+  open=$(status_open_decisions "$status")
+  [ -z "$open" ] || fail "captain-held no longer closes ordinary needs-decision: $open"
+  pass "only matching resolved closes a keyed needs-review decision"
+}
+
 test_no_run_idle_pane_uses_keyed_log() {
   reset_fakes
   local d; d=$(new_case keyed-idle)
@@ -1258,6 +1322,7 @@ test_unreadable_process_table_fails_closed() {
 test_active_run_is_authoritative
 test_stale_needs_decision_superseded
 test_stale_blocked_superseded
+test_needs_review_superseded_once_run_exists
 test_genuine_parked_not_superseded
 test_scalar_gate_parked_not_superseded
 test_gate_block_parked_not_superseded
@@ -1284,6 +1349,8 @@ test_no_run_unknown_agent_status_uses_pane_capture
 test_no_run_idle_agent_status_corroborated_by_busy_pane
 test_no_run_idle_agent_status_and_idle_pane_stays_idle
 test_no_run_idle_pane_uses_log
+test_no_run_idle_pane_needs_review_is_parked
+test_needs_review_only_resolved_closes_key
 test_no_run_idle_pane_uses_keyed_log
 test_no_run_idle_pane_paused
 test_no_run_idle_pane_custom_paused_verb
