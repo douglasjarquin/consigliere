@@ -319,8 +319,19 @@ confirm_pane_gone() { # -> 0 proven gone, 1 not proven
 # Refuse loudly and retryably. Called before anything irreversible, so the
 # isolated copy, the task branch, every durable record, and the endpoint are all
 # still intact for a plain rerun.
+#
+# Under --force the boss has given explicit discard authority and the removal
+# proceeds, because refusing there would deadlock cleanup whenever herdr is
+# unreachable. It is still not silent: --force authorizes discarding unlanded
+# WORK, and stranding a live soldier is a different consequence than the boss
+# was asked about, so it is named on the way past rather than swallowed.
 require_pane_gone() { # <what-is-being-retained>
   confirm_pane_gone && return 0
+  if [ "$FORCE" = "--force" ]; then
+    echo "WARNING: proceeding under --force without proof that pane $PANE is gone - herdr reports '${PANE_PRESENCE_STATE:-unknown}'." >&2
+    echo "WARNING: if that pane is still alive it is now orphaned: no status, no metadata, no supervision. Check it by hand." >&2
+    return 0
+  fi
   echo "REFUSED: cannot confirm pane $PANE is gone - herdr reports '${PANE_PRESENCE_STATE:-unknown}'." >&2
   case "$PANE_PRESENCE_STATE" in
     present) echo "That pane is still alive. Closing it was refused or has not taken effect; erasing $1 now would strand a running soldier." >&2 ;;
@@ -484,7 +495,7 @@ if [ "$KIND" = capo ]; then
     done
   fi
   [ -n "$PANE" ] && cs_herdr_pane_close "$PANE" >/dev/null 2>&1 || true
-  [ "$FORCE" = "--force" ] || require_pane_gone "capo $ID's home and records" || exit 1
+  require_pane_gone "capo $ID's home and records" || exit 1
   [ -n "$WS" ] && cs_herdr workspace close "$WS" >/dev/null 2>&1 || true
   # The capo home is a plain detached worktree of the consigliere repo.
   git -C "$CS_ROOT" worktree remove --force "$HOME_PATH" 2>/dev/null \
@@ -540,7 +551,7 @@ fi
 
 # Prove the pane is gone BEFORE the first irreversible step, so a refusal leaves
 # the worktree, the branch, and every durable record intact for a plain rerun.
-[ "$FORCE" = "--force" ] || require_pane_gone "task $ID's records" || exit 1
+require_pane_gone "task $ID's records" || exit 1
 
 BRANCH=""
 if [ -n "$WT" ] && [ -d "$WT" ]; then

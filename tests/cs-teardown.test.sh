@@ -225,12 +225,16 @@ done
 # pane, so it must refuse rather than read as absence.
 pass "records are retained unless the pane is proven gone"
 
-# --force carries the boss's explicit discard authority and bypasses the gate,
-# matching how every other proof in this script treats --force.
+# --force carries the boss's explicit discard authority and proceeds, matching
+# how every other proof in this script treats --force - but it must SAY that it
+# orphaned a live pane, because --force authorizes discarding unlanded work and
+# stranding a running soldier is a different consequence than that.
 make_task gf ship
 out=$(CS_TEST_PANE_PRESENCE=present "$BIN" gf --force 2>&1) \
-  || fail "--force must bypass the confirmed-gone gate: $out"
+  || fail "--force must proceed past the confirmed-gone gate: $out"
 assert_absent "$TMP/state/gf.meta" "--force clears records despite a live pane"
-pass "--force bypasses the confirmed-gone gate"
+assert_contains "$out" "WARNING" "--force names the unproven pane instead of proceeding silently"
+assert_contains "$out" "orphaned" "--force spells out the consequence of a surviving pane"
+pass "--force proceeds past the gate but never silently"
 
 pass "cs-teardown landed-work proofs"
