@@ -32,9 +32,7 @@
 # mode (data/projects.md via cs-project-mode.sh):
 #   no-mistakes  implement -> the SOLDIER starts the pipeline itself -> PR ->
 #                boss merge (default). The soldier never stops at the
-#                implementation commit to wait for a trigger: that handoff was
-#                an unenforced supervisory act, and a lane whose supervisor
-#                missed it sat idle 56m on 2026-08-02 (niceuptime-590).
+#                implementation commit to wait for a supervisor trigger.
 #   direct-PR    implement -> push + open PR via gh-axi (no pipeline) -> boss merge
 #   local-only   implement on branch, stop and report "ready in branch" (no
 #                push/PR); boss approves, consigliere merges to local main

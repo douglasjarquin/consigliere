@@ -27,11 +27,11 @@ Test and script overrides: `CS_ROOT_OVERRIDE`, `CS_STATE_OVERRIDE` narrow a sing
 | `config/dispatch-policy` | optional per-home profiles for task dispatch; `bin/cs-spawn.sh` owns its strict four-column schema below |
 | `config/permission-mode` | optional narrower claude launch permission mode for homes whose org policy forbids full bypass; absent = full autonomy; `bin/cs-harness-lib.sh` owns the two-column schema below |
 | `config/upstream` | path or URL of the firstmate checkout for `/upstream-review`; absent = `../firstmate` |
-| `config/activation` | per-home activation scope: `always`, `afk-only`, or `off`; absent = `afk-only`. `bin/cs-activate.sh` owns it. Capo homes are seeded `always`, and the bootstrap sweep fills an absent value with `always` so homes seeded before this file existed are retrofitted; a present value is never overwritten |
+| `config/activation` | per-home activation scope: `always`, `afk-only`, or `off`; absent = `afk-only`; `bin/cs-activate.sh` owns the policy, and `bin/cs-home-seed.sh --help` owns capo seed and bootstrap convergence |
 | `config/wedge-alarm` | away-mode wedge-alarm active-alert directives; absent = auto (macOS Notification Center when available) |
 
 Inheritance into capo homes: `data/boss-shared.md` is propagated read-only, and `config/backlog-backend` is copied at seed time; nothing else is inherited.
-A capo home is additionally seeded `config/activation=always` (not inherited - set fresh, and converged on sweep per the table above), because its wake queue rots whenever its parent is busy and nobody types directly into a capo pane.
+Capo activation is local rather than inherited; see `bin/cs-home-seed.sh --help` for its seed and bootstrap convergence contract.
 The main-side source of either may be a symlink that resolves to a regular file, because propagation only reads it; an unresolved symlink stops propagation instead of mirroring absence.
 The capo-side destination must be a plain regular file, because propagation writes there and following a link out of the capo home is exactly what that check prevents.
 `bin/cs-inherit-lib.sh` owns the allowlist.

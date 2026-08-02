@@ -846,12 +846,8 @@ sweep_ff_home() {  # <id> <home>  - detached-HEAD FF-only advance; CAPO_SYNC lin
 }
 
 # Converge config/activation for a home seeded before per-home activation
-# existed. The seed path writes it once at creation, so a home seeded earlier
-# has no file at all and resolves to afk-only - it can then never start its own
-# turn, and its queue rots exactly as the seed comment records. Measured twice:
-# 8h11m on 2026-08-01 across both capos, and 56m on 2026-08-02 for a lane whose
-# handoff wake sat undrained (niceuptime-590). A seed-time-only fix never
-# reaches the homes that already exist, which is why this belongs in the sweep.
+# existed. A seed-time-only default never reaches an existing home, whose
+# absent value resolves to afk-only and prevents self-started turns.
 # Fill ONLY absence: any present value, including a symlink to externally
 # managed config, is a deliberate choice this sweep must not overwrite.
 sweep_activation_home() {  # <id> <home>  - CAPO_SYNC line only when it acts
