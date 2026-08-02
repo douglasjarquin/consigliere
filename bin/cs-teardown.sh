@@ -65,6 +65,9 @@ esac
 # shellcheck source=bin/cs-lock-lib.sh
 CS_LOCK_LOG_PREFIX="cs-teardown" . "$SCRIPT_DIR/cs-lock-lib.sh"
 
+# shellcheck source=bin/cs-capo-registry-lib.sh
+. "$SCRIPT_DIR/cs-capo-registry-lib.sh"
+
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
@@ -479,11 +482,30 @@ remove_watcher_markers() {
 
 # --- capo retirement ---------------------------------------------------------
 
+# Drop exactly this capo's rows. The id is matched LITERALLY through
+# bin/cs-capo-registry-lib.sh: a capo id may contain `.`, so the old
+# `grep -vE "^- $id( |$)"` treated it as a wildcard and retiring `a.b` deleted
+# an unrelated `axb` route. The rewrite is EOF-safe too, so a registry whose
+# last line has no trailing newline keeps that entry instead of losing it.
 remove_capo_registry_entry() {
-  local id=$1 tmp
-  [ -f "$CAPO_REG" ] || return 0
+  local id=$1 tmp line
+  cs_capo_registry_valid_id "$id" || {
+    echo "REFUSED: '$id' is not a valid capo id; the routing table was left unchanged." >&2
+    return 1
+  }
+  cs_capo_registry_exists "$CAPO_REG" || return 0
+  if ! cs_capo_registry_available "$CAPO_REG"; then
+    echo "warning: ${CS_CAPO_REGISTRY_ERROR}; the routing table was left unchanged." >&2
+    return 0
+  fi
   tmp="$CAPO_REG.tmp.$$"
-  grep -vE "^- $id( |$)" "$CAPO_REG" > "$tmp" || true
+  : > "$tmp"
+  while IFS= read -r line || [ -n "$line" ]; do
+    if cs_capo_registry_line_is_id "$line" "$id"; then
+      continue
+    fi
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$CAPO_REG"
   mv "$tmp" "$CAPO_REG"
 }
 

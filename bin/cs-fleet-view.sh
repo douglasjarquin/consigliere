@@ -18,11 +18,14 @@
 #              still-open boss decision), the scout report pointer at
 #              data/<id>/report.md, and the last status EVENT (history, never
 #              current-state truth).
-#   capos    - registered rows from data/capos.md. Each capo home gets a
-#              bounded structured read (in-flight child meta count, backlog
-#              headline counts) ONLY after validation: the recorded home must
-#              exist and carry the .cs-capo-home marker. Anything unreadable or
-#              invalid is classified state=unknown with a reason, never guessed.
+#   capos    - registered rows from data/capos.md, parsed by the single owner
+#              bin/cs-capo-registry-lib.sh. Each capo home gets a bounded
+#              structured read (in-flight child meta count, backlog headline
+#              counts) ONLY after validation: the recorded home must exist and
+#              carry the .cs-capo-home marker. Anything unreadable or invalid is
+#              classified state=unknown with a reason, never guessed. A registry
+#              that cannot be read at all sets `capos.error` and says so in the
+#              render rather than reporting an empty fleet.
 #              A capo's idle endpoint is healthy; do not treat quiet as stale.
 #
 # Read-only always: no session lock, no wake drain, no teardown, no merges, no
@@ -41,6 +44,8 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/cs-capo-registry-lib.sh
+. "$SCRIPT_DIR/cs-capo-registry-lib.sh"
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
@@ -291,29 +296,52 @@ capo_record_json() {  # <id> <home> <scope>
       children_in_flight:$children,backlog:$backlog}'
 }
 
+malformed_capo_record_json() {  # <raw registry line>
+  jq -n --arg reason "malformed registry entry: $1" \
+    '{id:null,home:null,scope:null,state:"unknown",reason:$reason,
+      children_in_flight:null,backlog:null}'
+}
+
+# The registry read fails CLOSED. An unreadable or symlinked routing table used
+# to render as present with zero records, which reads exactly like "this fleet
+# has no capos" - so every registered capo silently vanished from the review.
+# It now carries an `error` the render surfaces. A row that does not parse
+# becomes a visible unknown record for the same reason.
 capos_json() {
-  local line id home scope shown=0 total
-  if [ ! -f "$CAPO_REG" ]; then
-    jq -n --arg path "$CAPO_REG" '{path:$path,present:false,records:[],truncated:false}'
+  local records status id home scope raw shown=0 total=0
+  if ! cs_capo_registry_exists "$CAPO_REG"; then
+    jq -n --arg path "$CAPO_REG" \
+      '{path:$path,present:false,records:[],truncated:false,error:null}'
     return 0
   fi
-  total=$(head -c "$CS_FLEET_REGISTRY_BYTES" "$CAPO_REG" | grep -c '^- ' || true)
-  case "$total" in ''|*[!0-9]*) total=0 ;; esac
+  # Availability is checked HERE, in this shell, so its reason survives; the
+  # capture below runs in a subshell that could not hand one back.
+  if ! cs_capo_registry_available "$CAPO_REG"; then
+    jq -n --arg path "$CAPO_REG" --arg error "$CS_CAPO_REGISTRY_ERROR" \
+      '{path:$path,present:true,records:[],truncated:false,error:$error}'
+    return 0
+  fi
+  if ! records=$(cs_capo_registry_records "$CAPO_REG" "$CS_FLEET_REGISTRY_BYTES"); then
+    jq -n --arg path "$CAPO_REG" --arg error "capo registry could not be read: $CAPO_REG" \
+      '{path:$path,present:true,records:[],truncated:false,error:$error}'
+    return 0
+  fi
+  [ -z "$records" ] || total=$(printf '%s\n' "$records" | wc -l | tr -d ' ')
   {
-    while IFS= read -r line; do
-      case "$line" in '- '*) ;; *) continue ;; esac
-      [ "$shown" -lt "$CS_FLEET_CAPOS" ] || break
-      shown=$((shown + 1))
-      id=${line#- }; id=${id%% *}
-      home=$(printf '%s' "$line" | sed -n 's/.*(home:[[:space:]]*\([^;)]*\)[;)].*/\1/p')
-      home=$(printf '%s' "$home" | sed 's/[[:space:]]*$//')
-      scope=$(printf '%s' "$line" | sed -n 's/.*scope:[[:space:]]*\([^;)]*\)[;)].*/\1/p')
-      scope=$(printf '%s' "$scope" | sed 's/[[:space:]]*$//')
-      capo_record_json "$id" "$home" "$scope"
-    done < <(head -c "$CS_FLEET_REGISTRY_BYTES" "$CAPO_REG")
+    if [ -n "$records" ]; then
+      while IFS=$'\t' read -r status id home scope raw; do
+        [ "$shown" -lt "$CS_FLEET_CAPOS" ] || break
+        shown=$((shown + 1))
+        if [ "$status" = ok ]; then
+          capo_record_json "$id" "$home" "$scope"
+        else
+          malformed_capo_record_json "$raw"
+        fi
+      done <<< "$records"
+    fi
   } | jq -s \
     --arg path "$CAPO_REG" --argjson total "$total" --argjson cap "$CS_FLEET_CAPOS" \
-    '{path:$path,present:true,records:.,truncated:($total > $cap)}'
+    '{path:$path,present:true,records:.,truncated:($total > $cap),error:null}'
 }
 
 # --- assemble and render -----------------------------------------------------
@@ -346,7 +374,7 @@ printf '%s\n' "$SNAPSHOT" | jq -r '
   def task_row($t):
     "| \($t.id) | \($t.kind) | \($t.current_state.state) (\($t.current_state.source)) | \(endpoint_of($t)) | \(dash($t.mode))/\(dash($t.yolo)) | \(dash($t.project)) | \(artifact($t)) | \(dash($t.current_state.detail)) |";
   def capo_row($c):
-    "| \($c.id) | \($c.state) | \(dash($c.children_in_flight)) | \(if $c.backlog == null then "-" else "\($c.backlog.in_flight)/\($c.backlog.queued)/\($c.backlog.done)" end) | \(dash($c.home)) | \(dash($c.reason)) |";
+    "| \(dash($c.id)) | \($c.state) | \(dash($c.children_in_flight)) | \(if $c.backlog == null then "-" else "\($c.backlog.in_flight)/\($c.backlog.queued)/\($c.backlog.done)" end) | \(dash($c.home)) | \(dash($c.reason)) |";
   ([.tasks[] | . as $t | (.open_decisions[] | {id:$t.id,key,verb,summary})]) as $decisions |
 
   "# Fleet Review",
@@ -372,6 +400,7 @@ printf '%s\n' "$SNAPSHOT" | jq -r '
   "",
   "## Capos (idle endpoint is healthy; route by scope, read state not chat)",
   (if .capos.present | not then "No capo registry at \(.capos.path)."
+   elif .capos.error != null then "UNREADABLE capo registry: \(.capos.error). Registered capos are NOT listed below; this is not an empty fleet."
    elif (.capos.records | length) == 0 then "Registry present, no registered capos."
    else
     "| ID | State | In-flight children | Backlog i/q/d | Home | Reason |",

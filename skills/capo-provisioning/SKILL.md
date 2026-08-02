@@ -21,6 +21,7 @@ Keep the always-inline routing rules in `AGENTS.md` authoritative: route by natu
 - <id> - <one-sentence charter summary> (home: <absolute-home-path>; scope: <natural-language responsibility>; projects: <project-a>, <project-b>; added <date>)
 ```
 
+`bin/cs-home-seed.sh` writes that line and `bin/cs-capo-registry-lib.sh` is the single owner of reading it back, in every consumer; a row it cannot parse is refused or surfaced with a reason, never silently skipped.
 Each registry entry stays concise and single-line: the summary is one sentence naming the durable charter, `scope:` is the natural-language intake responsibility, `projects:` is the non-exclusive clone list, and any extra prose is limited to genuinely domain-specific hard rules that change routing or safety for that capo.
 The `home:` path points to the seeded home containing `data/charter.md`; no extra registry pointer field is needed.
 The home-seeded `data/charter.md` is the sole owner of boilerplate idle-by-default behavior, the normal delegation lifecycle, and standard escalation contracts, so point to that charter rather than restating those contracts in the registry entry.
