@@ -210,4 +210,24 @@ assert_contains "$out" "CAPO_LIVENESS: capo alpha-capo: skipped: local record ha
 cp "$TMP/alpha-capo.meta.orig" "$HOME_DIR/state/alpha-capo.meta"
 pass "sweep reports a live record that has no endpoint"
 
+# 10. sweep retrofits an ABSENT config/activation and never overwrites a
+#     present one. A home seeded before per-home activation existed has no
+#     file, resolves to afk-only, and can never start its own turn.
+rm -f "$CAPO/config/activation"
+out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "retrofit sweep failed: $out"
+assert_contains "$out" "CAPO_SYNC: capo alpha-capo: activation set to always (was unset)" \
+  "an absent activation is reported when filled"
+[ "$(cat "$CAPO/config/activation")" = always ] || fail "sweep must retrofit activation to always"
+out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "idempotent sweep failed: $out"
+[ -z "$out" ] || fail "a converged sweep must be silent, got: $out"
+pass "sweep retrofits an absent config/activation (idempotently)"
+
+# 10a. a deliberate value survives: the retrofit fills absence only
+printf 'off\n' > "$CAPO/config/activation"
+out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "deliberate-value sweep failed: $out"
+[ "$(cat "$CAPO/config/activation")" = off ] || fail "sweep must never overwrite a deliberate activation choice"
+[ -z "$out" ] || fail "leaving a present value alone must be silent, got: $out"
+printf 'always\n' > "$CAPO/config/activation"
+pass "sweep never overwrites a present config/activation"
+
 pass "cs-home-seed provisioning, rollback, and sweep behavior"

@@ -272,7 +272,8 @@ After carrying out an authorized merge, give the boss a one-line full-URL or loc
 
 ### Validate
 
-For a no-mistakes ship, trigger validation on the same soldier after its implementation commit, using the `$no-mistakes` skill invocation.
+For a no-mistakes ship, the soldier starts validation itself after its implementation commit; consigliere does not trigger it and must not wait to.
+A no-mistakes soldier that reports `done:` before a green PR, or that idles after committing without a run, is a lane to reconcile rather than a task to accept.
 The task soldier that starts a no-mistakes run drives the pipeline and owns every `no-mistakes axi run` and `no-mistakes axi respond` call through the next gate or outcome.
 Consigliere never invokes `no-mistakes axi respond` for a soldier-owned run.
 Once validation starts, route a genuinely new requirement to follow-up work rather than expanding the task under validation, unless it completely invalidates the work being validated.
