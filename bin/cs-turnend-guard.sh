@@ -104,7 +104,7 @@ esac
 . "$SCRIPT_DIR/cs-wake-lib.sh"
 
 cs_supervision_status "$STATE" "$GRACE"
-[ "$CS_SUP_IN_FLIGHT" -gt 0 ] || exit 0
+[ "$CS_SUP_SUPERVISED" -gt 0 ] || exit 0
 cs_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$CS_HOME" && exit 0
 
 # While away mode owns supervision, the daemon (not the checkpoint) is the live
@@ -115,7 +115,7 @@ rule='━━━━━━━━━━━━━━━━━━━━━━━━�
 GUARD_BODY=$(
   printf '●%s\n' "$rule"
   printf '●  TURN WOULD END BLIND - SUPERVISION IS OFF\n'
-  printf '●  %s task(s) in flight, but no live watcher holds this home lock (last beat: %s).\n' "$CS_SUP_IN_FLIGHT" "$CS_SUP_BEACON_DESC"
+  printf '●  %s, but no live watcher holds this home lock (last beat: %s).\n' "$(cs_supervision_work_desc)" "$CS_SUP_BEACON_DESC"
 # shellcheck disable=SC2016 # the ${CS_WATCH_CHECKPOINT:-180} is literal advice text for the reading agent
   printf '●  Drain queued wakes with bin/cs-wake-drain.sh, then start the foreground checkpoint: bin/cs-watch-checkpoint.sh --seconds "${CS_WATCH_CHECKPOINT:-180}". No turn ends blind while work is under way.\n'
   printf '●%s\n' "$rule"
