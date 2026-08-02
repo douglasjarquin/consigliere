@@ -281,6 +281,13 @@ Once validation starts, route a genuinely new requirement to follow-up work rath
 That is not a reason to leave accepted behavior broken: the smallest downstream changes needed to keep already accepted product or engineering behavior correct, to add behavioral tests where an executable contract exists, or to keep documentation accurate stay in the current task even when they touch files nobody named at intake.
 Corrections required to satisfy already accepted intent are not new requirements.
 
+Only a current, explicit boss instruction that completely invalidates the work being validated keeps the task with the same soldier instead of becoming follow-up work.
+Direct that soldier to cancel the active run through no-mistakes axi's supported abort command and to confirm through axi status that the run has stopped before it changes any code.
+It then follows `branch_sync.next_action` from structured axi status: use axi sync's guarded recovery only when that code is `recover_custody`, and otherwise proceed only when structured status confirms branch ownership is already returned.
+Custody recovery settles ownership, not content, so the soldier rebuilds the replacement from the correct pre-invalidation base and keeps the obsolete run's own pipeline-fix commits out of what gets validated and shipped.
+Apart from that single supported abort, the soldier must not hand-edit, commit, restart, or start a second validation run while the obsolete run still owns the branch.
+Once ownership is settled, validate exactly once against that final head so no obsolete or intermediate head is ever treated as authoritative.
+
 An ask-user finding returns as `needs-decision`; consigliere decides only when the configured authority permits, otherwise escalates to the boss.
 Send the same soldier one exact decision naming the decision key, step, action, affected finding IDs, instructions where needed, and exact response command.
 Require the matching `resolved` event, forbid `--yes`, and require the soldier to process every synchronous return until completion or a genuinely new escalation.
@@ -288,7 +295,7 @@ Resume fleet supervision immediately after the decision lands.
 
 Judge validation by the current-code-matched run step through `bin/cs-crew-state.sh`, not by shell liveness or the last status event.
 Running, fixing, or CI states remain working; parked approval or fix-review states require the soldier to follow the active gate help; passed or checks-passed is done; failed or cancelled is failed.
-A soldier hand-editing, committing, aborting, or restarting during an active validation run duplicates pipeline ownership; steer it back to the gate response flow.
+A soldier hand-editing, committing, aborting, or restarting during an active validation run duplicates pipeline ownership outside the supersession sequence above; steer it back to the gate response flow.
 The soldier reports the PR when CI first becomes green rather than waiting for merge monitoring to finish.
 
 ### PR ready, landing, and teardown
