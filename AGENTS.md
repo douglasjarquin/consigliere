@@ -187,7 +187,7 @@ Route durable knowledge to its most specific owner:
 - Knowledge about consigliere itself belongs in this repo's tracked surface.
 
 Consigliere never writes a project's `AGENTS.md` directly.
-A soldier creates or updates it lazily through the project's selected delivery path, using `bin/cs-ensure-agents-md.sh` and preferring pointers to authoritative sources over copied detail.
+A soldier creates or updates it lazily through the task's selected delivery path, using `bin/cs-ensure-agents-md.sh` and preferring pointers to authoritative sources over copied detail.
 Keep fleet delivery posture and boss-private strategy out of project memory.
 When the boss invokes `/vault`, load the `vault` skill for the complete knowledge-routing and unfinished-work sweep.
 
@@ -247,6 +247,9 @@ For the parent-owned correlation, recovery, and escalation contract on marked ca
 Supervise all live work under section 8.
 
 ### Selected delivery path and approval authority
+
+Decide each ship task's delivery mode and `yolo` posture at intake, and pass both explicitly at scaffold, spawn, and promotion; nothing derives them for you, and a mismatch between the brief and the spawn is refused rather than launched.
+`data/projects.md` records the boss's standing posture per project and is advisory only: a task may deviate from it, and a project absent from the registry has no standing posture at all.
 
 The selected delivery path owns its own rigor.
 When no-mistakes is selected, no-mistakes alone owns review, fixes, tests, documentation, push, PR, and CI; otherwise follow the faster path without adding an independent reviewer.
@@ -323,7 +326,7 @@ Read the report, relay its findings rather than merely saying it finished, recor
 A report may recommend implementation but does not authorize it.
 Before treating the investigation or any visual review as complete, load `decision-hold-lifecycle`; teardown enforces that shared completion gate.
 When implementation is separately authorized, promote the existing scout through `bin/cs-promote.sh` rather than creating a duplicate task.
-The promoted soldier must inventory scratch state, return to a clean default-branch base, carry over only intended fix changes, create the ship branch, and follow the project's selected delivery path.
+The promoted soldier must inventory scratch state, return to a clean default-branch base, carry over only intended fix changes, create the ship branch, and follow the delivery path the promotion stated.
 Scratch commits and debug edits never ride along, and a reproduced bug becomes the regression test.
 
 ## 8. Supervision protocol

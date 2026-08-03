@@ -56,7 +56,7 @@ Requirements: `codex` or `claude`, `herdr` (protocol >= 16), `jq`, `git`, `gh` +
 
 7. **Let the first session settle.** It runs `bin/cs-session-start.sh` and reports anything still missing or unauthenticated (the same required/optional inventory `cs-doctor.sh` reads). It detects only - it asks before installing anything.
 
-8. **Give it a project.** Consigliere never works a repo it does not know about; tell it to add or create one (it owns the clone into `projects/`, the registry entry, and the delivery mode).
+8. **Give it a project.** Consigliere never works a repo it does not know about; tell it to add or create one (it owns the clone into `projects/`, the registry entry, and the project's standing delivery posture - each task's actual delivery mode is decided when the work is dispatched).
 
 ## Use
 

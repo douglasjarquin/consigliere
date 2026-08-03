@@ -58,21 +58,20 @@ cs_git_identity
 
 BIN="$ROOT/bin/cs-teardown.sh"
 
-# make_task <id> <kind> [mode]: fixture repo + linked worktree + meta
+# make_task <id> <kind> [mode]: fixture repo + linked worktree + meta.
+# A ship meta carries the delivery posture cs-spawn.sh recorded for it; a scout
+# meta carries none at all, because a report deliverable has no mode to honour
+# and no approval posture to apply. The fixture mirrors that so the scout paths
+# below are exercised against the metadata shape a real scout actually has.
 make_task() {
   local id=$1 kind=$2 mode=${3:-no-mistakes} proj wt
   proj="$TMP/proj-$id"
   wt="$TMP/wt-$id"
   cs_git_init_commit "$proj"
   git -C "$proj" worktree add --quiet -b "cs/$id" "$wt"
-  cs_write_meta "$TMP/state/$id.meta" \
-    "workspace=w99" \
-    "pane=w99:p99" \
-    "worktree=$wt" \
-    "project=$proj" \
-    "kind=$kind" \
-    "mode=$mode" \
-    "yolo=off"
+  local meta=("workspace=w99" "pane=w99:p99" "worktree=$wt" "project=$proj" "kind=$kind")
+  [ "$kind" = scout ] || meta+=("mode=$mode" "yolo=off")
+  cs_write_meta "$TMP/state/$id.meta" "${meta[@]}"
 }
 
 # 1. dirty ship worktree refuses; work survives

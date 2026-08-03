@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Behavior: cs-brief.sh scaffolds ship/scout/capo briefs shaped by delivery
-# mode, refuses overwrite, gates --herdr-lab flags, and embeds the safety
+# Behavior: cs-brief.sh scaffolds ship/scout/capo briefs shaped by the explicit
+# --mode, refuses overwrite, gates --herdr-lab flags, and embeds the safety
 # contracts (isolation assertion, status protocol, marker contract).
+# The delivery contract itself - required/refused --mode, the no-yolo rule, and
+# the machine-readable contract line - is owned by tests/cs-task-delivery.test.sh.
 set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -13,14 +15,13 @@ mkdir -p "$TMP/data" "$TMP/state"
 
 BIN="$ROOT/bin/cs-brief.sh"
 
-cat > "$TMP/data/projects.md" <<'EOF'
-- alpha - default mode (added 2026-07-01)
-- beta [direct-PR] - direct (added 2026-07-01)
-- gamma [local-only] - local (added 2026-07-01)
-EOF
+# No projects.md fixture: cs-brief.sh does not read the registry at all. The
+# delivery mode arrives as an explicit --mode, and every repo/project name below
+# is just a string the scaffold echoes back. A registry entry here would only
+# suggest the scaffold still consults one.
 
-# ship, no-mistakes default
-out=$("$BIN" t1 alpha)
+# ship, --mode no-mistakes
+out=$("$BIN" t1 alpha --mode no-mistakes)
 assert_contains "$out" "mode=no-mistakes" "ship scaffold reports mode"
 B="$TMP/data/t1/brief.md"
 assert_present "$B" "ship brief written"
@@ -49,13 +50,13 @@ assert_grep 'leave out generic operational, status, delivery, and other scaffold
 pass "ship brief (no-mistakes) scaffold"
 
 # refuse overwrite
-if "$BIN" t1 alpha >/dev/null 2>&1; then
+if "$BIN" t1 alpha --mode no-mistakes >/dev/null 2>&1; then
   fail "second scaffold for t1 must refuse"
 fi
 pass "existing brief refuses overwrite"
 
 # direct-PR shaping
-"$BIN" t2 beta >/dev/null
+"$BIN" t2 beta --mode direct-PR >/dev/null
 B="$TMP/data/t2/brief.md"
 assert_grep 'direct-PR' "$B" "direct-PR named"
 assert_grep 'done: PR {url}' "$B" "direct-PR done signal"
@@ -63,7 +64,7 @@ assert_no_grep 'no-mistakes doctor' "$B" "no pipeline setup in direct-PR"
 pass "ship brief (direct-PR) scaffold"
 
 # local-only shaping
-"$BIN" t3 gamma >/dev/null
+"$BIN" t3 gamma --mode local-only >/dev/null
 B="$TMP/data/t3/brief.md"
 assert_grep 'ready in branch cs/t3' "$B" "local-only done signal"
 assert_grep 'Never push to any remote' "$B" "local-only forbids push"
@@ -100,14 +101,14 @@ done
 pass "ship and scout briefs carry the unmarked-boss-message rule"
 
 # herdr-lab section
-"$BIN" t5 alpha --herdr-lab >/dev/null
+"$BIN" t5 alpha --mode no-mistakes --herdr-lab >/dev/null
 B="$TMP/data/t5/brief.md"
 assert_grep 'HARD SAFETY CONTRACT' "$B" "herdr-lab contract present"
 assert_grep 'cs-herdr-lab.sh' "$B" "lab helper referenced"
 pass "herdr-lab guarded brief"
 
 # --issue linkage: PR-mode brief carries the hard Closes contract
-"$BIN" t7 alpha --issue 42 >/dev/null
+"$BIN" t7 alpha --mode no-mistakes --issue 42 >/dev/null
 B="$TMP/data/t7/brief.md"
 assert_grep 'Board issue #42' "$B" "issue section present"
 assert_grep 'Closes #42' "$B" "PR must close the issue"
@@ -115,7 +116,7 @@ assert_grep 'Do NOT edit the project board yourself' "$B" "no self board edits"
 pass "ship brief --issue bakes in the Closes contract"
 
 # --issue on local-only: no PR, consigliere closes after local merge
-"$BIN" t8 gamma --issue 43 >/dev/null
+"$BIN" t8 gamma --mode local-only --issue 43 >/dev/null
 B="$TMP/data/t8/brief.md"
 assert_grep 'consigliere closes issue #43 after' "$B" "local-only issue closed by consigliere"
 assert_no_grep 'Closes #43' "$B" "no PR keyword on local-only"
@@ -123,7 +124,7 @@ pass "ship brief --issue local-only variant"
 
 # --issue rejected on scout and non-numeric
 if "$BIN" t9 alpha --scout --issue 5 >/dev/null 2>&1; then fail "--issue on scout must refuse"; fi
-if "$BIN" t10 alpha --issue abc >/dev/null 2>&1; then fail "non-numeric --issue must refuse"; fi
+if "$BIN" t10 alpha --mode no-mistakes --issue abc >/dev/null 2>&1; then fail "non-numeric --issue must refuse"; fi
 pass "--issue misuse refusals"
 
 # capo charter
@@ -148,7 +149,7 @@ pass "capo project-list gating"
 if "$BIN" c4 --capo alpha --herdr-lab >/dev/null 2>&1; then
   fail "--herdr-lab on capo must refuse"
 fi
-if "$BIN" t6 alpha --no-projects >/dev/null 2>&1; then
+if "$BIN" t6 alpha --mode no-mistakes --no-projects >/dev/null 2>&1; then
   fail "--no-projects on ship must refuse"
 fi
 pass "flag misuse refusals"

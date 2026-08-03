@@ -38,7 +38,7 @@ export CS_HERDR_SESSION="$LAB"
 ID=live1
 
 # brief
-"$ROOT/bin/cs-brief.sh" "$ID" "$REPO" >/dev/null || fail "brief scaffold"
+"$ROOT/bin/cs-brief.sh" "$ID" "$REPO" --mode local-only >/dev/null || fail "brief scaffold"
 # Replace {TASK} with a deterministic no-op task.
 BRIEF="$TMP/home/data/$ID/brief.md"
 python3 - "$BRIEF" <<'PY'
@@ -49,9 +49,9 @@ open(p, "w").write(s)
 PY
 
 # spawn
-out=$("$ROOT/bin/cs-spawn.sh" "$ID" "$TMP/$REPO" --effort low 2>&1) || fail "spawn failed: $out"
+out=$("$ROOT/bin/cs-spawn.sh" "$ID" "$TMP/$REPO" --mode local-only --yolo off --effort low 2>&1) || fail "spawn failed: $out"
 assert_contains "$out" "spawned $ID" "spawn reports success"
-assert_contains "$out" "mode=local-only" "spawn resolved registry mode"
+assert_contains "$out" "mode=local-only" "spawn records the explicit delivery mode"
 pass "spawn creates isolated worktree and launches codex"
 
 META="$TMP/home/state/$ID.meta"
@@ -63,7 +63,7 @@ WT=$(grep '^worktree=' "$META" | cut -d= -f2)
 pass "meta records pane/worktree; branch cs/$ID checked out"
 
 # duplicate spawn refuses
-if "$ROOT/bin/cs-spawn.sh" "$ID" "$TMP/$REPO" >/dev/null 2>&1; then
+if "$ROOT/bin/cs-spawn.sh" "$ID" "$TMP/$REPO" --mode local-only --yolo off >/dev/null 2>&1; then
   fail "duplicate spawn for same id must refuse"
 fi
 pass "duplicate spawn refuses"
