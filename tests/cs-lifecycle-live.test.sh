@@ -3,6 +3,23 @@
 # and a real codex agent - cs-brief scaffold, cs-spawn isolation + launch,
 # native agent detection, cs-send steer confirmation, and cs-teardown of the
 # clean worktree. Skipped unless CS_TEST_CODEX_LIVE=1 (spawns a real codex).
+#
+# KNOWN COVERAGE LIMIT - this suite does NOT prove a codex turn ran.
+# Verified 2026-08-03 (herdr 0.7.5, codex-cli 0.146.0): codex asks "Do you trust
+# the contents of this directory?" for a repo root outside any path trusted in
+# ~/.codex/config.toml, and this suite's fixture repo is a fresh mktemp dir, so it
+# is never trusted. While codex waits at that dialog its agent_status reads `idle`
+# and state/<id>.turn-ended is never touched. Two consequences:
+#   - The steer below is typed into the trust dialog, which ACCEPTS it, so every
+#     run appends a permanent [projects."<temp-path>"] trust_level entry to the
+#     boss's real ~/.codex/config.toml for a directory that is then deleted.
+#   - Unlike the claude twin, nothing here asserts state/<id>.turn-ended, so the
+#     hollow pass is invisible.
+# The boss's own fleet is unaffected: ~/.codex/config.toml trusts
+# /Users/douglasjarquin and every fleet worktree lives under it. Closing the gap
+# needs an isolated codex config for the suite, which needs a
+# cs_harness_launch_env change (it deliberately emits nothing for codex today), so
+# it is a separate decision and not silently bolted on here.
 set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -78,14 +95,23 @@ done
 [ "$found" = 1 ] || fail "codex agent never detected in pane $PANE"
 pass "native agent detection sees codex"
 
-# wait for the boot turn to finish, then steer and confirm
-cs_herdr_agent_wait "$PANE" idle 120000 >/dev/null || fail "codex never went idle after boot turn"
+# KNOWN-HOLLOW WAIT - deliberately `idle`, and deliberately not an assertion that
+# a turn ran. The honest wait here is `done` (a codex turn ends on `done`, not
+# `idle`; verified 2026-08-03, docs/codex.md), but this suite's fixture repo is an
+# untrusted mktemp dir, so codex is still parked on the folder-trust dialog at this
+# point and never reaches `done` - switching this line to `done` fails the suite.
+# `idle` is exactly what the unanswered dialog reads, so this returns immediately
+# and proves nothing. It stays until the fixture can be given a trusted, isolated
+# codex config (see this file's header); the steer below is what releases codex.
+cs_herdr_agent_wait "$PANE" idle 120000 >/dev/null || fail "codex pane never reached a prompt"
 out=$("$ROOT/bin/cs-send.sh" "$ID" "Reply with exactly LIVE_STEER_OK and stop." 2>&1) || fail "steer failed: $out"
 case "$out" in *submitted*|*queued*) : ;; *) fail "steer not confirmed: $out" ;; esac
 pass "steer submit confirmed"
 
-# let the steer turn finish, then teardown the (clean) worktree
-cs_herdr_agent_wait "$PANE" idle 120000 >/dev/null || true
+# Let the steer turn finish, then teardown the (clean) worktree. Waiting on idle
+# here never resolved - the post-turn status is done - so this silently burned its
+# full 120s timeout on every run.
+cs_herdr_agent_wait "$PANE" "done" 120000 >/dev/null || true
 if [ -n "$(git -C "$WT" status --porcelain)" ]; then
   # The agent was told not to touch files; if it did, this is a finding, not a
   # test failure - discard explicitly to finish the lifecycle check.

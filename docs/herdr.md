@@ -4,6 +4,10 @@ Verified against herdr 0.7.4 (protocol 16) on 2026-07-22, and re-verified agains
 The CI pin (`bin/cs-install-herdr.sh`) is 0.7.5 so the required herdr lane exercises the same CLI contract the fleet runs; it was 0.7.4 until an `agent wait` flag rename broke the fleet while CI stayed green.
 Re-verify this table after any herdr upgrade; `bin/cs-bootstrap.sh` gates on the minimum protocol.
 
+Audited 2026-08-03 (herdr 0.7.5, codex-cli 0.146.0, claude 2.1.220) for claims asserted without a recorded sample.
+One was wrong and is corrected below: "after the turn ends it reads `idle`" - both harnesses actually settle on `done`.
+The audit was scoped to agent-status and folder-trust behavior, the claims a supervision wait depends on; the capture, worktree, and event-splice sections were not re-sampled and still rest on their original dated evidence.
+
 ## Session discipline
 
 - Every CLI call carries an explicit trailing `--session <name>`; ambient `HERDR_SESSION` alone is not trusted (upstream firstmate evidence: unreliable once another server runs).
@@ -46,7 +50,19 @@ This is the same rule already applied to tab labels below: scope to this home's 
 ## Native agent status (verified against live codex)
 
 - `agent list` / `agent get <pane>` detect codex automatically (`"agent":"codex"`) with `agent_status`: `idle|working|blocked|done|unknown`.
-- Mid-turn status reads `working`; after the turn ends it reads `idle`.
+- Mid-turn status reads `working`; **after a turn ends it reads `done`, not `idle`** (re-verified 2026-08-03, herdr 0.7.5 / codex-cli 0.146.0; the same holds for claude, see docs/claude.md).
+  This line previously said `idle`, which was wrong and had never been backed by a recorded sample.
+  `idle` is what a codex pane reads while it sits at a PROMPT with no turn running, including a folder-trust dialog it has not answered, so `idle` means "not currently working" and is NOT evidence that a turn completed.
+  Polled every 4s through `bin/cs-herdr-lab.sh run`, a codex soldier steered with `bin/cs-send.sh`:
+
+  ```text
+    4s status=working
+    8s status=done
+   ... holds at done for the remaining 6 samples ...
+  ```
+
+  Consequence: never wait on `idle` to mean "the turn is over", because `herdr agent wait <pane> --until idle` will not resolve after a turn.
+  Wait on `done`, or use `cs_herdr_agent_busy_state`, which normalizes both harnesses.
 - `agent wait <pane> --until <status> --timeout <ms>` blocks until the status is reached (verified ~5s wait resolving on turn end); use it for submit confirmation and bounded single-target waits.
   **The flag was RENAMED between releases: 0.7.4 took `--status`, 0.7.5 takes `--until`, and each rejects the other outright.**
 

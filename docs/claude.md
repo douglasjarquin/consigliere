@@ -1,9 +1,12 @@
 # Claude Code verified facts
 
 Verified live against claude 2.1.218 on 2026-07-24 (launch-scoped Stop hook fires
-and blocks; `--settings` accepts a file or JSON string; no trust prompt under
-`--dangerously-skip-permissions`), and against claude 2.1.220 on 2026-07-28
-(`--permission-mode auto` keeps the launch-scoped Stop hook firing).
+and blocks; `--settings` accepts a file or JSON string), against claude 2.1.220 on
+2026-07-28 (`--permission-mode auto` keeps the launch-scoped Stop hook firing), and
+against claude 2.1.220 on 2026-08-03 (folder trust, and post-turn status; below).
+This header used to claim "no trust prompt under `--dangerously-skip-permissions`",
+which was wrong and contradicted `bin/cs-harness-lib.sh`'s own comment on the same
+version and date; see "Folder trust" below for the corrected, sampled behavior.
 Re-verify after claude upgrades; `bin/cs-bootstrap.sh` checks presence only, not
 version. The launch template and per-harness facts live in `bin/cs-harness-lib.sh`.
 
@@ -74,11 +77,33 @@ version. The launch template and per-harness facts live in `bin/cs-harness-lib.s
 - Root-session detection: a Claude Code session exports `CLAUDECODE=1`;
   `cs_harness_detect_root` reads it (after `config/harness` and `CS_HARNESS_OVERRIDE`).
 
+## Folder trust (verified 2026-08-03, claude 2.1.220)
+
+`--dangerously-skip-permissions` does NOT bypass the folder-trust dialog for an interactive TTY session.
+This is why `cs_harness_claude_trust_dir` exists and why `bin/cs-spawn.sh` pre-trusts every fresh claude worktree: without it an unattended soldier sits at the dialog forever.
+
+Sampled with an isolated `CLAUDE_CONFIG_DIR` seeded past first-run onboarding (`{"theme":"dark","hasCompletedOnboarding":true,"projects":{}}`) so the only thing missing was trust for the target directory:
+
+```text
+$ CLAUDE_CONFIG_DIR=<isolated> claude --dangerously-skip-permissions 'Reply with exactly PROBE_OK and stop.'
+
+ Quick safety check: Is this a project you created or one you trust?
+ ❯ 1. Yes, I trust this folder
+   2. No, exit
+ Enter to confirm · Esc to cancel
+```
+
+Two side facts worth keeping:
+
+- A fresh `CLAUDE_CONFIG_DIR` blocks even earlier, at the theme picker, so isolating claude's config for a test means seeding onboarding as well as trust.
+- Trust lives in `<config-dir>/.claude.json` under `projects.<abs-dir>` as `hasTrustDialogAccepted` / `hasCompletedProjectOnboarding`; `cs_harness_claude_untrust_dir` removes it at teardown so torn-down worktrees do not accumulate.
+
 ## Post-turn agent status is `done`, never `idle` (verified 2026-08-03, herdr 0.7.5, claude 2.1.220)
 
-A codex agent reads `agent_status: working` mid-turn and `idle` after the turn ends (docs/herdr.md).
-A claude agent reads `working` mid-turn and **`done`** after the turn ends, and never reports `idle` at all.
+A claude agent reads `agent_status: working` mid-turn and **`done`** after the turn ends, and never reports `idle` at all.
 `done` here means "this turn is over", not "the agent exited": the same pane accepts a steer afterwards and goes `working` again.
+This is NOT a claude-vs-codex difference: a codex agent settles on `done` after a turn too (re-verified the same day, docs/codex.md).
+What `idle` actually means is "a pane with no turn running", which for codex includes sitting at an unanswered folder-trust dialog; docs/herdr.md's older claim that a finished turn reads `idle` was wrong for both harnesses.
 
 Spawned through `bin/cs-spawn.sh` into an isolated lab, then polled every 5s for 70s after the boot turn:
 
@@ -103,8 +128,8 @@ submitted
 
 Consequences:
 
-- Never wait on `idle` for a claude soldier: `herdr agent wait <pane> --until idle` times out against a perfectly healthy agent.
-  `cs_herdr_agent_wait "$PANE" done` is the claude equivalent of the codex `idle` wait.
+- Never wait on `idle` to mean "the turn is over", for either harness: `herdr agent wait <pane> --until idle` times out against a perfectly healthy agent.
+  Wait on `done`, or use `cs_herdr_agent_busy_state`, which normalizes both.
 - Production is unaffected, and this was verified rather than assumed: the only production wait is `cs_herdr_submit_confirm`, which waits for `working`, and `cs_herdr_agent_busy_state` already maps a raw `done` to its own non-busy state (`bin/cs-herdr-lib.sh`), so the watcher and `bin/cs-crew-state.sh` never depend on claude reporting `idle`.
 - `tests/cs-lifecycle-claude-live.test.sh` did depend on it, and failed on `main` for that reason alone; it now waits on `done`.
 
@@ -156,8 +181,8 @@ combination never occurs in a consigliere launch.
 - `claude -p` / `--print` - headless non-interactive run; used for `--headless` scouts.
 - `--output-format json|stream-json` - structured output, unused today.
 - Herdr-native agent status (`agent_status`) auto-detects a claude agent the same as
-  a codex agent, and `cs_herdr_agent_busy_state` normalizes both, so BUSY detection is
+  a codex agent, and `cs_herdr_agent_busy_state` normalizes both, so busy detection is
   harness-agnostic; the rendered-banner corroboration ("esc to interrupt") is shared.
-  The post-turn resting VALUE is not shared - claude reports `done` where codex reports
-  `idle` - so never compare a raw `agent_status` against `idle` for a claude soldier.
+  Post-turn both harnesses settle on `done`, so never read a raw `idle` as "the turn
+  finished".
   See "Post-turn agent status is `done`, never `idle`" above.
