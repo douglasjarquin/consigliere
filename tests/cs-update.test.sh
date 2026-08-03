@@ -95,4 +95,28 @@ out=$(run_update "$CLONE")
 assert_contains "$out" "not default branch" "tangle skips update"
 pass "tangled checkout skips"
 
+# 7. an advanced LIVE capo is named for nudging, and a skipped one is not.
+# The whole point of the summary is telling the caller which capos to steer; a
+# parser that never matches makes the self-update silently stop refreshing
+# capo instructions, which is how a capo keeps running last week's contract.
+# The producer's line shape is pinned on the other side by
+# tests/cs-home-seed.test.sh ("CAPO_SYNC: capo alpha-capo: updated").
+mk_fixture nudge
+printf -- '- alpha-capo - a (home: %s; scope: s; projects: p; added 2026-01-01)\n' \
+  "$TMP/alpha-home" > "$CLONE/data/capos.md"
+cat > "$CLONE/bin/cs-home-seed.sh" <<'SH'
+#!/usr/bin/env bash
+# Stand-in for the sweep, emitting its real reported shapes.
+[ "${1:-}" = "--sweep" ] || exit 0
+echo "CAPO_SYNC: capo alpha-capo: updated aaaaaaa..bbbbbbb"
+echo "CAPO_SYNC: capo beta-capo: skipped: dirty working tree"
+SH
+chmod +x "$CLONE/bin/cs-home-seed.sh"
+out=$(run_update "$CLONE")
+assert_contains "$out" "nudge-capos: alpha-capo" "an advanced capo is named for a nudge"
+case "$out" in
+  *"nudge-capos:"*beta-capo*) fail "a skipped capo must never be nudged" ;;
+esac
+pass "the capo sweep summary names advanced capos and skips the rest"
+
 pass "cs-update behaviors"

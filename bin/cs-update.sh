@@ -90,7 +90,11 @@ nudge=""
 if [ -x "$SCRIPT_DIR/cs-home-seed.sh" ] && [ -f "$DATA/capos.md" ]; then
   sweep_out=$("$SCRIPT_DIR/cs-home-seed.sh" --sweep 2>&1) || true
   [ -z "$sweep_out" ] || printf '%s\n' "$sweep_out"
-  nudge=$(printf '%s\n' "$sweep_out" | sed -n 's/^CAPO_SYNC: \([^ ]*\) advanced.*/\1/p' | tr '\n' ' ' | sed 's/ $//')
+  # Must match what the sweep actually emits: "CAPO_SYNC: capo <id>: updated
+  # <before>..<after>" (pinned by tests/cs-home-seed.test.sh). Matching only
+  # `updated` is deliberate - a skipped home was NOT advanced, so nudging it
+  # would tell a capo to re-read instructions it never received.
+  nudge=$(printf '%s\n' "$sweep_out" | sed -n 's/^CAPO_SYNC: capo \([^:]*\): updated .*/\1/p' | tr '\n' ' ' | sed 's/ $//')
 fi
 
 echo "reread-consigliere: $reread"
