@@ -79,6 +79,35 @@ assert_contains "$out" "duplicate capo id" "validate names the duplicate id"
 cp "$TMP/reg-good" "$REG"
 pass "registry validate refuses duplicate ids"
 
+# 3a. an EOF-TRUNCATED registry (last line with no trailing newline) must still
+#     bind. A `while read` without the `|| [ -n "$line" ]` guard drops that last
+#     line, and with it the only record of a live home - so a second capo could
+#     be seeded onto an already-registered home, and an id could be rebound to a
+#     different home, with nothing refusing either.
+printf -- '- other-capo - Other domain. (home: %s; scope: Other work.; projects: ; added 2026-01-01)' \
+  "$TMP/capos/dup-capo" > "$REG"
+out=$("$BIN" dup-capo alpha 2>&1) && fail "a home already registered to another capo must refuse"
+assert_contains "$out" "is already registered to other-capo" \
+  "the duplicate-home refusal must come from the home-assignment check"
+assert_absent "$TMP/capos/dup-capo" "the duplicate-home refusal must create no home"
+
+printf -- '- alpha-capo - Alpha domain. (home: %s; scope: Alpha work.; projects: ; added 2026-01-01)' \
+  "$TMP/elsewhere" > "$REG"
+out=$("$BIN" alpha-capo alpha 2>&1) && fail "rebinding a registered id to a new home must refuse"
+assert_contains "$out" "capo id alpha-capo is already registered to home" \
+  "the id-rebind refusal must name the existing home"
+cp "$TMP/reg-good" "$REG"
+pass "an EOF-truncated registry still refuses a duplicate home and an id rebind"
+
+# 3b. a row that does not parse is refused, not skipped. A skipped row is a
+#     binding the duplicate and overlap checks never see.
+cp "$TMP/reg-good" "$TMP/reg-restore"
+printf -- '- wrecked - a row with no structured suffix\n' >> "$REG"
+out=$("$BIN" validate 2>&1) && fail "a malformed registry row must fail validate"
+assert_contains "$out" "malformed capo registry entry" "validate names the malformed row"
+cp "$TMP/reg-restore" "$REG"
+pass "registry validate refuses a malformed row instead of skipping it"
+
 # 4. transactional rollback on a forced mid-seed failure (second project's
 #    origin dangles, so its clone fails AFTER the home worktree and the first
 #    project clone were created)

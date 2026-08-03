@@ -91,7 +91,7 @@ data/                personal fleet records; LOCAL, gitignored as a whole
   projects.md        thin fleet navigation registry (section 6)
   boards.md          per-project GitHub Projects board mapping for the contracts and casino skills (section 7); parsed by bin/cs-board.sh
   sweeps.md          standing board sweeps that outlive the session that started one; armed, converged, and retired only by bin/cs-board-watch.sh
-  capos.md           capo routing table; maintained by cs-home-seed.sh (section 6)
+  capos.md           capo routing table; maintained by cs-home-seed.sh (section 6); parsed by bin/cs-capo-registry-lib.sh
   upstream-review.md last-reviewed firstmate SHA plus dated review entries (section 14)
   <id>/brief.md      per-task soldier brief, or per-capo charter brief when kind=capo
   <id>/report.md     scout task deliverable, written by the soldier; survives teardown
@@ -106,6 +106,8 @@ state/               volatile runtime signals; gitignored
   <id>.check-trust   content binding created by cs-check-register.sh
   <id>.pr-poll       validated data sidecar for the byte-static PR merge poll
   pending-replies/   parent-owned capo pending-reply records; cs-pending-reply-lib.sh
+  procevent/         armed blocking sources supervised outside a turn; bin/cs-procevent.sh
+  procevent-inbox/   their captured results, adapter records, and handled acknowledgements
   .wake-queue        durable queued wakes: epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload
   .afk               durable away-mode flag; present = daemon may inject escalations
   .watch.lock .wake-queue.lock .monitor.lock   watcher, queue, and monitor singleton locks
@@ -281,6 +283,13 @@ Once validation starts, route a genuinely new requirement to follow-up work rath
 That is not a reason to leave accepted behavior broken: the smallest downstream changes needed to keep already accepted product or engineering behavior correct, to add behavioral tests where an executable contract exists, or to keep documentation accurate stay in the current task even when they touch files nobody named at intake.
 Corrections required to satisfy already accepted intent are not new requirements.
 
+Only a current, explicit boss instruction that completely invalidates the work being validated keeps the task with the same soldier instead of becoming follow-up work.
+Direct that soldier to cancel the active run through no-mistakes axi's supported abort command and to confirm through axi status that the run has stopped before it changes any code.
+It then follows `branch_sync.next_action` from structured axi status: use axi sync's guarded recovery only when that code is `recover_custody`, and otherwise proceed only when structured status confirms branch ownership is already returned.
+Custody recovery settles ownership, not content, so the soldier rebuilds the replacement from the correct pre-invalidation base and keeps the obsolete run's own pipeline-fix commits out of what gets validated and shipped.
+Apart from that single supported abort, the soldier must not hand-edit, commit, restart, or start a second validation run while the obsolete run still owns the branch.
+Once ownership is settled, validate exactly once against that final head so no obsolete or intermediate head is ever treated as authoritative.
+
 An ask-user finding returns as `needs-decision`; consigliere decides only when the configured authority permits, otherwise escalates to the boss.
 Send the same soldier one exact decision naming the decision key, step, action, affected finding IDs, instructions where needed, and exact response command.
 Require the matching `resolved` event, forbid `--yes`, and require the soldier to process every synchronous return until completion or a genuinely new escalation.
@@ -288,7 +297,7 @@ Resume fleet supervision immediately after the decision lands.
 
 Judge validation by the current-code-matched run step through `bin/cs-crew-state.sh`, not by shell liveness or the last status event.
 Running, fixing, or CI states remain working; parked approval or fix-review states require the soldier to follow the active gate help; passed or checks-passed is done; failed or cancelled is failed.
-A soldier hand-editing, committing, aborting, or restarting during an active validation run duplicates pipeline ownership; steer it back to the gate response flow.
+A soldier hand-editing, committing, aborting, or restarting during an active validation run duplicates pipeline ownership outside the supersession sequence above; steer it back to the gate response flow.
 The soldier reports the PR when CI first becomes green rather than waiting for merge monitoring to finish.
 
 ### PR ready, landing, and teardown
@@ -463,7 +472,7 @@ These skills are not boss-invocable; load them only at their precise triggers.
 - `project-management` - load before adding, creating, cloning, registering, removing, or initializing a project.
 - `stuck-soldier-recovery` - load when the session-start digest reports a direct report's endpoint dead or its metadata has no workspace, or after a stale wake, looping pane, repeated confusion, an answered-by-brief question, an unresponsive soldier, or a failed steer.
 - `capo-provisioning` - load before creating, seeding, validating, launching, handing backlog to, recovering, pushing inherited local material into, or retiring a capo home, and before editing `data/capos.md`.
-- `decision-hold-lifecycle` - load before treating an investigation or visual review as complete, before ending a visual review that exposed a decision, and when recording or routing the boss's answer.
+- `decision-hold-lifecycle` - load before treating an investigation or visual review as complete, before ending a visual review that exposed a decision, before waiting on a Lavish review's feedback, and when recording or routing the boss's answer.
 - `consigliere-coding-guidelines` - load before changing consigliere's shared, tracked material, as defined by section 1's list, whether editing directly or briefing a soldier for a consigliere-repo task.
 
 ## 14. Upstream review

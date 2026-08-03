@@ -139,15 +139,16 @@ if [ -n "$tangle_branch" ]; then
   } >&2
 fi
 
-# Compute in-flight count and watcher-beacon freshness via the shared
-# grace-based predicate (bin/cs-supervision-lib.sh). Only act with tasks in
-# flight; count them so the banner can say how much is riding on an absent
-# watcher.
+# Compute the supervised-work count and watcher-beacon freshness via the shared
+# grace-based predicate (bin/cs-supervision-lib.sh). Only act when something is
+# riding on the watcher - a task in flight or an armed blocking source - and
+# describe it so the banner can say how much.
 cs_supervision_status "$STATE" "$GRACE"
-in_flight=$CS_SUP_IN_FLIGHT
+supervised=$CS_SUP_SUPERVISED
 watcher_fresh=$CS_SUP_WATCHER_FRESH
 beacon_desc=$CS_SUP_BEACON_DESC
-if [ "$in_flight" -eq 0 ]; then
+work_desc=$(cs_supervision_work_desc)
+if [ "$supervised" -eq 0 ]; then
   # Leave the unhealthy state (no work riding on the watcher): clear so a later
   # in-flight + stale combination is a fresh episode even if the beacon is still
   # absent with the same key string.
@@ -175,7 +176,7 @@ if [ "$watcher_fresh" = false ]; then
     {
       printf '●%s\n' "$rule"
       printf '●  WATCHER DOWN - SUPERVISION IS OFF\n'
-      printf '●  %s task(s) in flight, but no watcher has a fresh beacon (last beat: %s, grace %ss).\n' "$in_flight" "$beacon_desc" "$GRACE"
+      printf '●  %s, but no watcher has a fresh beacon (last beat: %s, grace %ss).\n' "$work_desc" "$beacon_desc" "$GRACE"
       if [ "$READ_ONLY" -eq 1 ]; then
         printf '●  This read-only session should report the lapse, not repair it.\n'
       else

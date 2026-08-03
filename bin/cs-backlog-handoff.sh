@@ -43,6 +43,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
+# shellcheck source=bin/cs-capo-registry-lib.sh
+. "$SCRIPT_DIR/cs-capo-registry-lib.sh"
 REG="$DATA/capos.md"
 MAIN_BACKLOG="$DATA/backlog.md"
 # shellcheck source=bin/cs-tasks-lib.sh
@@ -52,14 +54,16 @@ MAIN_BACKLOG="$DATA/backlog.md"
 ID=$1
 shift
 
+# bin/cs-capo-registry-lib.sh owns the parse: it validates the id charset,
+# refuses a missing, unreadable, or symlinked registry, matches the id
+# literally (so a dotted id such as `a.b` cannot resolve to `axb`'s home), and
+# refuses a duplicated id instead of quietly taking the last row.
 capo_home() {
-  local id=$1 line
-  [ -f "$REG" ] || { echo "error: no capo registry at $REG" >&2; return 1; }
-  line=$(grep -E "^- $id( |$)" "$REG" | tail -1 || true)
-  [ -n "$line" ] || { echo "error: capo $id is not registered in $REG" >&2; return 1; }
-  # Match the (home: ...) field itself; summary/scope prose often contains
-  # parentheticals, so a greedy prefix keeps the last (home: ...) authoritative.
-  printf '%s\n' "$line" | sed -n 's/.*(home:[[:space:]]*\([^;)]*\);.*/\1/p' | sed 's/[[:space:]]*$//'
+  local id=$1
+  cs_capo_registry_field "$REG" "$id" home || {
+    echo "error: ${CS_CAPO_REGISTRY_ERROR:-capo $id is not registered in $REG}" >&2
+    return 1
+  }
 }
 
 path_is_ancestor_of() {

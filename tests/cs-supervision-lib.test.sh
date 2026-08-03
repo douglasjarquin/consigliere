@@ -110,6 +110,34 @@ cs_supervision_unhealthy "$S8" 300 && rc=0 || rc=1
 [ "$rc" = 1 ] || fail "zero in-flight should be healthy (false) regardless of beacon"
 pass "cs_supervision_unhealthy is false for an idle fleet (zero in-flight)"
 
+# --- armed blocking sources count as work needing supervision ----------------
+# An armed state/procevent/<id>.source is not a task and has no meta, but its
+# result arrives as a queued wake only a live supervision cycle will read.
+
+# 8b. an armed source alone: counted, supervised, and unhealthy with no beacon.
+S8B="$TMP/s8b"; mkdir -p "$S8B/procevent"
+: > "$S8B/procevent/lavish-deadbeef.source"
+cs_supervision_status "$S8B" 300
+[ "$CS_SUP_IN_FLIGHT" = 0 ] || fail "armed source: expected 0 in-flight, got $CS_SUP_IN_FLIGHT"
+[ "$CS_SUP_ARMED_SOURCES" = 1 ] || fail "armed source: expected 1 armed, got $CS_SUP_ARMED_SOURCES"
+[ "$CS_SUP_SUPERVISED" = 1 ] || fail "armed source: expected 1 supervised, got $CS_SUP_SUPERVISED"
+[ "$(cs_supervision_work_desc)" = "1 blocking source(s) armed" ] \
+  || fail "armed source: work desc should name the armed source, got '$(cs_supervision_work_desc)'"
+cs_supervision_unhealthy "$S8B" 300 && rc=0 || rc=1
+[ "$rc" = 0 ] || fail "an armed source with no beacon should be unhealthy (true)"
+pass "cs_supervision_status counts an armed blocking source as work needing supervision"
+
+# 8c. tasks and sources together: both counted, both named.
+S8C="$TMP/s8c"; mkdir -p "$S8C/procevent"
+cs_write_meta "$S8C/a.meta" "kind=ship"
+: > "$S8C/procevent/lavish-1.source"
+: > "$S8C/procevent/lavish-2.source"
+cs_supervision_status "$S8C" 300
+[ "$CS_SUP_SUPERVISED" = 3 ] || fail "mixed: expected 3 supervised, got $CS_SUP_SUPERVISED"
+[ "$(cs_supervision_work_desc)" = "1 task(s) in flight and 2 blocking source(s) armed" ] \
+  || fail "mixed: work desc should name both, got '$(cs_supervision_work_desc)'"
+pass "cs_supervision_work_desc names in-flight tasks and armed sources together"
+
 # --- cs_root_is_capo_home ----------------------------------------------------
 
 # 9. a valid marker file with a clean id -> true.

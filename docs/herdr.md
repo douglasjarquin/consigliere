@@ -145,6 +145,32 @@ This answers a question `agent get` cannot. `agent get` reports what herdr BELIE
 
 **The husk predicate fails closed, deliberately.** "Could not read the process table" and "read it, no agent there" are different claims and only the second is a husk. Treating an unreadable answer as a husk would report a healthy soldier as dead on any herdr without process-info, on any transient socket error, and in every test stub. The `foreground_processes` array must be present before the predicate concludes anything. This was caught by an existing test rather than by review: the first implementation reported every stubbed pane as a dead agent.
 
+## Pane presence: the answer is in the body, not the exit status (verified live 2026-08-02, herdr 0.7.5, protocol 17)
+
+`herdr pane get <id> --session <s>` distinguishes three outcomes, and two of them share one exit status.
+
+```text
+$ herdr pane get w4K:p1 --session default          # live pane
+{"result":{"pane":{ ... "pane_id":"w4K:p1" ... },"type":...}}     # STDOUT, rc 0
+
+$ herdr pane get w9Z:p99 --session default         # absent pane
+{"error":{"code":"pane_not_found","message":"pane w9Z:p99 not found"},"id":"cli:pane:get"}   # STDERR, rc 1
+
+$ herdr pane get w4K:p1 --session no-such-lab-xyz  # server unreachable
+Error: Os { code: 2, kind: NotFound, message: "No such file or directory" }                  # STDERR, rc 1
+```
+
+Two facts matter and neither is guessable:
+
+- **The error body is on stderr.** A stdout-only read (`out=$(herdr pane get "$id" 2>/dev/null)`) captures nothing at all for an absent pane, so it cannot tell absence from an unreachable server. Both streams must be captured together.
+- **The exit status cannot classify.** A confirmed-absent pane and an unreachable server are both rc 1. Only the structured body separates them: `.error.code == "pane_not_found"` is proof of death, any other error code is not, and non-JSON output is not an answer at all.
+
+A malformed pane id is answered as `pane_not_found` too (`herdr pane get "not a pane"` returns that code), so herdr's answer is authoritative about the string it was asked, not about whether the string was well formed.
+
+`cs_herdr_pane_presence` in `bin/cs-herdr-lib.sh` owns this classification and returns `dead|present|unknown`; a success body must echo the requested `pane_id` back to count as `present`, so a truncated or renamed-field response after a herdr upgrade degrades to `unknown` rather than to a wrong answer.
+
+**Two readers, deliberately different.** `cs_herdr_pane_exists` stays exit-status-based and fails open, which is correct for callers that only want to skip work. Any caller about to destroy something on the strength of the answer must use `cs_herdr_pane_confirmed_gone`, which fails closed: `present` and `unknown` both refuse. `bin/cs-teardown.sh` gates record removal on it, so an unreachable herdr can never be read as "the soldier is gone". This is the same distinction the husk predicate above draws, applied to pane existence.
+
 ## One snapshot instead of N pane reads (verified live 2026-07-29, protocol 17)
 
 `herdr api snapshot` returns every pane in one payload, each carrying `agent_status`, `agent`, `agent_session`, `cwd`, `tab_id`, `workspace_id`, `revision`, and `state_change_seq`. Sampled against the live session (23292 bytes, 10 panes):

@@ -35,6 +35,17 @@ assert_grep 'checks green' "$B" "no-mistakes definition of done"
 assert_grep 'needs-review: {summary of what you built}' "$B" "no-mistakes commit reports needs-review"
 assert_grep 'this mode adds that one state to the list in rule 4' "$B" "no-mistakes brief forbids done: at the commit"
 assert_no_grep 'done: {summary}' "$B" "the ambiguous commit-time done: is gone"
+# The pipeline reviews against --intent, so a soldier that passes a diff summary
+# instead of the accepted contract gets reviewed against less than it agreed to.
+# shellcheck disable=SC2016  # literal grep patterns; backticks are brief markup, not expansion
+assert_grep 'make `--intent` preserve all relevant content' "$B" \
+  "no-mistakes brief requires --intent to carry the accepted task contract"
+assert_grep "carrying only each requirement's current accepted form" "$B" \
+  "no-mistakes brief requires superseded requirements to carry their current form"
+assert_grep 'retain the direct requirements instead of substituting a summary of your diff' "$B" \
+  "no-mistakes brief forbids a diff summary in place of the requirements"
+assert_grep 'leave out generic operational, status, delivery, and other scaffold boilerplate' "$B" \
+  "no-mistakes brief excludes scaffold boilerplate from --intent"
 pass "ship brief (no-mistakes) scaffold"
 
 # refuse overwrite
@@ -62,6 +73,9 @@ pass "ship brief (local-only) scaffold"
 # review step, so their briefs must not mention it.
 for t in t2 t3; do
   assert_no_grep 'needs-review' "$TMP/data/$t/brief.md" "no needs-review outside no-mistakes ($t)"
+  # shellcheck disable=SC2016  # literal grep pattern; backticks are brief markup, not expansion
+  assert_no_grep 'make `--intent` preserve all relevant content' "$TMP/data/$t/brief.md" \
+    "no --intent contract outside no-mistakes ($t)"
 done
 pass "needs-review appears only in no-mistakes briefs"
 

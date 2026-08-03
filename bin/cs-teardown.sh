@@ -23,8 +23,11 @@
 # proceeds only once the report exists and (when bin/cs-decision-hold.sh is
 # installed) the unresolved-decision completion gate passes.
 # Capos (kind=capo) are retired explicitly. Normal teardown refuses while
-# their home has in-flight soldier meta files; --force is the approved discard
-# path. Removing the home never touches anything under projects/ clones.
+# their home has in-flight soldier meta files, or while it still has armed
+# blocking sources or owns process claims that would leak a child against a
+# shared external source (bin/cs-procevent.sh retire-home is the bounded
+# retirement it runs first); --force is the approved discard path. Removing the
+# home never touches anything under projects/ clones.
 #
 # The herdr `worktree remove` runs only AFTER these proofs pass; its own
 # dirty-refusal is a backstop, never the safety mechanism. A ship remove that
@@ -61,6 +64,9 @@ esac
 . "$SCRIPT_DIR/cs-harness-lib.sh"
 # shellcheck source=bin/cs-lock-lib.sh
 CS_LOCK_LOG_PREFIX="cs-teardown" . "$SCRIPT_DIR/cs-lock-lib.sh"
+
+# shellcheck source=bin/cs-capo-registry-lib.sh
+. "$SCRIPT_DIR/cs-capo-registry-lib.sh"
 
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
@@ -289,6 +295,65 @@ quiesce_pane() {
   return 0
 }
 
+# --- confirmed-gone gate (never erase the records of a surviving pane) ------
+
+# The durable records are the only thing tying consigliere to a running soldier.
+# Erase them while the pane is still alive and that soldier is stranded: no
+# status, no metadata, no supervision, and nothing left pointing at it.
+#
+# `pane close` cannot answer this. Its status is discarded by every caller here,
+# and a close that succeeded, a close that was refused, and a close that never
+# reached the server all look identical from the exit code. So removal is gated
+# on a positive structured proof of absence from herdr instead
+# (cs_herdr_pane_presence: only a pane_not_found body counts as dead; present
+# and unknown both refuse). Bounded, because close is asynchronous - herdr may
+# still be tearing the pane down when it returns.
+PANE_PRESENCE_STATE=""
+confirm_pane_gone() { # -> 0 proven gone, 1 not proven
+  local waited=0
+  # No recorded pane means there is nothing that could be stranded.
+  [ -n "$PANE" ] || return 0
+  # Missing confirmation machinery is a refusal, not a skip. A gate that
+  # disappears silently when its helper is absent is worse than no gate: it
+  # reads as "proven gone" on exactly the broken installs that need it most.
+  if ! command -v cs_herdr_pane_presence >/dev/null 2>&1; then
+    PANE_PRESENCE_STATE="no-presence-helper"
+    return 1
+  fi
+  while :; do
+    PANE_PRESENCE_STATE=$(cs_herdr_pane_presence "$PANE")
+    [ "$PANE_PRESENCE_STATE" = dead ] && return 0
+    [ "$waited" -ge 30 ] && return 1
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+}
+
+# Refuse loudly and retryably. Called before anything irreversible, so the
+# isolated copy, the task branch, every durable record, and the endpoint are all
+# still intact for a plain rerun.
+#
+# Under --force the boss has given explicit discard authority and the removal
+# proceeds, because refusing there would deadlock cleanup whenever herdr is
+# unreachable. It is still not silent: --force authorizes discarding unlanded
+# WORK, and stranding a live soldier is a different consequence than the boss
+# was asked about, so it is named on the way past rather than swallowed.
+require_pane_gone() { # <what-is-being-retained>
+  confirm_pane_gone && return 0
+  if [ "$FORCE" = "--force" ]; then
+    echo "WARNING: proceeding under --force without proof that pane $PANE is gone - herdr reports '${PANE_PRESENCE_STATE:-unknown}'." >&2
+    echo "WARNING: if that pane is still alive it is now orphaned: no status, no metadata, no supervision. Check it by hand." >&2
+    return 0
+  fi
+  echo "REFUSED: cannot confirm pane $PANE is gone - herdr reports '${PANE_PRESENCE_STATE:-unknown}'." >&2
+  case "$PANE_PRESENCE_STATE" in
+    present) echo "That pane is still alive. Closing it was refused or has not taken effect; erasing $1 now would strand a running soldier." >&2 ;;
+    *)       echo "herdr could not answer, so absence is unproven; an unreachable server is not evidence the soldier is gone." >&2 ;;
+  esac
+  echo "Nothing was removed. Rerun teardown once the pane is confirmed gone, or use --force after explicit discard approval." >&2
+  return 1
+}
+
 # --- the fail-closed safety check -------------------------------------------
 
 validate_worktree_teardown_safety() {
@@ -417,11 +482,30 @@ remove_watcher_markers() {
 
 # --- capo retirement ---------------------------------------------------------
 
+# Drop exactly this capo's rows. The id is matched LITERALLY through
+# bin/cs-capo-registry-lib.sh: a capo id may contain `.`, so the old
+# `grep -vE "^- $id( |$)"` treated it as a wildcard and retiring `a.b` deleted
+# an unrelated `axb` route. The rewrite is EOF-safe too, so a registry whose
+# last line has no trailing newline keeps that entry instead of losing it.
 remove_capo_registry_entry() {
-  local id=$1 tmp
-  [ -f "$CAPO_REG" ] || return 0
+  local id=$1 tmp line
+  cs_capo_registry_valid_id "$id" || {
+    echo "REFUSED: '$id' is not a valid capo id; the routing table was left unchanged." >&2
+    return 1
+  }
+  cs_capo_registry_exists "$CAPO_REG" || return 0
+  if ! cs_capo_registry_available "$CAPO_REG"; then
+    echo "warning: ${CS_CAPO_REGISTRY_ERROR}; the routing table was left unchanged." >&2
+    return 0
+  fi
   tmp="$CAPO_REG.tmp.$$"
-  grep -vE "^- $id( |$)" "$CAPO_REG" > "$tmp" || true
+  : > "$tmp"
+  while IFS= read -r line || [ -n "$line" ]; do
+    if cs_capo_registry_line_is_id "$line" "$id"; then
+      continue
+    fi
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$CAPO_REG"
   mv "$tmp" "$CAPO_REG"
 }
 
@@ -442,7 +526,23 @@ if [ "$KIND" = capo ]; then
       exit 1
     done
   fi
+  # Blocking sources this home armed, and claims it owns machine-wide, must be
+  # retired BEFORE the home is removed: the claim root and the external source
+  # both outlive the home, so an abandoned registration leaks a blocking child
+  # against a shared external source and keeps a claim no home can release.
+  if [ -x "$SCRIPT_DIR/cs-procevent.sh" ]; then
+    if ! CS_HOME="$HOME_PATH" CS_STATE_OVERRIDE="$HOME_PATH/state" \
+        "$SCRIPT_DIR/cs-procevent.sh" retire-home >/dev/null; then
+      if [ "$FORCE" != "--force" ]; then
+        echo "REFUSED: capo $ID still holds armed blocking sources or owns process claims." >&2
+        echo "Retire them from that home (bin/cs-procevent.sh retire-home) before cleanup, or explicitly discard with --force." >&2
+        exit 1
+      fi
+      echo "WARNING: capo $ID's blocking sources could not all be retired; --force is removing the home anyway." >&2
+    fi
+  fi
   [ -n "$PANE" ] && cs_herdr_pane_close "$PANE" >/dev/null 2>&1 || true
+  require_pane_gone "capo $ID's home and records" || exit 1
   [ -n "$WS" ] && cs_herdr workspace close "$WS" >/dev/null 2>&1 || true
   # The capo home is a plain detached worktree of the consigliere repo.
   git -C "$CS_ROOT" worktree remove --force "$HOME_PATH" 2>/dev/null \
@@ -495,6 +595,10 @@ fi
 # and may be dirty, so their remove is forced by design once the report gate
 # above has passed; a ship remove is forced only under --force.
 [ -n "$PANE" ] && cs_herdr_pane_close "$PANE" >/dev/null 2>&1 || true
+
+# Prove the pane is gone BEFORE the first irreversible step, so a refusal leaves
+# the worktree, the branch, and every durable record intact for a plain rerun.
+require_pane_gone "task $ID's records" || exit 1
 
 BRANCH=""
 if [ -n "$WT" ] && [ -d "$WT" ]; then

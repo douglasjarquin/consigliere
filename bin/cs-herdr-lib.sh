@@ -191,6 +191,54 @@ cs_herdr_pane_exists() { # <pane_id>
   cs_herdr pane get "$1" >/dev/null 2>&1
 }
 
+# Classify one pane from the STRUCTURED response body, never from the exit
+# status. `pane get` answers "no such pane", "here it is", and "I cannot tell
+# you" over the same failure exit, and only the first is proof of death, so an
+# exit-status reader like cs_herdr_pane_exists above folds an unreachable server
+# into the same answer as a confirmed-absent pane. That fail-open reading is
+# fine for callers that only want to skip work, and wrong for any caller about
+# to destroy something on the strength of the answer.
+#
+# Verified live 2026-08-02 (herdr 0.7.5, protocol 17); exact bodies in
+# docs/herdr.md "Pane presence":
+#   present     -> {"result":{"pane":{"pane_id":"<id>",...}}}  on STDOUT, rc 0
+#   absent      -> {"error":{"code":"pane_not_found",...}}     on STDERR, rc 1
+#   unreachable -> non-JSON `Error: Os { code: 2, ... }`       on STDERR, rc 1
+#
+# The error body is on stderr, so a stdout-only read sees nothing at all for an
+# absent pane and cannot tell it from an unreachable server. Both streams are
+# captured together for that reason; if a future herdr ever mixed diagnostic
+# noise into a success response the concatenation would stop parsing as JSON and
+# classify unknown, which is the safe direction for every caller here.
+cs_herdr_pane_presence() { # <pane_id> -> dead|present|unknown
+  local out code echoed
+  out=""
+  # The body carries the answer even when the call exits non-zero (an absent
+  # pane is rc 1 WITH a pane_not_found body), so the status is deliberately
+  # discarded here rather than allowed to suppress the payload.
+  if [ -n "${1:-}" ]; then
+    out=$(cs_herdr pane get "$1" 2>&1) || true
+  fi
+  [ -n "$out" ] || { printf 'unknown\n'; return 0; }
+  printf '%s' "$out" | jq -e . >/dev/null 2>&1 || { printf 'unknown\n'; return 0; }
+  code=$(printf '%s' "$out" | jq -r '.error.code // empty')
+  if [ -n "$code" ]; then
+    if [ "$code" = pane_not_found ]; then printf 'dead\n'; else printf 'unknown\n'; fi
+    return 0
+  fi
+  # A success body must echo back the exact pane we asked about. Anything else -
+  # a truncated result, a renamed field after a herdr upgrade - is not an answer.
+  echoed=$(printf '%s' "$out" | jq -r '.result.pane.pane_id // empty')
+  if [ "$echoed" = "$1" ]; then printf 'present\n'; else printf 'unknown\n'; fi
+}
+
+# Proof that the exact recorded pane is gone. Only a structured pane_not_found
+# counts: present and unknown both refuse, so a caller can never treat "I could
+# not reach herdr" as "the soldier is gone".
+cs_herdr_pane_confirmed_gone() { # <pane_id>
+  [ "$(cs_herdr_pane_presence "$1")" = dead ]
+}
+
 # --- agent status ----------------------------------------------------------
 
 cs_herdr_agent_status_raw() { # <pane_id> -> idle|working|blocked|done|unknown
