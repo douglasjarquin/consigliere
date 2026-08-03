@@ -7,9 +7,13 @@
 #
 # This is the claude twin of cs-lifecycle-live.test.sh. It is the authoritative
 # check that (a) the claude --settings turn-end hook touches state/<id>.turn-ended,
-# and (b) herdr's native agent detection reports a claude agent's busy/idle status
-# (the watcher depends on it). If herdr does not auto-detect claude agents, run
+# and (b) herdr's native agent detection reports a claude agent's busy status (the
+# watcher depends on it). If herdr does not auto-detect claude agents, run
 # `herdr integration install claude` first, or record the gap.
+#
+# NOT a copy of the codex twin's status words: a claude agent's post-turn resting
+# status is `done`, never `idle` (docs/claude.md). Waiting on `idle` here fails
+# against a healthy soldier.
 set -u
 # The root harness for this suite is claude; set BEFORE sourcing lib.sh so its
 # default codex pin does not win.
@@ -88,12 +92,17 @@ done
 [ "$found" = 1 ] || fail "claude Stop hook never touched state/$ID.turn-ended"
 pass "claude turn-end Stop hook touches the turn-end signal"
 
-cs_herdr_agent_wait "$PANE" idle 120000 >/dev/null || fail "claude never went idle after boot turn"
+# A claude agent reports agent_status=done when its turn ends and NEVER idle
+# (verified 2026-08-03, herdr 0.7.5 / claude 2.1.220 - docs/claude.md). Waiting on
+# idle here, as the codex twin does, times out against a perfectly healthy soldier:
+# that is the whole reason this suite failed on main. `done` means "turn over", not
+# "agent exited" - the steer below proves the pane still takes work.
+cs_herdr_agent_wait "$PANE" "done" 120000 >/dev/null || fail "claude never finished its boot turn"
 out=$("$ROOT/bin/cs-send.sh" "$ID" "Reply with exactly LIVE_STEER_OK and stop." 2>&1) || fail "steer failed: $out"
 case "$out" in *submitted*|*queued*) : ;; *) fail "steer not confirmed: $out" ;; esac
 pass "steer submit confirmed"
 
-cs_herdr_agent_wait "$PANE" idle 120000 >/dev/null || true
+cs_herdr_agent_wait "$PANE" "done" 120000 >/dev/null || true
 if [ -n "$(git -C "$WT" status --porcelain)" ]; then
   echo "note: worktree dirtied by agent; using explicit --force discard" >&2
   out=$("$ROOT/bin/cs-teardown.sh" "$ID" --force 2>&1) || fail "forced teardown failed: $out"

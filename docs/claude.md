@@ -74,6 +74,40 @@ version. The launch template and per-harness facts live in `bin/cs-harness-lib.s
 - Root-session detection: a Claude Code session exports `CLAUDECODE=1`;
   `cs_harness_detect_root` reads it (after `config/harness` and `CS_HARNESS_OVERRIDE`).
 
+## Post-turn agent status is `done`, never `idle` (verified 2026-08-03, herdr 0.7.5, claude 2.1.220)
+
+A codex agent reads `agent_status: working` mid-turn and `idle` after the turn ends (docs/herdr.md).
+A claude agent reads `working` mid-turn and **`done`** after the turn ends, and never reports `idle` at all.
+`done` here means "this turn is over", not "the agent exited": the same pane accepts a steer afterwards and goes `working` again.
+
+Spawned through `bin/cs-spawn.sh` into an isolated lab, then polled every 5s for 70s after the boot turn:
+
+```
+$ herdr agent get w3:p1 --session cs-lab-diag-claude-idle-...   # via bin/cs-herdr-lab.sh run
+  5s status=done     turn-ended=yes
+ 10s status=done     turn-ended=yes
+   ... 14 consecutive samples, all done ...
+ 70s status=done     turn-ended=yes
+```
+
+`turn-ended=yes` is `state/<id>.turn-ended`, so the `--settings` Stop hook had already fired: the turn was genuinely over while the status read `done`.
+A steer then proves the agent is alive and reusable, not exited:
+
+```
+$ bin/cs-send.sh diag2 "Reply with exactly LIVE_STEER_OK and stop."
+submitted
+  4s status=working
+  8s status=done
+   ... holds at done ...
+```
+
+Consequences:
+
+- Never wait on `idle` for a claude soldier: `herdr agent wait <pane> --until idle` times out against a perfectly healthy agent.
+  `cs_herdr_agent_wait "$PANE" done` is the claude equivalent of the codex `idle` wait.
+- Production is unaffected, and this was verified rather than assumed: the only production wait is `cs_herdr_submit_confirm`, which waits for `working`, and `cs_herdr_agent_busy_state` already maps a raw `done` to its own non-busy state (`bin/cs-herdr-lib.sh`), so the watcher and `bin/cs-crew-state.sh` never depend on claude reporting `idle`.
+- `tests/cs-lifecycle-claude-live.test.sh` did depend on it, and failed on `main` for that reason alone; it now waits on `done`.
+
 ## Away-mode composer
 
 `bin/cs-composer-lib.sh` recognizes claude's empty-composer glyph `❯` (U+276F)
@@ -122,5 +156,8 @@ combination never occurs in a consigliere launch.
 - `claude -p` / `--print` - headless non-interactive run; used for `--headless` scouts.
 - `--output-format json|stream-json` - structured output, unused today.
 - Herdr-native agent status (`agent_status`) auto-detects a claude agent the same as
-  a codex agent, so busy/idle/done detection is harness-agnostic; the rendered-banner
-  corroboration ("esc to interrupt") is shared.
+  a codex agent, and `cs_herdr_agent_busy_state` normalizes both, so BUSY detection is
+  harness-agnostic; the rendered-banner corroboration ("esc to interrupt") is shared.
+  The post-turn resting VALUE is not shared - claude reports `done` where codex reports
+  `idle` - so never compare a raw `agent_status` against `idle` for a claude soldier.
+  See "Post-turn agent status is `done`, never `idle`" above.
