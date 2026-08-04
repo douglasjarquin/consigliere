@@ -47,7 +47,7 @@ export CS_HERDR_SESSION="$LAB"
 
 ID=claudelive1
 
-"$ROOT/bin/cs-brief.sh" "$ID" "$REPO" >/dev/null || fail "brief scaffold"
+"$ROOT/bin/cs-brief.sh" "$ID" "$REPO" --mode local-only >/dev/null || fail "brief scaffold"
 BRIEF="$TMP/home/data/$ID/brief.md"
 python3 - "$BRIEF" <<'PY'
 import sys
@@ -56,7 +56,7 @@ s = open(p).read().replace("{TASK}", "Do nothing else: this is a plumbing test. 
 open(p, "w").write(s)
 PY
 
-out=$("$ROOT/bin/cs-spawn.sh" "$ID" "$TMP/$REPO" --effort low 2>&1) || fail "spawn failed: $out"
+out=$("$ROOT/bin/cs-spawn.sh" "$ID" "$TMP/$REPO" --mode local-only --yolo off --effort low 2>&1) || fail "spawn failed: $out"
 assert_contains "$out" "spawned $ID" "spawn reports success"
 pass "spawn creates isolated worktree and launches claude"
 

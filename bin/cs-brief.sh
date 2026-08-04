@@ -6,8 +6,16 @@
 # description, acceptance criteria, and context, and may adjust other sections
 # when the task genuinely deviates (e.g. working an existing external PR
 # instead of shipping a new one).
-# Usage: cs-brief.sh <task-id> <repo-name> [--scout] [--herdr-lab]
+# Usage: cs-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--issue <n>] [--herdr-lab]
+#        cs-brief.sh <task-id> <repo-name> --scout [--herdr-lab]
 #        cs-brief.sh <task-id> --capo {<project>...|--no-projects}
+#   --mode is REQUIRED on a ship scaffold and refused on --scout and --capo,
+#   whose deliverables have no delivery mode. There is no fallback: a missing or
+#   out-of-set mode is a refusal, because a silently defaulted definition of done
+#   is exactly the drift this flag exists to prevent.
+#   There is no --yolo flag on any scaffold. yolo governs consigliere's own
+#   approval behaviour, never the worker's contract, so a brief must never carry
+#   it; passing it is refused rather than ignored.
 #   --scout writes the scout contract instead: the deliverable is a report at
 #   data/<task-id>/report.md (no push, no PR) and the worktree is scratch.
 #   --capo writes a persistent capo charter. The project list is cloned into
@@ -28,10 +36,16 @@
 #   the caller-supplied repo string cannot reliably identify this repo. Briefs
 #   made without it carry a loud declaration so an omitted contract cannot be
 #   silent.
-# For ship tasks, the definition of done is shaped by the project's delivery
-# mode (data/projects.md via cs-project-mode.sh):
+# For ship tasks, the definition of done is shaped by the explicit --mode, and
+# the brief's last line records it verbatim as
+# "Delivery contract: mode=<mode>" (bin/cs-delivery-lib.sh owns that literal).
+# cs-spawn.sh reads that line back and refuses a spawn whose --mode disagrees, so
+# the worker's definition of done and the task's durable record cannot diverge.
+# The line sits at the very end, past every section a caller edits when it fills
+# in {TASK}, so filling the brief in cannot clobber it.
+# The three modes:
 #   no-mistakes  implement -> needs-review: (consigliere reviews the commit and
-#                triggers validation) -> pipeline -> PR -> boss merge (default).
+#                triggers validation) -> pipeline -> PR -> boss merge.
 #                The commit is reported as needs-review, never done: a keyed
 #                open state keeps an unreviewed commit visible, where done:
 #                read as finished and let a missed review idle a lane 56m on
@@ -42,7 +56,7 @@
 # Ship briefs begin with a worktree-isolation assertion before any commit.
 # The task branch cs/<task-id> is created by cs-spawn.sh's herdr worktree, so
 # briefs verify the branch rather than creating it.
-# Scout tasks ignore mode - their deliverable is a report, not a merge.
+# Scout tasks have no delivery mode - their deliverable is a report, not a merge.
 # Every scaffold's status protocol distinguishes the configured
 # declared-external-wait verb (CS_CLASSIFY_PAUSED_VERB, default "paused") from
 # "blocked:": pause for a known external wait expected to clear on its own,
@@ -71,6 +85,8 @@ esac
 # shellcheck source=bin/cs-classify-lib.sh
 . "$SCRIPT_DIR/cs-classify-lib.sh"
 PAUSED_VERB=${CS_CLASSIFY_PAUSED_VERB:-$CS_CLASSIFY_PAUSED_VERB_DEFAULT}
+# shellcheck source=bin/cs-delivery-lib.sh
+. "$SCRIPT_DIR/cs-delivery-lib.sh"
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
@@ -78,6 +94,7 @@ KIND=ship
 HERDR_LAB=0
 NO_PROJECTS=0
 ISSUE=
+MODE=
 POS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -87,6 +104,14 @@ while [ "$#" -gt 0 ]; do
     --no-projects) NO_PROJECTS=1 ;;
     --issue) ISSUE=${2:?--issue requires an issue number}; shift ;;
     --issue=*) ISSUE=${1#--issue=} ;;
+    --mode) MODE=${2:?--mode requires a value}; shift ;;
+    --mode=*) MODE=${1#--mode=} ;;
+    # yolo is consigliere's own approval posture, not the worker's contract, so
+    # it must never reach a brief. Refuse it instead of quietly treating it as a
+    # positional argument.
+    --yolo|--yolo=*)
+      echo "error: --yolo is not a brief flag; yolo governs consigliere's approval behaviour and is passed to cs-spawn.sh, never written into a brief" >&2
+      exit 1 ;;
     *) POS+=("$1") ;;
   esac
   shift
@@ -97,6 +122,22 @@ if [ -n "$ISSUE" ]; then
 fi
 if [ -n "$ISSUE" ] && [ "$KIND" != ship ]; then
   echo "error: --issue applies only to ship briefs (an issue is closed by a merged PR)" >&2
+  exit 1
+fi
+
+# The delivery contract is an explicit per-task decision with no fallback: a ship
+# brief states it or is refused, and a scout or capo deliverable has none to state.
+if [ "$KIND" = ship ]; then
+  if [ -z "$MODE" ]; then
+    echo "error: a ship brief requires --mode <$CS_DELIVERY_MODES>; the delivery contract is decided per task, not derived from the project registry" >&2
+    exit 1
+  fi
+  if ! cs_delivery_mode_valid "$MODE"; then
+    echo "error: --mode must be one of $CS_DELIVERY_MODES, got '$MODE'" >&2
+    exit 1
+  fi
+elif [ -n "$MODE" ]; then
+  echo "error: --mode applies only to ship briefs; a $KIND deliverable has no delivery mode" >&2
   exit 1
 fi
 
@@ -301,19 +342,15 @@ echo "scaffolded: $BRIEF (scout; replace {TASK})"
 exit 0
 fi
 
-# Ship task: shape Setup / Rule 1 / Definition of done by the project's delivery mode.
-# yolo does not affect the brief (it governs consigliere's approval behaviour), so discard it.
-read -r MODE _ <<EOF
-$("$CS_ROOT/bin/cs-project-mode.sh" "$REPO")
-EOF
-
+# Ship task: shape Setup / Rule 1 / Definition of done by the explicit --mode,
+# already validated against the closed set above.
 case "$MODE" in
   direct-PR)
     SETUP2=""
     RULE1='1. Never push to the default branch (push only your `cs/'"$ID"'` branch). Never merge a PR.'
     IFS= read -r -d '' DOD <<EOF || true
 # Definition of done
-This project ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
+This task ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
 The task is complete only when committed on your branch.
 When it is implemented and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file and stop.
 Do NOT run /no-mistakes. The configured merge authority decides whether to merge the PR; consigliere relays the outcome.
@@ -324,14 +361,14 @@ EOF
     RULE1="1. Never push to any remote and never open a PR. Work only on your \`cs/$ID\` branch; consigliere handles the merge into local \`main\`."
     IFS= read -r -d '' DOD <<EOF || true
 # Definition of done
-This project ships **local-only**: no remote, no PR, no pipeline.
+This task ships **local-only**: no remote, no PR, no pipeline.
 The task is complete only when committed on your branch \`cs/$ID\`. Do NOT push, do NOT open a PR, do NOT merge.
 Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
 When it is implemented and committed, append \`done: ready in branch cs/$ID\` to the status file and stop.
 The configured merge authority approves the ready branch, then consigliere merges it into local \`main\` through the guarded fast-forward path.
 EOF
     ;;
-  *)  # no-mistakes (default)
+  *)  # no-mistakes; the closed-set validation above admits nothing else
     SETUP2="
 2. Run \`no-mistakes doctor\`; if it reports the repo is not initialized here, run \`no-mistakes init\`."
     RULE1='1. Never push to the default branch. Never merge a PR.'
@@ -365,12 +402,17 @@ esac
 # keep their exact prior shape.
 DOD=${DOD%$'\n'}
 
+# The machine-readable contract cs-spawn.sh cross-checks its own --mode against.
+# It is emitted last, after every section a caller rewrites while filling in
+# {TASK}, so an edited brief cannot lose or contradict it by accident.
+CONTRACT_LINE=$(cs_delivery_contract_line "$MODE")
+
 if [ -n "$ISSUE" ]; then
   if [ "$MODE" = local-only ]; then
     IFS= read -r -d '' ISSUE_SECTION <<EOF || true
 # Board issue #$ISSUE
 This task implements GitHub issue #$ISSUE.
-This project ships local-only (no PR), so you cannot close the issue with a PR keyword.
+This task ships local-only (no PR), so you cannot close the issue with a PR keyword.
 Do the work as usual; consigliere closes issue #$ISSUE after it lands the approved local merge.
 Do NOT close the issue yourself and do NOT move its board card - the board's own workflow handles the card once the issue is closed.
 EOF
@@ -449,5 +491,7 @@ If you touch a project \`AGENTS.md\` that lacks \`## Maintaining this file\`, ad
 Keep it proportionate: skip \`AGENTS.md\` edits for trivial tasks that produced no durable project knowledge.
 
 $DOD
+
+$CONTRACT_LINE
 EOF
 echo "scaffolded: $BRIEF (ship, mode=$MODE; replace {TASK})"

@@ -109,7 +109,7 @@ test_spawn_launch_brief_stamping() {
   mkdir -p "$home/data/task" "$home/state" "$fakebin"
   cs_git_init_commit "$repo"
   printf -- '- project [local-only] - fixture\n' > "$home/data/projects.md"
-  printf 'implement the fixture\n' > "$home/data/task/brief.md"
+  printf 'implement the fixture\nDelivery contract: mode=local-only\n' > "$home/data/task/brief.md"
 
   cat > "$fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
@@ -153,7 +153,7 @@ SH
   env PATH="$fakebin:$PATH" CS_HOME="$home" CS_DATA_OVERRIDE="$home/data" \
     CS_STATE_OVERRIDE="$home/state" CS_FAKE_SPAWN_WORKTREE="$worktree" \
     CS_FAKE_SPAWN_LAUNCH="$TMP/spawn.launch" \
-    "$SPAWN" task "$repo" >/dev/null || fail "spawn fixture failed"
+    "$SPAWN" task "$repo" --mode local-only --yolo off >/dev/null || fail "spawn fixture failed"
   launch=$(cat "$TMP/spawn.launch")
   (
     cd "$worktree" || exit 1
@@ -161,7 +161,8 @@ SH
   ) || fail "captured spawn launch command failed"
   prompt=$(cat "$TMP/spawn.prompt")
   [ "$(cs_operational_input_kind "$prompt")" = launch-brief ] || fail "spawn prompt lacks launch-brief kind"
-  [ "$(cs_operational_input_body "$prompt")" = "implement the fixture" ] || fail "spawn prompt lost brief body"
+  [ "$(cs_operational_input_body "$prompt")" = "$(cat "$home/data/task/brief.md")" ] \
+    || fail "spawn prompt lost brief body"
   # The launch strings are owned by cs-harness-lib.sh: one per launch path per
   # harness - soldier(codex), soldier(claude), scout, capo = 4. Every path must
   # stamp the typed launch-brief kind through cs-operational-input.

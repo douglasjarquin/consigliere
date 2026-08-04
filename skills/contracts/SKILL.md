@@ -12,7 +12,9 @@ This is ordinary section-7 ship lifecycle with a board front door - the safety c
 
 ## Preconditions (check once, fast)
 
-1. The project is registered in `data/projects.md` (delivery mode + yolo) and its board is mapped in `data/boards.md`, beside the registry and keyed by the same project name; `docs/configuration.md` owns the mapping line format. If the board mapping is missing, tell the boss the one line they need to add and stop.
+1. The project is registered in `data/projects.md` and its board is mapped in `data/boards.md`, beside the registry and keyed by the same project name; `docs/configuration.md` owns the mapping line format.
+   The registry's standing posture is advisory, while each ship task's flags are chosen explicitly at intake.
+   If the board mapping is missing, tell the boss the one line they need to add and stop.
 2. Run `bin/cs-board.sh check <project>`. It confirms the Ready / In Progress / Done options exist and reminds you the closed->Done workflow must be enabled on the board. If it warns that a `Done` option or the workflow is missing, surface that to the boss before sweeping - with built-in-only Done moves, a missing workflow silently strands cards.
 3. Board work needs a PR to close the issue. A `local-only` project cannot close an issue by merge; if the project is `local-only`, tell the boss and confirm they want consigliere to close each issue after the local merge instead, or switch the project to `no-mistakes`/`direct-PR`.
 
@@ -29,9 +31,13 @@ This is ordinary section-7 ship lifecycle with a board front door - the safety c
    - **Serialize only true dependencies.** Same-file or same-subsystem overlap alone does not block concurrent work; queue an issue only for a true semantic dependency, shared mutable external state, incompatible concurrent migration, or another concrete condition that makes independent progress or reconciliation unsafe. Independent issues fill the remaining lanes freely.
 5. For each issue you dispatch (up to the cap):
    a. Move the card at dispatch: `bin/cs-board.sh start <project> <item-id>` (Ready -> In Progress). Do this only once you are actually spawning the soldier, so the board reflects real work.
-   b. Scaffold the brief WITH the issue link: `bin/cs-brief.sh <task-id> <project> --issue <n>`, then replace `{TASK}` with the issue's scope, acceptance criteria, and context. The `--issue` flag bakes in the hard `Closes #<n>` PR requirement; do not remove it.
-   c. Spawn: `bin/cs-spawn.sh <task-id> <project-dir> --issue <n> [--model .. --effort ..]` (section 4 chooses model/effort). Use a stable task id derived from the issue, e.g. `<project>-<n>`.
-   d. Record the work item in the backlog with the issue link; note any dependents gated by a concrete condition as queued/blocked.
+   b. Decide this issue's delivery mode and yolo posture per `AGENTS.md` section 7, defaulting to the project's standing registry posture unless the issue warrants otherwise.
+      The scaffold and the spawn must state the same mode, or the spawn refuses.
+   c. Scaffold the brief WITH the issue link: `bin/cs-brief.sh <task-id> <project> --mode <mode> --issue <n>`, then replace `{TASK}` with the issue's scope, acceptance criteria, and context.
+      The `--issue` flag bakes in the hard `Closes #<n>` PR requirement; do not remove it.
+   d. Spawn: `bin/cs-spawn.sh <task-id> <project-dir> --mode <mode> --yolo <on|off> --issue <n> [--model .. --effort ..]` (section 4 chooses model/effort).
+      Use a stable task id derived from the issue, e.g. `<project>-<n>`.
+   e. Record the work item in the backlog with the issue link; note any dependents gated by a concrete condition as queued/blocked.
 6. Supervise every lane under section 8 (the foreground checkpoint). As a lane finishes and tears down, pull the next Ready/queued issue into it and repeat from step 5 until the column is empty or the boss says stop.
 7. When the sweep genuinely ends - the column is clear, or the boss stops it - run `bin/cs-board-watch.sh disarm <project>`. An armed sweep for work nobody intends to do keeps reporting depth that consigliere will not act on. Under `casino` this step does not apply: that skill's factory is standing, and it owns when its sweep ends.
 

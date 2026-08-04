@@ -9,7 +9,7 @@
 #   backlog  - compact listing via tasks-axi when the configured backend selects
 #              it and the tool is installed, else title lines from
 #              data/backlog.md; plus per-section headline counts.
-#   tasks    - one row per state/<id>.meta: kind/mode/yolo/project/pr from meta
+#   tasks    - one row per state/<id>.meta: kind, optional mode/yolo, project, pr
 #              (bin/cs-meta-lib.sh), endpoint liveness (herdr pane exists plus
 #              corroborated agent status via bin/cs-herdr-lib.sh), the
 #              authoritative current state from bin/cs-crew-state.sh, the keyed

@@ -1,8 +1,26 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a soldier in a herdr-native task worktree, or a capo
 # in its isolated consigliere home.
-# Usage: cs-spawn.sh <task-id> <project-dir> [--model <name>] [--effort <level>] [--scout] [--base <ref>]
+# Usage: cs-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--model <name>] [--effort <level>] [--base <ref>] [--issue <n>]
+#        cs-spawn.sh <task-id> <project-dir> --scout [--headless] [--model <name>] [--effort <level>] [--base <ref>]
 #        cs-spawn.sh <task-id> <capo-home> --capo [--model <name>] [--effort <level>]
+#
+#   --mode and --yolo are REQUIRED on a ship spawn and refused on --scout and
+#   --capo. A ship task's delivery posture is decided per task at intake, never
+#   derived here: cs-brief.sh already shaped the worker's definition of done from
+#   the same explicit decision, and this spawn refuses to launch if the brief's
+#   recorded "Delivery contract: mode=<mode>" line disagrees with --mode. That
+#   refusal happens before the worktree is created, so it never leaves an
+#   endpoint, workspace, or branch behind.
+#   A brief with no contract line was scaffolded before the contract existed: that
+#   warns once and launches on --mode rather than refusing.
+#   data/projects.md records the boss's STANDING posture per project and stays
+#   advisory: a --mode carrying less rigor than the registry entry prints a
+#   deviation notice and continues, and a project absent from the registry has no
+#   standing posture, so it gets no notice at all.
+#   A scout records no mode= and no yolo= in its metadata: its deliverable is a
+#   report, so there is no delivery contract to honour. cs-promote.sh is where a
+#   promoted scout first states one.
 #
 #   --model <name> and --effort <default|low|medium|high|xhigh|max|ultra> override the optional
 #   config/dispatch-policy entry for the resolved harness and task kind.
@@ -47,8 +65,6 @@
 #
 # Every invocation holds a task-id-scoped lock across creation through
 # metadata publication, so concurrent same-id spawns serialize.
-# Delivery mode and yolo are resolved from data/projects.md at spawn time and
-# recorded in meta; cs-project-mode.sh owns the registry parse.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -73,6 +89,8 @@ esac
 . "$SCRIPT_DIR/cs-operational-input.sh"
 # shellcheck source=bin/cs-harness-lib.sh
 . "$SCRIPT_DIR/cs-harness-lib.sh"
+# shellcheck source=bin/cs-delivery-lib.sh
+. "$SCRIPT_DIR/cs-delivery-lib.sh"
 
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
@@ -148,6 +166,8 @@ EOF
 KIND=ship
 MODEL=
 EFFORT=
+MODE=
+YOLO=
 BASE=
 HEADLESS=0
 # Seconds to wait for an agent to appear after the launch line is delivered.
@@ -164,6 +184,8 @@ while [ "$#" -gt 0 ]; do
     --headless) HEADLESS=1 ;;
     --model) MODEL=${2:?--model requires a value}; shift ;;
     --effort) EFFORT=${2:?--effort requires a value}; shift ;;
+    --mode) MODE=${2:?--mode requires a value}; shift ;;
+    --yolo) YOLO=${2:?--yolo requires a value}; shift ;;
     --base) BASE=${2:?--base requires a value}; shift ;;
     --issue) ISSUE=${2:?--issue requires a value}; shift ;;
     -*) echo "error: unknown flag $1" >&2; exit 2 ;;
@@ -196,6 +218,37 @@ cs_harness_permission_mode "$HARNESS" >/dev/null || exit 2
 if [ "$HEADLESS" -eq 1 ] && [ "$KIND" != scout ]; then
   echo "error: --headless applies only to --scout tasks" >&2
   exit 2
+fi
+
+# The delivery contract is validated with the other pre-flight checks, ahead of
+# the spawn lock and the worktree, so a bad or missing flag cannot leave an
+# endpoint, workspace, branch, or metadata file behind.
+if [ "$KIND" = ship ]; then
+  if [ -z "$MODE" ]; then
+    echo "error: a ship spawn requires --mode <$CS_DELIVERY_MODES>; the delivery contract is decided per task, not derived from the project registry" >&2
+    exit 2
+  fi
+  if ! cs_delivery_mode_valid "$MODE"; then
+    echo "error: --mode must be one of $CS_DELIVERY_MODES, got '$MODE'" >&2
+    exit 2
+  fi
+  if [ -z "$YOLO" ]; then
+    echo "error: a ship spawn requires --yolo <$CS_DELIVERY_YOLOS>" >&2
+    exit 2
+  fi
+  if ! cs_delivery_yolo_valid "$YOLO"; then
+    echo "error: --yolo must be one of $CS_DELIVERY_YOLOS, got '$YOLO'" >&2
+    exit 2
+  fi
+else
+  if [ -n "$MODE" ]; then
+    echo "error: --mode applies only to ship spawns; a $KIND deliverable has no delivery mode" >&2
+    exit 2
+  fi
+  if [ -n "$YOLO" ]; then
+    echo "error: --yolo applies only to ship spawns; approval posture belongs to a ship task's contract" >&2
+    exit 2
+  fi
 fi
 
 cs_herdr_protocol_check
@@ -363,9 +416,30 @@ git -C "$PROJ_ABS" rev-parse --show-toplevel >/dev/null 2>&1 || {
   echo "error: '$PROJ_ABS' is not a git checkout" >&2; exit 1; }
 
 PROJECT_NAME=$(basename "$PROJ_ABS")
-read -r MODE YOLO <<EOF
-$("$CS_ROOT/bin/cs-project-mode.sh" "$PROJECT_NAME")
-EOF
+
+# Cross-check the brief against --mode, and note an advisory deviation from the
+# project's standing registry posture. Both run here, ahead of
+# cs_herdr_task_create, so a refusal leaves no worktree, workspace, or branch.
+if [ "$KIND" = ship ]; then
+  if BRIEF_MODE=$(cs_delivery_brief_mode "$BRIEF"); then
+    if [ "$BRIEF_MODE" != "$MODE" ]; then
+      echo "error: brief $BRIEF records '$CS_DELIVERY_CONTRACT_PREFIX$BRIEF_MODE' but this spawn passed --mode $MODE" >&2
+      echo "The worker's definition of done and the task's durable record would disagree. Re-scaffold the brief for $MODE, or spawn with --mode $BRIEF_MODE." >&2
+      exit 2
+    fi
+  else
+    echo "warn: brief $BRIEF carries no '$CS_DELIVERY_CONTRACT_PREFIX<mode>' line (scaffolded before the explicit delivery contract); launching on --mode $MODE" >&2
+  fi
+  # --standing prints the registry posture only for a REGISTERED project and stays
+  # silent otherwise, so an unregistered project (the consigliere repo itself, for
+  # one) has no standing posture to deviate from and reports nothing.
+  if STANDING=$("$CS_ROOT/bin/cs-project-mode.sh" --standing "$PROJECT_NAME" 2>/dev/null); then
+    STANDING_MODE=${STANDING%% *}
+    if [ "$(cs_delivery_mode_rigor "$MODE")" -lt "$(cs_delivery_mode_rigor "$STANDING_MODE")" ]; then
+      echo "notice: $PROJECT_NAME's standing registry posture is $STANDING_MODE; this task ships $MODE, which carries less rigor. The registry is advisory - continuing." >&2
+    fi
+  fi
+fi
 
 BRANCH="cs/$ID"
 if git -C "$PROJ_ABS" show-ref --verify --quiet "refs/heads/$BRANCH"; then
@@ -404,10 +478,12 @@ META_LINES=(
   "model=${MODEL:-default}"
   "effort=${EFFORT:-default}"
   "kind=$KIND"
-  "mode=$MODE"
-  "yolo=$YOLO"
-  "harness=$HARNESS"
 )
+# A scout records no delivery posture at all: its deliverable is a report, so
+# there is no mode to honour and no approval posture to apply. cs-promote.sh
+# states both explicitly when a scout is promoted to ship.
+[ "$KIND" = ship ] && META_LINES+=("mode=$MODE" "yolo=$YOLO")
+META_LINES+=("harness=$HARNESS")
 [ "$HEADLESS" -eq 1 ] && META_LINES+=("headless=1")
 [ -n "$ISSUE" ] && META_LINES+=("issue=$ISSUE")
 cs_meta_write "$STATE/$ID.meta" "${META_LINES[@]}"
@@ -462,4 +538,6 @@ fi
 
 HEADLESS_NOTE=""
 [ "$HEADLESS" -eq 1 ] && HEADLESS_NOTE=" headless=1"
-echo "spawned $ID kind=$KIND mode=$MODE yolo=$YOLO workspace=$WS pane=$PANE worktree=$WT_REAL$HEADLESS_NOTE"
+POSTURE_NOTE=""
+[ "$KIND" = ship ] && POSTURE_NOTE=" mode=$MODE yolo=$YOLO"
+echo "spawned $ID kind=$KIND$POSTURE_NOTE workspace=$WS pane=$PANE worktree=$WT_REAL$HEADLESS_NOTE"

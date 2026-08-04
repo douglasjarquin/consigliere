@@ -50,7 +50,7 @@ When a sweep parks new specs, tell the boss in one batched line which issues now
 
 ## Implementation sweep (Ready)
 
-Load the `contracts` skill and run its sweep over the Ready column; it owns lane count, true-dependency serialization, dispatch card moves, briefs with `Closes #<n>`, landing, the board wake, and the stuck-card check.
+Load the `contracts` skill and run its sweep over the Ready column; it owns lane count, true-dependency serialization, dispatch card moves, briefs with `Closes #<n>`, the per-issue delivery contract passed explicitly at scaffold and spawn, landing, the board wake, and the stuck-card check.
 Spec lanes and implementation lanes run concurrently under the ordinary section-8 supervision cycle; as either column refills (new ideas in Inbox, boss promotions into Ready), keep sweeping until both are clear or the boss says stop.
 Between sessions that refilling arrives as the armed sweep's `check:` wake, which reports both depths at once: pull Inbox into free spec lanes and Ready into free implementation lanes from the same wake.
 Disarm only when the boss ends the factory, not when a column merely empties - Inbox refills on its own, and Backlog specs the boss has not yet promoted are exactly what the sweep is waiting for.

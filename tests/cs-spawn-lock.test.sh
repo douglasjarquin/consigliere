@@ -64,12 +64,14 @@ cs_git_init_commit "$REPO"
 run_spawn() {
   local id=$1
   mkdir -p "$HOME_DIR/data/$id"
-  printf 'implement the fixture\n' > "$HOME_DIR/data/$id/brief.md"
+  # Every spawn here is a ship spawn, so the brief and the spawn state the same
+  # explicit delivery contract (cs-spawn.sh cross-checks them).
+  printf 'implement the fixture\nDelivery contract: mode=local-only\n' > "$HOME_DIR/data/$id/brief.md"
   env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
     CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$STATE" \
     CS_CLAUDE_JSON="$TMP/claude.json" \
     CS_FAKE_SPAWN_WORKTREE="$TMP/wt-$id" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-$id" \
-    "$SPAWN" "$id" "$REPO" >/dev/null 2>&1
+    "$SPAWN" "$id" "$REPO" --mode local-only --yolo off >/dev/null 2>&1
 }
 
 # A reliably-dead PID: start a trivial process, reap it, so kill -0 fails.

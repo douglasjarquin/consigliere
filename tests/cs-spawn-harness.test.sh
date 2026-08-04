@@ -53,11 +53,23 @@ printf -- '- project [local-only] - fixture\n' > "$HOME_DIR/data/projects.md"
 REPO="$TMP/project"
 cs_git_init_commit "$REPO"
 
+# spawn_one drives BOTH ship and scout spawns, and a scout now refuses --mode /
+# --yolo, so the ship posture flags are passed per call site rather than here.
 spawn_one() {
   local harness=$1 id=$2 wt="$TMP/wt-$2"
   shift 2
+  local arg prev='' brief_mode=''
   mkdir -p "$HOME_DIR/data/$id"
   printf 'implement the fixture\n' > "$HOME_DIR/data/$id/brief.md"
+  # A ship fixture's brief must record the same delivery contract the spawn
+  # passes; a scout's brief carries none. Without this the ship spawns would all
+  # exercise the pre-contract compatibility warning instead of the cross-check.
+  for arg in "$@"; do
+    [ "$prev" = --mode ] && brief_mode=$arg
+    prev=$arg
+  done
+  [ -n "$brief_mode" ] \
+    && printf 'Delivery contract: mode=%s\n' "$brief_mode" >> "$HOME_DIR/data/$id/brief.md"
   # CS_CLAUDE_JSON sandboxes the folder-trust pre-seed away from the real
   # ~/.claude.json (claude spawns pre-trust their worktree).
   env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE="$harness" \
@@ -69,7 +81,7 @@ spawn_one() {
 }
 
 # --- codex root: unchanged launch shape, harness=codex ----------------------
-launch=$(spawn_one codex t-codex)
+launch=$(spawn_one codex t-codex --mode no-mistakes --yolo off)
 [ "$(cs_meta_get "$HOME_DIR/state/t-codex.meta" harness)" = codex ] || fail "codex meta harness"
 assert_contains "$launch" "codex " "codex root launches codex"
 assert_contains "$launch" 'notify=' "codex root wires notify turn-end"
@@ -91,7 +103,7 @@ launch=$(spawn_one codex t-policy-codex-scout --scout)
 assert_contains "$launch" "--model 'gpt-5.6-sol'" "codex scout policy model launch"
 assert_contains "$launch" "-c 'model_reasoning_effort=\"max\"'" "codex scout policy max effort launch"
 
-launch=$(spawn_one codex t-policy-codex-ship)
+launch=$(spawn_one codex t-policy-codex-ship --mode no-mistakes --yolo off)
 [ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-ship.meta" model)" = gpt-5.6-terra ] || fail "codex ship policy model"
 [ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-ship.meta" effort)" = ultra ] || fail "codex ship policy effort"
 assert_contains "$launch" "--model 'gpt-5.6-terra'" "codex ship policy model launch"
@@ -103,13 +115,13 @@ launch=$(spawn_one claude t-policy-claude-scout --scout)
 assert_contains "$launch" "--model 'opus'" "claude scout policy model launch"
 assert_contains "$launch" "--effort 'max'" "claude scout policy effort launch"
 
-launch=$(spawn_one claude t-policy-claude-ship)
+launch=$(spawn_one claude t-policy-claude-ship --mode no-mistakes --yolo off)
 [ "$(cs_meta_get "$HOME_DIR/state/t-policy-claude-ship.meta" model)" = sonnet ] || fail "claude ship policy model"
 [ "$(cs_meta_get "$HOME_DIR/state/t-policy-claude-ship.meta" effort)" = medium ] || fail "claude ship policy effort"
 assert_contains "$launch" "--model 'sonnet'" "claude ship policy model launch"
 assert_contains "$launch" "--effort 'medium'" "claude ship policy effort launch"
 
-launch=$(spawn_one codex t-policy-explicit --model gpt-5.6-mini --effort low)
+launch=$(spawn_one codex t-policy-explicit --mode no-mistakes --yolo off --model gpt-5.6-mini --effort low)
 [ "$(cs_meta_get "$HOME_DIR/state/t-policy-explicit.meta" model)" = gpt-5.6-mini ] || fail "explicit model overrides policy"
 [ "$(cs_meta_get "$HOME_DIR/state/t-policy-explicit.meta" effort)" = low ] || fail "explicit effort overrides policy"
 assert_contains "$launch" "--model 'gpt-5.6-mini'" "explicit model launch"
@@ -117,7 +129,7 @@ assert_contains "$launch" "model_reasoning_effort=\"low\"" "explicit effort laun
 pass "dispatch policy selects harness and task-kind profile; explicit flags win"
 
 # --- claude root: --settings launch, harness=claude, settings file written --
-launch=$(spawn_one claude t-claude)
+launch=$(spawn_one claude t-claude --mode no-mistakes --yolo off)
 [ "$(cs_meta_get "$HOME_DIR/state/t-claude.meta" harness)" = claude ] || fail "claude meta harness"
 assert_contains "$launch" "claude " "claude root launches claude"
 assert_contains "$launch" "--dangerously-skip-permissions" "claude root autonomy flag"
@@ -136,7 +148,7 @@ pass "claude root: harness=claude, --settings launch, settings file written"
 # End-to-end, not just the launch-string unit: proves the home's config dir
 # resolves the same way for the harness lib as it does for cs-spawn itself.
 printf 'claude auto\n' > "$HOME_DIR/config/permission-mode"
-launch=$(spawn_one claude t-claude-permmode)
+launch=$(spawn_one claude t-claude-permmode --mode no-mistakes --yolo off)
 assert_contains "$launch" "--permission-mode 'auto'" "configured permission mode reaches the spawn launch"
 assert_not_contains "$launch" '--dangerously-skip-permissions' "configured mode replaces the bypass flag"
 
@@ -147,7 +159,7 @@ if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude \
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
   CS_CLAUDE_JSON="$TMP/claude.json" \
   CS_FAKE_SPAWN_WORKTREE="$TMP/wt-permmode-invalid" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-permmode-invalid" \
-  "$SPAWN" t-permmode-invalid "$REPO" 2>&1); then
+  "$SPAWN" t-permmode-invalid "$REPO" --mode no-mistakes --yolo off 2>&1); then
   fail "an unusable permission mode must reject spawn"
 fi
 assert_contains "$output" "not a usable claude launch permission mode" "unusable mode error is specific"
@@ -162,7 +174,7 @@ if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
   CS_CLAUDE_JSON="$TMP/claude.json" \
   CS_FAKE_SPAWN_WORKTREE="$TMP/wt-policy-invalid" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-policy-invalid" \
-  "$SPAWN" t-policy-invalid "$REPO" 2>&1); then
+  "$SPAWN" t-policy-invalid "$REPO" --mode no-mistakes --yolo off 2>&1); then
   fail "malformed dispatch policy must reject spawn"
 fi
 assert_contains "$output" "invalid codex effort 'too-much'" "malformed policy error is specific"
@@ -174,7 +186,7 @@ POLICY="$HOME_DIR/config/dispatch-policy"
 rm -f "$POLICY"
 printf 'codex ship gpt-5.6-luna high\n' > "$TMP/external-policy"
 ln -s "$TMP/external-policy" "$POLICY"
-launch=$(spawn_one codex t-policy-symlink)
+launch=$(spawn_one codex t-policy-symlink --mode no-mistakes --yolo off)
 [ "$(cs_meta_get "$HOME_DIR/state/t-policy-symlink.meta" model)" = gpt-5.6-luna ] || fail "symlinked policy model"
 [ "$(cs_meta_get "$HOME_DIR/state/t-policy-symlink.meta" effort)" = high ] || fail "symlinked policy effort"
 assert_contains "$launch" "--model 'gpt-5.6-luna'" "symlinked policy model launch"
@@ -188,7 +200,7 @@ if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
   CS_CLAUDE_JSON="$TMP/claude.json" \
   CS_FAKE_SPAWN_WORKTREE="$TMP/wt-policy-dangling" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-policy-dangling" \
-  "$SPAWN" t-policy-dangling "$REPO" 2>&1); then
+  "$SPAWN" t-policy-dangling "$REPO" --mode no-mistakes --yolo off 2>&1); then
   fail "a dangling dispatch policy symlink must reject spawn"
 fi
 assert_contains "$output" "dispatch policy symlink does not resolve" "dangling symlink error is specific"
@@ -203,7 +215,7 @@ if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude \
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
   CS_CLAUDE_JSON="$TMP/claude.json" \
   CS_FAKE_SPAWN_WORKTREE="$TMP/wt-claude-ultra" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-claude-ultra" \
-  "$SPAWN" t-claude-ultra "$REPO" --effort ultra 2>&1); then
+  "$SPAWN" t-claude-ultra "$REPO" --mode no-mistakes --yolo off --effort ultra 2>&1); then
   fail "claude ultra must reject spawn"
 fi
 assert_contains "$output" "claude does not accept effort=ultra; choose default|low|medium|high|xhigh|max" "claude ultra error is specific"
@@ -219,12 +231,12 @@ pass "claude ultra blocks dispatch"
 # the task as under way, and the pane sat at a bare prompt until the stale timer
 # eventually noticed: a soldier that reported success and never existed.
 mkdir -p "$HOME_DIR/data/t-swallowed"
-printf 'implement the fixture\n' > "$HOME_DIR/data/t-swallowed/brief.md"
+printf 'implement the fixture\nDelivery contract: mode=no-mistakes\n' > "$HOME_DIR/data/t-swallowed/brief.md"
 if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
   CS_FAKE_SPAWN_WORKTREE="$TMP/wt-swallowed" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-swallowed" \
   CS_FAKE_SPAWN_NO_AGENT=1 CS_SPAWN_LAUNCH_WAIT_SECS=2 \
-  "$SPAWN" t-swallowed "$REPO" 2>&1); then
+  "$SPAWN" t-swallowed "$REPO" --mode no-mistakes --yolo off 2>&1); then
   fail "spawn must fail when no agent appears after the launch"
 fi
 assert_contains "$output" "no agent appeared" "the swallowed launch must be named, not silently reported as spawned"

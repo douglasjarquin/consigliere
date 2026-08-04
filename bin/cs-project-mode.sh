@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
-# Resolve a project's delivery mode and yolo flag from the data/projects.md registry.
+# Report a project's STANDING delivery posture: the mode and yolo flag the boss
+# recorded for it in the data/projects.md registry.
 # Prints two words to stdout: "<mode> <yolo>" where mode is one of
 # no-mistakes|direct-PR|local-only and yolo is on|off.
+#
+# This is a registry reporter, not the resolver of any task's delivery posture. A
+# ship task's mode and yolo are decided per task at intake and passed explicitly
+# to cs-brief.sh, cs-spawn.sh, and cs-promote.sh; bin/cs-delivery-lib.sh owns that
+# vocabulary. The standing posture is advisory: cs-spawn.sh notes a task that
+# deviates downward from it and continues.
+# Callers here hold no task and want exactly the registry's own answer:
+# cs-fleet-sync.sh (skip local-only clones) and cs-home-seed.sh (capo route
+# eligibility and no-mistakes initialization).
 #
 # Registry line format (data/projects.md):
 #   - <name> - <desc> (added <date>)                  -> no-mistakes off  (default)
@@ -21,7 +31,14 @@
 #
 # An unknown/missing project or unknown mode falls back to "no-mistakes off" and
 # warns to stderr, so a typo never silently drops the gate.
-# Usage: cs-project-mode.sh <project-name>
+#
+# --standing asks the narrower question "does this project have a standing posture
+# at all?", for a caller that must distinguish an unregistered project from a
+# registered one carrying the default. It prints the same "<mode> <yolo>" and
+# exits 0 for a registered project, and exits 3 printing nothing - and warning
+# nothing - when there is no registry or no entry. An unregistered project simply
+# has no standing posture; that is not a fault to report.
+# Usage: cs-project-mode.sh [--standing] <project-name>
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,9 +46,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
 REG="$DATA/projects.md"
-NAME=${1:?usage: cs-project-mode.sh <project-name>}
+STANDING_ONLY=0
+if [ "${1:-}" = --standing ]; then
+  STANDING_ONLY=1
+  shift
+fi
+NAME=${1:?usage: cs-project-mode.sh [--standing] <project-name>}
 
 if [ ! -f "$REG" ]; then
+  [ "$STANDING_ONLY" -eq 1 ] && exit 3
   echo "warn: no registry at $REG; defaulting $NAME to no-mistakes off" >&2
   echo "no-mistakes off"
   exit 0
@@ -54,6 +77,7 @@ parsed=$(awk -v n="$NAME" '
 ' "$REG")
 
 if [ -z "$parsed" ]; then
+  [ "$STANDING_ONLY" -eq 1 ] && exit 3
   echo "warn: project \"$NAME\" not in registry; defaulting to no-mistakes off" >&2
   echo "no-mistakes off"
   exit 0
