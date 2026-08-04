@@ -16,7 +16,7 @@
 
 # Idempotent guard: helper files may source this library for ROOT/fail/pass,
 # and the test that includes them may also source it directly. Re-sourcing
-# must not wipe the registered-cleanup array or reset state.
+# must not reset the registered-cleanup registry or other state.
 if [ -n "${CS_TEST_LIB_SOURCED:-}" ]; then
   return 0
 fi
@@ -55,7 +55,7 @@ pass() {
 # cs_test_tmproot, and the trap was installed by its first call. Both were dead
 # code: the function is used as `TMP=$(cs_test_tmproot foo)`, so its body runs in
 # a command-substitution SUBSHELL, and neither the append nor the `trap` ever
-# reached the caller. Every suite leaked its temp dir - 394 of them had piled up
+# reached the caller. Every suite leaked its temp dir - 393 of them had piled up
 # in TMPDIR before this was fixed, and leaked fixture repos are what got
 # accidentally trusted into the boss's codex config (docs/codex.md).
 # A file survives the subshell. `$$` is the invoking shell's PID and bash does NOT

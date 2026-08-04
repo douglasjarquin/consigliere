@@ -5,7 +5,7 @@
 # cs_test_tmproot is used as `TMP=$(cs_test_tmproot foo)`, so its body runs in a
 # command-substitution subshell; the old implementation appended to a shell array
 # and installed the EXIT trap from inside that subshell, so neither ever reached
-# the caller. Every suite leaked its temp dir (394 had accumulated in TMPDIR), and
+# the caller. Every suite leaked its temp dir (393 had accumulated in TMPDIR), and
 # leaked fixture repos are what got accidentally trusted into the boss's codex
 # config. Nothing failed, so nothing noticed - hence these regressions.
 #

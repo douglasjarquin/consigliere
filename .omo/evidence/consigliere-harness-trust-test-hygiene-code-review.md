@@ -3,24 +3,35 @@
 ## Review scope
 
 Base: `1269f280a1a8ea479c908e6d889a320459988c0b`.
-Target: `ff597daf1239021f7139885b793bf6c8d66f294f`.
-Changed files inspected: `docs/claude.md`, `docs/codex.md`, `docs/herdr.md`, `tests/cs-lifecycle-claude-live.test.sh`, `tests/cs-lifecycle-live.test.sh`, `tests/cs-test-lib.test.sh`, and `tests/lib.sh`.
-The required `omo ulw-loop status --json` lookup reported `ULW_LOOP_PLAN_MISSING`, so this fallback path uses the target branch goal slug.
+Target: `a748555c0e66a92226cb0f2edb5425832585a7d1`.
+I reviewed the full target range and the follow-up delta from `ff597daf1239021f7139885b793bf6c8d66f294f`.
+The supplied `omo ulw-loop status --json` lookup reported `ULW_LOOP_PLAN_MISSING`, so this uses the existing goal-slug fallback artifact path.
 
 ## Evidence inspected
 
-I inspected the full range diff, each changed source file with current line numbers, the three commits in the range, the shared test-library call sites, EXIT-trap overrides, the portable test runner, and CI registration.
-`git diff --check 1269f280a1a8ea479c908e6d889a320459988c0b ff597daf1239021f7139885b793bf6c8d66f294f` was clean.
-`tests/cs-test-lib.test.sh` is selected by default as a portable test through `bin/cs-test-run.sh`.
-No tests, shellcheck runs, builds, live lanes, or pipelines were run, as required by the assignment.
+I inspected the commit history, full diffs, current line-numbered source, every `cs_test_tmproot` and `cs_test_cleanup` caller, and every test EXIT-trap override.
+I also inspected the two tracked `.omo/evidence` files and their committing history.
+No tests, shellcheck runs, builds, live lanes, or pipelines were run, as required.
+`git diff --check` produced no output.
+
+## Criteria audit
+
+- The Codex launch documentation now accurately says that the bypass flag does not suppress folder trust at `docs/codex.md:17`.
+- `tests/lib.sh:64-71` canonicalizes the temporary base and falls back to `/tmp` when the supplied base is invalid or resolves to `/`.
+- `tests/lib.sh:84-101` canonicalizes each registry candidate and removes only a single real child of the non-root canonical base.
+- `tests/cs-test-lib.test.sh:97-123` covers the base, trailing-slash, dot, and root-`TMPDIR` corrupted-registry cases from a child shell.
+- The registry survives command substitution, caller-side EXIT cleanup is installed at source time, and repeated cleanup is a silent no-op after consuming the registry.
+- Every reviewed test that replaces the library EXIT trap calls `cs_test_cleanup` from its replacement handler.
+- The docs and test updates have no `bin/` changes.
+- The tracked `.omo/evidence` files are no-mistakes review artifacts, not product source or behavior changes, so they do not contradict the docs/tests-only implementation criterion.
 
 ## Skill-perspective check
 
 Ran: yes.
-I loaded and applied the available `omo:remove-ai-slops` and `omo:programming` skill criteria before judging test relevance and maintainability.
-The diff does not add deletion-only tests, tautological tests, brittle prompt tests, untyped escape hatches, unnecessary production parsing, or needless abstraction.
-The new child-process tests are appropriate because EXIT-trap and command-substitution behavior is only observable at shell-process exit.
-The diff does violate the required safe-boundary perspective: its registry validation claims to accept only minted paths but accepts arbitrary paths under the shared temporary parent.
+I loaded and applied the available `omo:remove-ai-slops` and `omo:programming` criteria before judging test relevance and maintainability.
+The diff violates neither perspective.
+The new child-shell cases test observable EXIT and command-substitution behavior rather than prose, implementation constants, or requested removals.
+The minimal candidate normalization is necessary at the untrusted registry boundary and does not add needless parsing, extraction, abstraction, or an untyped escape hatch.
 
 ## Findings
 
@@ -30,11 +41,7 @@ None.
 
 ### HIGH
 
-- HIGH - auto-fix - `tests/lib.sh:84-90`, with inadequate coverage at `tests/cs-test-lib.test.sh:97-109`: `cs_test_cleanup` accepts any nonempty path below `CS_TEST_TMPBASE` that contains no `..`, then calls `rm -rf` on it.
-  For the normal `TMPDIR=/tmp`, a corrupted registry line `/tmp/unrelated-existing-dir` passes both guards even though `cs_test_tmproot` never minted it.
-  This contradicts the stated and authoritative contract that cleanup removes only minted paths and lets a corruptible, predictable registry delete another test or process's temporary directory.
-  The regression only proves that paths outside `TMPDIR` and the base itself survive, so it gives false confidence while missing the failing in-boundary sibling case.
-  Record minted roots in a private, per-process directory or authenticate/validate each exact minted path, create the registry safely, and add a child-shell regression showing that an unrelated preexisting sibling below `TMPDIR` survives.
+None.
 
 ### MEDIUM
 
@@ -42,21 +49,18 @@ None.
 
 ### LOW
 
-- LOW - auto-fix - `docs/claude.md:4-8`, `docs/claude.md:83-109`, and `docs/herdr.md:56-62`: the newly added empirical documentation uses placeholders and ellipses such as `<isolated>` and `...` instead of the required exact dated commands and recorded output.
-  This makes the claimed re-verification non-reproducible from the artifact and misses the stated documentary style requirement.
+None.
 
-## Deliberate containment respected
+## Deliberate behavior not reported
 
-I did not report the Codex trust-dialog gap, the labelled KNOWN-HOLLOW idle wait, or per-run Codex trust entry as defects because the authoritative intent explicitly excludes them.
-The Claude wait changes consistently use `done` after the turn-ended signal and do not alter production control flow.
-The Codex post-steer wait is changed from a masked `idle` timeout to `done`, which is within the stated scope.
+The Codex folder-trust gap and the labelled KNOWN-HOLLOW `idle` wait are explicitly deliberate constraints and are not findings.
 
 ## Verdict and risk
 
-`codeQualityStatus`: BLOCK.
-`recommendation`: REQUEST_CHANGES.
-Risk: high for cleanup safety and cross-test/process interference until the registry can prove a recorded path was minted rather than merely located under `TMPDIR`.
+`codeQualityStatus`: CLEAR.
+`recommendation`: APPROVE.
+Risk: low for the reviewed docs/tests changes.
 
 ## Blockers
 
-- Make `tests/lib.sh` reject unregistered sibling paths under `TMPDIR` before `rm -rf`, and add a regression that proves this case.
+None.
