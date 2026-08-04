@@ -99,7 +99,7 @@ projects/            cloned repos; gitignored; READ-ONLY for you
 state/               volatile runtime signals; gitignored
   <id>.status        appended by soldiers: "<state>: <note>" wake-event lines, not current-state truth
   <id>.turn-ended    touched every turn end by the harness turn-end hook (codex notify / claude Stop-hook)
-  <id>.meta          written by cs-spawn: workspace=, pane=, worktree=, project=, model=, effort=, kind=, mode=, yolo=; cs-pr-check records pr= and pr_head=
+  <id>.meta          written by cs-spawn; kind-specific posture fields and the complete schema live in docs/configuration.md; cs-pr-check records pr= and pr_head=
   <id>.check.sh      authenticated slow poll; watcher runs registered checks from hash-validated snapshots only
   .home-pane         this home's own agent pane, recorded at session start; revalidated before any activation
   .activation-stalled  present when this home cannot self-activate (pane gone or agent dead); needs recovery

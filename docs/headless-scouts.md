@@ -67,7 +67,7 @@ detected" STOP condition does not fire.**
 ### What assumes an interactive pane (inert or merely cosmetic)
 
 - **Fleet view (was cosmetic, now fixed here)** — `bin/cs-fleet-view.sh`
-  `task_json_stream` reads `kind/mode/yolo/pane/…` but did not read `headless`,
+  `task_json_stream` reads `kind`, optional `mode/yolo`, `pane`, and other fields, but did not read `headless`,
   and rendered the endpoint column as `present / <agent>`, implying a steerable
   pane. Fixed: it now reads `headless`, emits it in the `cs-fleet-view.v1`
   snapshot, and the human render appends `· headless (not steerable)` to the
