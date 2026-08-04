@@ -62,7 +62,12 @@ pass() {
 # update it in a subshell (BASHPID does), so parent and subshell agree on the
 # registry path without passing anything.
 CS_TEST_TMPBASE="${TMPDIR:-/tmp}"
-CS_TEST_TMPBASE="${CS_TEST_TMPBASE%/}"
+if ! CS_TEST_TMPBASE=$(cd -P -- "$CS_TEST_TMPBASE" 2>/dev/null && pwd -P); then
+  CS_TEST_TMPBASE=/tmp
+fi
+if [ "$CS_TEST_TMPBASE" = / ]; then
+  CS_TEST_TMPBASE=/tmp
+fi
 CS_TEST_REGISTRY="$CS_TEST_TMPBASE/cs-test-reg.$$"
 
 # The trap is installed HERE, at source time, in the caller's own shell - not from
@@ -74,20 +79,26 @@ trap cs_test_cleanup EXIT
 # cs_test_cleanup - remove every registered temp root. Safe to call more than once
 # (a suite's own handler may call it, then EXIT fires): the registry is consumed.
 cs_test_cleanup() {
-  local d
+  local d tmpbase_real candidate_real leaf
   [ -f "$CS_TEST_REGISTRY" ] || return 0
+  tmpbase_real=$(cd -P -- "$CS_TEST_TMPBASE" 2>/dev/null && pwd -P) || return 0
+  [ "$tmpbase_real" != / ] || return 0
   while IFS= read -r d; do
-    # Only ever remove a path this library minted: under the temp base, with a
-    # non-empty leaf and no traversal. A corrupted registry must not become an
-    # `rm -rf` on something else.
-    case "$d" in
-      "$CS_TEST_TMPBASE"/?*) ;;
-      *) continue ;;
-    esac
     case "$d" in
       *..*) continue ;;
     esac
-    rm -rf "$d"
+    candidate_real=$(cd -P -- "$d" 2>/dev/null && pwd -P) || continue
+    case "$candidate_real" in
+      "$tmpbase_real") continue ;;
+      "$tmpbase_real"/*)
+        leaf=${candidate_real#"$tmpbase_real"/}
+        case "$leaf" in
+          ''|.|..|*/*) continue ;;
+        esac
+        ;;
+      *) continue ;;
+    esac
+    rm -rf "$candidate_real"
   done < "$CS_TEST_REGISTRY"
   rm -f "$CS_TEST_REGISTRY"
 }

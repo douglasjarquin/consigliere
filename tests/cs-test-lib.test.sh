@@ -95,7 +95,7 @@ pass "cs_test_cleanup is idempotent"
 : > "$PATHS"
 run_child '
 A=$(cs_test_tmproot probe-guard)
-printf "%s\n" "/" "/etc" "$HOME" "../../etc" "$CS_TEST_TMPBASE" >> "$CS_TEST_REGISTRY"
+printf "%s\n" "/" "/etc" "$HOME" "../../etc" "$CS_TEST_TMPBASE" "$CS_TEST_TMPBASE/" "$CS_TEST_TMPBASE/." >> "$CS_TEST_REGISTRY"
 printf "%s\n%s\n" "$A" "$CS_TEST_TMPBASE" > "$PATHS"
 '
 assert_present / "/ must survive a corrupted registry"
@@ -106,7 +106,21 @@ base=$(sed -n 2p "$PATHS")
 assert_present "$base" "the temp base itself must survive a corrupted registry"
 d=$(head -1 "$PATHS")
 assert_absent "$d" "the child's own temp root is still cleaned"
-pass "a corrupted registry cannot remove anything outside the temp base"
+pass "a corrupted registry cannot remove the temp base or anything outside it"
+
+: > "$PATHS"
+OUT=$(TMPDIR=/ PATHS="$PATHS" ROOT="$ROOT" bash -c '
+  set -u
+  . "$ROOT/tests/lib.sh"
+  A=$(cs_test_tmproot probe-root)
+  printf "%s\n%s\n" "$A" "$CS_TEST_TMPBASE" > "$PATHS"
+  printf "%s\n" "/etc" >> "$CS_TEST_REGISTRY"
+' 2>&1)
+d=$(head -1 "$PATHS")
+[ -n "$d" ] || fail "root TMPDIR child did not report its temp root: $OUT"
+assert_present /etc "TMPDIR=/ must not make /etc removable"
+assert_absent "$d" "the root TMPDIR child still cleans its temp root"
+pass "TMPDIR=/ cannot broaden corrupted-registry cleanup"
 
 # --- 6. a suite that never makes a temp root exits cleanly -------------------
 # lib.sh installs the trap at source time now, so the no-registry path must be a

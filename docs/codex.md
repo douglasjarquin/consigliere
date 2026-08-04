@@ -14,7 +14,7 @@ codex [--model <m>] [-c 'model_reasoning_effort="<low|medium|high|xhigh|max|ultr
 ```
 
 - The typed `launch-brief` positional prompt starts the supervised interactive session.
-- `--dangerously-bypass-approvals-and-sandbox` gives the unattended soldier full autonomy (no trust dialog).
+- The `--dangerously-bypass-approvals-and-sandbox` flag gives the unattended soldier full autonomy over approvals and the sandbox, but it does not suppress Codex's folder-trust dialog; see `Folder trust and the false idle` below.
 - The `notify` hook fires at every turn end, touching the task's turn-ended signal for the watcher.
 - Effort vocabulary: `low|medium|high|xhigh|max|ultra`; Codex supports all six levels and cs-spawn passes the selected value.
 - A capo launch omits the notify hook (a capo is a supervisor, not a supervised turn-taker) and prefixes `CS_HOME=<home>`.
