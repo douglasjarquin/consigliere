@@ -238,9 +238,17 @@ EOF
 # most-recently-opened-last order; prints nothing when none are open. Pure read
 # of the file. This is the durable open-set the fleet snapshot and any
 # point-in-time consumer must use instead of trusting the last status line.
+#
+# File-handling is hardened for the directory-wide scan (scan_open_decisions)
+# that reaches files a targeted read would not: a status file that is itself a
+# symlink is skipped with the cheap [ -L ] builtin (no O_NOFOLLOW subprocess,
+# matching the sibling scanners' defense level), and an unreadable file is
+# skipped silently instead of leaking a redirection error.
 status_open_decisions() {  # <status-file>
   local f=$1 line verb key note resolve held open='' stripped open_verb
-  [ -f "$f" ] || return 0
+  if [ -L "$f" ] || [ ! -f "$f" ] || [ ! -r "$f" ]; then
+    return 0
+  fi
   resolve=${CS_CLASSIFY_RESOLVE_VERB:-$CS_CLASSIFY_RESOLVE_VERB_DEFAULT}
   held=${CS_CLASSIFY_BOSS_HELD_VERB:-$CS_CLASSIFY_BOSS_HELD_VERB_DEFAULT}
   while IFS= read -r line || [ -n "$line" ]; do
@@ -440,6 +448,30 @@ scan_boss_relevant_statuses() {  # <state>
     status_is_boss_relevant "$last" || continue
     task=$(basename "$f"); task="${task%.status}"
     printf '%s\t%s\t%s\n' "$f" "$task" "$last"
+  done
+  return 0
+}
+
+# Fold EVERY state/*.status file into the fleet-wide set of still-open keyed
+# decisions. Prints one TAB-separated "<task>\t<key>\t<verb>\t<summary>" line per
+# still-open decision, across all tasks. Reuses status_open_decisions (the ONE
+# open/resolved fold) per file, so a needs-decision/needs-review/blocked line
+# buried under later unrelated appends is still surfaced. That fold's own
+# guards skip a symlinked or unreadable status file silently. No dedup and no
+# cross-task ordering guarantee: each line already carries its task id. The
+# read cost matches the sibling scan_boss_relevant_statuses (one full read of
+# each small append-only status file), so this adds no unbounded fan-out.
+scan_open_decisions() {  # <state>
+  local state=$1 f task line
+  for f in "$state"/*.status; do
+    [ -e "$f" ] || continue
+    task=$(basename "$f"); task="${task%.status}"
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      printf '%s\t%s\n' "$task" "$line"
+    done <<EOF
+$(status_open_decisions "$f")
+EOF
   done
   return 0
 }
