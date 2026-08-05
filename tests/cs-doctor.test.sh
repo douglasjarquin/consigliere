@@ -115,4 +115,8 @@ for tool in $(cs_deps_tools required) $(cs_deps_tools optional) claude \
 done
 pass 'every inventory tool has a purpose and an install suggestion'
 
+assert_contains "$(cs_deps_hint no-mistakes)" \
+  'https://github.com/kunchenguid/no-mistakes' \
+  'the no-mistakes install suggestion names its repository'
+
 pass 'cs-doctor behaviors'
