@@ -51,7 +51,29 @@ cat > "$FAKEBIN/gh" <<'SH'
 exit 1
 SH
 cp "$FAKEBIN/gh" "$FAKEBIN/gh-axi"
-chmod +x "$FAKEBIN/herdr" "$FAKEBIN/gh" "$FAKEBIN/gh-axi"
+# Hermetic no-mistakes: the pre-teardown run conclusion (conclude_nm_run) queries
+# `axi status` and, for a parked-and-attributed run, aborts it. This fake serves
+# the env-driven TOON for `axi status` and models the daemon concluding the run:
+# `axi abort` touches CS_FAKE_ABORT_MARK, after which `axi status` serves
+# CS_FAKE_AXI_STATUS_AFTER instead. Default (both unset) is "no run" -> no-op, so
+# every existing case above is unaffected and never touches the real binary.
+cat > "$FAKEBIN/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+set -u
+case "${1:-} ${2:-}" in
+  "axi status")
+    if [ -n "${CS_FAKE_ABORT_MARK:-}" ] && [ -f "$CS_FAKE_ABORT_MARK" ]; then
+      printf '%s\n' "${CS_FAKE_AXI_STATUS_AFTER:-}"
+    else
+      printf '%s\n' "${CS_FAKE_AXI_STATUS:-}"
+    fi ;;
+  "axi abort")
+    [ -n "${CS_FAKE_ABORT_MARK:-}" ] && : > "$CS_FAKE_ABORT_MARK"
+    echo '{}' ;;
+esac
+exit 0
+SH
+chmod +x "$FAKEBIN/herdr" "$FAKEBIN/gh" "$FAKEBIN/gh-axi" "$FAKEBIN/no-mistakes"
 export PATH="$FAKEBIN:$PATH"
 
 cs_git_identity
@@ -261,5 +283,122 @@ assert_grep '- axb - Near miss domain.' "$TMP/data/capos.md" \
   "retiring a dotted id must not delete the near-miss route"
 assert_absent "$TMP/state/a.b.meta" "capo records cleared after retirement"
 pass "retiring a dotted capo id leaves the near-miss route intact"
+
+# --- pre-teardown run conclusion + leaked-process reap ----------------------
+# A run is attributed to a task only by its exact branch AND current head
+# (bin/cs-nm-run-lib.sh, the shared owner cs-crew-state.sh also uses). These
+# builders emit the TOON `axi status` returns.
+parked_run() {  # <branch> <head>
+  cat <<EOF
+run:
+  id: "01RUN"
+  branch: $1
+  status: awaiting_approval
+  awaiting_agent: parked 7h39m
+  head: "$2"
+gate: review
+EOF
+}
+cancelled_run() {  # <branch> <head>
+  cat <<EOF
+run:
+  id: "01RUN"
+  branch: $1
+  status: completed
+  head: "$2"
+outcome: cancelled
+EOF
+}
+
+# 11. A parked run attributed to this exact task is aborted, the abort is
+# confirmed, and only then does teardown proceed. The worktree sits at its
+# landed base (content_in_default), so the landed-work proof passes and the only
+# thing standing between the task and cleanup is the parked run.
+make_task p1 ship
+p1_head=$(git -C "$TMP/wt-p1" rev-parse HEAD)
+p1_mark="$TMP/state/p1.aborted"
+out=$(CS_FAKE_ABORT_MARK="$p1_mark" \
+      CS_FAKE_AXI_STATUS="$(parked_run cs/p1 "$p1_head")" \
+      CS_FAKE_AXI_STATUS_AFTER="$(cancelled_run cs/p1 "$p1_head")" \
+      "$BIN" p1 2>&1) || fail "parked-run teardown failed: $out"
+assert_present "$p1_mark" "the parked run was aborted"
+assert_contains "$out" "teardown p1 complete" "teardown proceeds after the run is concluded"
+assert_absent "$TMP/wt-p1" "worktree removed after the run was concluded"
+pass "a parked run attributed to this task is aborted and confirmed before cleanup"
+
+# 12. A parked run whose abort does NOT stick (still parked on re-check) is a
+# fail-closed refusal naming what survived - never a silent proceed.
+make_task p2 ship
+p2_head=$(git -C "$TMP/wt-p2" rev-parse HEAD)
+p2_mark="$TMP/state/p2.aborted"
+out=$(CS_FAKE_ABORT_MARK="$p2_mark" \
+      CS_FAKE_AXI_STATUS="$(parked_run cs/p2 "$p2_head")" \
+      CS_FAKE_AXI_STATUS_AFTER="$(parked_run cs/p2 "$p2_head")" \
+      "$BIN" p2 2>&1) && fail "a run that stays parked after abort must refuse teardown"
+assert_contains "$out" "still parked at a gate" "the refusal names the run that would not conclude"
+assert_present "$TMP/wt-p2" "worktree retained when the run would not conclude"
+assert_present "$TMP/state/p2.meta" "records retained when the run would not conclude"
+pass "a parked run that will not conclude fails the teardown closed"
+
+# 13. A parked run on ANOTHER branch is never touched; teardown proceeds and no
+# abort is issued.
+make_task p3 ship
+p3_mark="$TMP/state/p3.aborted"
+out=$(CS_FAKE_ABORT_MARK="$p3_mark" \
+      CS_FAKE_AXI_STATUS="$(parked_run cs/some-other-branch "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")" \
+      "$BIN" p3 2>&1) || fail "other-branch run must not block teardown: $out"
+assert_absent "$p3_mark" "a run on another branch is never aborted"
+assert_contains "$out" "teardown p3 complete" "teardown proceeds past another branch's run"
+pass "a parked run on another branch is left untouched"
+
+# 14. A run on THIS branch but at a diverged/rewritten head (the recorded head is
+# no longer in this worktree) is not attributed, so it is never touched.
+make_task p4 ship
+p4_mark="$TMP/state/p4.aborted"
+out=$(CS_FAKE_ABORT_MARK="$p4_mark" \
+      CS_FAKE_AXI_STATUS="$(parked_run cs/p4 "cafebabecafebabecafebabecafebabecafebabe")" \
+      "$BIN" p4 2>&1) || fail "diverged-head run must not block teardown: $out"
+assert_absent "$p4_mark" "a run at a diverged head on this branch is never aborted"
+assert_contains "$out" "teardown p4 complete" "teardown proceeds past a diverged-head run"
+pass "a run on this branch at a diverged head is left untouched"
+
+# 15. A retried teardown after a partial first attempt converges. First attempt
+# refuses because the run stays parked; the second attempt runs against a run
+# that is now concluded (abort stuck) and completes.
+make_task p5 ship
+p5_head=$(git -C "$TMP/wt-p5" rev-parse HEAD)
+p5_mark="$TMP/state/p5.aborted"
+out=$(CS_FAKE_ABORT_MARK="$p5_mark" \
+      CS_FAKE_AXI_STATUS="$(parked_run cs/p5 "$p5_head")" \
+      CS_FAKE_AXI_STATUS_AFTER="$(parked_run cs/p5 "$p5_head")" \
+      "$BIN" p5 2>&1) && fail "first attempt must refuse while the run stays parked"
+assert_present "$TMP/wt-p5" "worktree retained after the refusing first attempt"
+# Second attempt: the run now reads concluded regardless of the abort marker.
+out=$(CS_FAKE_AXI_STATUS="$(cancelled_run cs/p5 "$p5_head")" "$BIN" p5 2>&1) \
+  || fail "retried teardown must converge: $out"
+assert_contains "$out" "teardown p5 complete" "retried teardown converges once the run is concluded"
+assert_absent "$TMP/wt-p5" "worktree removed on the converging retry"
+pass "a retried teardown after a partial first attempt converges"
+
+# 16. Leaked task processes (cwd under the worktree) are TERM/KILLed; a process
+# rooted elsewhere is never signaled. Uses real processes and lsof, not herdr.
+if command -v lsof >/dev/null 2>&1; then
+  make_task r1 ship
+  mkdir -p "$TMP/wt-r1/sub"
+  ELSEWHERE=$(mktemp -d "$TMP/elsewhere.XXXXXX")
+  ( cd "$TMP/wt-r1/sub" && exec sleep 60 ) & leaked_pid=$!
+  ( cd "$ELSEWHERE" && exec sleep 60 ) & control_pid=$!
+  sleep 0.3
+  out=$("$BIN" r1 2>&1) || fail "reap-path teardown failed: $out"
+  assert_contains "$out" "teardown r1 complete" "teardown completes after reaping"
+  wait "$leaked_pid" 2>/dev/null
+  kill -0 "$leaked_pid" 2>/dev/null && fail "a process rooted under the worktree must be reaped"
+  kill -0 "$control_pid" 2>/dev/null || fail "a process rooted elsewhere must not be signaled"
+  kill "$control_pid" 2>/dev/null
+  wait "$control_pid" 2>/dev/null
+  pass "leaked worktree processes are reaped and unrelated processes are spared"
+else
+  pass "leaked-process reap (skipped: lsof unavailable)"
+fi
 
 pass "cs-teardown landed-work proofs"
