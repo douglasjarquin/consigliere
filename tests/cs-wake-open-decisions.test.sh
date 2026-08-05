@@ -130,6 +130,25 @@ test_clean_drain_prints_no_section() {
   pass "a clean drain prints no OPEN DECISIONS section"
 }
 
+test_invalid_cap_falls_back_to_default() {
+  local dir state out err override
+  dir=$(make_case invalid-cap); state="$dir/state"
+  out="$dir/out"; err="$dir/err"
+  for i in $(seq 1 33); do
+    printf 'needs-decision [key=k%s]: decision %s\n' "$i" "$i"
+  done > "$state/t1.status"
+  for override in abc 0 ''; do
+    CS_OPEN_DECISIONS_CAP="$override" CS_STATE_OVERRIDE="$state" "$DRAIN" > "$out" 2> "$err" \
+      || fail "drain failed for invalid cap '$override'"
+    assert_grep "k32" "$out" "invalid cap '$override' must retain the default bound"
+    assert_no_grep "k33" "$out" "invalid cap '$override' must not disable the bound"
+    assert_grep "1 more open decision(s) omitted" "$out" \
+      "invalid cap '$override' must preserve the omission marker"
+    [ ! -s "$err" ] || fail "invalid cap '$override' leaked stderr: $(cat "$err")"
+  done
+  pass "unset, empty, and non-positive caps fall back to the default"
+}
+
 test_scan_wrapper_folds_whole_fleet() {
   local dir state out
   dir=$(make_case wrapper); state="$dir/state"
@@ -169,5 +188,6 @@ test_resolved_decision_absent
 test_nonempty_drain_preserves_raw_and_annotations
 test_unreadable_and_symlink_skipped_without_noise
 test_clean_drain_prints_no_section
+test_invalid_cap_falls_back_to_default
 test_scan_wrapper_folds_whole_fleet
 test_fold_guards_symlink_and_unreadable

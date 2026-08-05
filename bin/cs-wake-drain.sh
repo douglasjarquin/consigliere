@@ -44,6 +44,9 @@ assert_watcher_liveness() {
 print_open_decisions() {
   local rows cap=${CS_OPEN_DECISIONS_CAP:-32} shown=0 omitted=0
   local task key verb note printed=false
+  case "$cap" in
+    ''|*[!0-9]*|0*) cap=32 ;;
+  esac
   rows=$(scan_open_decisions "$STATE") || return 0
   [ -n "$rows" ] || return 0
   while IFS="$(printf '\t')" read -r task key verb note; do
