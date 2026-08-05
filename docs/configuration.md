@@ -168,6 +168,7 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_HERDR_SESSION` | cs-herdr-lib | herdr session; labs only, defaults to `default` |
 | `CS_CAPOS_ROOT` | cs-home-seed | capo home pool root; default `~/.consigliere/capos` |
 | `CS_WATCH_CHECKPOINT` | cs-watch-checkpoint | bounded foreground checkpoint seconds; default 180 |
+| `CS_OPEN_DECISIONS_CAP` | cs-wake-drain | maximum open decisions printed per drain; default 32; omitted decisions are marked |
 | `CS_CHECK_TIMEOUT` | cs-watch | per-check timeout for registered `state/<id>.check.sh` |
 | `CS_STALE_ESCALATE_SECS` | cs-watch, cs-daemon | wedge escalation threshold |
 | `CS_BUSY_TURN_MAX_SECS` | cs-watch | how long a pane may run busy with no completed turn before it enters the wedge timer; default 3600 |

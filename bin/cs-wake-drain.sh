@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # Atomically drain durable watcher wake records, optionally annotate validated
-# signal status keys after raw consumption commits, then assert liveness.
+# signal status keys after raw consumption commits, print the fleet-wide OPEN
+# DECISIONS section, then assert liveness. The OPEN DECISIONS section folds
+# every state/*.status file on EVERY drain (including the empty-queue fast
+# path), so a still-open decision buried under later unrelated status appends
+# reaches consigliere even when the last-line wake annotation no longer shows it.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/cs-wake-lib.sh
 . "$SCRIPT_DIR/cs-wake-lib.sh"
+# shellcheck source=bin/cs-classify-lib.sh
+. "$SCRIPT_DIR/cs-classify-lib.sh"
 
 DRAIN_TMP=
 DRAIN_LOCK_HELD=false
@@ -24,6 +30,44 @@ RAW_ROWS=
 # drain's exit status.
 assert_watcher_liveness() {
   "$SCRIPT_DIR/cs-guard.sh" || true
+}
+
+# Print the fleet-wide OPEN DECISIONS section from the durable status fold. This
+# runs on every drain so a needs-decision/needs-review/blocked line that later,
+# unrelated status appends pushed off the last line still surfaces here instead
+# of going silently missed. Best-effort context like the annotations: it is a
+# pure read of state/*.status, never touches the queue, and cannot fail the
+# drain. Bounded the same way the enrichment phase is - at most
+# CS_OPEN_DECISIONS_CAP decisions are listed and any remainder is reported as
+# omitted, never silently dropped - so a large fleet cannot turn a drain into an
+# unbounded output fan-out. No open decisions prints nothing.
+print_open_decisions() {
+  local rows cap=${CS_OPEN_DECISIONS_CAP:-32} shown=0 omitted=0
+  local task key verb note printed=false
+  case "$cap" in
+    ''|*[!0-9]*|0*) cap=32 ;;
+  esac
+  rows=$(scan_open_decisions "$STATE") || return 0
+  [ -n "$rows" ] || return 0
+  while IFS="$(printf '\t')" read -r task key verb note; do
+    [ -n "$task" ] || continue
+    if [ "$shown" -ge "$cap" ]; then
+      omitted=$((omitted + 1))
+      continue
+    fi
+    if [ "$printed" = false ]; then
+      printf 'OPEN DECISIONS (still open, may be buried above the last status line):\n'
+      printed=true
+    fi
+    shown=$((shown + 1))
+    printf '  %s [key=%s] %s: %s\n' "$task" "$key" "$verb" "$note"
+  done <<EOF
+$rows
+EOF
+  if [ "$omitted" -gt 0 ]; then
+    printf '  ... %s more open decision(s) omitted (open-decisions cap)\n' "$omitted"
+  fi
+  return 0
 }
 
 # shellcheck disable=SC2317,SC2329 # Invoked by trap handlers below.
@@ -47,6 +91,9 @@ DRAIN_LOCK_HELD=true
 
 if [ ! -s "$CS_WAKE_QUEUE" ]; then
   : > "$CS_WAKE_QUEUE"
+  cs_lock_release "$CS_WAKE_QUEUE_LOCK"
+  DRAIN_LOCK_HELD=false
+  (print_open_decisions) || true
   assert_watcher_liveness
   exit 0
 fi
@@ -75,5 +122,6 @@ DRAIN_LOCK_HELD=false
 # Raw output and queue deletion are authoritative. Everything below is
 # best-effort and cannot restore, duplicate, hide, or fail the consumed rows.
 (cs_wake_print_annotations "$RAW_ROWS") || true
+(print_open_decisions) || true
 assert_watcher_liveness
 exit 0
