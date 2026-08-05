@@ -117,7 +117,7 @@ cs_deps_hint() {
     gh-axi) printf 'npm i -g gh-axi\n' ;;
     git) printf 'brew install git, or the Xcode command line tools\n' ;;
     tasks-axi) printf 'npm i -g tasks-axi\n' ;;
-    no-mistakes) printf 'install per the no-mistakes project'\''s own instructions\n' ;;
+    no-mistakes) printf 'install from https://github.com/kunchenguid/no-mistakes (see its README)\n' ;;
     lavish-axi) printf 'npm i -g lavish-axi\n' ;;
     chrome-devtools-axi) printf 'npm i -g chrome-devtools-axi\n' ;;
     shellcheck) printf 'brew install shellcheck; on Linux x86_64, bin/cs-install-shellcheck.sh <dir> installs the pinned build\n' ;;
