@@ -73,6 +73,12 @@ assert_contains "$out" 'occupied=2' "two live task endpoints occupy two lanes"
 assert_contains "$out" 'free=1' "merged orphan releases one dispatch lane"
 assert_contains "$out" 'cleanup_pending=1' "merged orphan remains durable cleanup follow-up"
 
+leading_zero_out=$(env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" \
+  CS_FAKE_LIVE_PANES='live-a live-b' "$BIN" proj 08) \
+  || fail "capacity owner rejected a leading-zero cap: $leading_zero_out"
+assert_contains "$leading_zero_out" 'cap=8' "leading-zero cap is normalized as decimal"
+assert_contains "$leading_zero_out" 'free=6' "leading-zero cap keeps decimal lane semantics"
+
 [ -d "$ORPHAN" ] || fail "capacity accounting removed the orphan directory"
 assert_present "$ORPHAN/keep.txt" "capacity accounting modified the orphan directory"
 assert_absent "$ORPHAN/.git" "orphan fixture unexpectedly gained a git marker"

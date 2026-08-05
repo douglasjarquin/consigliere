@@ -60,6 +60,7 @@ PROJECT=${1:-}
 CAP=${2:-}
 valid_project "$PROJECT" || die "project name must be a simple name"
 valid_number "$CAP" || die "lane cap must be a positive integer"
+CAP=$((10#$CAP))
 
 PROJECT_DIR="$CS_HOME/projects/$PROJECT"
 [ -d "$PROJECT_DIR" ] || die "project clone is unavailable: $PROJECT_DIR"
