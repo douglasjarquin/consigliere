@@ -36,6 +36,23 @@
 # leave .git lock files; cs-lock-lib.sh owns the provably-stale proof before
 # any lock is cleared, and any uncertainty refuses.
 #
+# Once the proofs pass and the pane is proven gone, two coupled pre-cleanup
+# steps run BEFORE the worktree is removed, its branch deleted, or the workspace
+# closed, both scoped to this exact task so they can never touch another task's
+# run or processes:
+#   1. Conclude a no-mistakes run parked at a gate that belongs to this task's
+#      exact branch AND current head (bin/cs-nm-run-lib.sh owns that attribution,
+#      the same contract cs-crew-state.sh uses). The run is aborted cd'd into the
+#      worktree so the daemon resolves it, and the abort is CONFIRMED by
+#      re-reading the run. Otherwise an orphaned run holds a fleet slot forever.
+#   2. Reap processes whose cwd is under the task worktree (lsof), TERM then
+#      KILL, re-verifying each candidate's identity immediately before signaling.
+#      Otherwise backgrounded/disowned descendants reparented to init keep
+#      pinning CPU under a worktree that no longer exists.
+# Incomplete cleanup (an abort that did not stick, a process that survived KILL)
+# is a fail-closed refusal naming what survived, downgraded to a named warning
+# only under --force.
+#
 # Usage: cs-teardown.sh <task-id> [--force]
 #   --force skips ordinary-task dirty and landed-work checks, skips scout
 #   report checks, and discards capo child work for kind=capo. Only use it
@@ -62,6 +79,8 @@ esac
 . "$SCRIPT_DIR/cs-meta-lib.sh"
 # shellcheck source=bin/cs-harness-lib.sh
 . "$SCRIPT_DIR/cs-harness-lib.sh"
+# shellcheck source=bin/cs-nm-run-lib.sh
+. "$SCRIPT_DIR/cs-nm-run-lib.sh"
 # shellcheck source=bin/cs-lock-lib.sh
 CS_LOCK_LOG_PREFIX="cs-teardown" . "$SCRIPT_DIR/cs-lock-lib.sh"
 
@@ -93,6 +112,16 @@ HARNESS=$(cs_meta_get "$META" harness 2>/dev/null || true)
 # Minimum age before a git lock with no live holder is considered abandoned.
 STALE_LOCK_MIN_AGE=${CS_TEARDOWN_STALE_LOCK_MIN_AGE:-30}
 TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED=3
+
+# Bounded timeout (seconds) for the pre-teardown no-mistakes run query.
+NM_TIMEOUT=${CS_TEARDOWN_NM_TIMEOUT:-10}
+case "$NM_TIMEOUT" in ''|*[!0-9]*) NM_TIMEOUT=10 ;; esac
+NM_READ_ATTEMPTS=3
+NM_READ_RETRY=0.3
+NM_RUNS_LIMIT=200
+# lsof is the verified mechanism for the leaked-process sweep; resolved once.
+LSOF_BIN=$(command -v lsof || true)
+CS_REAP_SURVIVORS=""
 
 default_branch() {
   local ref name
@@ -354,6 +383,213 @@ require_pane_gone() { # <what-is-being-retained>
   return 1
 }
 
+# --- conclude a parked run + reap leaked processes --------------------------
+# Two coupled pre-cleanup steps, both scoped to THIS task's exact identity so
+# they can never touch another task's run or processes. They run after the pane
+# is proven gone and before the worktree is removed, its branch deleted, or the
+# herdr workspace is closed. Both are idempotent: a retried teardown after a
+# partial first attempt finds nothing left parked and no surviving process.
+
+# Conclude a no-mistakes run parked at a gate that belongs to this task's exact
+# branch AND current head. Teardown can otherwise remove a task whose pipeline
+# run is still parked at a post-CI approval gate, leaving an orphaned run holding
+# a fleet slot indefinitely. Attribution is bin/cs-nm-run-lib.sh's contract, the
+# same owner cs-crew-state.sh uses: a run on another branch, or on this branch at
+# a rewritten or diverged head, is never touched. The abort is issued cd'd into
+# the worktree so the daemon resolves the run itself (teardown never names a run
+# id), and is CONFIRMED by re-reading the run rather than assumed. Returns
+# non-zero only when a parked run is still parked after the abort.
+conclude_nm_run() {
+  local branch current_branch status_out coarse_status attempt readable=0
+  CS_NM_CONCLUDE_FAILURE=""
+  [ "$MODE" = no-mistakes ] || return 0
+  branch=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || return 0
+  [ -n "$branch" ] || return 0
+
+  status_out=""
+  for ((attempt = 1; attempt <= NM_READ_ATTEMPTS; attempt++)); do
+    if status_out=$(cs_nm_axi_status_read "$WT" "$NM_TIMEOUT"); then
+      readable=1
+      break
+    fi
+    status_out=""
+    [ "$attempt" -lt "$NM_READ_ATTEMPTS" ] && sleep "$NM_READ_RETRY"
+  done
+  if [ "$readable" -eq 0 ]; then
+    CS_NM_CONCLUDE_FAILURE="could not verify that no orphaned no-mistakes run remains for this task because the daemon did not answer; retry once it responds"
+    return 1
+  fi
+
+  if cs_nm_status_is_attributed "$WT" "$branch" "$status_out"; then
+    cs_nm_run_is_gate_parked "$status_out" || return 0
+  else
+    if ! coarse_status=$(cs_nm_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT"); then
+      CS_NM_CONCLUDE_FAILURE="could not verify that no orphaned no-mistakes run remains for this task because the runs list did not answer; retry once it responds"
+      return 1
+    fi
+    if cs_nm_run_status_is_active "$coarse_status"; then
+      :
+    else
+      return 0
+    fi
+  fi
+
+  current_branch=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || {
+    CS_NM_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this no-mistakes run; retry"
+    return 1
+  }
+  if [ "$current_branch" != "$branch" ]; then
+    CS_NM_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this no-mistakes run; retry"
+    return 1
+  fi
+  if cs_nm_status_is_attributed "$WT" "$branch" "$status_out"; then
+    :
+  elif cs_nm_run_status_is_active "$coarse_status"; then
+    if ! coarse_status=$(cs_nm_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT") \
+       || ! cs_nm_run_status_is_active "$coarse_status"; then
+      CS_NM_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this no-mistakes run; retry"
+      return 1
+    fi
+  else
+    CS_NM_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this no-mistakes run; retry"
+    return 1
+  fi
+
+  echo "note: concluding this task's no-mistakes run parked at a gate before cleanup." >&2
+  ( cd "$WT" && no-mistakes axi abort ) >/dev/null 2>&1 || true
+  local confirmation_readable=0 parked_seen=0
+  for ((attempt = 1; attempt <= NM_READ_ATTEMPTS; attempt++)); do
+    if status_out=$(cs_nm_axi_status_read "$WT" "$NM_TIMEOUT"); then
+      confirmation_readable=1
+      if [ -n "$status_out" ] && cs_nm_status_is_attributed "$WT" "$branch" "$status_out"; then
+        if ! cs_nm_run_is_gate_parked "$status_out"; then
+          return 0
+        fi
+        parked_seen=1
+      elif [ -n "$status_out" ] && coarse_status=$(cs_nm_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT"); then
+        if ! cs_nm_run_status_is_active "$coarse_status"; then
+          return 0
+        fi
+        parked_seen=1
+      fi
+    fi
+    [ "$attempt" -lt "$NM_READ_ATTEMPTS" ] && sleep "$NM_READ_RETRY"
+  done
+  if [ "$confirmation_readable" -eq 0 ]; then
+    CS_NM_CONCLUDE_FAILURE="abort was issued, but teardown could not confirm that this task's no-mistakes run stopped; retry after the daemon responds"
+  elif [ "$parked_seen" -eq 1 ]; then
+    CS_NM_CONCLUDE_FAILURE="this task's no-mistakes run is still parked at a gate after an abort attempt"
+  else
+    CS_NM_CONCLUDE_FAILURE="abort was issued, but teardown could not positively confirm that this task's no-mistakes run stopped; retry after the daemon responds"
+  fi
+  return 1
+}
+
+proc_cwd() {
+  "$LSOF_BIN" -a -d cwd -p "$1" -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
+}
+
+proc_cwd_under_roots() {
+  local pid=$1 cwd root
+  shift
+  cwd=$(proc_cwd "$pid") || return 1
+  [ -n "$cwd" ] || return 1
+  for root in "$@"; do
+    case "$cwd/" in
+      "$root"/*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+reap_pid_is_teardown_ancestry() {
+  local candidate=$1 current=$$ next
+  while :; do
+    [ "$candidate" = "$current" ] && return 0
+    [ "$current" = 1 ] && return 1
+    next=$(ps -o ppid= -p "$current" 2>/dev/null | tr -d '[:space:]')
+    case "$next" in
+      ''|*[!0-9]*) return 1 ;;
+    esac
+    current=$next
+  done
+}
+
+reap_leaked_processes() { # <root...>
+  local root resolved pid roots=() pids=() uniq survivors=()
+  CS_REAP_SURVIVORS=""
+  for root in "$@"; do
+    [ -d "$root" ] || continue
+    resolved=$(cd "$root" 2>/dev/null && pwd -P) || continue
+    roots+=("$resolved")
+  done
+  [ "${#roots[@]}" -gt 0 ] || return 0
+  for root in "${roots[@]}"; do
+    while IFS= read -r pid; do
+      [ -n "$pid" ] || continue
+      pids+=("$pid")
+    done < <("$LSOF_BIN" -a -d cwd +D "$root" -t 2>/dev/null || true)
+  done
+  [ "${#pids[@]}" -gt 0 ] || return 0
+  uniq=$(printf '%s\n' "${pids[@]}" | sort -un)
+  for pid in $uniq; do
+    reap_pid_is_teardown_ancestry "$pid" && continue
+    proc_cwd_under_roots "$pid" "${roots[@]}" || continue
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+  sleep 0.5
+  for pid in $uniq; do
+    reap_pid_is_teardown_ancestry "$pid" && continue
+    proc_cwd_under_roots "$pid" "${roots[@]}" || continue
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+  sleep 0.2
+  for pid in $uniq; do
+    reap_pid_is_teardown_ancestry "$pid" && continue
+    if kill -0 "$pid" 2>/dev/null && proc_cwd_under_roots "$pid" "${roots[@]}"; then
+      survivors+=("$pid")
+    fi
+  done
+  [ "${#survivors[@]}" -eq 0 ] || { CS_REAP_SURVIVORS="${survivors[*]}"; return 1; }
+  return 0
+}
+
+# Run both pre-cleanup steps for a ship or scout task worktree. Incomplete
+# cleanup (a parked run that would not conclude, or a process that survived KILL)
+# is a fail-closed refusal naming what survived - never a silent warning - except
+# under --force, where the boss's explicit discard authority downgrades the
+# refusal to a named warning, matching every other proof in this script.
+conclude_and_reap() {
+  # A scout never drives a no-mistakes run of its own; only conclude for ships.
+  if [ "$KIND" = ship ] && ! conclude_nm_run; then
+    if [ "$FORCE" = "--force" ]; then
+      echo "WARNING: ${CS_NM_CONCLUDE_FAILURE:-no-mistakes run conclusion was not confirmed}; --force is proceeding. Check it by hand." >&2
+    else
+      echo "REFUSED: ${CS_NM_CONCLUDE_FAILURE:-no-mistakes run conclusion was not confirmed}." >&2
+      echo "Nothing was removed. Retry once the daemon responds, or get the boss's explicit OK to discard, then --force." >&2
+      return 1
+    fi
+  fi
+  if [ -z "$LSOF_BIN" ]; then
+    if [ "$FORCE" = "--force" ]; then
+      echo "WARNING: lsof is unavailable; --force is proceeding without reaping any leaked task processes under $WT. Check for them by hand." >&2
+    else
+      echo "REFUSED: lsof is unavailable, so leaked task processes under $WT cannot be found and reaped." >&2
+      echo "Install lsof, or get the boss's explicit OK to discard, then --force." >&2
+      return 1
+    fi
+  elif ! reap_leaked_processes "$WT"; then
+    if [ "$FORCE" = "--force" ]; then
+      echo "WARNING: task processes survived under $WT (pids: ${CS_REAP_SURVIVORS:-?}); --force is proceeding anyway. Check them by hand." >&2
+    else
+      echo "REFUSED: task processes rooted under $WT survived TERM and KILL (pids: ${CS_REAP_SURVIVORS:-?})." >&2
+      echo "They would be orphaned by cleanup. Investigate, or get the boss's explicit OK to discard, then --force." >&2
+      return 1
+    fi
+  fi
+  return 0
+}
+
 # --- the fail-closed safety check -------------------------------------------
 
 validate_worktree_teardown_safety() {
@@ -599,6 +835,14 @@ fi
 # Prove the pane is gone BEFORE the first irreversible step, so a refusal leaves
 # the worktree, the branch, and every durable record intact for a plain rerun.
 require_pane_gone "task $ID's records" || exit 1
+
+# Conclude this task's parked no-mistakes run and reap any leaked task processes
+# BEFORE the worktree is removed, its branch deleted, or the workspace closed, so
+# a torn-down task can never strand an orphaned run holding a fleet slot or leave
+# descendants pinning CPU under a worktree that no longer exists.
+if [ -n "$WT" ] && [ -d "$WT" ]; then
+  conclude_and_reap || exit 1
+fi
 
 BRANCH=""
 if [ -n "$WT" ] && [ -d "$WT" ]; then

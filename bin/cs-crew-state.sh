@@ -13,22 +13,20 @@
 # identity, else the pane busy-signature) and reconciles the possibly-stale log
 # against it.
 #
-# The determinism lives entirely here - only run-step / pane / log reads plus
-# fixed mapping logic, no heuristics and no LLM. Output is one stable, parseable,
+# The local reconciliation is deterministic - only run-step / pane / log reads
+# plus fixed mapping logic, no heuristics and no LLM. The shared no-mistakes run
+# attribution and gate-parked predicates live in bin/cs-nm-run-lib.sh, their one
+# owner for this reader and teardown. Output is one stable, parseable,
 # token-tight line consigliere can read every heartbeat:
 #
 #   state: <working|parked|done|blocked|paused|failed|unknown> · source: <run-step|pane|status-log|pane-process|none> · <detail>
 #
 # Logic, in order:
 #   1. Resolve worktree + pane + kind from state/<id>.meta.
-#   2. Matching no-mistakes run for this soldier's branch AND current code identity,
-#      active or terminal (from `axi status`, or the coarse `no-mistakes runs`
-#      fallback)? Branch name alone is not enough: a historical run on a reused
-#      branch whose head was rewritten or diverged must not be attributed.
-#      A run matches when its head equals the worktree HEAD, or the worktree HEAD
-#      is an ancestor of the run head (pipeline fix commits advanced the run on
-#      the same line of history). Local work that advanced past the run head, or
-#      diverged from it, invalidates attribution.
+#   2. Resolve a no-mistakes run for this soldier's branch and current code
+#      identity through bin/cs-nm-run-lib.sh, using `axi status` or the coarse
+#      `no-mistakes runs` fallback. The library owns the exact attribution and
+#      gate-parked predicates used here and by teardown.
 #      The run-step is AUTHORITATIVE: running/fixing -> working, ci -> working,
 #      awaiting_approval/fix_review -> parked (with gate findings), terminal
 #      passed/checks-passed -> done, failed/cancelled -> failed. EXCEPT: while
@@ -63,6 +61,8 @@ cs_resolve_root
 . "$SCRIPT_DIR/cs-meta-lib.sh"
 # shellcheck source=bin/cs-classify-lib.sh
 . "$SCRIPT_DIR/cs-classify-lib.sh"
+# shellcheck source=bin/cs-nm-run-lib.sh
+. "$SCRIPT_DIR/cs-nm-run-lib.sh"
 
 ID=${1:-}
 [ -n "$ID" ] || { echo "usage: cs-crew-state.sh <id>" >&2; exit 2; }
@@ -164,98 +164,19 @@ crew_pane_is_busy() {  # <pane>
 
 # --- no-mistakes run lookup (authoritative when a run matches this branch) --
 
-trim() {
-  local s=${1:-}
-  s="${s#"${s%%[![:space:]]*}"}"
-  s="${s%"${s##*[![:space:]]}"}"
-  printf '%s' "$s"
-}
-strip_quotes() {
-  local s
-  s=$(trim "${1:-}")
-  case "$s" in
-    \"*\") s=${s#\"}; s=${s%\"} ;;
-  esac
-  trim "$s"
-}
-
-# Bounded no-mistakes call in the worktree; stdout only, never fails the script.
-HAVE_TIMEOUT=none
-if command -v timeout >/dev/null 2>&1; then HAVE_TIMEOUT=timeout
-elif command -v gtimeout >/dev/null 2>&1; then HAVE_TIMEOUT=gtimeout
-elif command -v perl >/dev/null 2>&1; then HAVE_TIMEOUT=perl
-fi
-nm_run() {  # <args...>
-  case "$HAVE_TIMEOUT" in
-    timeout)  ( cd "$WT" && timeout "$NM_TIMEOUT" no-mistakes "$@" ) 2>/dev/null || true ;;
-    gtimeout) ( cd "$WT" && gtimeout "$NM_TIMEOUT" no-mistakes "$@" ) 2>/dev/null || true ;;
-    perl)     ( cd "$WT" && perl -e 'my $t = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.2; kill "KILL", -$pid; exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$NM_TIMEOUT" no-mistakes "$@" ) 2>/dev/null || true ;;
-    *)        true ;;
-  esac
-}
-
-# Scalar value of a TOON key in the captured run output ($RUN_OUT).
+# TOON parsing, the bounded no-mistakes call, and the run-attribution rules all
+# live in bin/cs-nm-run-lib.sh so teardown and this reader share one owner (see
+# that file's header). These thin wrappers keep the local call sites below
+# reading against $RUN_OUT / $WT / $NM_TIMEOUT while the lib holds the logic.
 RUN_OUT=""
-nm_field() {  # <key>
-  printf '%s\n' "$RUN_OUT" | sed -n "s/^[[:space:]]*$1:[[:space:]]*\(.*\)/\1/p" | head -1
-}
-# Finding count from a findings[N]{...} table header; empty when none.
-nm_findings_count() {
-  printf '%s\n' "$RUN_OUT" | grep -oE 'findings\[[0-9]+\]' | head -1 | grep -oE '[0-9]+'
-}
-nm_gate_step_row() {
-  local row step rest status findings
-  row=$(printf '%s\n' "$RUN_OUT" | grep -E '^[[:space:]]*[^,]+,[[:space:]]*"?(awaiting_approval|fix_review)"?[[:space:]]*,' | head -1)
-  [ -n "$row" ] || return 0
-  row=$(trim "$row")
-  step=$(trim "${row%%,*}")
-  rest=${row#*,}
-  status=$(strip_quotes "$(trim "${rest%%,*}")")
-  rest=${rest#*,}
-  findings=$(trim "${rest%%,*}")
-  printf '%s|%s|%s' "$step" "$status" "$findings"
-}
-nm_gate_status() {
-  local s row
-  s=$(printf '%s\n' "$RUN_OUT" | grep -E '^[[:space:]]*(status|state):[[:space:]]*"?(awaiting_approval|fix_review)"?[[:space:]]*$' | head -1)
-  if [ -n "$s" ]; then
-    s=$(strip_quotes "$(trim "${s#*:}")")
-    printf '%s' "$s"
-    return
-  fi
-  row=$(nm_gate_step_row)
-  [ -n "$row" ] && { row=${row#*|}; printf '%s' "${row%%|*}"; }
-}
-nm_has_gate() {
-  printf '%s\n' "$RUN_OUT" | grep -Eq '^[[:space:]]*gate:[[:space:]]*'
-}
-nm_gate_line_name() {
-  local gate step
-  gate=$(strip_quotes "$(nm_field gate)")
-  [ -n "$gate" ] && { printf '%s' "$gate"; return; }
-  step=$(printf '%s\n' "$RUN_OUT" | sed -n '/^[[:space:]]*gate:[[:space:]]*$/,/^[^[:space:]][^:]*:/s/^[[:space:]]*step:[[:space:]]*\(.*\)/\1/p' | head -1)
-  step=$(strip_quotes "$step")
-  [ -n "$step" ] && printf '%s' "$step"
-}
-nm_gate_name() {
-  local gate row
-  gate=$(nm_gate_line_name)
-  [ -n "$gate" ] && { printf '%s' "$gate"; return; }
-  row=$(nm_gate_step_row)
-  [ -n "$row" ] && printf '%s' "${row%%|*}"
-}
-nm_gate_findings_count() {
-  local f row rest
-  f=$(nm_findings_count)
-  [ -n "$f" ] && { printf '%s' "$f"; return; }
-  row=$(nm_gate_step_row)
-  [ -n "$row" ] || return 0
-  rest=${row#*|}
-  rest=${rest#*|}
-  rest=${rest%%|*}
-  case "$rest" in ''|*[!0-9]*) return 0 ;; esac
-  printf '%s' "$rest"
-}
+trim() { cs_nm_trim "${1:-}"; }
+strip_quotes() { cs_nm_strip_quotes "${1:-}"; }
+nm_run() { cs_nm_run "$WT" "$NM_TIMEOUT" "$@"; }
+nm_field() { cs_nm_field "$RUN_OUT" "$1"; }
+nm_has_gate() { cs_nm_has_gate "$RUN_OUT"; }
+nm_gate_line_name() { cs_nm_gate_line_name "$RUN_OUT"; }
+nm_gate_name() { cs_nm_gate_name "$RUN_OUT"; }
+nm_gate_findings_count() { cs_nm_gate_findings_count "$RUN_OUT"; }
 log_reports_ci_ready() {
   [ "$LOG_VERB" = "done" ] || return 1
   case "$(status_line_note "$LOG_LINE")" in
@@ -340,81 +261,26 @@ nm_ci_checks_state() {
 # originating firstmate history - but this cross-branch path was independently
 # confirmed dead code and is worth having actually work.)
 #
-# The real run-listing command is the top-level `no-mistakes runs` (verified:
-# `no-mistakes --help` lists it separately from `axi`). It is plain, human-
-# oriented text - no run id, no JSON/TOON, newest-first, columns
-# "<status> <branch> <short-sha> <date> [<pr-url>]" separated by runs of
-# spaces (verified: no quoting, so splitting on the first two whitespace runs
-# is exact) - but branch + coarse status is exactly what this predicate needs:
-# is a run for THIS branch active right now. Echoes the first (most recent)
-# matching row's status word (running/completed/cancelled/failed), or empty
-# when the branch has no run within CS_CREW_STATE_RUNS_LIMIT rows.
+# The real run-listing command is the top-level `no-mistakes runs`. The coarse
+# cross-branch attribution (parse that plain text, match this branch's most
+# recent row under the same head-identity rule as axi status) is owned by
+# bin/cs-nm-run-lib.sh; this wrapper binds it to this reader's worktree and
+# limit. See that file's header for the exact runs-list shape and rules.
 nm_runs_status_for_branch() {  # <branch>
-  local branch=$1 out row st rest br sha
-  out=$(nm_run runs --limit "$CS_CREW_STATE_RUNS_LIMIT")
-  [ -n "$out" ] || return 0
-  while IFS= read -r row; do
-    row=$(trim "$row")
-    [ -n "$row" ] || continue
-    st=${row%% *}
-    rest=${row#* }
-    rest=$(trim "$rest")
-    br=${rest%% *}
-    rest=${rest#* }
-    rest=$(trim "$rest")
-    sha=${rest%% *}
-    if [ "$br" = "$branch" ]; then
-      # Same code-identity rule as axi status: skip a same-branch row whose
-      # short-sha does not match this worktree (rewritten or advanced tip).
-      if ! nm_coarse_head_matches_worktree "$sha"; then
-        continue
-      fi
-      printf '%s' "$st"
-      return 0
-    fi
-  done <<< "$out"
-  return 0
+  cs_nm_runs_status_for_branch "$WT" "$1" "$CS_CREW_STATE_RUNS_LIMIT" "$NM_TIMEOUT"
 }
 
 # CREW_BRANCH is empty at detached HEAD (a just-spawned soldier, or a scout's
 # scratch worktree); with no branch there is no run to attribute to this soldier.
 CREW_BRANCH=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
 
-# 0 if the active axi-status run's head field matches this worktree's code
-# identity. Branch match is a precondition (caller). Rules:
-#   - missing/empty head field: cannot bind; reject the run
-#   - equal commits (short or full SHA): match
-#   - worktree HEAD is an ancestor of run head: match (pipeline fix commits on
-#     the same history advanced the run tip)
-#   - run head is a strict ancestor of worktree HEAD: no match (local work
-#     advanced outside the run)
-#   - diverged / run head not in this worktree: no match (rewritten branch tip)
+# The head-identity rules (equal, or worktree HEAD is an ancestor of the run
+# head; a strict-earlier, diverged, or unresolvable head is no match) are owned
+# by cs_nm_head_matches_worktree. Branch match is the caller's precondition.
+# This reader binds it to the axi-status TOON `head` field; the coarse runs-list
+# form is applied inside cs_nm_runs_status_for_branch against the row's short-sha.
 nm_run_head_matches_worktree() {
-  local run_head local_full run_full
-  run_head=$(strip_quotes "$(nm_field head)")
-  [ -n "$run_head" ] || return 1
-  local_full=$(git -C "$WT" rev-parse HEAD 2>/dev/null) || return 1
-  run_full=$(git -C "$WT" rev-parse --verify "${run_head}^{commit}" 2>/dev/null) || return 1
-  [ "$run_full" = "$local_full" ] && return 0
-  if git -C "$WT" merge-base --is-ancestor "$local_full" "$run_full" 2>/dev/null; then
-    return 0
-  fi
-  return 1
-}
-
-# Coarse runs-list rows are "<status> <branch> <short-sha> ...". 0 if the short
-# sha for this branch row matches the worktree head under the same rules as
-# nm_run_head_matches_worktree (equal, or local is ancestor of run tip).
-nm_coarse_head_matches_worktree() {  # <short-sha>
-  local run_head=$1 local_full run_full
-  [ -n "$run_head" ] || return 1
-  local_full=$(git -C "$WT" rev-parse HEAD 2>/dev/null) || return 1
-  run_full=$(git -C "$WT" rev-parse --verify "${run_head}^{commit}" 2>/dev/null) || return 1
-  [ "$run_full" = "$local_full" ] && return 0
-  if git -C "$WT" merge-base --is-ancestor "$local_full" "$run_full" 2>/dev/null; then
-    return 0
-  fi
-  return 1
+  cs_nm_head_matches_worktree "$WT" "$(strip_quotes "$(nm_field head)")"
 }
 
 HAVE_RUN=0
@@ -476,8 +342,6 @@ if [ "$HAVE_RUN" = 1 ]; then
     status=$(strip_quotes "$(nm_field status)")
     RUN_STATUS=$status
     outcome=$(strip_quotes "$(nm_field outcome)")
-    awaiting=$(printf '%s\n' "$RUN_OUT" | grep -E '^[[:space:]]*awaiting_agent:' | head -1 || true)
-    gate_status=$(nm_gate_status)
     has_gate=0
     nm_has_gate && has_gate=1
 
@@ -489,7 +353,7 @@ if [ "$HAVE_RUN" = 1 ]; then
         cancelled)     RUN_STATE=failed; RUN_DETAIL="run cancelled" ;;
         *)             RUN_STATE=unknown; RUN_DETAIL="outcome: $outcome" ;;
       esac
-    elif [ -n "$awaiting" ] || [ "$status" = awaiting_approval ] || [ "$status" = fix_review ] || [ -n "$gate_status" ] || [ "$has_gate" = 1 ]; then
+    elif cs_nm_run_is_gate_parked "$RUN_OUT"; then
       if [ "$has_gate" = 1 ]; then
         gate=$(nm_gate_line_name)
       else
