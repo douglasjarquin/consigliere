@@ -28,8 +28,11 @@ This is ordinary section-7 ship lifecycle with a board front door - the safety c
 3. Read each issue (`gh-axi issue view <n>`) enough to write a real brief: scope, acceptance criteria, and whether it overlaps another issue's subsystem or depends on unlanded work.
 4. Order and gate:
    - **Concurrency cap: 3 lanes per project** by default. The boss can override per sweep ("knock out 5 at once"); honor an explicit number.
-   - **Serialize only true dependencies.** Same-file or same-subsystem overlap alone does not block concurrent work; queue an issue only for a true semantic dependency, shared mutable external state, incompatible concurrent migration, or another concrete condition that makes independent progress or reconciliation unsafe. Independent issues fill the remaining lanes freely.
-5. For each issue you dispatch (up to the cap):
+   - Before dispatching, run `bin/cs-board-capacity.sh <project> <lane-cap>` and use its `free=` value as the number of Ready issues to dispatch.
+     This command is the single owner of live lane accounting; do not substitute the backlog's `## In flight` count.
+   - Re-run the capacity command after each dispatch and continue while Ready work remains and `free` is positive.
+   - **Serialize only true dependencies.** Same-file or same-subsystem overlap alone does not block concurrent work; queue an issue only for a true semantic dependency, shared mutable external state, incompatible concurrent migration, or another concrete condition that makes independent progress and reconciliation unsafe. Independent issues fill the remaining lanes freely.
+5. For each issue you dispatch (up to the reported free capacity):
    a. Move the card at dispatch: `bin/cs-board.sh start <project> <item-id>` (Ready -> In Progress). Do this only once you are actually spawning the soldier, so the board reflects real work.
    b. Decide this issue's delivery mode and yolo posture per `AGENTS.md` section 7, defaulting to the project's standing registry posture unless the issue warrants otherwise.
       The scaffold and the spawn must state the same mode, or the spawn refuses.
@@ -45,7 +48,8 @@ This is ordinary section-7 ship lifecycle with a board front door - the safety c
 
 A `check:` wake naming a board sweep carries the project's current Ready and Inbox depth.
 The poll reports depth only; it never dispatches, never moves a card, and never judges lane capacity.
-Reconcile live lanes with `bin/cs-crew-state.sh`, then resume from step 5 for each free lane, honoring the same cap and true-dependency rules.
+Run `bin/cs-board-capacity.sh <project> <lane-cap>` and resume from step 5 for each reported free lane, honoring the same cap and true-dependency rules.
+A merged task with no live endpoint can leave cleanup pending, including an orphaned directory that cleanup safely refuses; its released lane is still available, and the directory and landed-work records remain untouched for the normal cleanup follow-up.
 Lanes already full is a silent no-op: the sweep is working as intended, and an unchanged fleet is not boss-facing progress.
 The poll goes quiet on its own once both columns are clear, and stays quiet while consigliere's own dispatch is what shrank the column, so a wake means work arrived or work has been sitting.
 
