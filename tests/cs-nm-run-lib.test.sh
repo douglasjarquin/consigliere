@@ -119,4 +119,25 @@ pass "gate-parked predicate: gates park, running and terminal do not"
   || fail "quoted head field strips its quotes"
 pass "TOON scalar field and quote stripping"
 
+READBIN="$TMP/read-bin"
+mkdir -p "$READBIN"
+cat > "$READBIN/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+case "${1:-} ${2:-}" in
+  "axi status")
+    if [ "${CS_NM_TEST_STATUS_FAIL:-0}" = 1 ]; then
+      exit 17
+    fi
+    printf '%s\n' "${CS_NM_TEST_STATUS:-}"
+    ;;
+esac
+SH
+chmod +x "$READBIN/no-mistakes"
+[ -z "$(PATH="$READBIN:$PATH" cs_nm_axi_status_read "$WT" 1)" ] \
+  || fail "a successful empty axi status remains readable"
+PATH="$READBIN:$PATH" CS_NM_TEST_STATUS_FAIL=1 \
+  cs_nm_axi_status_read "$WT" 1 >/dev/null 2>&1 \
+  && fail "a failed axi status is unreadable"
+pass "axi status reader preserves reachability"
+
 pass "cs-nm-run-lib attribution contract"

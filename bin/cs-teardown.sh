@@ -116,6 +116,9 @@ TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED=3
 # Bounded timeout (seconds) for the pre-teardown no-mistakes run query.
 NM_TIMEOUT=${CS_TEARDOWN_NM_TIMEOUT:-10}
 case "$NM_TIMEOUT" in ''|*[!0-9]*) NM_TIMEOUT=10 ;; esac
+NM_READ_ATTEMPTS=3
+NM_READ_RETRY=0.3
+NM_RUNS_LIMIT=200
 # lsof is the verified mechanism for the leaked-process sweep; resolved once.
 LSOF_BIN=$(command -v lsof || true)
 CS_REAP_SURVIVORS=""
@@ -397,40 +400,75 @@ require_pane_gone() { # <what-is-being-retained>
 # id), and is CONFIRMED by re-reading the run rather than assumed. Returns
 # non-zero only when a parked run is still parked after the abort.
 conclude_nm_run() {
-  local branch status_out
-  command -v no-mistakes >/dev/null 2>&1 || return 0
+  local branch status_out coarse_status attempt readable=0
+  CS_NM_CONCLUDE_FAILURE=""
+  [ "$MODE" = no-mistakes ] || return 0
   branch=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || return 0
   [ -n "$branch" ] || return 0
-  status_out=$(cs_nm_axi_status "$WT" "$NM_TIMEOUT")
-  [ -n "$status_out" ] || return 0
-  cs_nm_status_is_attributed "$WT" "$branch" "$status_out" || return 0
-  cs_nm_run_is_gate_parked "$status_out" || return 0
-  echo "note: concluding this task's no-mistakes run parked at a gate before cleanup." >&2
-  ( cd "$WT" && no-mistakes axi abort ) >/dev/null 2>&1 || true
-  # Confirm: the run this task owns must no longer be parked at a gate. The abort
-  # can take a moment to settle in the daemon, so re-read a few times before
-  # declaring it stuck rather than flaking on a single racing read.
-  local attempt=0
-  while [ "$attempt" -lt 5 ]; do
-    status_out=$(cs_nm_axi_status "$WT" "$NM_TIMEOUT")
-    if [ -z "$status_out" ] || ! cs_nm_status_is_attributed "$WT" "$branch" "$status_out" \
-       || ! cs_nm_run_is_gate_parked "$status_out"; then
+
+  status_out=""
+  for ((attempt = 1; attempt <= NM_READ_ATTEMPTS; attempt++)); do
+    if status_out=$(cs_nm_axi_status_read "$WT" "$NM_TIMEOUT"); then
+      readable=1
+      break
+    fi
+    status_out=""
+    [ "$attempt" -lt "$NM_READ_ATTEMPTS" ] && sleep "$NM_READ_RETRY"
+  done
+  if [ "$readable" -eq 0 ]; then
+    CS_NM_CONCLUDE_FAILURE="could not verify that no orphaned no-mistakes run remains for this task because the daemon did not answer; retry once it responds"
+    return 1
+  fi
+
+  if cs_nm_status_is_attributed "$WT" "$branch" "$status_out"; then
+    cs_nm_run_is_gate_parked "$status_out" || return 0
+  else
+    if ! coarse_status=$(cs_nm_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT"); then
+      CS_NM_CONCLUDE_FAILURE="could not verify that no orphaned no-mistakes run remains for this task because the runs list did not answer; retry once it responds"
+      return 1
+    fi
+    if cs_nm_run_status_is_active "$coarse_status"; then
+      :
+    else
       return 0
     fi
-    attempt=$((attempt + 1))
-    sleep 0.3
+  fi
+
+  echo "note: concluding this task's no-mistakes run parked at a gate before cleanup." >&2
+  ( cd "$WT" && no-mistakes axi abort ) >/dev/null 2>&1 || true
+  local confirmation_readable=0 parked_seen=0
+  for ((attempt = 1; attempt <= NM_READ_ATTEMPTS; attempt++)); do
+    if status_out=$(cs_nm_axi_status_read "$WT" "$NM_TIMEOUT"); then
+      confirmation_readable=1
+      if [ -n "$status_out" ] && cs_nm_status_is_attributed "$WT" "$branch" "$status_out"; then
+        if ! cs_nm_run_is_gate_parked "$status_out"; then
+          return 0
+        fi
+        parked_seen=1
+      elif [ -n "$status_out" ] && coarse_status=$(cs_nm_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT"); then
+        if ! cs_nm_run_status_is_active "$coarse_status"; then
+          return 0
+        fi
+        parked_seen=1
+      fi
+    fi
+    [ "$attempt" -lt "$NM_READ_ATTEMPTS" ] && sleep "$NM_READ_RETRY"
   done
+  if [ "$confirmation_readable" -eq 0 ]; then
+    CS_NM_CONCLUDE_FAILURE="abort was issued, but teardown could not confirm that this task's no-mistakes run stopped; retry after the daemon responds"
+  elif [ "$parked_seen" -eq 1 ]; then
+    CS_NM_CONCLUDE_FAILURE="this task's no-mistakes run is still parked at a gate after an abort attempt"
+  else
+    CS_NM_CONCLUDE_FAILURE="abort was issued, but teardown could not positively confirm that this task's no-mistakes run stopped; retry after the daemon responds"
+  fi
   return 1
 }
 
-# Physically-resolved cwd of <pid> via lsof, or empty. Used to re-verify a
-# candidate's identity immediately before signaling, so PID reuse between
-# discovery and signal cannot make teardown kill an unrelated process.
-proc_cwd() { # <pid>
+proc_cwd() {
   "$LSOF_BIN" -a -d cwd -p "$1" -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
 }
 
-proc_cwd_under_roots() { # <pid> <root...>
+proc_cwd_under_roots() {
   local pid=$1 cwd root
   shift
   cwd=$(proc_cwd "$pid") || return 1
@@ -443,14 +481,19 @@ proc_cwd_under_roots() { # <pid> <root...>
   return 1
 }
 
-# TERM then KILL every process whose cwd is under one of <root...> (the task
-# worktree, and any task tmp directory a caller passes). Teardown can otherwise
-# leave backgrounded or disowned descendants - reparented to init with a cwd
-# still inside the worktree - pinning CPU with no live task meta to attribute
-# them to. Each candidate's identity is re-verified immediately before every
-# signal, and a process that exits between discovery and signal is tolerated.
-# Returns non-zero, recording the survivors in CS_REAP_SURVIVORS, only when a
-# process is still alive with its cwd still under a root after KILL.
+reap_pid_is_teardown_ancestry() {
+  local candidate=$1 current=$$ next
+  while :; do
+    [ "$candidate" = "$current" ] && return 0
+    [ "$current" = 1 ] && return 1
+    next=$(ps -o ppid= -p "$current" 2>/dev/null | tr -d '[:space:]')
+    case "$next" in
+      ''|*[!0-9]*) return 1 ;;
+    esac
+    current=$next
+  done
+}
+
 reap_leaked_processes() { # <root...>
   local root resolved pid roots=() pids=() uniq survivors=()
   CS_REAP_SURVIVORS=""
@@ -469,19 +512,19 @@ reap_leaked_processes() { # <root...>
   [ "${#pids[@]}" -gt 0 ] || return 0
   uniq=$(printf '%s\n' "${pids[@]}" | sort -un)
   for pid in $uniq; do
-    [ "$pid" = "$$" ] && continue
+    reap_pid_is_teardown_ancestry "$pid" && continue
     proc_cwd_under_roots "$pid" "${roots[@]}" || continue
     kill -TERM "$pid" 2>/dev/null || true
   done
   sleep 0.5
   for pid in $uniq; do
-    [ "$pid" = "$$" ] && continue
+    reap_pid_is_teardown_ancestry "$pid" && continue
     proc_cwd_under_roots "$pid" "${roots[@]}" || continue
     kill -KILL "$pid" 2>/dev/null || true
   done
   sleep 0.2
   for pid in $uniq; do
-    [ "$pid" = "$$" ] && continue
+    reap_pid_is_teardown_ancestry "$pid" && continue
     if kill -0 "$pid" 2>/dev/null && proc_cwd_under_roots "$pid" "${roots[@]}"; then
       survivors+=("$pid")
     fi
@@ -499,10 +542,10 @@ conclude_and_reap() {
   # A scout never drives a no-mistakes run of its own; only conclude for ships.
   if [ "$KIND" = ship ] && ! conclude_nm_run; then
     if [ "$FORCE" = "--force" ]; then
-      echo "WARNING: this task's no-mistakes run is still parked at a gate after an abort attempt; --force is proceeding, so it may keep holding a fleet slot. Check it by hand." >&2
+      echo "WARNING: ${CS_NM_CONCLUDE_FAILURE:-no-mistakes run conclusion was not confirmed}; --force is proceeding. Check it by hand." >&2
     else
-      echo "REFUSED: this task's no-mistakes run is still parked at a gate after an abort attempt." >&2
-      echo "It would keep holding a fleet slot after cleanup. Investigate the run, or get the boss's explicit OK to discard, then --force." >&2
+      echo "REFUSED: ${CS_NM_CONCLUDE_FAILURE:-no-mistakes run conclusion was not confirmed}." >&2
+      echo "Nothing was removed. Retry once the daemon responds, or get the boss's explicit OK to discard, then --force." >&2
       return 1
     fi
   fi

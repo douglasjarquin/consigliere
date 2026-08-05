@@ -36,17 +36,21 @@ elif command -v gtimeout >/dev/null 2>&1; then CS_NM_HAVE_TIMEOUT=gtimeout
 elif command -v perl >/dev/null 2>&1; then CS_NM_HAVE_TIMEOUT=perl
 fi
 
-# Bounded no-mistakes call from inside a worktree; stdout only, never fails the
-# caller. <wt> <timeout> <args...>
-cs_nm_run() {
+cs_nm_run_read() {
   local wt=$1 timeout=$2
   shift 2
   case "$CS_NM_HAVE_TIMEOUT" in
-    timeout)  ( cd "$wt" && timeout "$timeout" no-mistakes "$@" ) 2>/dev/null || true ;;
-    gtimeout) ( cd "$wt" && gtimeout "$timeout" no-mistakes "$@" ) 2>/dev/null || true ;;
-    perl)     ( cd "$wt" && perl -e 'my $t = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.2; kill "KILL", -$pid; exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$timeout" no-mistakes "$@" ) 2>/dev/null || true ;;
-    *)        true ;;
+    timeout)  ( cd "$wt" && timeout "$timeout" no-mistakes "$@" ) 2>/dev/null ;;
+    gtimeout) ( cd "$wt" && gtimeout "$timeout" no-mistakes "$@" ) 2>/dev/null ;;
+    perl)     ( cd "$wt" && perl -e 'my $t = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.2; kill "KILL", -$pid; exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$timeout" no-mistakes "$@" ) 2>/dev/null ;;
+    *)        return 127 ;;
   esac
+}
+
+# Bounded no-mistakes call from inside a worktree; stdout only, never fails the
+# caller. <wt> <timeout> <args...>
+cs_nm_run() {
+  cs_nm_run_read "$@" || true
 }
 
 # --- TOON parsing primitives (shared, pure) ---------------------------------
@@ -163,8 +167,12 @@ cs_nm_head_matches_worktree() {
 # short-sha still matches this worktree's head, or empty when the branch has no
 # attributable run within <limit> rows. <wt> <branch> <limit> <timeout>
 cs_nm_runs_status_for_branch() {
+  cs_nm_runs_status_for_branch_read "$@" || true
+}
+
+cs_nm_runs_status_for_branch_read() {
   local wt=$1 branch=$2 limit=$3 timeout=$4 out row st rest br sha
-  out=$(cs_nm_run "$wt" "$timeout" runs --limit "$limit")
+  out=$(cs_nm_run_read "$wt" "$timeout" runs --limit "$limit") || return 1
   [ -n "$out" ] || return 0
   while IFS= read -r row; do
     row=$(cs_nm_trim "$row")
@@ -192,6 +200,17 @@ cs_nm_runs_status_for_branch() {
 # `no-mistakes axi status` output for this worktree, bounded. <wt> <timeout>
 cs_nm_axi_status() {
   cs_nm_run "$1" "$2" axi status
+}
+
+cs_nm_axi_status_read() {
+  cs_nm_run_read "$1" "$2" axi status
+}
+
+cs_nm_run_status_is_active() {
+  case "${1:-}" in
+    ''|completed|cancelled|failed|passed|done|success|terminal) return 1 ;;
+    *) return 0 ;;
+  esac
 }
 
 # 0 if <toon> is an `axi status` run attributed to <branch> at a matching head.

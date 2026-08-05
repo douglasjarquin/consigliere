@@ -63,10 +63,15 @@ set -u
 case "${1:-} ${2:-}" in
   "axi status")
     if [ -n "${CS_FAKE_ABORT_MARK:-}" ] && [ -f "$CS_FAKE_ABORT_MARK" ]; then
+      [ "${CS_FAKE_AXI_STATUS_AFTER_FAIL:-0}" = 1 ] && exit 17
       printf '%s\n' "${CS_FAKE_AXI_STATUS_AFTER:-}"
     else
+      [ "${CS_FAKE_AXI_STATUS_FAIL:-0}" = 1 ] && exit 19
       printf '%s\n' "${CS_FAKE_AXI_STATUS:-}"
     fi ;;
+  "runs --limit")
+    [ "${CS_FAKE_RUNS_FAIL:-0}" = 1 ] && exit 23
+    printf '%s\n' "${CS_FAKE_RUNS_STATUS:-}" ;;
   "axi abort")
     [ -n "${CS_FAKE_ABORT_MARK:-}" ] && : > "$CS_FAKE_ABORT_MARK"
     echo '{}' ;;
@@ -284,6 +289,19 @@ assert_grep '- axb - Near miss domain.' "$TMP/data/capos.md" \
 assert_absent "$TMP/state/a.b.meta" "capo records cleared after retirement"
 pass "retiring a dotted capo id leaves the near-miss route intact"
 
+make_task m1 ship local-only
+out=$(CS_FAKE_AXI_STATUS_FAIL=1 "$BIN" m1 2>&1) || fail "non-no-mistakes teardown must skip run conclusion: $out"
+assert_contains "$out" "teardown m1 complete" "non-no-mistakes mode skips the run conclusion"
+pass "non-no-mistakes mode skips run conclusion"
+
+make_task f1 ship
+out=$(CS_FAKE_AXI_STATUS_FAIL=1 "$BIN" f1 2>&1) \
+  && fail "an unreadable no-mistakes status must refuse teardown"
+assert_contains "$out" "could not verify that no orphaned" "unreadable status refusal names the orphan check"
+assert_present "$TMP/wt-f1" "worktree retained after unreadable status refusal"
+assert_present "$TMP/state/f1.meta" "records retained after unreadable status refusal"
+pass "unreadable no-mistakes status fails closed"
+
 # --- pre-teardown run conclusion + leaked-process reap ----------------------
 # A run is attributed to a task only by its exact branch AND current head
 # (bin/cs-nm-run-lib.sh, the shared owner cs-crew-state.sh also uses). These
@@ -340,6 +358,18 @@ assert_present "$TMP/wt-p2" "worktree retained when the run would not conclude"
 assert_present "$TMP/state/p2.meta" "records retained when the run would not conclude"
 pass "a parked run that will not conclude fails the teardown closed"
 
+make_task p2u ship
+p2u_head=$(git -C "$TMP/wt-p2u" rev-parse HEAD)
+p2u_mark="$TMP/state/p2u.aborted"
+out=$(CS_FAKE_ABORT_MARK="$p2u_mark" \
+      CS_FAKE_AXI_STATUS="$(parked_run cs/p2u "$p2u_head")" \
+      CS_FAKE_AXI_STATUS_AFTER_FAIL=1 \
+      "$BIN" p2u 2>&1) && fail "an unreadable post-abort status must refuse teardown"
+assert_contains "$out" "could not confirm" "unreadable post-abort status names the missing confirmation"
+assert_present "$TMP/wt-p2u" "worktree retained after unreadable post-abort status"
+assert_present "$TMP/state/p2u.meta" "records retained after unreadable post-abort status"
+pass "unreadable post-abort status fails closed"
+
 # 13. A parked run on ANOTHER branch is never touched; teardown proceeds and no
 # abort is issued.
 make_task p3 ship
@@ -389,7 +419,7 @@ if command -v lsof >/dev/null 2>&1; then
   ( cd "$TMP/wt-r1/sub" && exec sleep 60 ) & leaked_pid=$!
   ( cd "$ELSEWHERE" && exec sleep 60 ) & control_pid=$!
   sleep 0.3
-  out=$("$BIN" r1 2>&1) || fail "reap-path teardown failed: $out"
+  out=$(cd "$TMP/wt-r1" && "$BIN" r1 2>&1) || fail "reap-path teardown failed: $out"
   assert_contains "$out" "teardown r1 complete" "teardown completes after reaping"
   wait "$leaked_pid" 2>/dev/null
   kill -0 "$leaked_pid" 2>/dev/null && fail "a process rooted under the worktree must be reaped"
