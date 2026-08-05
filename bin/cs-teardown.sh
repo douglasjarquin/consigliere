@@ -400,7 +400,7 @@ require_pane_gone() { # <what-is-being-retained>
 # id), and is CONFIRMED by re-reading the run rather than assumed. Returns
 # non-zero only when a parked run is still parked after the abort.
 conclude_nm_run() {
-  local branch status_out coarse_status attempt readable=0
+  local branch current_branch status_out coarse_status attempt readable=0
   CS_NM_CONCLUDE_FAILURE=""
   [ "$MODE" = no-mistakes ] || return 0
   branch=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || return 0
@@ -432,6 +432,27 @@ conclude_nm_run() {
     else
       return 0
     fi
+  fi
+
+  current_branch=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || {
+    CS_NM_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this no-mistakes run; retry"
+    return 1
+  }
+  if [ "$current_branch" != "$branch" ]; then
+    CS_NM_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this no-mistakes run; retry"
+    return 1
+  fi
+  if cs_nm_status_is_attributed "$WT" "$branch" "$status_out"; then
+    :
+  elif cs_nm_run_status_is_active "$coarse_status"; then
+    if ! coarse_status=$(cs_nm_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT") \
+       || ! cs_nm_run_status_is_active "$coarse_status"; then
+      CS_NM_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this no-mistakes run; retry"
+      return 1
+    fi
+  else
+    CS_NM_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this no-mistakes run; retry"
+    return 1
   fi
 
   echo "note: concluding this task's no-mistakes run parked at a gate before cleanup." >&2

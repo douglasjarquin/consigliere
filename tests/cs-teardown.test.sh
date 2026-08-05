@@ -68,6 +68,9 @@ case "${1:-} ${2:-}" in
     else
       [ "${CS_FAKE_AXI_STATUS_FAIL:-0}" = 1 ] && exit 19
       printf '%s\n' "${CS_FAKE_AXI_STATUS:-}"
+      if [ -n "${CS_FAKE_MUTATE_WORKTREE:-}" ]; then
+        git -C "$CS_FAKE_MUTATE_WORKTREE" checkout -q "${CS_FAKE_MUTATE_BRANCH:?}"
+      fi
     fi ;;
   "runs --limit")
     [ "${CS_FAKE_RUNS_FAIL:-0}" = 1 ] && exit 23
@@ -357,6 +360,21 @@ assert_contains "$out" "still parked at a gate" "the refusal names the run that 
 assert_present "$TMP/wt-p2" "worktree retained when the run would not conclude"
 assert_present "$TMP/state/p2.meta" "records retained when the run would not conclude"
 pass "a parked run that will not conclude fails the teardown closed"
+
+make_task p2t ship
+p2t_head=$(git -C "$TMP/wt-p2t" rev-parse HEAD)
+p2t_mark="$TMP/state/p2t.aborted"
+git -C "$TMP/wt-p2t" branch cs/p2t-other
+out=$(CS_FAKE_ABORT_MARK="$p2t_mark" \
+      CS_FAKE_AXI_STATUS="$(parked_run cs/p2t "$p2t_head")" \
+      CS_FAKE_MUTATE_WORKTREE="$TMP/wt-p2t" \
+      CS_FAKE_MUTATE_BRANCH=cs/p2t-other \
+      "$BIN" p2t 2>&1) && fail "a changed task identity must refuse teardown"
+assert_contains "$out" "identity changed under teardown" "identity mismatch refusal names the changed task identity"
+assert_absent "$p2t_mark" "identity mismatch does not issue an abort"
+assert_present "$TMP/wt-p2t" "worktree retained after identity mismatch"
+assert_present "$TMP/state/p2t.meta" "records retained after identity mismatch"
+pass "identity mismatch refuses abort without touching the run"
 
 make_task p2u ship
 p2u_head=$(git -C "$TMP/wt-p2u" rev-parse HEAD)
