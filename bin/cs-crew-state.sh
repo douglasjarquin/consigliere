@@ -13,22 +13,20 @@
 # identity, else the pane busy-signature) and reconciles the possibly-stale log
 # against it.
 #
-# The determinism lives entirely here - only run-step / pane / log reads plus
-# fixed mapping logic, no heuristics and no LLM. Output is one stable, parseable,
+# The local reconciliation is deterministic - only run-step / pane / log reads
+# plus fixed mapping logic, no heuristics and no LLM. The shared no-mistakes run
+# attribution and gate-parked predicates live in bin/cs-nm-run-lib.sh, their one
+# owner for this reader and teardown. Output is one stable, parseable,
 # token-tight line consigliere can read every heartbeat:
 #
 #   state: <working|parked|done|blocked|paused|failed|unknown> · source: <run-step|pane|status-log|pane-process|none> · <detail>
 #
 # Logic, in order:
 #   1. Resolve worktree + pane + kind from state/<id>.meta.
-#   2. Matching no-mistakes run for this soldier's branch AND current code identity,
-#      active or terminal (from `axi status`, or the coarse `no-mistakes runs`
-#      fallback)? Branch name alone is not enough: a historical run on a reused
-#      branch whose head was rewritten or diverged must not be attributed.
-#      A run matches when its head equals the worktree HEAD, or the worktree HEAD
-#      is an ancestor of the run head (pipeline fix commits advanced the run on
-#      the same line of history). Local work that advanced past the run head, or
-#      diverged from it, invalidates attribution.
+#   2. Resolve a no-mistakes run for this soldier's branch and current code
+#      identity through bin/cs-nm-run-lib.sh, using `axi status` or the coarse
+#      `no-mistakes runs` fallback. The library owns the exact attribution and
+#      gate-parked predicates used here and by teardown.
 #      The run-step is AUTHORITATIVE: running/fixing -> working, ci -> working,
 #      awaiting_approval/fix_review -> parked (with gate findings), terminal
 #      passed/checks-passed -> done, failed/cancelled -> failed. EXCEPT: while

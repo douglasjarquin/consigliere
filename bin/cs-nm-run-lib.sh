@@ -14,7 +14,8 @@
 # state, and teardown would abort another task's run. This library is that one
 # owner; both consumers delegate here.
 #
-# The identity rules (kept identical to the header of bin/cs-crew-state.sh):
+# The identity rules are owned here and referenced by bin/cs-crew-state.sh and
+# bin/cs-teardown.sh:
 #   - Branch name alone is NOT enough: a historical run on a reused branch whose
 #     head was rewritten or diverged must not be attributed.
 #   - A run matches when its head equals the worktree HEAD, or the worktree HEAD
