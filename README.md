@@ -66,7 +66,7 @@ cd consigliere
 codex                 # or: claude
 ```
 
-`AGENTS.md` is the always-loaded operating contract (claude loads it via the `CLAUDE.md` symlink). The session starts with `bin/cs-session-start.sh` (one digest: lock, bootstrap, wake queue, context, fleet state, supervision block). The root harness is auto-detected (`CLAUDECODE=1` ⇒ claude, else codex; `config/harness` overrides).
+`AGENTS.md` is the always-loaded operating contract (claude loads it via the `CLAUDE.md` symlink). The session starts with `bin/cs-session-start.sh` (one digest: lock, bootstrap, wake queue, context, fleet state, supervision block). The root harness is auto-detected (`CLAUDECODE=1` ⇒ claude, else codex; `config/host/harness.conf` overrides).
 
 Then talk to it in plain language: describe the work, name the project when it is ambiguous, and it dispatches, supervises, and brings back PRs for your word. It never merges without you - `yolo` lets it answer routine review decisions on its own, but landing is always your call - never writes to a project itself, and never tears down unlanded work.
 
@@ -76,7 +76,16 @@ Then talk to it in plain language: describe the work, name the project when it i
 - `skills/` - agent-loaded procedures (afk, rundown, the-books, vault, capo-provisioning, upstream-review, ...)
 - `docs/` - architecture, configuration schema (owner), supervision protocol, verified herdr/codex/claude/lavish facts
 - `tests/` - colocated behavior tests (`bash tests/<name>.test.sh`, or `bin/cs-test-run.sh --portable`; live suites opt in via `CS_TEST_HERDR_LIVE=1` / `CS_TEST_CODEX_LIVE=1`)
-- `data/ state/ config/ projects/` - boss-private operational home, gitignored
+- `config/` - the user-owned tree (settings and durable memory), boss-private and gitignored; `config/host/` holds the machine-local files
+- `data/ state/ projects/` - generated output, volatile runtime state, and clones; boss-private, gitignored, disposable or re-creatable
+
+Backup and restore need no tool:
+
+```
+back up:      cp -a <home>/config <backup>/
+new machine:  copy everything except host/ into <newhome>/config/,
+              recreate config/host/ for this machine, run bin/cs-doctor.sh
+```
 
 ## CI
 

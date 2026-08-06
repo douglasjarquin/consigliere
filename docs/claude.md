@@ -26,7 +26,7 @@ version. The launch template and per-harness facts live in `bin/cs-harness-lib.s
   and trust cannot land in two different config directories.
 - `--dangerously-skip-permissions` gives the unattended soldier full autonomy (no permission prompts).
 - `--permission-mode <auto|acceptEdits|bypassPermissions>` is the alternative for a home
-  whose Claude account policy forbids the bypass flag; `config/permission-mode` selects it
+  whose Claude account policy forbids the bypass flag; `config/host/permission-mode.conf` selects it
   and `docs/configuration.md` owns that schema. It is the flag form of the interactive
   Shift+Tab mode cycle, so a pane starts in the chosen mode with no keystrokes.
   Exactly one of the two flags is emitted, never both.
@@ -72,7 +72,7 @@ version. The launch template and per-harness facts live in `bin/cs-harness-lib.s
   in every consigliere tree (`bin/cs-ensure-agents-md.sh` maintains the symlink), so
   codex and claude read the same operating contract.
 - Root-session detection: a Claude Code session exports `CLAUDECODE=1`;
-  `cs_harness_detect_root` reads it (after `config/harness` and `CS_HARNESS_OVERRIDE`).
+  `cs_harness_detect_root` reads it (after `config/host/harness.conf` and `CS_HARNESS_OVERRIDE`).
 
 ## Away-mode composer
 
@@ -109,7 +109,7 @@ turn-ended
 
 The hook fired under `--permission-mode auto`, so `auto` keeps the same turn-end
 wiring as `--dangerously-skip-permissions`. Only the three modes an unattended
-soldier can actually work under are accepted by `config/permission-mode`;
+soldier can actually work under are accepted by `config/host/permission-mode.conf`;
 `plan`, `manual`, and `dontAsk` are refused for the reasons in
 `docs/configuration.md`.
 

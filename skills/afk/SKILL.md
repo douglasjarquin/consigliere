@@ -119,7 +119,7 @@ attempts one normal flush, which still requires an idle pane and an
 affirmatively empty composer. If that submit cannot be confirmed, it raises a
 loud, rate-limited wedge alarm: an ERROR in the daemon log, a durable
 `state/.subsuper-inject-wedged` marker (surfaced by the return catch-up), and
-a configurable active alert (`config/wedge-alarm`: `off`, `auto`, `osascript`,
+a configurable active alert (`config/host/wedge-alarm.conf`: `off`, `auto`, `osascript`,
 `herdr`, or `command:<cmd>`; absent means auto, a macOS Notification Center
 banner, so the alarm is never silent). A guard false-positive becomes a
 visible stall, never an unbounded silent no-op.

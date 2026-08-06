@@ -9,6 +9,6 @@ last-reviewed: 51404137e8c4729670233cc31ff43eeae527b77c
 ```
 
 Mechanism:
-- `bin/cs-upstream-log.sh` - read-only; fetches the firstmate checkout (`config/upstream`, default `../firstmate`) and prints `git log --reverse --stat <last-reviewed>..origin/HEAD`.
+- `bin/cs-upstream-log.sh` - read-only; fetches the firstmate checkout (`config/host/upstream.conf`, default `../firstmate`) and prints `git log --reverse --stat <last-reviewed>..origin/HEAD`.
 - `skills/upstream-review` - the editorial triage procedure and relevance table; the only writer of `docs/upstream-review.md`, always through a branch, a PR, and the boss's merge.
 - Ports are always fresh implementations against consigliere's structure; `git merge`/`cherry-pick` from firstmate is never used.

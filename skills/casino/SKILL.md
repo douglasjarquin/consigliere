@@ -20,7 +20,7 @@ This is ordinary section-7 lifecycle with a board front door - the safety contra
 
 ## Preconditions (check once, fast)
 
-1. The `contracts` preconditions hold: project registered in `data/projects.md`, board mapped in `data/boards.md`, and the closed->Done workflow reminder from `bin/cs-board.sh check <project>` heeded.
+1. The `contracts` preconditions hold: project registered in `config/projects.md`, board mapped in `config/boards.md`, and the closed->Done workflow reminder from `bin/cs-board.sh check <project>` heeded.
 2. The same `check` must also report the `Inbox` and `Backlog` options ok; if either is missing, tell the boss the exact column to add on the board (or the mapping tokens to set - `docs/configuration.md` owns the line format) and stop.
 
 ## Spec sweep (Inbox)

@@ -27,7 +27,7 @@ The goal is a session that is safe to reset or destroy because everything durabl
    This skill does not grant any new write permission; it only prompts consigliere to use the boundaries that already exist (AGENTS.md section 1):
    - Boss preferences and fleet-local operational facts: hand-write directly to the destination selected by AGENTS.md's knowledge-routing table, using inspect-then-update every time.
      Before writing, inspect the destination, find the existing bullet or section the finding duplicates or supersedes, and rewrite it in place rather than adding a new trailing entry.
-     `data/learnings.md` may not exist yet; create it on first local learning, in the same dated, evidence-backed, curated style as `data/boss.md`.
+     `config/learnings.md` may not exist yet; create it on first local learning, in the same dated, evidence-backed, curated style as `config/boss.md`.
    - Project-intrinsic knowledge: never hand-write a project's `AGENTS.md`.
      Route it through a normal ship task so a soldier records it via `bin/cs-ensure-agents-md.sh` and commits it through that project's delivery pipeline, exactly as section 6 describes.
      If the fleet is live, delegate this to a soldier rather than doing it inline.
@@ -35,7 +35,7 @@ The goal is a session that is safe to reset or destroy because everything durabl
    - Task-scoped notes: inspect the relevant backlog item with `tasks-axi show <id> --full`, judge whether the new note is new, duplicate, superseding, or obsolete, then write a considered replacement body with `tasks-axi update <id> --body-file <path>`.
      When the replacement intentionally supersedes prior state that should remain recoverable, add `--archive-body` to that update command so the prior body stays recoverable without copying it into the replacement.
      Never append.
-     If hand-editing `data/backlog.md` per the active backend, make the same inspect-then-update edit in place.
+     If hand-editing `config/backlog.md` per the active backend, make the same inspect-then-update edit in place.
    - Undone next steps: file each as a queued backlog item (section 10), with `blocked-by` recorded if it genuinely depends on something else.
 
 4. **Curate with inspect-then-update.**
@@ -48,7 +48,7 @@ The goal is a session that is safe to reset or destroy because everything durabl
    Graduation moves are limited to exactly three: promote a learning to the shared `AGENTS.md` via PR, fold it into the boss-preference destination selected by AGENTS.md, or delete a stale entry.
    Do not invent other graduation paths.
 
-   `data/boss.md`, `data/boss-shared.md`, and `data/learnings.md` are startup memory: every session of this home reads them in full at every start, so their size is a standing cost paid whether or not a session uses them.
+   `config/boss.md`, `config/boss-shared.md`, and `config/learnings.md` are startup memory: every session of this home reads them in full at every start, so their size is a standing cost paid whether or not a session uses them.
    When the session-start digest reported one of them over its startup-memory budget, bringing it back under budget is part of this sweep rather than a later chore.
    Consolidate by merging duplicate entries, rewriting a multi-line note down to the durable fact it is really asserting, and deleting entries that are obsolete or now owned by a more specific destination under `AGENTS.md` section 6.
    Never get under budget by dropping a fact that is still true and still belongs here.
