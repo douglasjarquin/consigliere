@@ -118,13 +118,15 @@ floor=$(floor_of GH_AXI)
 export CS_TEST_GH_AXI_VERSION
 CS_TEST_GH_AXI_VERSION='requires Node 99.0'
 out=$(run_bootstrap)
-assert_line "$out" "^MISSING: gh-axi .*below floor $floor" \
-  'a dotted token inside arbitrary version text stays below-floor'
+assert_line "$out" "^MISSING: gh-axi unparseable version below floor $floor" \
+  'a dotted token inside arbitrary version text stays below-floor and unparseable'
 
 CS_TEST_GH_AXI_VERSION="${floor}-rc.1"
 out=$(run_bootstrap)
-assert_line "$out" "^MISSING: gh-axi .*below floor $floor" \
-  'a prerelease at the stable floor stays below-floor'
+assert_line "$out" "^MISSING: gh-axi unparseable version below floor $floor" \
+  'a prerelease at the stable floor stays below-floor and unparseable'
+assert_no_line "$out" "^MISSING: gh-axi $floor below floor $floor" \
+  'the diagnostic never re-extracts a dotted token the comparator rejected'
 unset CS_TEST_GH_AXI_VERSION
 pass 'only complete dotted release versions are comparable'
 

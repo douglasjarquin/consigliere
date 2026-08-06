@@ -81,11 +81,16 @@ cs_bootstrap_axi_floor() {
 # cs_bootstrap_axi_gap <tool> - when the installed tool is below its floor,
 # print "<installed-or-unparseable> below floor <floor> - upgrade: <hint>" and
 # exit 0; silent exit 1 when the tool is ungated, absent, or at/above its floor.
+# The displayed version keeps the comparator's classification: output the
+# comparator rejected as not a clean dotted release (malformed, prerelease)
+# reports as unparseable rather than re-extracting a dotted token that would
+# contradict the rejection.
 cs_bootstrap_axi_gap() {
   local tool=$1 floor installed
   floor=$(cs_bootstrap_axi_floor "$tool") || return 1
   cs_deps_version_at_least "$tool" "$floor" && return 1
-  installed=$(cs_deps_version "$tool" || true)
+  installed=$("$tool" --version 2>/dev/null || true)
+  [[ "$installed" =~ ^[0-9]+(\.[0-9]+)+$ ]] || installed=""
   printf '%s below floor %s - upgrade: %s\n' \
     "${installed:-unparseable version}" "$floor" "$(cs_deps_hint "$tool")"
 }
