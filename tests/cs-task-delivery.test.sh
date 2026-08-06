@@ -3,7 +3,7 @@
 # decision, cross-checked between the brief and the spawn, and recorded once.
 #
 # Before this contract, cs-brief.sh and cs-spawn.sh each read the mode out of the
-# data/projects.md registry, independently, at two different moments, with nothing
+# config/projects.md registry, independently, at two different moments, with nothing
 # comparing the two reads. A registry edit between scaffold and dispatch, or a
 # brief adjusted by hand, left the worker following one contract while consigliere
 # supervised off another - and the posture was never a per-task decision at all.
@@ -44,13 +44,13 @@ HOME_DIR="$TMP/home"
 DATA="$HOME_DIR/data"
 STATE="$HOME_DIR/state"
 mkdir -p "$DATA" "$STATE" "$HOME_DIR/config"
-printf 'manual\n' > "$HOME_DIR/config/backlog-backend"   # deterministic offline listing
+printf 'manual\n' > "$HOME_DIR/config/backlog-backend.conf"   # deterministic offline listing
 export CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$DATA" CS_STATE_OVERRIDE="$STATE"
 
 # `strict` is registered no-mistakes (the most rigor), `relaxed` local-only (the
 # least). `unregistered` deliberately has no entry, which is the consigliere repo's
 # own situation: no standing posture to deviate from, and nothing to warn about.
-cat > "$DATA/projects.md" <<'EOF'
+cat > "$HOME_DIR/config/projects.md" <<'EOF'
 - strict - full pipeline (added 2026-08-01)
 - relaxed [local-only] - local fixture (added 2026-08-01)
 EOF
@@ -331,7 +331,7 @@ assert_not_contains "$OUT" "notice:" "more rigor than the registry prints no not
 pass "a downward registry deviation is a notice and never blocks the spawn"
 
 # --- 12. an unregistered project has no standing posture --------------------
-# The consigliere repo itself is exactly this case: absent from data/projects.md
+# The consigliere repo itself is exactly this case: absent from config/projects.md
 # on purpose, so its spawns must be quiet - no deviation notice, and no leaked
 # "not in registry" warning implying something is wrong.
 "$BRIEF_BIN" d-unreg unregistered --mode local-only >/dev/null || fail "d-unreg scaffold failed"

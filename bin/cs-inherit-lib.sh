@@ -3,12 +3,13 @@
 #
 # Exactly two items flow from the main consigliere home into a capo home,
 # and nothing ever flows back:
-#   - data/boss-shared.md   main-authoritative shared boss preferences,
+#   - config/boss-shared.md   main-authoritative shared boss preferences,
 #                           propagated as a READ-ONLY copy (mode 444) with a
 #                           generated do-not-edit header prepended, converged
 #                           at seed time and on every bootstrap sweep;
-#   - config/backlog-backend  the backlog backend choice, copied once at seed
-#                           time only (a capo may later diverge deliberately).
+#   - config/backlog-backend.conf  the backlog backend choice, copied once at
+#                           seed time only (a capo may later diverge
+#                           deliberately).
 #
 # Convergence discipline (ported from firstmate's config-inherit machinery,
 # minus its multi-harness config allowlist): the main copy is authoritative.
@@ -27,7 +28,7 @@
 # error; quarantined drift is a success with a CAPO_SYNC line.
 
 CS_SHARED_BOSS_FILE="boss-shared.md"
-CS_SHARED_BOSS_REL="data/$CS_SHARED_BOSS_FILE"
+CS_SHARED_BOSS_REL="config/$CS_SHARED_BOSS_FILE"
 CS_SHARED_BOSS_MODE=444
 
 # The do-not-edit note prepended to every propagated capo copy. Comparing the
@@ -37,8 +38,8 @@ CS_SHARED_BOSS_MODE=444
 cs_inherit_shared_boss_header() {
   cat <<'EOF'
 <!-- READ-ONLY COPY - DO NOT EDIT.
-     Propagated from the main consigliere home's data/boss-shared.md, which is
-     the authoritative copy. Route new shared boss preferences to the main
+     Propagated from the main consigliere home's config/boss-shared.md, which
+     is the authoritative copy. Route new shared boss preferences to the main
      consigliere through a marked status reply or a document pointer; edits
      made here are quarantined and overwritten on the next convergence. -->
 EOF
@@ -99,28 +100,28 @@ _cs_inherit_quarantine_dest() {  # <dest>
   printf '%s\n' "$artifact"
 }
 
-# cs_inherit_shared_boss <src-data-dir> <dest-data-dir> [capo-home-label]
-# Converge the capo's read-only data/boss-shared.md copy to the main home's.
+# cs_inherit_shared_boss <src-config-dir> <dest-config-dir> [capo-home-label]
+# Converge the capo's read-only config/boss-shared.md copy to the main home's.
 # Emits CAPO_SYNC: lines to stdout when local drift is quarantined; silent on
 # unchanged and on a clean push. Returns 1 on a real propagation error.
 cs_inherit_shared_boss() {
-  local src_data=$1 dest_data=$2 label=${3:-}
+  local src_dir=$1 dest_dir=$2 label=${3:-}
   local src dest tmp artifact
-  [ -n "$src_data" ] && [ -n "$dest_data" ] || return 1
-  src="$src_data/$CS_SHARED_BOSS_FILE"
-  dest="$dest_data/$CS_SHARED_BOSS_FILE"
-  [ -n "$label" ] || label=${dest_data%/data}
+  [ -n "$src_dir" ] && [ -n "$dest_dir" ] || return 1
+  src="$src_dir/$CS_SHARED_BOSS_FILE"
+  dest="$dest_dir/$CS_SHARED_BOSS_FILE"
+  [ -n "$label" ] || label=${dest_dir%/config}
 
   if [ -e "$src" ] || [ -L "$src" ]; then
     _cs_inherit_readable_source "$src" || {
       echo "cs-inherit: error: unusable main source $src (not a regular file, or an unresolved symlink)" >&2
       return 1
     }
-    _cs_inherit_dir_safe "$dest_data" || {
-      echo "cs-inherit: error: unsafe destination directory $dest_data" >&2
+    _cs_inherit_dir_safe "$dest_dir" || {
+      echo "cs-inherit: error: unsafe destination directory $dest_dir" >&2
       return 1
     }
-    tmp=$(mktemp "$dest_data/.cs-boss-shared.XXXXXX" 2>/dev/null) || return 1
+    tmp=$(mktemp "$dest_dir/.cs-boss-shared.XXXXXX" 2>/dev/null) || return 1
     if ! _cs_inherit_render_shared_boss "$src" "$tmp"; then
       rm -f "$tmp" 2>/dev/null || true
       return 1
@@ -176,8 +177,8 @@ cs_inherit_shared_boss() {
 cs_inherit_backlog_backend() {
   local src_config=$1 dest_config=$2 src dest tmp
   [ -n "$src_config" ] && [ -n "$dest_config" ] || return 1
-  src="$src_config/backlog-backend"
-  dest="$dest_config/backlog-backend"
+  src="$src_config/backlog-backend.conf"
+  dest="$dest_config/backlog-backend.conf"
   if [ -e "$src" ] || [ -L "$src" ]; then
     _cs_inherit_readable_source "$src" || {
       echo "cs-inherit: error: unusable main source $src (not a regular file, or an unresolved symlink)" >&2
@@ -216,7 +217,7 @@ cs_inherit_backlog_backend() {
 # backlog-backend copy.
 cs_inherit_seed() {
   local main_home=$1 capo_home=$2 label=${3:-} rc=0
-  cs_inherit_shared_boss "$main_home/data" "$capo_home/data" "$label" || rc=1
+  cs_inherit_shared_boss "$main_home/config" "$capo_home/config" "$label" || rc=1
   cs_inherit_backlog_backend "$main_home/config" "$capo_home/config" || rc=1
   return "$rc"
 }
@@ -225,5 +226,5 @@ cs_inherit_seed() {
 # The sweep-time convergence: shared boss preferences only.
 cs_inherit_converge() {
   local main_home=$1 capo_home=$2 label=${3:-}
-  cs_inherit_shared_boss "$main_home/data" "$capo_home/data" "$label"
+  cs_inherit_shared_boss "$main_home/config" "$capo_home/config" "$label"
 }

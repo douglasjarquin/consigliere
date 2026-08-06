@@ -87,7 +87,7 @@ fi
 # Capo homes: one FF implementation, owned by the seed sweep. Its CAPO_SYNC
 # lines name each advanced home; an advanced LIVE capo should be nudged.
 nudge=""
-if [ -x "$SCRIPT_DIR/cs-home-seed.sh" ] && [ -f "$DATA/capos.md" ]; then
+if [ -x "$SCRIPT_DIR/cs-home-seed.sh" ] && [ -f "$CONFIG_HOST/capos.md" ]; then
   sweep_out=$("$SCRIPT_DIR/cs-home-seed.sh" --sweep 2>&1) || true
   [ -z "$sweep_out" ] || printf '%s\n' "$sweep_out"
   # Must match what the sweep actually emits: "CAPO_SYNC: capo <id>: updated

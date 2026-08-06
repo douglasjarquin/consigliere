@@ -15,8 +15,8 @@
 #   4. supervision   - the ONE foreground-checkpoint operating block, inlined
 #                      here (the protocol is identical across harnesses and
 #                      one wait shape; there is no protocol renderer).
-#   5. context       - data/projects.md, data/capos.md, data/boss.md,
-#                      data/boss-shared.md, data/learnings.md, each with an
+#   5. context       - config/projects.md, config/host/capos.md, config/boss.md,
+#                      config/boss-shared.md, config/learnings.md, each with an
 #                      explicit ABSENT marker when missing (absence is
 #                      meaningful and never confused with empty-but-present).
 #                      The three curated startup-memory files also report when
@@ -44,9 +44,15 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Session start is one of the two legitimate layout-gate bypasses: it must be
+# able to acquire the lock and run the migrator against a not-yet-migrated
+# home. The bypass is NOT exported: every child except cs-lock.sh and the
+# migrator still fails closed until the migration below has converged.
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
+CS_LAYOUT_GATE_SKIP=1
 cs_resolve_root
+CS_LAYOUT_GATE_SKIP=
 
 # shellcheck source=bin/cs-herdr-lib.sh
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
@@ -80,7 +86,7 @@ print_file_or_absent() {
   fi
 }
 
-# Startup memory - data/boss.md, data/boss-shared.md, data/learnings.md - is
+# Startup memory - config/boss.md, config/boss-shared.md, config/learnings.md - is
 # read IN FULL at every session start of every home, so its cost is paid by
 # every session whether or not that session ever uses it. Unlike the registries
 # printed alongside it, whose size is bounded by how many projects and capos
@@ -109,7 +115,7 @@ print_startup_memory() {  # <path> <label> - print, then report if over budget
 
 backlog_backend() {
   local b
-  b=$(cat "$CONFIG/backlog-backend" 2>/dev/null || true)
+  b=$(cat "$CONFIG/backlog-backend.conf" 2>/dev/null || true)
   case "$b" in
     manual) printf 'manual' ;;
     *) printf 'tasks-axi' ;;
@@ -174,7 +180,7 @@ print_backlog_compact() {
       else
         print_backlog_manual_compact "$path" "$(backlog_backend) backend"
       fi
-      printf 'Full task bodies remain available on demand: tasks-axi show <id> --full, or data/backlog.md.\n'
+      printf 'Full task bodies remain available on demand: tasks-axi show <id> --full, or config/backlog.md.\n'
     else
       printf '(present, empty)\n'
     fi
@@ -196,8 +202,10 @@ printf '%s' "$SESSION_START_PREFIX"
 section "SESSION START - $CS_HOME"
 
 # --- 1. lock -----------------------------------------------------------
+# The gate bypass covers only the lock: an unmigrated home must still be able
+# to elect the one session that will migrate it.
 subsection "LOCK"
-LOCK_OUT=$("$SCRIPT_DIR/cs-lock.sh" 2>&1)
+LOCK_OUT=$(CS_LAYOUT_GATE_SKIP=1 "$SCRIPT_DIR/cs-lock.sh" 2>&1)
 LOCK_RC=$?
 printf '%s\n' "$LOCK_OUT"
 READ_ONLY=0
@@ -215,6 +223,25 @@ if [ "$LOCK_RC" -ne 0 ]; then
     printf '●  otherwise mutate fleet state from this session.\n'
     printf '%s\n' "$BAR"
   }
+fi
+
+# --- 1b. config/ layout migration (one-shot, idempotent, quiet no-op) ----
+# Runs only in the locked session, immediately after the lock, so every later
+# step - and every other script's fail-closed layout gate - sees a migrated
+# home. A refusal (divergent old+new content) stops the digest: nothing else
+# can run correctly until the named files are reconciled.
+if [ "$READ_ONLY" -eq 0 ]; then
+  MIGRATE_OUT=$("$SCRIPT_DIR/cs-migrate-config.sh" 2>&1)
+  MIGRATE_RC=$?
+  if [ -n "$MIGRATE_OUT" ]; then
+    subsection "LAYOUT MIGRATION"
+    printf '%s\n' "$MIGRATE_OUT"
+  fi
+  if [ "$MIGRATE_RC" -ne 0 ]; then
+    printf 'Session start stops here: the config/ layout migration was refused above.\n'
+    printf 'Reconcile the named files by hand, then start the session again.\n'
+    exit 1
+  fi
 fi
 
 # --- 2. bootstrap --------------------------------------------------------
@@ -296,16 +323,16 @@ if [ -n "${HERDR_PANE_ID:-}" ]; then
 fi
 
 section "CONTEXT"
-print_file_or_absent "$DATA/projects.md" "data/projects.md"
-print_file_or_absent "$DATA/boards.md" "data/boards.md (GitHub board mapping for the contracts and casino skills)"
-print_file_or_absent "$DATA/capos.md" "data/capos.md (host-local; ABSENT = no capos provisioned here)"
-print_startup_memory "$DATA/boss.md" "data/boss.md"
-print_startup_memory "$DATA/boss-shared.md" "data/boss-shared.md (shared, main-authoritative, read-only in capo homes)"
-print_startup_memory "$DATA/learnings.md" "data/learnings.md"
+print_file_or_absent "$CONFIG/projects.md" "config/projects.md"
+print_file_or_absent "$CONFIG/boards.md" "config/boards.md (GitHub board mapping for the contracts and casino skills)"
+print_file_or_absent "$CONFIG_HOST/capos.md" "config/host/capos.md (host-local; ABSENT = no capos provisioned here)"
+print_startup_memory "$CONFIG/boss.md" "config/boss.md"
+print_startup_memory "$CONFIG/boss-shared.md" "config/boss-shared.md (shared, main-authoritative, read-only in capo homes)"
+print_startup_memory "$CONFIG/learnings.md" "config/learnings.md"
 
 # --- 6. fleet-state digest ---------------------------------------------
 section "FLEET STATE"
-print_backlog_compact "$DATA/backlog.md" "data/backlog.md"
+print_backlog_compact "$CONFIG/backlog.md" "config/backlog.md"
 
 subsection "Board sweeps (data/sweeps.md)"
 if [ "$READ_ONLY" -eq 1 ]; then
@@ -392,10 +419,10 @@ EOF
 fi
 cat <<'EOF'
 The digest above is complete for this session start. Do NOT re-read
-data/projects.md, data/boards.md, data/sweeps.md, data/capos.md, data/boss.md,
-data/boss-shared.md, data/learnings.md, or state/*.meta now - they were just
+config/projects.md, config/boards.md, data/sweeps.md, config/host/capos.md, config/boss.md,
+config/boss-shared.md, config/learnings.md, or state/*.meta now - they were just
 printed in full.
-Do NOT bulk-read data/backlog.md now either: the compact listing was just
+Do NOT bulk-read config/backlog.md now either: the compact listing was just
 printed with a pointer for targeted full-body follow-up.
 Do NOT bulk-read state/*.status now either: their bounded tails were just
 printed with full log paths for targeted follow-up when older wake-event

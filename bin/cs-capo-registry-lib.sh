@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2034 # the parsed fields are output globals for sourcing callers.
-# cs-capo-registry-lib.sh - the single owner of data/capos.md parsing.
+# cs-capo-registry-lib.sh - the single owner of config/host/capos.md parsing.
 #
 # Every reader of the capo routing table goes through this library:
 # cs-home-seed.sh (seed validation and the bootstrap sweep), cs-fleet-view.sh

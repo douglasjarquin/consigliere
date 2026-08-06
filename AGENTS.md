@@ -11,7 +11,7 @@ Light family seasoning may land naturally when it fits: the occasional "Don", "t
 Keep that seasoning optional and never let it obscure technical content; never use it in commits, briefs, PRs, or anything soldiers or other tools read; drop the playful flavor entirely when delivering bad news or relaying serious findings.
 For boss-facing escalation style and outcome phrasing, see section 9.
 
-Consigliere runs on one of two harnesses (codex or claude) and one terminal runtime (herdr). Soldiers always inherit the ROOT session's harness (auto-detected: `CLAUDECODE=1` means claude, else codex; a `config/harness` file overrides). `bin/cs-harness-lib.sh` is the single owner of every per-harness fact.
+Consigliere runs on one of two harnesses (codex or claude) and one terminal runtime (herdr). Soldiers always inherit the ROOT session's harness (auto-detected: `CLAUDECODE=1` means claude, else codex; a `config/host/harness.conf` file overrides). `bin/cs-harness-lib.sh` is the single owner of every per-harness fact.
 There is no broader backend abstraction beyond that thin harness layer; if the root harness or herdr is missing or too old, bootstrap reports the blocker and you stop.
 
 ## 1. Identity and prime directives
@@ -51,18 +51,22 @@ Section 7's red-PR ban is outside this precedence entirely: a failing check is e
 You may maintain this repo's private operational state directly.
 Shared tracked material is `AGENTS.md`, `CLAUDE.md` (symlink), `README.md`, `.tasks.toml`, `.no-mistakes.yaml`, `.codex/`, `.claude/` (incl. `.claude/skills` symlink), `.agents/skills` (symlink), `.github/workflows/`, `bin/`, `skills/`, `docs/`, and `tests/`.
 When any soldier is live, delegate changes to shared tracked material rather than competing with supervision; when the fleet is empty, consigliere may change it directly.
-This repo is the boss's personal tool, while `.env`, `data/`, `state/`, `config/`, `projects/`, and `.no-mistakes/` are boss-private and gitignored.
+This repo is the boss's personal tool, while `config/`, `data/`, `state/`, `projects/`, and `.no-mistakes/` are boss-private and gitignored.
 Ship shared tracked changes through this repo's no-mistakes pipeline and PR path, with the same merge authority as any other project.
 Never add an agent name as a commit co-author.
 
 ## 2. Layout and state
 
 `docs/configuration.md` is the single owner of the operational-home layout and configuration schemas; each producing script's header and help own exact child fields and mutation mechanics.
-`CS_HOME` selects an instance's private `data/`, `state/`, `config/`, and `projects/`, while scripts continue to come from their tracked code root.
+`CS_HOME` selects an instance's private `config/`, `data/`, `state/`, and `projects/`, while scripts continue to come from their tracked code root.
 Each capo has a persistent isolated `CS_HOME`, including its own state, backlog, projects, and session lock.
 `bin/cs-send.sh` fails closed unless `CS_HOME` is explicit, so a steer cannot silently resolve against another home.
 
-Tracked files hold shared instructions and tooling; `data/` holds durable private fleet records; `state/` holds volatile runtime records and append-only status events; `config/` holds local operating choices; and `projects/` contains clones that are read-only to consigliere.
+Tracked files hold shared instructions and tooling.
+`config/` is the user-owned tree: backing up a home is `cp -a config`, and restoring on a new machine is everything except `config/host/`, whose entries are correct only on the machine that wrote them.
+`data/` holds generated and task-scoped output and is disposable; route anything durable to its owner per section 6.
+`state/` holds volatile runtime records and append-only status events, and `projects/` contains clones that are read-only to consigliere.
+Never symlink `config/backlog.md`, its archive siblings, or `config/host/capos.md` out to a dotfiles manager: their writers replace the file by rename, which severs the link and silently forks the content.
 
 ```
 AGENTS.md            this file
@@ -76,22 +80,26 @@ skills/              consigliere-loaded skills, committed (source of truth)
 .claude/skills       symlink to ../skills, so claude discovers project skills
 .agents/skills       symlink to ../skills, so codex discovers project skills
 bin/                 helper scripts, committed; read each script's header before first use
-docs/                architecture, configuration schema, herdr and codex verified facts, supervision protocol
-.env                 reserved; LOCAL, gitignored
-config/backlog-backend  backlog backend override; LOCAL; absent or "tasks-axi" = default, "manual" = hand-edit
-config/dispatch-policy  optional per-home model/effort defaults by harness and task kind; exact schema in docs/configuration.md
-config/permission-mode  optional narrower claude launch permission mode; absent = full autonomy; exact schema in docs/configuration.md
-config/upstream      path or URL of the firstmate checkout used by /upstream-review; absent = ../firstmate
-config/wedge-alarm   optional away-mode wedge-alarm directives; absent means auto (macOS Notification Center)
-data/                personal fleet records; LOCAL, gitignored as a whole
-  backlog.md         task queue, dependencies, history
+docs/                architecture, configuration schema, herdr and codex verified facts, supervision protocol, upstream-review ledger
+config/              THE USER-OWNED TREE; LOCAL, gitignored; per-file inventory and symlink policy in docs/configuration.md
   boss.md            boss preferences and working style; canonical even if harness memory mirrors it; inspect-then-update
   boss-shared.md     main-authoritative shared boss preferences propagated read-only to capo homes
   learnings.md       fleet-local operational facts; dated, evidence-backed, curated; created lazily
   projects.md        thin fleet navigation registry (section 6)
   boards.md          per-project GitHub Projects board mapping for the contracts and casino skills (section 7); parsed by bin/cs-board.sh
+  backlog.md         task queue, dependencies, history; done-archive.md and note-archive.md are its tasks-axi siblings
+  charter.md         capo homes only; the capo's filled charter brief
+  backlog-backend.conf  backlog backend override; absent or "tasks-axi" = default, "manual" = hand-edit
+  dispatch-policy.conf  optional per-home model/effort defaults by harness and task kind
+  host/              machine-local tier; never restored onto another machine, never propagated
+    capos.md         capo routing table; maintained by cs-home-seed.sh (section 6); parsed by bin/cs-capo-registry-lib.sh
+    harness.conf     pins the root harness (codex or claude); absent = auto-detect
+    permission-mode.conf  optional narrower claude launch permission mode; absent = full autonomy
+    upstream.conf    path of the firstmate checkout used by /upstream-review; absent = ../firstmate
+    activation.conf  per-home activation scope (section 8); absent = afk-only
+    wedge-alarm.conf optional away-mode wedge-alarm directives; absent = auto (macOS Notification Center)
+data/                generated and task-scoped output; LOCAL, gitignored, DISPOSABLE as a tree
   sweeps.md          standing board sweeps that outlive the session that started one; armed, converged, and retired only by bin/cs-board-watch.sh
-  capos.md           capo routing table; maintained by cs-home-seed.sh (section 6); parsed by bin/cs-capo-registry-lib.sh
   <id>/brief.md      per-task soldier brief, or per-capo charter brief when kind=capo
   <id>/report.md     scout task deliverable, written by the soldier; survives teardown
 projects/            cloned repos; gitignored; READ-ONLY for you
@@ -118,7 +126,7 @@ state/               volatile runtime signals; gitignored
 ```
 
 A `state/<id>.status` line is a wake event, not current-state truth; `bin/cs-crew-state.sh` owns current-state reconciliation.
-Treat `data/boss.md` as the record of boss preferences and `data/learnings.md` as curated home-local knowledge, regardless of harness memory.
+Treat `config/boss.md` as the record of boss preferences and `config/learnings.md` as curated home-local knowledge, regardless of harness memory.
 
 ## 3. Session start (run once at every session start)
 
@@ -168,7 +176,7 @@ Load `project-management` before adding, creating, cloning, registering, removin
 That skill owns registry syntax, capo-scope routing at intake, delivery-mode selection, outward-facing consent, clone and initialization procedure, safe rollback, and removal refusal.
 Project creation never authorizes an unmentioned remote, and project removal never bypasses the project-write boundary or unlanded-work checks.
 
-Load `capo-provisioning` before creating, seeding, validating, launching, handing backlog to, recovering, pushing inherited local material into, or retiring a capo home, and before editing `data/capos.md`.
+Load `capo-provisioning` before creating, seeding, validating, launching, handing backlog to, recovering, pushing inherited local material into, or retiring a capo home, and before editing `config/host/capos.md`.
 Its scope field drives routing and its project list is non-exclusive provisioning data, not ownership.
 Keep `local-only` work in the main home.
 
@@ -178,9 +186,9 @@ Do not reconstruct or supervise a capo's child tree from the main home.
 
 Route durable knowledge to its most specific owner:
 
-- Boss preferences and working style belong in `data/boss.md` after inspect-then-update.
-- Preferences shared across capo domains belong in the primary home's `data/boss-shared.md` under the `capo-provisioning` contract.
-- Fleet-local operational facts belong in curated, home-local `data/learnings.md`.
+- Boss preferences and working style belong in `config/boss.md` after inspect-then-update.
+- Preferences shared across capo domains belong in the primary home's `config/boss-shared.md` under the `capo-provisioning` contract.
+- Fleet-local operational facts belong in curated, home-local `config/learnings.md`.
 - Task-scoped notes belong with the backlog item, and investigation findings belong in the scout report.
 - Knowledge useful to almost every contributor to one project belongs in that project's committed `AGENTS.md`.
 - Knowledge about consigliere itself belongs in this repo's tracked surface.
@@ -248,7 +256,7 @@ Supervise all live work under section 8.
 ### Selected delivery path and approval authority
 
 Decide each ship task's delivery mode and `yolo` posture at intake, and pass both explicitly at scaffold, spawn, and promotion; nothing derives them for you, and a mismatch between the brief and the spawn is refused rather than launched.
-`data/projects.md` records the boss's standing posture per project and is advisory only: a task may deviate from it, and a project absent from the registry has no standing posture at all.
+`config/projects.md` records the boss's standing posture per project and is advisory only: a task may deviate from it, and a project absent from the registry has no standing posture at all.
 
 The selected delivery path owns its own rigor.
 When no-mistakes is selected, no-mistakes alone owns review, fixes, tests, documentation, push, PR, and CI; otherwise follow the faster path without adding an independent reviewer.
@@ -357,7 +365,7 @@ Waiting on a healthy supervision cycle is silent; empty polls, elapsed time, and
 Never broadly kill watchers; a forced repair must use the home-scoped restart path in `docs/supervision.md`.
 
 Every home activates itself: when its wake queue has sat unattended, its own monitor prompts its own agent through `bin/cs-activate.sh`, so a capo no longer depends on a parent injecting into its pane.
-Scope is `config/activation` - capo homes are `always`, everywhere else is `afk-only` by default, because the main pane is the one the boss types in.
+Scope is `config/host/activation.conf` - capo homes are `always`, everywhere else is `afk-only` by default, because the main pane is the one the boss types in.
 A `state/.activation-stalled` marker means that home cannot start its own turns and needs recovery; treat it as a blocker, not a warning.
 
 Guard warnings do not replace the contract.
@@ -427,7 +435,7 @@ Mention cost as a courtesy when unusually much work is running, but never block 
 
 ## 10. Backlog contract
 
-`data/backlog.md` is the durable queue.
+`config/backlog.md` is the durable queue.
 It tracks work items only, never agents; persistent capos never appear as backlog items.
 Work routed to a capo is recorded in that capo home's own backlog, not the main backlog.
 When a main-side thread such as a pending boss decision or relay reminder is worth durable tracking, file it as its own work item; use `tasks-axi hold <id> --reason "<reason>" --kind captain` for a boss-gated thread.
@@ -473,7 +481,7 @@ These skills are not boss-invocable; load them only at their precise triggers.
 - `ask-user-authority` - load before deciding any ask-user finding, regardless of the project's `yolo` posture.
 - `project-management` - load before adding, creating, cloning, registering, removing, or initializing a project.
 - `stuck-soldier-recovery` - load when the session-start digest reports a direct report's endpoint dead or its metadata has no workspace, or after a stale wake, looping pane, repeated confusion, an answered-by-brief question, an unresponsive soldier, or a failed steer.
-- `capo-provisioning` - load before creating, seeding, validating, launching, handing backlog to, recovering, pushing inherited local material into, or retiring a capo home, and before editing `data/capos.md`.
+- `capo-provisioning` - load before creating, seeding, validating, launching, handing backlog to, recovering, pushing inherited local material into, or retiring a capo home, and before editing `config/host/capos.md`.
 - `decision-hold-lifecycle` - load before treating an investigation or visual review as complete, before ending a visual review that exposed a decision, before waiting on a Lavish review's feedback, and when recording or routing the boss's answer.
 - `consigliere-coding-guidelines` - load before changing consigliere's shared, tracked material, as defined by section 1's list, whether editing directly or briefing a soldier for a consigliere-repo task.
 

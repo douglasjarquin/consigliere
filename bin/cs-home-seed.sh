@@ -11,10 +11,10 @@
 #       projects/ dirs are created; each named project is cloned from its
 #       origin into <home>/projects/ (the list is non-exclusive provisioning
 #       data, and local-only projects are refused); the filled charter brief at
-#       data/<id>/brief.md is copied to <home>/data/charter.md; the tiny
-#       inheritance surface (bin/cs-inherit-lib.sh: data/boss-shared.md
-#       read-only plus config/backlog-backend) is seeded; and the routing
-#       entry is written to data/capos.md as
+#       data/<id>/brief.md is copied to <home>/config/charter.md; the tiny
+#       inheritance surface (bin/cs-inherit-lib.sh: config/boss-shared.md
+#       read-only plus config/backlog-backend.conf) is seeded; and the routing
+#       entry is written to config/host/capos.md as
 #         - <id> - <summary> (home: <path>; scope: <scope>; projects: <csv>; added <date>)
 #       This script writes that line; bin/cs-capo-registry-lib.sh is the single
 #       owner of reading it back, here and in every other consumer.
@@ -30,7 +30,7 @@
 #       worktree, new project clones, and registry edits are all rolled back.
 #   cs-home-seed.sh validate
 #       Refuse duplicate ids, duplicate homes, nested or overlapping homes, and
-#       any malformed entry in data/capos.md. A row that does not parse is
+#       any malformed entry in config/host/capos.md. A row that does not parse is
 #       refused rather than skipped: a silently dropped row is a binding the
 #       duplicate-home and rebind checks never see.
 #   cs-home-seed.sh --sweep
@@ -39,8 +39,8 @@
 #          default-branch tip - a purely local detached-HEAD advance, FF-only,
 #          never forcing, merging, or stashing; dirty or diverged homes are
 #          skipped with a CAPO_SYNC: line and their work left untouched.
-#          The same pass converges the inherited data/boss-shared.md copy, and
-#          fills an ABSENT config/activation with "always" so a home seeded
+#          The same pass converges the inherited config/boss-shared.md copy, and
+#          fills an ABSENT config/host/activation.conf with "always" so a home seeded
 #          before per-home activation existed stops resolving to afk-only and
 #          can start its own turns. A present value is never overwritten.
 #       2. Liveness-guarantee every live capo meta (state/<id>.meta with
@@ -91,7 +91,7 @@ esac
 cs_resolve_root
 PROJECTS="${CS_PROJECTS_OVERRIDE:-$CS_HOME/projects}"
 CAPOS_ROOT="${CS_CAPOS_ROOT:-$HOME/.consigliere/capos}"
-REG="$DATA/capos.md"
+REG="$CONFIG_HOST/capos.md"
 MARKER=".cs-capo-home"
 SPAWN_BIN="${CS_HOME_SEED_SPAWN_BIN:-$SCRIPT_DIR/cs-spawn.sh}"
 
@@ -382,7 +382,11 @@ write_registry() {  # <id> <home> <projects_csv> <brief>
     echo "error: capo id must be [A-Za-z0-9._-]+: '$id'" >&2
     return 1
   }
-  mkdir -p "$DATA"
+  mkdir -p "$CONFIG_HOST"
+  if [ -L "$REG" ]; then
+    echo "error: capo registry is a symlink, not the ordinary file the fleet writes: $REG" >&2
+    return 1
+  fi
   scope=$(registry_scope_for_brief "$brief")
   summary=$(registry_summary_for_brief "$brief")
   today=$(date +%F)
@@ -483,7 +487,7 @@ initialize_no_mistakes_project() {  # <home> <project> <created:0|1>
 sync_project_registry() {  # <home> <project>...
   local home=$1 sub_reg tmp project line today names
   shift
-  sub_reg="$home/data/projects.md"
+  sub_reg="$home/config/projects.md"
   tmp="$sub_reg.tmp.$$"
   names=$(printf '%s\n' "$@" | awk '{ printf "%s%s", sep, $0; sep="\034" }')
   if [ -f "$sub_reg" ]; then
@@ -499,7 +503,7 @@ sync_project_registry() {  # <home> <project>...
   fi
   today=$(date +%F)
   for project in "$@"; do
-    line=$(awk -v n="$project" '$1=="-" && $2==n { print; exit }' "$DATA/projects.md" 2>/dev/null || true)
+    line=$(awk -v n="$project" '$1=="-" && $2==n { print; exit }' "$CONFIG/projects.md" 2>/dev/null || true)
     if [ -z "$line" ]; then
       line="- $project - cloned project (added $today)"
     fi
@@ -516,10 +520,10 @@ refuse_populated_projectless_home() {  # <home>
     echo "error: retire or clean this home first before seeding with --no-projects" >&2
     return 1
   done
-  if [ -f "$home/data/projects.md" ]; then
-    entries=$(awk '$1 == "-" && $2 != "" { print $2 }' "$home/data/projects.md" || true)
+  if [ -f "$home/config/projects.md" ]; then
+    entries=$(awk '$1 == "-" && $2 != "" { print $2 }' "$home/config/projects.md" || true)
     if [ -n "$entries" ]; then
-      echo "error: cannot seed project-less capo home $home because data/projects.md registers: $(printf '%s' "$entries" | tr '\n' ' ')" >&2
+      echo "error: cannot seed project-less capo home $home because config/projects.md registers: $(printf '%s' "$entries" | tr '\n' ' ')" >&2
       echo "error: retire or clean this home first before seeding with --no-projects" >&2
       return 1
     fi
@@ -625,8 +629,8 @@ seed_rollback() {
       fi
       if [ -n "${SEED_BACKUP_DIR:-}" ] && [ -d "$SEED_BACKUP_DIR" ]; then
         restore_seed_file "$SEED_MARKER_EXISTED" "$SEED_BACKUP_DIR/marker" "$SEED_HOME/$MARKER"
-        restore_seed_file "$SEED_CHARTER_EXISTED" "$SEED_BACKUP_DIR/charter.md" "$SEED_HOME/data/charter.md"
-        restore_seed_file "$SEED_SUB_REG_EXISTED" "$SEED_BACKUP_DIR/sub-projects.md" "$SEED_HOME/data/projects.md"
+        restore_seed_file "$SEED_CHARTER_EXISTED" "$SEED_BACKUP_DIR/charter.md" "$SEED_HOME/config/charter.md"
+        restore_seed_file "$SEED_SUB_REG_EXISTED" "$SEED_BACKUP_DIR/sub-projects.md" "$SEED_HOME/config/projects.md"
       fi
     fi
   fi
@@ -750,20 +754,20 @@ seed_home() {
     refuse_projectful_projectless_charter "$id" "$SEED_PARENT_BRIEF" || return 1
   fi
 
-  mkdir -p "$DATA" "$home/data" "$home/state" "$home/config" "$home/projects"
+  mkdir -p "$CONFIG_HOST" "$home/data" "$home/state" "$home/config/host" "$home/projects"
   # A capo home activates ALWAYS, not only while the boss is away. Its queue
   # rots whenever its parent is busy - measured 8h11m on 2026-08-01 with both
   # capo watchers healthy and 28 wakes undrained - and nobody types directly
   # into a capo pane, so the composer race that forces afk-only in the main
   # home does not apply here. bin/cs-activate.sh owns the semantics.
-  printf 'always\n' > "$home/config/activation" 2>/dev/null || true
-  if [ -f "$home/data/projects.md" ]; then
+  printf 'always\n' > "$home/config/host/activation.conf" 2>/dev/null || true
+  if [ -f "$home/config/projects.md" ]; then
     SEED_SUB_REG_EXISTED=1
-    cp "$home/data/projects.md" "$SEED_BACKUP_DIR/sub-projects.md"
+    cp "$home/config/projects.md" "$SEED_BACKUP_DIR/sub-projects.md"
   fi
-  if [ -f "$home/data/charter.md" ]; then
+  if [ -f "$home/config/charter.md" ]; then
     SEED_CHARTER_EXISTED=1
-    cp "$home/data/charter.md" "$SEED_BACKUP_DIR/charter.md"
+    cp "$home/config/charter.md" "$SEED_BACKUP_DIR/charter.md"
   fi
   if [ -f "$home/$MARKER" ]; then
     SEED_MARKER_EXISTED=1
@@ -787,7 +791,7 @@ seed_home() {
     done
   fi
 
-  cp "$SEED_PARENT_BRIEF" "$home/data/charter.md"
+  cp "$SEED_PARENT_BRIEF" "$home/config/charter.md"
   printf '%s\n' "$id" > "$home/$MARKER"
   cs_inherit_seed "$CS_HOME" "$home" "$id" || {
     echo "error: seed-time inheritance failed for $home" >&2
@@ -861,15 +865,22 @@ sweep_ff_home() {  # <id> <home>  - detached-HEAD FF-only advance; CAPO_SYNC lin
   echo "CAPO_SYNC: capo $id: updated $before..$after"
 }
 
-# Converge config/activation for a home seeded before per-home activation
+# Converge config/host/activation.conf for a home seeded before per-home activation
 # existed. A seed-time-only default never reaches an existing home, whose
 # absent value resolves to afk-only and prevents self-started turns.
 # Fill ONLY absence: any present value, including a symlink to externally
 # managed config, is a deliberate choice this sweep must not overwrite.
 sweep_activation_home() {  # <id> <home>  - CAPO_SYNC line only when it acts
   local id=$1 home=$2
-  local activation="$home/config/activation"
+  local activation="$home/config/host/activation.conf"
+  # Check config/ itself BEFORE config/host: _cs_inherit_dir_safe may mkdir its
+  # argument, and creating host/ through a symlinked config/ would write outside
+  # the capo home - exactly what the check exists to prevent.
   _cs_inherit_dir_safe "$home/config" || {
+    echo "CAPO_SYNC: capo $id: skipped: unsafe config/ for activation"
+    return 0
+  }
+  _cs_inherit_dir_safe "$home/config/host" || {
     echo "CAPO_SYNC: capo $id: skipped: unsafe config/ for activation"
     return 0
   }
@@ -879,7 +890,7 @@ sweep_activation_home() {  # <id> <home>  - CAPO_SYNC line only when it acts
   elif [ -e "$activation" ] || [ -L "$activation" ]; then
     return 0
   else
-    echo "CAPO_SYNC: capo $id: skipped: cannot write config/activation"
+    echo "CAPO_SYNC: capo $id: skipped: cannot write config/host/activation.conf"
   fi
 }
 

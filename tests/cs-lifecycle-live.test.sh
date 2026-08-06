@@ -27,10 +27,10 @@ TMP=$(cs_test_tmproot cs-lifecycle)
 export CS_HOME="$TMP/home"
 export CS_DATA_OVERRIDE="$TMP/home/data"
 export CS_STATE_OVERRIDE="$TMP/home/state"
-mkdir -p "$TMP/home/data" "$TMP/home/state"
+mkdir -p "$TMP/home/data" "$TMP/home/state" "$TMP/home/config"
 cs_git_identity
 cs_git_init_commit "$TMP/$REPO"
-printf -- '- %s [local-only] - live fixture (added 2026-07-22)\n' "$REPO" > "$TMP/home/data/projects.md"
+printf -- '- %s [local-only] - live fixture (added 2026-07-22)\n' "$REPO" > "$TMP/home/config/projects.md"
 
 "$ROOT/bin/cs-herdr-lab.sh" provision "$LAB" || fail "lab provision"
 export CS_HERDR_SESSION="$LAB"

@@ -61,11 +61,11 @@ SH
 chmod +x "$FAKEBIN/cs-crew-state.sh"
 
 # --- fixture home: backlog, task metas, statuses, reports, capo registry -----
-mkdir -p "$HOME_DIR/state" "$HOME_DIR/data/t2" "$HOME_DIR/config" \
+mkdir -p "$HOME_DIR/state" "$HOME_DIR/data/t2" "$HOME_DIR/config/host" \
   "$TMP_ROOT/wt1" "$TMP_ROOT/wt2"
-printf 'manual\n' > "$HOME_DIR/config/backlog-backend"   # deterministic offline listing
+printf 'manual\n' > "$HOME_DIR/config/backlog-backend.conf"   # deterministic offline listing
 
-cat > "$HOME_DIR/data/backlog.md" <<'MD'
+cat > "$HOME_DIR/config/backlog.md" <<'MD'
 # Backlog
 
 ## In flight
@@ -108,10 +108,10 @@ printf 'done: headless scout finished; read the report\n' > "$HOME_DIR/state/t4.
 printf '# headless findings\n' > "$HOME_DIR/data/t4/report.md"
 
 # Capo homes: alpha is valid+marked, beta lacks the marker, gamma is missing.
-mkdir -p "$TMP_ROOT/capoA/state" "$TMP_ROOT/capoA/data" "$TMP_ROOT/capoB"
+mkdir -p "$TMP_ROOT/capoA/state" "$TMP_ROOT/capoA/config" "$TMP_ROOT/capoB"
 : > "$TMP_ROOT/capoA/.cs-capo-home"
 cs_write_meta "$TMP_ROOT/capoA/state/childx.meta" "pane=w9:p1" "kind=ship"
-cat > "$TMP_ROOT/capoA/data/backlog.md" <<'MD'
+cat > "$TMP_ROOT/capoA/config/backlog.md" <<'MD'
 ## In flight
 
 - [ ] c1 - Capo child work
@@ -124,7 +124,7 @@ cat > "$TMP_ROOT/capoA/data/backlog.md" <<'MD'
 ## Done
 MD
 
-cat > "$HOME_DIR/data/capos.md" <<MD
+cat > "$HOME_DIR/config/host/capos.md" <<MD
 # Capos
 
 - alpha (home: $TMP_ROOT/capoA; scope: infra work)
@@ -265,7 +265,7 @@ test_capo_bound_disclosed() {
 # --- registry read fails closed -------------------------------------------------
 
 test_registry_reads_fail_closed() {
-  local reg="$HOME_DIR/data/capos.md" saved
+  local reg="$HOME_DIR/config/host/capos.md" saved
   saved=$(cat "$reg")
 
   # A registry whose last line has no trailing newline must keep its last capo.
@@ -340,7 +340,7 @@ test_usage_errors() {
 # --- absent registry is the empty set, not a gap --------------------------------
 
 test_absent_registry_is_not_a_gap() {
-  local reg="$HOME_DIR/data/capos.md" saved
+  local reg="$HOME_DIR/config/host/capos.md" saved
   saved=$(cat "$reg")
   rm -f "$reg"
 

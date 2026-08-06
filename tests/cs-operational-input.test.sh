@@ -108,7 +108,7 @@ test_spawn_launch_brief_stamping() {
   worktree="$TMP/spawn-worktree"
   mkdir -p "$home/data/task" "$home/state" "$fakebin"
   cs_git_init_commit "$repo"
-  printf -- '- project [local-only] - fixture\n' > "$home/data/projects.md"
+  printf -- '- project [local-only] - fixture\n' > "$home/config/projects.md"
   printf 'implement the fixture\nDelivery contract: mode=local-only\n' > "$home/data/task/brief.md"
 
   cat > "$fakebin/herdr" <<'SH'

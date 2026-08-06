@@ -9,8 +9,8 @@
 # It also NEVER moves a card to Ready - Backlog -> Ready is the boss's human
 # approval gate (see the casino skill) and has no command here on purpose.
 #
-# Board identity comes from data/boards.md (LOCAL, gitignored), a durable
-# per-project record kept beside data/projects.md and keyed by the same project
+# Board identity comes from config/boards.md (LOCAL, gitignored), a durable
+# per-project record kept beside config/projects.md and keyed by the same project
 # name. Blank lines and lines beginning with '#' are ignored; every other line
 # is one mapping:
 #   <project-name> <owner> <project-number> [ready-label] [inprogress-label] [status-field] [inbox-label] [backlog-label]
@@ -49,7 +49,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
-BOARDS="$DATA/boards.md"
+BOARDS="$CONFIG/boards.md"
 
 # Test seam: point CS_BOARD_GH at a fake gh for offline tests.
 GH=${CS_BOARD_GH:-gh}

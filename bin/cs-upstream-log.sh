@@ -5,7 +5,7 @@
 # ported editorially (fresh implementations against consigliere's structure),
 # never merged or cherry-picked. This read-only helper feeds the
 # /upstream-review skill:
-#   - resolves the firstmate checkout from config/upstream (a local path;
+#   - resolves the firstmate checkout from config/host/upstream.conf (a local path;
 #     default ../firstmate relative to the consigliere repo root),
 #   - fetches its origin,
 #   - reads the last-reviewed SHA from the first line of the tracked ledger
@@ -30,9 +30,9 @@ case "${1:-}" in
   *) echo "error: unknown argument $1" >&2; exit 2 ;;
 esac
 
-UPSTREAM=$(cat "$CONFIG/upstream" 2>/dev/null || true)
+UPSTREAM=$(cat "$CONFIG/host/upstream.conf" 2>/dev/null || true)
 [ -n "$UPSTREAM" ] || UPSTREAM="$CS_ROOT/../firstmate"
-[ -d "$UPSTREAM/.git" ] || { echo "error: no firstmate checkout at '$UPSTREAM' (set config/upstream)" >&2; exit 1; }
+[ -d "$UPSTREAM/.git" ] || { echo "error: no firstmate checkout at '$UPSTREAM' (set config/host/upstream.conf)" >&2; exit 1; }
 
 REVIEW="$CS_ROOT/docs/upstream-review.md"
 LAST=""

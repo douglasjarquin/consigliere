@@ -14,7 +14,7 @@
 #   endpoint, workspace, or branch behind.
 #   A brief with no contract line was scaffolded before the contract existed: that
 #   warns once and launches on --mode rather than refusing.
-#   data/projects.md records the boss's STANDING posture per project and stays
+#   config/projects.md records the boss's STANDING posture per project and stays
 #   advisory: a --mode carrying less rigor than the registry entry prints a
 #   deviation notice and continues, and a project absent from the registry has no
 #   standing posture, so it gets no notice at all.
@@ -23,12 +23,12 @@
 #   promoted scout first states one.
 #
 #   --model <name> and --effort <default|low|medium|high|xhigh|max|ultra> override the optional
-#   config/dispatch-policy entry for the resolved harness and task kind.
+#   config/dispatch-policy.conf entry for the resolved harness and task kind.
 #   The policy's exact format is in docs/configuration.md.
 #   Codex accepts max and ultra through model_reasoning_effort; default omits it.
 #   Claude accepts max but not ultra.
 #   A claude home whose account policy forbids --dangerously-skip-permissions
-#   selects a narrower launch mode in config/permission-mode (auto|acceptEdits|
+#   selects a narrower launch mode in config/host/permission-mode.conf (auto|acceptEdits|
 #   bypassPermissions); an unusable or malformed record blocks the dispatch.
 #   The exact format is in docs/configuration.md.
 #   --scout marks the task kind=scout (report deliverable, scratch worktree).
@@ -103,7 +103,7 @@ mkdir -p "$STATE"
 HARNESS=$(cs_harness_detect_root)
 
 cs_spawn_apply_dispatch_policy() {
-  local file="$CONFIG/dispatch-policy" line entry_harness entry_kind entry_model entry_effort extra
+  local file="$CONFIG/dispatch-policy.conf" line entry_harness entry_kind entry_model entry_effort extra
   local line_no=0 seen='|' match_model='' match_effort=''
   # A symlink is allowed as long as it resolves to a regular file, so a home may
   # keep its policy under external configuration management. A symlink that does
@@ -211,7 +211,7 @@ if ! cs_harness_effort_valid "$HARNESS" "$EFFORT"; then
   esac
   exit 2
 fi
-# Resolve config/permission-mode up front. The launch builders read it too, but
+# Resolve config/host/permission-mode.conf up front. The launch builders read it too, but
 # they run after the worktree and metadata exist; validating here keeps a
 # malformed file from leaving a half-created task behind.
 cs_harness_permission_mode "$HARNESS" >/dev/null || exit 2

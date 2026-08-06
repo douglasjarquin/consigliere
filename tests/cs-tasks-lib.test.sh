@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Behavior tests for bin/cs-tasks-lib.sh: the tasks-axi availability/compat
-# probe, the manual-backend predicate, and config/backlog-backend reading.
+# probe, the manual-backend predicate, and config/backlog-backend.conf reading.
 # Fully offline: every tasks-axi is a fakebin shim; the real tool (if any) is
 # excluded from PATH for the no-tool case.
 set -u
@@ -101,25 +101,25 @@ test_backlog_backend_value() {
   mkdir -p "$config"
 
   [ "$(run_probe "" cs_backlog_backend_value "$config")" = tasks-axi ] \
-    || fail "absent config/backlog-backend must default to tasks-axi"
+    || fail "absent config/backlog-backend.conf must default to tasks-axi"
 
-  printf 'manual\n' > "$config/backlog-backend"
+  printf 'manual\n' > "$config/backlog-backend.conf"
   [ "$(run_probe "" cs_backlog_backend_value "$config")" = manual ] \
     || fail "manual value must be read back"
 
-  printf '  manual \n' > "$config/backlog-backend"
+  printf '  manual \n' > "$config/backlog-backend.conf"
   [ "$(run_probe "" cs_backlog_backend_value "$config")" = manual ] \
     || fail "surrounding whitespace must be stripped"
 
-  printf '\n' > "$config/backlog-backend"
+  printf '\n' > "$config/backlog-backend.conf"
   [ "$(run_probe "" cs_backlog_backend_value "$config")" = tasks-axi ] \
     || fail "blank file must fall back to tasks-axi"
 
-  printf 'something-else\n' > "$config/backlog-backend"
+  printf 'something-else\n' > "$config/backlog-backend.conf"
   [ "$(run_probe "" cs_backlog_backend_value "$config")" = something-else ] \
     || fail "unknown values pass through for the caller to default"
 
-  pass "config/backlog-backend reading defaults, trims, and passes through"
+  pass "config/backlog-backend.conf reading defaults, trims, and passes through"
 }
 
 test_manual_predicate_and_availability() {
@@ -134,13 +134,13 @@ test_manual_predicate_and_availability() {
   run_probe "$fb" cs_tasks_axi_backend_available "$config" \
     || fail "default backend with compatible tasks-axi must be available"
 
-  printf 'manual\n' > "$config/backlog-backend"
+  printf 'manual\n' > "$config/backlog-backend.conf"
   run_probe "$fb" cs_backlog_backend_manual "$config" \
     || fail "manual config must satisfy the manual predicate"
   set +e; run_probe "$fb" cs_tasks_axi_backend_available "$config"; rc=$?; set -e
   [ "$rc" -ne 0 ] || fail "manual opt-out must disable the tasks-axi backend even when compatible"
 
-  printf 'tasks-axi\n' > "$config/backlog-backend"
+  printf 'tasks-axi\n' > "$config/backlog-backend.conf"
   run_probe "$fb" cs_tasks_axi_backend_available "$config" \
     || fail "explicit tasks-axi config with compatible tool must be available"
 

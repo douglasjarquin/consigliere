@@ -29,7 +29,7 @@ cs_capo_fixture_repo() {
 
 # cs_capo_fixture_project <sandbox> <home> <name> - a project clone with a
 # file:// origin under <home>/projects/<name>, plus its bare remote at
-# <sandbox>/<name>-remote.git. Register it in data/projects.md yourself.
+# <sandbox>/<name>-remote.git. Register it in config/projects.md yourself.
 cs_capo_fixture_project() {
   local sandbox=$1 home=$2 name=$3
   git init -q "$sandbox/src-$name"
@@ -42,7 +42,7 @@ cs_capo_fixture_project() {
 }
 
 # cs_capo_registry_line <id> <summary> <home> <scope> [projects] [added] - one
-# canonical data/capos.md row, exactly as bin/cs-home-seed.sh writes it.
+# canonical config/host/capos.md row, exactly as bin/cs-home-seed.sh writes it.
 cs_capo_registry_line() {
   printf -- '- %s - %s (home: %s; scope: %s; projects: %s; added %s)\n' \
     "$1" "$2" "$3" "$4" "${5:-}" "${6:-2026-01-01}"

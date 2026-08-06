@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Behavior (portable): the session-start digest's startup-memory budget.
 #
-# data/boss.md, data/boss-shared.md, and data/learnings.md are read IN FULL at
+# config/boss.md, config/boss-shared.md, and config/learnings.md are read IN FULL at
 # every session start of every home, so their size is a standing cost paid
 # whether or not a session ever uses them. Unlike the registries printed beside
 # them, curated prose has no natural ceiling, so without a visible bound it
@@ -41,7 +41,7 @@ big_file() {
 
 # --- under budget: no report --------------------------------------------------
 HOME_DIR=$(fresh_home under)
-printf 'The boss prefers plain outcome language.\n' > "$HOME_DIR/data/boss.md"
+printf 'The boss prefers plain outcome language.\n' > "$HOME_DIR/config/boss.md"
 out=$(CS_HOME="$HOME_DIR" CS_STARTUP_MEMORY_MAX_BYTES=8192 "$BIN" 2>/dev/null)
 assert_not_contains "$out" 'OVER STARTUP-MEMORY BUDGET' "a small startup-memory file is not flagged"
 assert_contains "$out" 'The boss prefers plain outcome language.' "the digest still prints the file"
@@ -49,10 +49,10 @@ pass "startup memory under budget is printed without a report"
 
 # --- over budget: reported, named, and still printed in full ------------------
 HOME_DIR=$(fresh_home over)
-big_file "$HOME_DIR/data/learnings.md" 12000
-first_line=$(head -1 "$HOME_DIR/data/learnings.md")
-last_line=$(tail -1 "$HOME_DIR/data/learnings.md")
-size=$(wc -c < "$HOME_DIR/data/learnings.md" | tr -d '[:space:]')
+big_file "$HOME_DIR/config/learnings.md" 12000
+first_line=$(head -1 "$HOME_DIR/config/learnings.md")
+last_line=$(tail -1 "$HOME_DIR/config/learnings.md")
+size=$(wc -c < "$HOME_DIR/config/learnings.md" | tr -d '[:space:]')
 out=$(CS_HOME="$HOME_DIR" CS_STARTUP_MEMORY_MAX_BYTES=8192 "$BIN" 2>/dev/null)
 assert_contains "$out" 'OVER STARTUP-MEMORY BUDGET' "an oversized startup-memory file is reported"
 assert_contains "$out" "$size bytes against a 8192-byte budget" "the report names the actual size and budget"
@@ -64,9 +64,9 @@ pass "startup memory over budget is reported by size and owner, and never trunca
 
 # --- the budget is per file, not for the whole context ------------------------
 HOME_DIR=$(fresh_home perfile)
-big_file "$HOME_DIR/data/learnings.md" 12000
-printf 'Short and well curated.\n' > "$HOME_DIR/data/boss.md"
-printf 'Also short.\n' > "$HOME_DIR/data/boss-shared.md"
+big_file "$HOME_DIR/config/learnings.md" 12000
+printf 'Short and well curated.\n' > "$HOME_DIR/config/boss.md"
+printf 'Also short.\n' > "$HOME_DIR/config/boss-shared.md"
 out=$(CS_HOME="$HOME_DIR" CS_STARTUP_MEMORY_MAX_BYTES=8192 "$BIN" 2>/dev/null)
 count=$(printf '%s\n' "$out" | grep -c 'OVER STARTUP-MEMORY BUDGET' || true)
 [ "$count" -eq 1 ] ||
@@ -77,14 +77,14 @@ pass "the budget applies per file, so a curated file is not blamed for a bloated
 # projects.md and capos.md are bounded by how many projects and capos exist, so
 # growth there is real fleet state rather than uncurated prose.
 HOME_DIR=$(fresh_home registries)
-big_file "$HOME_DIR/data/projects.md" 12000
+big_file "$HOME_DIR/config/projects.md" 12000
 out=$(CS_HOME="$HOME_DIR" CS_STARTUP_MEMORY_MAX_BYTES=8192 "$BIN" 2>/dev/null)
 assert_not_contains "$out" 'OVER STARTUP-MEMORY BUDGET' "a large registry is not a startup-memory violation"
 pass "registries are outside the startup-memory budget"
 
 # --- a malformed budget falls back instead of disabling the check -------------
 HOME_DIR=$(fresh_home malformed)
-big_file "$HOME_DIR/data/learnings.md" 12000
+big_file "$HOME_DIR/config/learnings.md" 12000
 out=$(CS_HOME="$HOME_DIR" CS_STARTUP_MEMORY_MAX_BYTES=not-a-number "$BIN" 2>/dev/null)
 assert_contains "$out" 'against a 8192-byte budget' "a malformed budget falls back to the default"
 pass "a malformed budget falls back to the default rather than silently disabling the check"

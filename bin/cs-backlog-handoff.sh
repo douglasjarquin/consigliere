@@ -12,7 +12,7 @@
 # format, so the format has exactly one parser and cannot drift.
 #
 # What this script owns (never delegated):
-#   - resolving the capo home from data/capos.md;
+#   - resolving the capo home from config/host/capos.md;
 #   - proving the destination is a genuine seeded capo home (.cs-capo-home
 #     marker with a matching id, AGENTS.md + bin/, safe operational dirs),
 #     never a project clone, the active home, or the consigliere repo;
@@ -33,7 +33,7 @@
 # selected item with a single-space or tab-indented continuation rather than
 # risk leaving it orphaned. The move needs compatible tasks-axi on PATH
 # (bin/cs-tasks-lib.sh owns the probe, including atomic multi-ID mv);
-# `config/backlog-backend=manual` governs only consigliere's own hand-editing,
+# `config/backlog-backend.conf=manual` governs only consigliere's own hand-editing,
 # never this validated helper. Idempotent: re-running converges. Atomic: on
 # any move failure nothing moves.
 # Usage: cs-backlog-handoff.sh <capo-id> <item-key>...
@@ -45,8 +45,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cs_resolve_root
 # shellcheck source=bin/cs-capo-registry-lib.sh
 . "$SCRIPT_DIR/cs-capo-registry-lib.sh"
-REG="$DATA/capos.md"
-MAIN_BACKLOG="$DATA/backlog.md"
+REG="$CONFIG_HOST/capos.md"
+MAIN_BACKLOG="$CONFIG/backlog.md"
 # shellcheck source=bin/cs-tasks-lib.sh
 . "$SCRIPT_DIR/cs-tasks-lib.sh"
 
@@ -214,7 +214,7 @@ backlog_key_noncanonical_body_lines() {
 RAW_HOME=$(capo_home "$ID") || exit 1
 [ -n "$RAW_HOME" ] || { echo "error: capo $ID has no home in $REG" >&2; exit 1; }
 CAPO_HOME=$(validate_capo_home "$ID" "$RAW_HOME") || exit 1
-CAPO_BACKLOG="$CAPO_HOME/data/backlog.md"
+CAPO_BACKLOG="$CAPO_HOME/config/backlog.md"
 validate_backlog_file "main backlog" "$MAIN_BACKLOG" || exit 1
 validate_backlog_file "capo backlog" "$CAPO_BACKLOG" || exit 1
 

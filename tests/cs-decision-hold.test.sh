@@ -19,7 +19,7 @@ make_home() {  # <name>
   local home="$TMP_ROOT/$1" fakebin
   mkdir -p "$home/data" "$home/state" "$home/config" "$home/projects"
   cp "$ROOT/.tasks.toml" "$home/.tasks.toml"
-  cat > "$home/data/backlog.md" <<'EOF'
+  cat > "$home/config/backlog.md" <<'EOF'
 ## In flight
 
 ## Queued
@@ -87,7 +87,7 @@ test_uninventoried_report_decision_refuses_completion() {
   home=$(make_home omitted-decision)
   id=sample-route-review
   mkdir -p "$home/data/$id"
-  cat > "$home/data/backlog.md" <<EOF
+  cat > "$home/config/backlog.md" <<EOF
 ## In flight
 - [ ] $id - Investigate sample routing (repo: sample) (kind: scout) (since 2026-07-22)
 
@@ -183,9 +183,9 @@ EOF
     --title "Choose the sample access level" --reason "boss access choice pending" --repo sample) \
     || fail "could not register access hold"
   [ "$access_hold" = "$id-decision-access" ] || fail "access hold identity was not distinct: $access_hold"
-  [ "$(grep -cE "^- \[ \] $route_hold -" "$home/data/backlog.md")" = 1 ] \
+  [ "$(grep -cE "^- \[ \] $route_hold -" "$home/config/backlog.md")" = 1 ] \
     || fail "idempotent retry duplicated the route hold"
-  [ "$(grep -cE "^- \[ \] $access_hold -" "$home/data/backlog.md")" = 1 ] \
+  [ "$(grep -cE "^- \[ \] $access_hold -" "$home/config/backlog.md")" = 1 ] \
     || fail "second decision did not retain one distinct backlog identity"
 
   run_decisions "$home" complete "$id" route access >/dev/null \
@@ -201,9 +201,9 @@ EOF
     || fail "reviewed investigation teardown failed: $(cat "$home/teardown.err")"
   tasks_in "$home" "done" "$id" --report "data/$id/report.md" --keep 0 >/dev/null \
     || fail "could not archive completed investigation"
-  ! grep -E "^- \[[ x]\] $id -" "$home/data/backlog.md" >/dev/null \
+  ! grep -E "^- \[[ x]\] $id -" "$home/config/backlog.md" >/dev/null \
     || fail "origin remained in the live backlog after archival"
-  grep -E "^- \[x\] $id -" "$home/data/done-archive.md" >/dev/null \
+  grep -E "^- \[x\] $id -" "$home/config/done-archive.md" >/dev/null \
     || fail "origin was not durably archived"
   show=$(tasks_in "$home" show "$route_hold" --full)
   assert_contains "$show" "held: yes" "teardown or archival erased the route boss hold"
@@ -349,7 +349,7 @@ The recommendation is informational and needs no boss action.
 EOF
   run_decisions "$home" complete "$id" --none >/dev/null \
     || fail "explicit no-decision inventory failed"
-  assert_no_grep "$id-decision-" "$home/data/backlog.md" \
+  assert_no_grep "$id-decision-" "$home/config/backlog.md" \
     "resolved findings or decision-like prose created a false hold"
   pass "resolved findings and decision-like prose do not create false holds"
 }
@@ -403,8 +403,8 @@ test_capo_hold_stays_in_authoritative_home() {
     || fail "capo investigation teardown failed: $(cat "$mate/teardown.err")"
   tasks_in "$mate" "done" "$origin" --report "data/$origin/report.md" --keep 0 >/dev/null
 
-  assert_no_grep "$hold" "$parent/data/backlog.md" "capo hold leaked into the main backlog"
-  assert_grep "$hold" "$mate/data/backlog.md" "capo hold left its authoritative backlog"
+  assert_no_grep "$hold" "$parent/config/backlog.md" "capo hold leaked into the main backlog"
+  assert_grep "$hold" "$mate/config/backlog.md" "capo hold left its authoritative backlog"
   pass "main-home and capo-home boss holds remain correctly routed"
 }
 

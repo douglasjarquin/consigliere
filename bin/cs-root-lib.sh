@@ -59,7 +59,57 @@ cs_abs_path() {  # <path> -> the same path, guaranteed absolute; rc=1 if empty
   esac
 }
 
-# DATA/STATE/CONFIG are set for the caller, not used within this library.
+# cs_layout_pairs - the single owner of the config/-layout migration mapping.
+# One "old<TAB>new" line per moved file, both relative to the resolved home
+# (old under $DATA or $CONFIG, new under $CONFIG). bin/cs-migrate-config.sh
+# renames along these pairs; cs_layout_gate refuses while any old name exists,
+# so the two can never disagree about what "migrated" means.
+cs_layout_pairs() {
+  printf '%s\t%s\n' \
+    "$CONFIG/backlog-backend"  "$CONFIG/backlog-backend.conf" \
+    "$CONFIG/dispatch-policy"  "$CONFIG/dispatch-policy.conf" \
+    "$CONFIG/permission-mode"  "$CONFIG/host/permission-mode.conf" \
+    "$CONFIG/upstream"         "$CONFIG/host/upstream.conf" \
+    "$CONFIG/activation"       "$CONFIG/host/activation.conf" \
+    "$CONFIG/wedge-alarm"      "$CONFIG/host/wedge-alarm.conf" \
+    "$CONFIG/harness"          "$CONFIG/host/harness.conf" \
+    "$DATA/boss.md"            "$CONFIG/boss.md" \
+    "$DATA/boss-shared.md"     "$CONFIG/boss-shared.md" \
+    "$DATA/learnings.md"       "$CONFIG/learnings.md" \
+    "$DATA/projects.md"        "$CONFIG/projects.md" \
+    "$DATA/boards.md"          "$CONFIG/boards.md" \
+    "$DATA/backlog.md"         "$CONFIG/backlog.md" \
+    "$DATA/done-archive.md"    "$CONFIG/done-archive.md" \
+    "$DATA/note-archive.md"    "$CONFIG/note-archive.md" \
+    "$DATA/capos.md"           "$CONFIG/host/capos.md" \
+    "$DATA/charter.md"         "$CONFIG/charter.md"
+}
+
+# cs_layout_gate - fail closed while any pre-move path still exists.
+# An old-name file (or dangling symlink) means this home has not migrated to
+# the config/ userspace layout; running against it would read absent-but-legal
+# defaults and silently ignore the boss's real files. The refusal names the
+# migrator and EXITS: most scripts here run under set -u without set -e, so a
+# returned failure would be silently ignored, which is the exact silent-loss
+# mode this gate exists to prevent. CS_LAYOUT_GATE_SKIP=1 bypasses it for
+# exactly three callers: bin/cs-migrate-config.sh (which must run against the
+# unmigrated home), bin/cs-session-start.sh's lock-and-migrate step, and
+# bin/cs-doctor.sh (checks-only; it reports migration state as a finding
+# instead of dying on it).
+cs_layout_gate() {
+  [ "${CS_LAYOUT_GATE_SKIP:-}" = 1 ] && return 0
+  local old
+  while IFS=$'\t' read -r old _; do
+    if [ -e "$old" ] || [ -L "$old" ]; then
+      printf 'cs-root: %s exists; this home has not been migrated to the config/ layout - run bin/cs-migrate-config.sh\n' "$old" >&2
+      exit 1
+    fi
+  done < <(cs_layout_pairs)
+  return 0
+}
+
+# DATA/STATE/CONFIG/CONFIG_HOST are set for the caller, not used within this
+# library.
 # shellcheck disable=SC2034
 cs_resolve_root() {
   local _cs_root_lib_dir
@@ -79,4 +129,6 @@ cs_resolve_root() {
   DATA=$(cs_abs_path "${CS_DATA_OVERRIDE:-$CS_HOME/data}") || return 1
   STATE=$(cs_abs_path "${CS_STATE_OVERRIDE:-$CS_HOME/state}") || return 1
   CONFIG=$(cs_abs_path "${CS_CONFIG_OVERRIDE:-$CS_HOME/config}") || return 1
+  CONFIG_HOST="$CONFIG/host"
+  cs_layout_gate
 }

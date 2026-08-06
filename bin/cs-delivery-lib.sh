@@ -13,7 +13,7 @@
 #     holding two copies of that format would drift silently, which is the whole
 #     failure this cross-check exists to catch.
 #
-# data/projects.md records the boss's STANDING posture per project and is
+# config/projects.md records the boss's STANDING posture per project and is
 # advisory; cs-project-mode.sh owns that registry parse and nothing here reads it.
 
 # Human-facing spelling of each closed set, for usage and error messages.
