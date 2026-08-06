@@ -19,7 +19,7 @@ FAKEBIN=$(cs_fakebin "$TMP")
 # (a stock macOS /usr/bin already ships git, python3, and sometimes jq).
 TOOLS="$TMP/tools"
 mkdir -p "$TOOLS"
-for util in bash env awk sed grep head cat tr uname dirname basename; do
+for util in bash env awk sed grep head cat tr uname dirname basename readlink mkdir; do
   src=$(command -v "$util") || fail "test fixture needs $util on PATH"
   ln -s "$src" "$TOOLS/$util"
 done
@@ -118,5 +118,50 @@ pass 'every inventory tool has a purpose and an install suggestion'
 assert_contains "$(cs_deps_hint no-mistakes)" \
   'https://github.com/kunchenguid/no-mistakes' \
   'the no-mistakes install suggestion names its repository'
+
+# --- config section: the user-owned tree ---------------------------------------
+# Migration state, symlink-target visibility, and the two loss tripwires
+# (host-tier symlink-out, rename-writer sever). docs/configuration.md owns the
+# inventory these checks read.
+
+CFG_HOME="$TMP/cfg-home"
+mkdir -p "$CFG_HOME/config/host" "$CFG_HOME/data" "$TMP/elsewhere"
+
+cfg_doctor() { PATH="$BASE_PATH" CS_HOME="$CFG_HOME" "$DOCTOR" 2>&1; }
+
+out=$(cfg_doctor)
+assert_line "$out" 'ok +layout +- +no pre-move paths' 'a migrated home reports the layout in effect'
+
+printf 'x\n' > "$CFG_HOME/data/boss.md"
+out=$(cfg_doctor)
+assert_line "$out" 'FAIL +boss.md +- +pre-move path still exists' 'a pre-move path is a failure'
+assert_contains "$out" 'cs-migrate-config.sh' 'the migration failure names the migrator'
+rm "$CFG_HOME/data/boss.md"
+
+printf 'claude auto\n' > "$TMP/elsewhere/permission-mode"
+ln -s "$TMP/elsewhere/permission-mode" "$CFG_HOME/config/host/permission-mode.conf"
+out=$(cfg_doctor)
+assert_line "$out" 'FAIL +permission-mode\.conf +- +host-tier file symlinked outside' \
+  'a host-tier symlink out of the home is a failure, not a note'
+rm "$CFG_HOME/config/host/permission-mode.conf"
+
+ln -s "$TMP/elsewhere/backlog.md" "$CFG_HOME/config/backlog.md"
+out=$(cfg_doctor)
+assert_line "$out" 'FAIL +backlog\.md +- +symlinked, but its writer replaces it by rename' \
+  'a symlinked backlog is a failure: tasks-axi severs it on the first mutation'
+rm "$CFG_HOME/config/backlog.md"
+
+printf 'x\n' > "$CFG_HOME/config/stray.txt"
+out=$(cfg_doctor)
+assert_line "$out" 'WARN +stray\.txt +- +not a known config/ name' 'an unknown entry is reported by name'
+rm "$CFG_HOME/config/stray.txt"
+
+printf 'the boss\n' > "$TMP/elsewhere/boss.md"
+ln -s "$TMP/elsewhere/boss.md" "$CFG_HOME/config/boss.md"
+out=$(cfg_doctor)
+assert_line "$out" 'ok +boss\.md +- +symlink ->' 'a portable symlink is reported with its resolved target'
+rm "$CFG_HOME/config/boss.md"
+
+pass 'the config section reports migration state, symlink targets, and the loss tripwires'
 
 pass 'cs-doctor behaviors'
