@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+# tests/cs-open-decision-cursor.test.sh - the cursor-backed incremental
+# open-decisions fold (status_open_decisions_incremental and its fleet-wide
+# scan_open_decisions_incremental wrapper in bin/cs-classify-lib.sh).
+# The incremental fold must agree byte-for-byte with the authoritative
+# whole-file fold (status_open_decisions) on every log, fold only newly
+# appended bytes on a steady-state call, fall back to a full re-fold on a
+# missing cursor, a truncated log, and a replaced/rotated/recreated log (even
+# at the same size, via the device+inode identity check), and on a genuine
+# read failure report the already-trusted persisted set unchanged without
+# destroying the cursor.
+set -u
+
+# shellcheck source=tests/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+CLASSIFY="$ROOT/bin/cs-classify-lib.sh"
+
+TMP_ROOT=$(cs_test_tmproot cs-open-decision-cursor)
+
+make_case() {
+  local name=$1 dir
+  dir="$TMP_ROOT/$name"
+  mkdir -p "$dir/state"
+  printf '%s\n' "$dir"
+}
+
+# fold_full <status-file>: the authoritative whole-file fold.
+fold_full() {
+  bash -c '. "$1"; status_open_decisions "$2"' _ "$CLASSIFY" "$1"
+}
+
+# fold_inc <status-file>: the cursor-backed incremental fold. Honors an
+# exported CS_OPEN_DECISIONS_READ_PROBE for the folded-bytes assertions.
+fold_inc() {
+  bash -c '. "$1"; status_open_decisions_incremental "$2"' _ "$CLASSIFY" "$1"
+}
+
+# scan_inc <state>: the fleet-wide incremental wrapper.
+scan_inc() {
+  bash -c '. "$1"; scan_open_decisions_incremental "$2"' _ "$CLASSIFY" "$1"
+}
+
+cursor_of() {  # <state> <task>
+  printf '%s/.decision-cursor-%s' "$1" "$2"
+}
+
+test_new_task_without_cursor_matches_full_fold() {
+  local dir state f out full
+  dir=$(make_case no-cursor); state="$dir/state"
+  f="$state/t1.status"
+  printf 'working: start\nneeds-decision [key=api]: pick A or B\nworking: more\n' > "$f"
+  out=$(fold_inc "$f")
+  full=$(fold_full "$f")
+  [ "$out" = "$full" ] || fail "first incremental call must equal the full fold (inc: '$out' full: '$full')"
+  assert_present "$(cursor_of "$state" t1)" "the first call must persist a cursor"
+  assert_grep "offset=" "$(cursor_of "$state" t1)" "the cursor must record a byte offset"
+  assert_grep "ident=" "$(cursor_of "$state" t1)" "the cursor must record a device:inode identity"
+  pass "a new task with no cursor takes the full re-fold path and writes the cursor"
+}
+
+test_steady_state_folds_only_new_bytes() {
+  local dir state f probe append out
+  dir=$(make_case steady); state="$dir/state"
+  f="$state/t1.status"
+  probe="$dir/probe"
+  printf 'working: start\nneeds-decision [key=api]: pick A or B\n' > "$f"
+  CS_OPEN_DECISIONS_READ_PROBE="$probe" fold_inc "$f" > /dev/null
+  : > "$probe"
+  # No new bytes: the steady-state call must read nothing and still report the
+  # persisted open set.
+  out=$(CS_OPEN_DECISIONS_READ_PROBE="$probe" fold_inc "$f")
+  assert_contains "$out" "$(printf 'api\tneeds-decision\tpick A or B')" \
+    "a no-new-bytes call must still report the persisted open set"
+  [ ! -s "$probe" ] || fail "a no-new-bytes call must fold zero bytes (probe: $(cat "$probe"))"
+  # An append: exactly the appended byte count is folded, not the whole file.
+  append='resolved [key=api]: picked A'
+  printf '%s\n' "$append" >> "$f"
+  out=$(CS_OPEN_DECISIONS_READ_PROBE="$probe" fold_inc "$f")
+  [ -z "$out" ] || fail "the appended resolution must close the open decision (got: '$out')"
+  assert_grep "$(printf '\t%s' "$(( ${#append} + 1 ))")" "$probe" \
+    "the steady-state call must fold exactly the appended bytes"
+  [ "$(wc -l < "$probe" | tr -d ' ')" = 1 ] || fail "exactly one chunk read expected: $(cat "$probe")"
+  pass "a steady-state call folds only newly appended bytes"
+}
+
+test_incremental_agrees_with_full_fold_line_by_line() {
+  local dir state f full inc log line
+  dir=$(make_case agreement); state="$dir/state"
+  f="$state/t1.status"
+  # Every fold-rule branch: the three opening verbs, keyed and default keys,
+  # resolve, re-open, and captain-held's needs-review exception.
+  log=$(cat <<'EOF'
+working: start
+needs-decision [key=api]: pick A or B
+needs-review: built the thing
+blocked [key=infra]: waiting on quota
+resolved [key=api]: picked A
+captain-held: transfer attempt on the open needs-review
+captain-held [key=infra]: parked with the boss
+needs-decision [key=api]: reopened after new evidence
+done: unrelated finish
+EOF
+)
+  : > "$f"
+  while IFS= read -r line; do
+    printf '%s\n' "$line" >> "$f"
+    # Fold after EVERY append so the incremental path exercises each rule
+    # branch on its own small chunk rather than one big first-call re-fold.
+    inc=$(fold_inc "$f")
+    full=$(fold_full "$f")
+    [ "$inc" = "$full" ] || fail "strategies disagree after '$line' (inc: '$inc' full: '$full')"
+  done <<EOF
+$log
+EOF
+  assert_contains "$inc" "$(printf 'default\tneeds-review\tbuilt the thing')" \
+    "captain-held must never close a needs-review decision"
+  assert_not_contains "$inc" "infra" "captain-held must close the blocked decision"
+  assert_contains "$inc" "reopened after new evidence" "a re-opened key must be open again"
+  pass "full and incremental strategies agree on every prefix of the same log"
+}
+
+test_truncated_log_refolds_from_scratch() {
+  local dir state f out full
+  dir=$(make_case truncated); state="$dir/state"
+  f="$state/t1.status"
+  printf 'needs-decision [key=a]: first\nneeds-decision [key=b]: second\n' > "$f"
+  fold_inc "$f" > /dev/null
+  # Truncate to a shorter, different log: the shrink invalidates the cursor.
+  printf 'needs-decision [key=c]: only this\n' > "$f"
+  out=$(fold_inc "$f")
+  full=$(fold_full "$f")
+  [ "$out" = "$full" ] || fail "a truncated log must re-fold from scratch (inc: '$out' full: '$full')"
+  assert_not_contains "$out" "first" "stale pre-truncation decisions must not survive"
+  assert_contains "$out" "$(printf 'c\tneeds-decision\tonly this')" "the new content must be folded"
+  pass "a truncated log invalidates the cursor and re-folds from scratch"
+}
+
+test_same_size_replacement_refolds_via_inode_check() {
+  local dir state f out full old new
+  dir=$(make_case same-size); state="$dir/state"
+  f="$state/t1.status"
+  old='needs-decision [key=aa]: xx'
+  new='needs-decision [key=bb]: yy'
+  [ "${#old}" = "${#new}" ] || fail "fixture bug: replacement lines must be the same size"
+  printf '%s\n' "$old" > "$f"
+  fold_inc "$f" > /dev/null
+  # Replace the file at the same path with SAME-SIZE content on a new inode:
+  # only the device+inode identity check can catch this, not the size check.
+  printf '%s\n' "$new" > "$f.new"
+  mv -f "$f.new" "$f"
+  out=$(fold_inc "$f")
+  full=$(fold_full "$f")
+  [ "$out" = "$full" ] || fail "a same-size replacement must re-fold (inc: '$out' full: '$full')"
+  assert_not_contains "$out" "aa" "the replaced file's old decision must not survive"
+  assert_contains "$out" "$(printf 'bb\tneeds-decision\tyy')" "the replacement's decision must be folded"
+  pass "a same-size replacement is caught by the device+inode identity check"
+}
+
+test_read_failure_preserves_trusted_set_and_cursor() {
+  local dir state f fakebin cursor before out
+  dir=$(make_case read-failure); state="$dir/state"
+  f="$state/t1.status"
+  printf 'needs-decision [key=api]: pick A or B\n' > "$f"
+  fold_inc "$f" > /dev/null
+  cursor=$(cursor_of "$state" t1)
+  before=$(cat "$cursor")
+  # Append new bytes, then make stat fail: the identity read is a genuine I/O
+  # error, so the call must report the already-trusted persisted set unchanged
+  # and must not touch the cursor - never an empty "nothing is open".
+  printf 'resolved [key=api]: never seen this turn\n' >> "$f"
+  fakebin=$(cs_fakebin "$dir")
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$fakebin/stat"
+  chmod +x "$fakebin/stat"
+  out=$(PATH="$fakebin:$PATH" fold_inc "$f")
+  assert_contains "$out" "$(printf 'api\tneeds-decision\tpick A or B')" \
+    "a read failure must report the trusted persisted set unchanged"
+  [ "$(cat "$cursor")" = "$before" ] || fail "a read failure must not rewrite the cursor"
+  # Once reads work again, the appended resolution is folded normally.
+  out=$(fold_inc "$f")
+  [ -z "$out" ] || fail "recovery after the read failure must fold the pending append (got: '$out')"
+  pass "a read failure reports the trusted set unchanged and preserves the cursor"
+}
+
+test_cursor_is_safe_to_delete() {
+  local dir state f out full
+  dir=$(make_case delete-cursor); state="$dir/state"
+  f="$state/t1.status"
+  printf 'needs-review: built it\nworking: more\n' > "$f"
+  fold_inc "$f" > /dev/null
+  rm -f "$(cursor_of "$state" t1)"
+  out=$(fold_inc "$f")
+  full=$(fold_full "$f")
+  [ "$out" = "$full" ] || fail "deleting the cursor must only cost one full re-fold (inc: '$out' full: '$full')"
+  assert_present "$(cursor_of "$state" t1)" "the re-fold must rewrite the cursor"
+  pass "deleting the cursor at any time only costs one full re-fold"
+}
+
+test_scan_wrapper_matches_full_scan() {
+  local dir state inc full
+  dir=$(make_case scan); state="$dir/state"
+  printf 'working: a\nneeds-decision [key=one]: first\n' > "$state/alpha.status"
+  printf 'blocked [key=two]: second\nresolved [key=two]: closed\n' > "$state/beta.status"
+  printf 'needs-review: third\n' > "$state/gamma.status"
+  full=$(bash -c '. "$1"; scan_open_decisions "$2"' _ "$CLASSIFY" "$state")
+  inc=$(scan_inc "$state")
+  [ "$inc" = "$full" ] || fail "the incremental scan must equal the full scan (inc: '$inc' full: '$full')"
+  # And again from warm cursors, with a new append landing in the result.
+  printf 'blocked [key=late]: new blocker\n' >> "$state/beta.status"
+  full=$(bash -c '. "$1"; scan_open_decisions "$2"' _ "$CLASSIFY" "$state")
+  inc=$(scan_inc "$state")
+  [ "$inc" = "$full" ] || fail "the warm-cursor scan must equal the full scan (inc: '$inc' full: '$full')"
+  assert_contains "$inc" "$(printf 'beta\tlate\tblocked\tnew blocker')" \
+    "the warm scan must fold the new append"
+  pass "scan_open_decisions_incremental matches scan_open_decisions cold and warm"
+}
+
+test_new_task_without_cursor_matches_full_fold
+test_steady_state_folds_only_new_bytes
+test_incremental_agrees_with_full_fold_line_by_line
+test_truncated_log_refolds_from_scratch
+test_same_size_replacement_refolds_via_inode_check
+test_read_failure_preserves_trusted_set_and_cursor
+test_cursor_is_safe_to_delete
+test_scan_wrapper_matches_full_scan

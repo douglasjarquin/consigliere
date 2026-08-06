@@ -121,6 +121,7 @@ state/               volatile runtime signals; gitignored
   .watch.lock .wake-queue.lock .monitor.lock   watcher, queue, and monitor singleton locks
   .last-watcher-beat watcher liveness beacon; guard scripts read it
   .last-monitor-beat .monitor.log .monitor-stop   persistent monitor liveness, lifecycle log, and stop request; cs-monitor.sh
+  .decision-cursor-*   per-task byte cursor and folded open-decision set bounding the wake drain's open-decision scan to new status appends; written only by cs-classify-lib.sh; safe to delete (forces one full re-fold)
   .hash-* .count-* .stale-* .paused-* .seen-* .last-* .capo-surfaced-*   watcher internals; never touch
   .subsuper-*        away-mode daemon internals; never touch
 .no-mistakes/        local validation state and evidence (`.no-mistakes/evidence`); gitignored

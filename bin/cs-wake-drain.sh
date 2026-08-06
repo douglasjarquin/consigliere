@@ -5,6 +5,9 @@
 # every state/*.status file on EVERY drain (including the empty-queue fast
 # path), so a still-open decision buried under later unrelated status appends
 # reaches consigliere even when the last-line wake annotation no longer shows it.
+# The fold is cursor-backed (scan_open_decisions_incremental), so each drain
+# reads only bytes appended since the previous drain, not every task's whole
+# lifetime status log.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,22 +35,26 @@ assert_watcher_liveness() {
   "$SCRIPT_DIR/cs-guard.sh" || true
 }
 
-# Print the fleet-wide OPEN DECISIONS section from the durable status fold. This
-# runs on every drain so a needs-decision/needs-review/blocked line that later,
-# unrelated status appends pushed off the last line still surfaces here instead
-# of going silently missed. Best-effort context like the annotations: it is a
-# pure read of state/*.status, never touches the queue, and cannot fail the
-# drain. Bounded the same way the enrichment phase is - at most
+# Print the fleet-wide OPEN DECISIONS section from the durable status fold
+# (via cs-classify-lib.sh's cursor-backed scan_open_decisions_incremental
+# wrapper). This runs on every drain so a needs-decision/needs-review/blocked
+# line that later, unrelated status appends pushed off the last line still
+# surfaces here instead of going silently missed. Best-effort context like the
+# annotations: it never touches the queue and cannot fail the drain. Not a
+# pure read: the incremental wrapper persists a per-status-file byte cursor
+# (state/.decision-cursor-<task>) so this per-drain scan folds only bytes
+# appended since the previous drain instead of every task's whole lifetime
+# log. Output is bounded the same way the enrichment phase is - at most
 # CS_OPEN_DECISIONS_CAP decisions are listed and any remainder is reported as
-# omitted, never silently dropped - so a large fleet cannot turn a drain into an
-# unbounded output fan-out. No open decisions prints nothing.
+# omitted, never silently dropped - so a large fleet cannot turn a drain into
+# an unbounded output fan-out. No open decisions prints nothing.
 print_open_decisions() {
   local rows cap=${CS_OPEN_DECISIONS_CAP:-32} shown=0 omitted=0
   local task key verb note printed=false
   case "$cap" in
     ''|*[!0-9]*|0*) cap=32 ;;
   esac
-  rows=$(scan_open_decisions "$STATE") || return 0
+  rows=$(scan_open_decisions_incremental "$STATE") || return 0
   [ -n "$rows" ] || return 0
   while IFS="$(printf '\t')" read -r task key verb note; do
     [ -n "$task" ] || continue

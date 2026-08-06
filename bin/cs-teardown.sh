@@ -694,6 +694,7 @@ remove_watcher_markers() {
     "$STATE/.seen-$(printf '%s' "$ID.status" | tr '.' '_')"
     "$STATE/.seen-$(printf '%s' "$ID.turn-ended" | tr '.' '_')"
     "$STATE/.hb-surfaced-$id_key"
+    "$STATE/.decision-cursor-$ID"
   )
   if [ -n "$PANE" ]; then
     pane_key=$(printf '%s' "$PANE" | tr ':/.' '___')
@@ -785,7 +786,8 @@ if [ "$KIND" = capo ]; then
     || rm -rf "$HOME_PATH"
   git -C "$CS_ROOT" worktree prune 2>/dev/null || true
   remove_capo_registry_entry "$ID"
-  rm -f "$STATE/$ID.status" "$STATE/$ID.turn-ended" "$STATE/$ID.meta"
+  rm -f "$STATE/$ID.status" "$STATE/$ID.turn-ended" "$STATE/$ID.meta" \
+    "$STATE/.decision-cursor-$ID"
   echo "teardown $ID complete (capo home $HOME_PATH retired)"
   exit 0
 fi
