@@ -211,6 +211,31 @@ capped=$(printf '%s\n' "$tail_section" | grep -c ' \[truncated\]$')
 [ "$capped" -eq 1 ] || fail "expected exactly one truncated tail line, got $capped: $tail_section"
 pass "status tail lines are capped with a truncation marker while the full log stays reachable"
 
+HOME_DIR=$(fresh_home malformed-line-cap)
+printf 'window=x:w1\nkind=ship\n' > "$HOME_DIR/state/task-malformed.meta"
+{
+  printf 'malformed: '
+  i=0
+  while [ "$i" -lt 221 ]; do
+    printf '\200'
+    i=$((i + 1))
+  done
+  printf '\n'
+} > "$HOME_DIR/state/task-malformed.status"
+malformed_out="$TMP/malformed-line-cap.out"
+LC_ALL=C CS_HOME="$HOME_DIR" "$BIN" > "$malformed_out" 2>/dev/null
+python3 - "$malformed_out" <<'PY' \
+  || fail "malformed UTF-8 bytes bypassed the shared line cap"
+import sys
+
+lines = open(sys.argv[1], "rb").read().splitlines()
+line = next(line for line in lines if line.startswith(b"malformed: "))
+assert len(line) == 220, len(line)
+assert line.endswith(b" [truncated]"), line[-32:]
+assert line.count(b"\x80") == 197, line.count(b"\x80")
+PY
+pass "malformed UTF-8 bytes each consume one cap position"
+
 # --- backlog composition fixtures ----------------------------------------------
 # A backlog whose Done section, held row, blocked row, and plain queued rows can
 # each be told apart in the rendered digest. DONE-ROW-LINE and the *-BODY-LINE

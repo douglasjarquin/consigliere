@@ -35,21 +35,50 @@ CS_LINE_CAP_SUFFIX=' [truncated]'
 cs_cap_line_var() {
   local LC_ALL=C
   local line=$1 max=${2:-$CS_LINE_CAP_DEFAULT} keep bytes
-  local offset=0 characters=0 keep_bytes=0 byte width
+  local offset=0 characters=0 keep_bytes=0 byte width next1 next2 next3
   keep=$((max - ${#CS_LINE_CAP_SUFFIX}))
   [ "$keep" -ge 0 ] || keep=0
   bytes=${#line}
   while [ "$offset" -lt "$bytes" ]; do
     printf -v byte '%d' "'${line:$offset:1}"
     [ "$byte" -ge 0 ] || byte=$((byte + 256))
-    if [ "$byte" -lt 128 ]; then
-      width=1
-    elif [ "$byte" -lt 224 ]; then
-      width=2
-    elif [ "$byte" -lt 240 ]; then
-      width=3
-    else
-      width=4
+    width=1
+    if ((byte >= 194 && byte <= 223 && offset + 1 < bytes)); then
+      printf -v next1 '%d' "'${line:$((offset + 1)):1}"
+      [ "$next1" -ge 0 ] || next1=$((next1 + 256))
+      if ((next1 >= 128 && next1 <= 191)); then
+        width=2
+      fi
+    elif ((byte >= 224 && byte <= 239 && offset + 2 < bytes)); then
+      printf -v next1 '%d' "'${line:$((offset + 1)):1}"
+      printf -v next2 '%d' "'${line:$((offset + 2)):1}"
+      [ "$next1" -ge 0 ] || next1=$((next1 + 256))
+      [ "$next2" -ge 0 ] || next2=$((next2 + 256))
+      if ((next2 >= 128 && next2 <= 191)); then
+        if ((byte == 224 && next1 >= 160 && next1 <= 191)); then
+          width=3
+        elif ((byte == 237 && next1 >= 128 && next1 <= 159)); then
+          width=3
+        elif ((byte != 224 && byte != 237 && next1 >= 128 && next1 <= 191)); then
+          width=3
+        fi
+      fi
+    elif ((byte >= 240 && byte <= 244 && offset + 3 < bytes)); then
+      printf -v next1 '%d' "'${line:$((offset + 1)):1}"
+      printf -v next2 '%d' "'${line:$((offset + 2)):1}"
+      printf -v next3 '%d' "'${line:$((offset + 3)):1}"
+      [ "$next1" -ge 0 ] || next1=$((next1 + 256))
+      [ "$next2" -ge 0 ] || next2=$((next2 + 256))
+      [ "$next3" -ge 0 ] || next3=$((next3 + 256))
+      if ((next2 >= 128 && next2 <= 191 && next3 >= 128 && next3 <= 191)); then
+        if ((byte == 240 && next1 >= 144 && next1 <= 191)); then
+          width=4
+        elif ((byte >= 241 && byte <= 243 && next1 >= 128 && next1 <= 191)); then
+          width=4
+        elif ((byte == 244 && next1 >= 128 && next1 <= 143)); then
+          width=4
+        fi
+      fi
     fi
     offset=$((offset + width))
     characters=$((characters + 1))
