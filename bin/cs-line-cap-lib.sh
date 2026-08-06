@@ -15,10 +15,10 @@
 # still owns how many tail lines it prints per task. This file owns only the
 # per-line cut.
 #
-# The cap counts characters under its own UTF-8 locale, so an inherited byte
-# locale cannot change the measurement or slice. A plain-ASCII line is bounded
-# to the same number of bytes, and a multibyte character is never cut in half
-# into an invalid sequence.
+# The cap counts complete UTF-8 byte sequences itself, so installed locale names
+# and the inherited locale cannot change the measurement or slice. A plain-ASCII
+# line is bounded to the same number of bytes, and a multibyte character is never
+# cut in half into an invalid sequence.
 # Truncation stays recoverable because the session-start digest prints each
 # task's full status log path, while every OPEN DECISIONS entry begins with the
 # task id that identifies its durable state/<id>.status source.
@@ -33,15 +33,33 @@ CS_LINE_CAP_SUFFIX=' [truncated]'
 # a larger section never pays a command substitution per item on a path that
 # runs at the top of every wake-handling turn.
 cs_cap_line_var() {
-  local LC_ALL=C.UTF-8
-  local line=$1 max=${2:-$CS_LINE_CAP_DEFAULT} keep
-  if [ "${#line}" -le "$max" ]; then
-    CS_LINE_CAP_LINE=$line
-    return 0
-  fi
+  local LC_ALL=C
+  local line=$1 max=${2:-$CS_LINE_CAP_DEFAULT} keep bytes
+  local offset=0 characters=0 keep_bytes=0 byte width
   keep=$((max - ${#CS_LINE_CAP_SUFFIX}))
   [ "$keep" -ge 0 ] || keep=0
-  CS_LINE_CAP_LINE="${line:0:$keep}$CS_LINE_CAP_SUFFIX"
+  bytes=${#line}
+  while [ "$offset" -lt "$bytes" ]; do
+    printf -v byte '%d' "'${line:$offset:1}"
+    [ "$byte" -ge 0 ] || byte=$((byte + 256))
+    if [ "$byte" -lt 128 ]; then
+      width=1
+    elif [ "$byte" -lt 224 ]; then
+      width=2
+    elif [ "$byte" -lt 240 ]; then
+      width=3
+    else
+      width=4
+    fi
+    offset=$((offset + width))
+    characters=$((characters + 1))
+    [ "$characters" -ne "$keep" ] || keep_bytes=$offset
+    if [ "$characters" -gt "$max" ]; then
+      CS_LINE_CAP_LINE="${line:0:$keep_bytes}$CS_LINE_CAP_SUFFIX"
+      return 0
+    fi
+  done
+  CS_LINE_CAP_LINE=$line
 }
 
 # cs_cap_line <line> [<max>]: the same cut, printed on stdout, for a caller that
