@@ -337,8 +337,33 @@ test_usage_errors() {
   pass "usage errors exit 2 and --help documents the contract"
 }
 
+# --- absent registry is the empty set, not a gap --------------------------------
+
+test_absent_registry_is_not_a_gap() {
+  local reg="$HOME_DIR/data/capos.md" saved
+  saved=$(cat "$reg")
+  rm -f "$reg"
+
+  # A home that never provisioned a capo has no registry, and that is healthy:
+  # the review must read it as zero capos, never as a missing artifact.
+  run_view
+  expect_code 0 "$RC" "absent-registry view"
+  assert_contains "$OUT" "No capos provisioned from this home." \
+    "absent registry must render as the empty set"
+  assert_not_contains "$OUT" "No capo registry" \
+    "absent registry must not be reported as a missing file"
+  run_view --json
+  printf '%s' "$OUT" | jq -e '
+    .capos.present == false and (.capos.records | length) == 0 and .capos.error == null
+  ' >/dev/null || fail "absent registry JSON must stay present:false with no error: $OUT"
+
+  printf '%s\n' "$saved" > "$reg"
+  pass "an absent capo registry renders as zero capos provisioned, not a gap"
+}
+
 test_markdown_review
 test_json_snapshot
 test_capo_bound_disclosed
 test_registry_reads_fail_closed
+test_absent_registry_is_not_a_gap
 test_usage_errors

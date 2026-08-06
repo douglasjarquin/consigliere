@@ -298,7 +298,7 @@ fi
 section "CONTEXT"
 print_file_or_absent "$DATA/projects.md" "data/projects.md"
 print_file_or_absent "$DATA/boards.md" "data/boards.md (GitHub board mapping for the contracts and casino skills)"
-print_file_or_absent "$DATA/capos.md" "data/capos.md"
+print_file_or_absent "$DATA/capos.md" "data/capos.md (host-local; ABSENT = no capos provisioned here)"
 print_startup_memory "$DATA/boss.md" "data/boss.md"
 print_startup_memory "$DATA/boss-shared.md" "data/boss-shared.md (shared, main-authoritative, read-only in capo homes)"
 print_startup_memory "$DATA/learnings.md" "data/learnings.md"

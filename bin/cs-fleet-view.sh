@@ -399,7 +399,7 @@ printf '%s\n' "$SNAPSHOT" | jq -r '
    else ($decisions[] | "- \(.id) [key=\(.key)] \(.verb): \(.summary)") end),
   "",
   "## Capos (idle endpoint is healthy; route by scope, read state not chat)",
-  (if .capos.present | not then "No capo registry at \(.capos.path)."
+  (if .capos.present | not then "No capos provisioned from this home."
    elif .capos.error != null then "UNREADABLE capo registry: \(.capos.error). Registered capos are NOT listed below; this is not an empty fleet."
    elif (.capos.records | length) == 0 then "Registry present, no registered capos."
    else
