@@ -36,6 +36,30 @@ fold_inc() {
   bash -c '. "$1"; status_open_decisions_incremental "$2"' _ "$CLASSIFY" "$1"
 }
 
+fold_inc_with_failed_stage() {
+  bash -c '
+    . "$1"
+    printf() {
+      case ${1-} in
+        "fold-contract=%s\\n") return 1 ;;
+        *) builtin printf "$@" ;;
+      esac
+    }
+    status_open_decisions_incremental "$2"
+  ' _ "$CLASSIFY" "$1"
+}
+
+fold_inc_with_predictable_symlinks() {
+  bash -c '
+    . "$1"
+    f=$2
+    cf=$(_cs_decision_cursor_path "$f")
+    ln -s "$3" "$cf.read.$$" || exit 1
+    ln -s "$4" "$cf.tmp.$$" || exit 1
+    status_open_decisions_incremental "$f"
+  ' _ "$CLASSIFY" "$1" "$2" "$3"
+}
+
 # scan_inc <state>: the fleet-wide incremental wrapper.
 scan_inc() {
   bash -c '. "$1"; scan_open_decisions_incremental "$2"' _ "$CLASSIFY" "$1"
@@ -245,7 +269,47 @@ test_read_failure_preserves_trusted_set_and_cursor() {
   pass "a read failure reports the trusted set unchanged and preserves the cursor"
 }
 
-test_concurrent_commit_does_not_move_cursor_backward() {
+test_failed_staged_cursor_write_preserves_previous_cursor() {
+  local dir state f cursor before out
+  dir=$(make_case failed-stage); state="$dir/state"
+  f="$state/t1.status"
+  cursor=$(cursor_of "$state" t1)
+  printf 'needs-decision [key=api]: keep this cursor\n' > "$f"
+  fold_inc "$f" > /dev/null
+  before=$(cat "$cursor")
+  : > "$f"
+
+  out=$(fold_inc_with_failed_stage "$f")
+  [ -z "$out" ] || fail "the current empty file must still fold to an empty set (got: '$out')"
+  [ "$(cat "$cursor")" = "$before" ] \
+    || fail "a failed staged write must preserve the complete previous cursor"
+  out=$(fold_inc "$f")
+  [ -z "$out" ] || fail "recovery after a failed staged write must persist the empty fold (got: '$out')"
+  assert_grep 'offset=0' "$cursor" "recovery must replace the preserved cursor with the complete reset"
+  pass "a failed staged cursor write preserves the previous cursor"
+}
+
+test_atomic_temp_files_ignore_predictable_symlinks() {
+  local dir state f cursor read_victim write_victim out full
+  dir=$(make_case temp-symlinks); state="$dir/state"
+  f="$state/t1.status"
+  cursor=$(cursor_of "$state" t1)
+  read_victim="$dir/read-victim"
+  write_victim="$dir/write-victim"
+  printf 'read-safe\n' > "$read_victim"
+  printf 'write-safe\n' > "$write_victim"
+  printf 'needs-decision [key=api]: choose safely\n' > "$f"
+
+  out=$(fold_inc_with_predictable_symlinks "$f" "$read_victim" "$write_victim")
+  full=$(fold_full "$f")
+  [ "$out" = "$full" ] || fail "atomic temp paths must preserve fold behavior (inc: '$out' full: '$full')"
+  [ "$(cat "$read_victim")" = 'read-safe' ] || fail "the chunk read must not follow a predictable symlink"
+  [ "$(cat "$write_victim")" = 'write-safe' ] || fail "the cursor stage must not follow a predictable symlink"
+  [ ! -L "$cursor" ] || fail "the persisted cursor must be a regular file, not an attacker symlink"
+  pass "atomic cursor temp files ignore predictable symlinks"
+}
+
+test_compare_before_rename_skips_observed_newer_cursor() {
   local dir state f cursor fakebin real_tail ready release slow_out slow_pid attempts=0
   local fast_out failed_read cursor_offset file_size
   dir=$(make_case concurrent); state="$dir/state"
@@ -260,6 +324,9 @@ test_concurrent_commit_does_not_move_cursor_backward() {
   fold_inc "$f" > /dev/null
   printf 'working: slow writer append\n' >> "$f"
 
+  # This pauses the slow writer before its header comparison and proves it skips
+  # a newer cursor already present at comparison time. It does not exercise the
+  # accepted compare-then-rename window after that check.
   cat > "$fakebin/tail" <<'SH'
 #!/usr/bin/env bash
 "$CS_CURSOR_REAL_TAIL" "$@" || exit $?
@@ -300,13 +367,13 @@ SH
   cursor_offset=$(sed -n '1s/^offset=//p' "$cursor")
   file_size=$(wc -c < "$f" | tr -d ' ')
   [ "$cursor_offset" = "$file_size" ] \
-    || fail "the slower writer moved the cursor backward (offset: '$cursor_offset' size: '$file_size')"
+    || fail "the comparison moved an observed newer cursor backward (offset: '$cursor_offset' size: '$file_size')"
   printf '#!/usr/bin/env bash\nexit 1\n' > "$fakebin/stat"
   chmod +x "$fakebin/stat"
   failed_read=$(PATH="$fakebin:$PATH" fold_inc "$f")
   [ -z "$failed_read" ] \
     || fail "a read failure after the race must see the newer persisted closed set (got: '$failed_read')"
-  pass "a slower concurrent writer cannot move the persisted cursor backward"
+  pass "compare-before-rename skips an observed newer cursor"
 }
 
 test_cursor_is_safe_to_delete() {
@@ -350,6 +417,8 @@ test_zero_byte_invalidation_persists_reset_cursor
 test_fold_contract_change_invalidates_cursor
 test_same_size_replacement_refolds_via_inode_check
 test_read_failure_preserves_trusted_set_and_cursor
-test_concurrent_commit_does_not_move_cursor_backward
+test_failed_staged_cursor_write_preserves_previous_cursor
+test_atomic_temp_files_ignore_predictable_symlinks
+test_compare_before_rename_skips_observed_newer_cursor
 test_cursor_is_safe_to_delete
 test_scan_wrapper_matches_full_scan

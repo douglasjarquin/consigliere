@@ -541,15 +541,19 @@ EOF
 # (state/.decision-cursor-<task>) as a side effect, the library's second
 # documented exception to the pure-read rule after crew_absorb_class. The
 # cursor format is self-describing: offset, device+inode identity, effective
-# resolve/held fold contract, then the folded open-set records. The write is
-# atomic (temp file + rename), so a crash between calls leaves either the prior
-# cursor or the new one, never a partial one. bin/cs-wake-drain.sh calls this
-# only after releasing the wake-queue lock, so overlapping drains compare those
-# bounded header fields immediately before rename. A slower writer discards its
-# candidate when the same identity already records a later offset, or the same
-# offset under the same fold contract, instead of moving persisted state
-# backward. No extra lock file is needed; a losing writer's one-call output may
-# be stale, and the next drain reads the monotonic persisted cursor.
+# resolve/held fold contract, then the folded open-set records. Each complete
+# cursor is staged in an atomically created same-directory file before rename,
+# so a crash between calls leaves either the prior cursor or the new one, never
+# a trusted partial write. bin/cs-wake-drain.sh calls this only after releasing
+# the wake-queue lock, so overlapping drains compare the bounded cursor headers
+# immediately before rename. A writer that sees the same identity at a later
+# offset, or at the same offset under the same fold contract, discards its
+# candidate. The check and rename are deliberately not serialized: a newer
+# cursor can land in that window and then be replaced by a smaller-offset
+# candidate. That lost update is bounded and self-healing because the next
+# successful drain re-folds the suffix from the smaller offset and reconstructs
+# the same open set. It can repeat work and make the losing writer's current
+# output stale, but it cannot permanently skip status bytes or require a lock.
 _cs_decision_cursor_path() {  # <status-file>
   local f=$1 dir base
   dir=$(dirname "$f")
@@ -648,7 +652,8 @@ status_open_decisions_incremental() {  # <status-file>
   fi
 
   if [ "$offset" -lt "$size" ]; then
-    chunk_file="$cf.read.$$"
+    chunk_file=$(umask 077; mktemp "$cf.read.XXXXXX" 2>/dev/null) \
+      || { printf '%s' "$trusted_open"; return 0; }
     tail -c "+$((offset + 1))" "$f" > "$chunk_file" 2>/dev/null \
       || { rm -f "$chunk_file"; printf '%s' "$trusted_open"; return 0; }
     chunk_size=$(LC_ALL=C wc -c < "$chunk_file" 2>/dev/null) \
@@ -671,57 +676,58 @@ status_open_decisions_incremental() {  # <status-file>
   fi
 
   if [ "$write_cursor" -eq 1 ]; then
-    tmp_file="$cf.tmp.$$"
-    {
-      printf 'offset=%s\n' "$size"
-      printf 'ident=%s\n' "$cur_ident"
-      printf 'fold-contract=%s\n' "$fold_contract"
-      # An `if` (not `[ -n "$open" ] && printf ...`) so the group's exit status
-      # is always 0 even when open is empty (fully resolved) - a bare `&&`
-      # there would make the whole group fail on that condition, silently
-      # skipping the mv below and leaving the cursor stuck on the OLD offset.
-      if [ -n "$open" ]; then printf '%s' "$open"; fi
-    } > "$tmp_file"
-    replace_cursor=1
-    disk_offset_line=''
-    disk_ident_line=''
-    disk_contract_line=''
-    if [ -f "$cf" ] && [ -r "$cf" ] && [ ! -L "$cf" ] && {
-      IFS= read -r disk_offset_line \
-        && IFS= read -r disk_ident_line \
-        && IFS= read -r disk_contract_line
-    } < "$cf" 2>/dev/null; then
-      disk_offset=${disk_offset_line#offset=}
-      disk_ident=${disk_ident_line#ident=}
-      disk_contract=${disk_contract_line#fold-contract=}
-      case "$disk_offset" in
-        ''|*[!0-9]*) : ;;
-        *)
-          if [ "$disk_offset_line" = "offset=$disk_offset" ] \
-            && [ "$disk_ident_line" = "ident=$disk_ident" ] \
-            && [ "$disk_contract_line" = "fold-contract=$disk_contract" ]; then
-            if [ "$disk_ident" = "$cur_ident" ]; then
-              if [ "$disk_offset" -gt "$size" ]; then
-                if [ "$disk_offset" != "$loaded_offset" ] \
-                  || [ "$disk_ident" != "$loaded_ident" ] \
-                  || [ "$disk_contract" != "$loaded_contract" ]; then
+    if tmp_file=$(umask 077; mktemp "$cf.tmp.XXXXXX" 2>/dev/null); then
+      if {
+        printf 'offset=%s\n' "$size" \
+          && printf 'ident=%s\n' "$cur_ident" \
+          && printf 'fold-contract=%s\n' "$fold_contract" \
+          && { [ -z "$open" ] || printf '%s' "$open"; }
+      } > "$tmp_file"; then
+        replace_cursor=1
+        disk_offset_line=''
+        disk_ident_line=''
+        disk_contract_line=''
+        if [ -f "$cf" ] && [ -r "$cf" ] && [ ! -L "$cf" ] && {
+          IFS= read -r disk_offset_line \
+            && IFS= read -r disk_ident_line \
+            && IFS= read -r disk_contract_line
+        } < "$cf" 2>/dev/null; then
+          disk_offset=${disk_offset_line#offset=}
+          disk_ident=${disk_ident_line#ident=}
+          disk_contract=${disk_contract_line#fold-contract=}
+          case "$disk_offset" in
+            ''|*[!0-9]*) : ;;
+            *)
+              if [ "$disk_offset_line" = "offset=$disk_offset" ] \
+                && [ "$disk_ident_line" = "ident=$disk_ident" ] \
+                && [ "$disk_contract_line" = "fold-contract=$disk_contract" ]; then
+                if [ "$disk_ident" = "$cur_ident" ]; then
+                  if [ "$disk_offset" -gt "$size" ]; then
+                    if [ "$disk_offset" != "$loaded_offset" ] \
+                      || [ "$disk_ident" != "$loaded_ident" ] \
+                      || [ "$disk_contract" != "$loaded_contract" ]; then
+                      replace_cursor=0
+                    fi
+                  elif [ "$disk_offset" -eq "$size" ] \
+                    && [ "$disk_contract" = "$fold_contract" ]; then
+                    replace_cursor=0
+                  fi
+                elif [ -n "$disk_ident" ] && [ "$disk_ident" != "$loaded_ident" ]; then
                   replace_cursor=0
                 fi
-              elif [ "$disk_offset" -eq "$size" ] \
-                && [ "$disk_contract" = "$fold_contract" ]; then
-                replace_cursor=0
               fi
-            elif [ -n "$disk_ident" ] && [ "$disk_ident" != "$loaded_ident" ]; then
-              replace_cursor=0
-            fi
-          fi
-          ;;
-      esac
-    fi
-    if [ "$replace_cursor" -eq 1 ]; then
-      mv -f "$tmp_file" "$cf" 2>/dev/null || rm -f "$tmp_file"
-    else
-      rm -f "$tmp_file"
+              ;;
+          esac
+        fi
+        if [ "$replace_cursor" -eq 1 ]; then
+          # Accepted compare-then-rename window: a smaller cursor self-heals on the next successful drain.
+          mv -f "$tmp_file" "$cf" 2>/dev/null || rm -f "$tmp_file"
+        else
+          rm -f "$tmp_file"
+        fi
+      else
+        rm -f "$tmp_file"
+      fi
     fi
   fi
   printf '%s' "$open"
