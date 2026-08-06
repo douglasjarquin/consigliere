@@ -74,7 +74,10 @@ cs_test_tmproot() {
 #
 # cs_fakebin <dir> creates <dir>/fakebin and echoes it; prepend it to PATH to
 # shadow real tools with stubs. cs_fake_exit0 drops trivial exit-0 stubs for
-# the named tools into a fakebin dir.
+# the named tools into a fakebin dir. cs_fake_version_tool drops a stub for a
+# tool whose installed version bootstrap gates, so a fixture is not reported as
+# an unparseable (below-floor) build simply for answering --version with
+# nothing.
 
 cs_fakebin() {
   local fakebin="$1/fakebin"
@@ -92,6 +95,25 @@ exit 0
 SH
     chmod +x "$fakebin/$tool"
   done
+}
+
+# cs_fake_version_tool <fakebin> <tool> <override-env-var> <default-version>
+# The stub answers --version with <override-env-var> when that variable is set
+# and non-empty, and with <default-version> otherwise; every other invocation
+# exits 0. A case that needs to drive a version floor exports the variable.
+# 9.9.9 is the conventional default: above any real floor, so a suite that
+# merely runs bootstrap is never reported as an out-of-date build.
+cs_fake_version_tool() {
+  local fakebin=$1 tool=$2 override=$3 default=$4
+  cat > "$fakebin/$tool" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = --version ]; then
+  printf '%s\n' "\${$override:-$default}"
+  exit 0
+fi
+exit 0
+SH
+  chmod +x "$fakebin/$tool"
 }
 
 # --- deterministic git identity and fixtures --------------------------------

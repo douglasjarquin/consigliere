@@ -17,10 +17,12 @@
 #
 # Version floors are NOT owned here. The pinned herdr version lives in
 # bin/cs-install-herdr.sh, the herdr protocol floor in bin/cs-herdr-lib.sh
-# (CS_HERDR_MIN_PROTOCOL), and the ShellCheck pin in bin/cs-lint.sh
-# (--required-version). This library names tools, states why consigliere needs
-# them, probes the installed version, and suggests an install channel - it never
-# holds a second copy of a pin.
+# (CS_HERDR_MIN_PROTOCOL), the ShellCheck pin in bin/cs-lint.sh
+# (--required-version), and the axi-family floors and their bump policy in
+# bin/cs-bootstrap.sh. This library names tools, states why consigliere needs
+# them, probes the installed version, offers the version comparison the floor
+# owners share, and suggests an install channel - it never holds a second copy
+# of a pin.
 #
 # Install suggestions are suggestions only. Consigliere never installs a
 # dependency for the boss: the same tool legitimately arrives by brew, npm, a
@@ -34,6 +36,7 @@
 #   cs_deps_purpose <tool>                        # why consigliere needs it
 #   cs_deps_hint <tool>                           # install suggestion
 #   cs_deps_version <tool>                        # installed version, or nothing
+#   cs_deps_version_at_least <tool> <floor>       # exit 0 iff installed >= floor
 #
 # cs_deps_version runs the tool's own `--version`; it does not bound that call,
 # so it is only safe against the inventory's tools, never arbitrary input.
@@ -73,7 +76,7 @@ cs_deps_tools() {
       ;;
     optional)
       printf '%s\n' "$(cs_deps_other_harness_binary)" tasks-axi no-mistakes \
-        lavish-axi chrome-devtools-axi
+        lavish-axi chrome-devtools-axi quota-axi
       ;;
     contributor)
       printf '%s\n' shellcheck python3
@@ -99,6 +102,7 @@ cs_deps_purpose() {
     no-mistakes) printf 'delivery pipeline for no-mistakes projects; other delivery modes are unaffected\n' ;;
     lavish-axi) printf 'visual review surfaces for structured decisions and reports\n' ;;
     chrome-devtools-axi) printf 'browser work for soldiers that must drive a real page\n' ;;
+    quota-axi) printf 'local provider quota headroom before spending a quota window\n' ;;
     shellcheck) printf 'the required shell-lint check (bin/cs-lint.sh)\n' ;;
     python3) printf 'herdr push events (bin/cs-herdr-events.py); the watcher poll loop is the backstop\n' ;;
     *) printf 'no recorded purpose\n'; return 1 ;;
@@ -120,6 +124,7 @@ cs_deps_hint() {
     no-mistakes) printf 'install from https://github.com/kunchenguid/no-mistakes (see its README)\n' ;;
     lavish-axi) printf 'npm i -g lavish-axi\n' ;;
     chrome-devtools-axi) printf 'npm i -g chrome-devtools-axi\n' ;;
+    quota-axi) printf 'npm i -g quota-axi\n' ;;
     shellcheck) printf 'brew install shellcheck; on Linux x86_64, bin/cs-install-shellcheck.sh <dir> installs the pinned build\n' ;;
     python3) printf 'brew install python, or any python3 already on the system\n' ;;
     *) printf 'no recorded install suggestion\n'; return 1 ;;
@@ -139,4 +144,26 @@ cs_deps_version() {
   esac
   # First dotted-number token: "jq-1.8.2" -> 1.8.2, "gh version 2.96.0 (...)" -> 2.96.0.
   printf '%s\n' "$raw" | grep -Eo '[0-9]+(\.[0-9]+)+' | head -1
+}
+
+# cs_deps_version_at_least <tool> <floor> - exit 0 when the installed version is
+# at or above <floor>, comparing dotted numeric fields. Exits nonzero when the
+# tool is absent or its version cannot be parsed, so an unparseable build reads
+# as below-floor rather than silently passing. Floor values are owned by the
+# calling script (bin/cs-deps-lib.sh header lists the owners), never here.
+cs_deps_version_at_least() {
+  local tool=${1:-} floor=${2:-} have
+  [ -n "$tool" ] && [ -n "$floor" ] || return 1
+  have=$(cs_deps_version "$tool") || return 1
+  [ -n "$have" ] || return 1
+  awk -v have="$have" -v floor="$floor" 'BEGIN {
+    n = split(have, H, "."); m = split(floor, F, ".")
+    len = (n > m ? n : m)
+    for (i = 1; i <= len; i++) {
+      h = H[i] + 0; f = F[i] + 0
+      if (h > f) exit 0
+      if (h < f) exit 1
+    }
+    exit 0
+  }'
 }

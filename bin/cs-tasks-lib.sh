@@ -5,7 +5,9 @@
 # Compatible means tasks-axi --version reports 0.1.1 or newer,
 # `tasks-axi update --help` exposes --archive-body for recoverable note rewrites,
 # and `tasks-axi mv --help` exposes [<id>...] for atomic multi-ID moves required
-# by capo handoffs (introduced in tasks-axi 0.2.2).
+# by capo handoffs. These probes are defense in depth behind the tasks-axi
+# version floor owned by bin/cs-bootstrap.sh; they are not that floor's
+# rationale, and the floor is not theirs.
 # `config/backlog-backend.conf=manual` opts out of tasks-axi for routine consigliere
 # backlog mutations, but validated capo handoffs always use `tasks-axi mv`.
 # Absent or any other value keeps the default tasks-axi backend path, falling

@@ -477,8 +477,10 @@ SH
 #!/usr/bin/env bash
 exit 1
 SH
-  cp "$fakebin/gh" "$fakebin/gh-axi"
-  chmod +x "$fakebin/herdr" "$fakebin/gh" "$fakebin/gh-axi"
+  chmod +x "$fakebin/herdr" "$fakebin/gh"
+  # A version-reporting gh-axi: bootstrap gates axi-family versions, so a bare
+  # failing stub would add a below-floor MISSING line this test does not want.
+  cs_fake_version_tool "$fakebin" gh-axi CS_TEST_GH_AXI_VERSION 9.9.9
   # A clone we will leave STUCK (dirty), and one that self-heals (detached-clean-ancestor).
   stuck=$(build_pair "$home" stuck-clone)
   advance_origin "$home" stuck-clone C1

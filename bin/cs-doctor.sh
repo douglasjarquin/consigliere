@@ -12,7 +12,9 @@
 # dispatch gate. cs-doctor.sh is the human-readable superset run BEFORE that -
 # versions, the herdr server, gh auth, and the contributor tools bootstrap stays
 # silent about. Both read one inventory (bin/cs-deps-lib.sh), so they cannot
-# disagree about what consigliere depends on.
+# disagree about what consigliere depends on. The axi-family version floors and
+# their bump policy are owned by bin/cs-bootstrap.sh; this report prints the
+# installed versions and does not restate the floors.
 #
 # Usage:
 #   cs-doctor.sh            print the report
