@@ -56,6 +56,8 @@ test_new_task_without_cursor_matches_full_fold() {
   assert_present "$(cursor_of "$state" t1)" "the first call must persist a cursor"
   assert_grep "offset=" "$(cursor_of "$state" t1)" "the cursor must record a byte offset"
   assert_grep "ident=" "$(cursor_of "$state" t1)" "the cursor must record a device:inode identity"
+  assert_grep "$(printf 'fold-contract=resolve:resolved\theld:captain-held')" \
+    "$(cursor_of "$state" t1)" "the cursor must record its effective fold contract"
   pass "a new task with no cursor takes the full re-fold path and writes the cursor"
 }
 
@@ -136,6 +138,67 @@ test_truncated_log_refolds_from_scratch() {
   pass "a truncated log invalidates the cursor and re-folds from scratch"
 }
 
+test_zero_byte_invalidation_persists_reset_cursor() {
+  local dir state f cursor out full old_size new_size
+  dir=$(make_case zero-byte); state="$dir/state"
+  f="$state/t1.status"
+  cursor=$(cursor_of "$state" t1)
+  printf '%s\n' \
+    'needs-decision [key=old]: stale decision' \
+    'working: 11111111111111111111111111111111111111111111111111111111111111111111111111111111' > "$f"
+  old_size=$(wc -c < "$f" | tr -d ' ')
+  fold_inc "$f" > /dev/null
+
+  : > "$f"
+  out=$(fold_inc "$f")
+  [ -z "$out" ] || fail "an empty invalidated log must have no open decisions (got: '$out')"
+  assert_grep 'offset=0' "$cursor" "a zero-byte invalidation must persist offset zero"
+  assert_no_grep 'stale decision' "$cursor" "a zero-byte invalidation must discard the stale open set"
+
+  printf '%s\n' \
+    'needs-decision [key=new]: decision after reset' \
+    'working: 222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222' > "$f"
+  new_size=$(wc -c < "$f" | tr -d ' ')
+  [ "$new_size" -gt "$old_size" ] || fail "fixture bug: regrown log must exceed the stale offset"
+  out=$(fold_inc "$f")
+  full=$(fold_full "$f")
+  [ "$out" = "$full" ] || fail "regrowth after an empty invalidation must fold from byte zero (inc: '$out' full: '$full')"
+  assert_contains "$out" "$(printf 'new\tneeds-decision\tdecision after reset')" \
+    "regrowth must not skip the new prefix"
+  pass "a zero-byte invalidation persists its reset cursor before regrowth"
+}
+
+test_fold_contract_change_invalidates_cursor() {
+  local dir state f cursor out full
+  dir=$(make_case fold-contract); state="$dir/state"
+  f="$state/t1.status"
+  cursor=$(cursor_of "$state" t1)
+  printf '%s\n' \
+    'needs-decision [key=choice]: pick one' \
+    'closed [key=choice]: picked one' \
+    'blocked [key=quota]: waiting' \
+    'parked [key=quota]: transferred' > "$f"
+
+  out=$(CS_CLASSIFY_RESOLVE_VERB=closed \
+    CS_CLASSIFY_BOSS_HELD_VERB=parked fold_inc "$f")
+  [ -z "$out" ] || fail "the configured close verbs must close both decisions (got: '$out')"
+  assert_grep "$(printf 'fold-contract=resolve:closed\theld:parked')" "$cursor" \
+    "the cursor must persist the configured fold contract"
+
+  out=$(CS_CLASSIFY_RESOLVE_VERB=resolved \
+    CS_CLASSIFY_BOSS_HELD_VERB=captain-held fold_inc "$f")
+  full=$(CS_CLASSIFY_RESOLVE_VERB=resolved \
+    CS_CLASSIFY_BOSS_HELD_VERB=captain-held fold_full "$f")
+  [ "$out" = "$full" ] || fail "a fold-contract change must re-fold from scratch (inc: '$out' full: '$full')"
+  assert_contains "$out" "$(printf 'choice\tneeds-decision\tpick one')" \
+    "the old resolve verb must stop closing decisions after the contract changes"
+  assert_contains "$out" "$(printf 'quota\tblocked\twaiting')" \
+    "the old held verb must stop closing decisions after the contract changes"
+  assert_grep "$(printf 'fold-contract=resolve:resolved\theld:captain-held')" "$cursor" \
+    "the rewritten cursor must identify the new fold contract"
+  pass "a changed resolve/held fold contract invalidates and rewrites the cursor"
+}
+
 test_same_size_replacement_refolds_via_inode_check() {
   local dir state f out full old new
   dir=$(make_case same-size); state="$dir/state"
@@ -182,6 +245,70 @@ test_read_failure_preserves_trusted_set_and_cursor() {
   pass "a read failure reports the trusted set unchanged and preserves the cursor"
 }
 
+test_concurrent_commit_does_not_move_cursor_backward() {
+  local dir state f cursor fakebin real_tail ready release slow_out slow_pid attempts=0
+  local fast_out failed_read cursor_offset file_size
+  dir=$(make_case concurrent); state="$dir/state"
+  f="$state/t1.status"
+  cursor=$(cursor_of "$state" t1)
+  fakebin=$(cs_fakebin "$dir")
+  real_tail=$(command -v tail)
+  ready="$dir/slow-ready"
+  release="$dir/slow-release"
+  slow_out="$dir/slow-output"
+  printf 'needs-decision [key=api]: choose one\n' > "$f"
+  fold_inc "$f" > /dev/null
+  printf 'working: slow writer append\n' >> "$f"
+
+  cat > "$fakebin/tail" <<'SH'
+#!/usr/bin/env bash
+"$CS_CURSOR_REAL_TAIL" "$@" || exit $?
+: > "$CS_CURSOR_RACE_READY"
+while [ ! -e "$CS_CURSOR_RACE_RELEASE" ]; do
+  sleep 0.01
+done
+SH
+  chmod +x "$fakebin/tail"
+  PATH="$fakebin:$PATH" \
+    CS_CURSOR_REAL_TAIL="$real_tail" \
+    CS_CURSOR_RACE_READY="$ready" \
+    CS_CURSOR_RACE_RELEASE="$release" \
+    bash -c '. "$1"; status_open_decisions_incremental "$2"' \
+      _ "$CLASSIFY" "$f" > "$slow_out" &
+  slow_pid=$!
+
+  while [ ! -e "$ready" ]; do
+    if ! kill -0 "$slow_pid" 2>/dev/null; then
+      wait "$slow_pid" || true
+      fail "the staged slow cursor writer exited before the race point"
+    fi
+    attempts=$((attempts + 1))
+    if [ "$attempts" -ge 500 ]; then
+      : > "$release"
+      wait "$slow_pid" || true
+      fail "timed out staging the slow cursor writer"
+    fi
+    sleep 0.01
+  done
+
+  printf 'resolved [key=api]: chose one\n' >> "$f"
+  fast_out=$(fold_inc "$f")
+  : > "$release"
+  wait "$slow_pid" || fail "the staged slow cursor writer failed"
+  [ -z "$fast_out" ] || fail "the newer writer must fold the resolution (got: '$fast_out')"
+
+  cursor_offset=$(sed -n '1s/^offset=//p' "$cursor")
+  file_size=$(wc -c < "$f" | tr -d ' ')
+  [ "$cursor_offset" = "$file_size" ] \
+    || fail "the slower writer moved the cursor backward (offset: '$cursor_offset' size: '$file_size')"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$fakebin/stat"
+  chmod +x "$fakebin/stat"
+  failed_read=$(PATH="$fakebin:$PATH" fold_inc "$f")
+  [ -z "$failed_read" ] \
+    || fail "a read failure after the race must see the newer persisted closed set (got: '$failed_read')"
+  pass "a slower concurrent writer cannot move the persisted cursor backward"
+}
+
 test_cursor_is_safe_to_delete() {
   local dir state f out full
   dir=$(make_case delete-cursor); state="$dir/state"
@@ -219,7 +346,10 @@ test_new_task_without_cursor_matches_full_fold
 test_steady_state_folds_only_new_bytes
 test_incremental_agrees_with_full_fold_line_by_line
 test_truncated_log_refolds_from_scratch
+test_zero_byte_invalidation_persists_reset_cursor
+test_fold_contract_change_invalidates_cursor
 test_same_size_replacement_refolds_via_inode_check
 test_read_failure_preserves_trusted_set_and_cursor
+test_concurrent_commit_does_not_move_cursor_backward
 test_cursor_is_safe_to_delete
 test_scan_wrapper_matches_full_scan

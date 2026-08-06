@@ -519,16 +519,15 @@ EOF
 #
 # Cursor invalidation is deliberately minimal, matching how status files are
 # ACTUALLY used in this repo: every one is created once and only ever appended
-# to - never replaced, renamed, or rewritten in place. So the only two ways a
-# cursor can go stale are a shrink (truncated) or the file at this path being
-# a different file than before (replaced/rotated/recreated), which a changed
-# device+inode makes an O(1) check via a single stat call - no content
-# hashing, no re-reading the consumed prefix. Either signal falls back to a
-# full re-fold of the whole current file from byte 0 - byte for byte what
-# status_open_decisions itself would compute - and rewrites the cursor from
-# that clean baseline. A missing cursor (new task, or someone deleted the
-# cursor file, which is always safe) takes the same full-re-fold path. A
-# same-inode, same-size, in-place byte edit is NOT detected; that is a
+# to - never replaced, renamed, or rewritten in place. A shrink (truncation),
+# a changed device+inode (replacement/rotation/recreation), or a changed
+# resolve/held fold contract falls back to a full re-fold from byte 0 - byte
+# for byte what status_open_decisions itself would compute - and rewrites the
+# cursor from that clean baseline, even when the current file is empty. A
+# missing cursor (new task, or someone deleted the cursor file, which is always
+# safe) takes the same full-re-fold path. The identity check remains O(1) via a
+# single stat call - no content hashing and no re-reading the consumed prefix.
+# A same-inode, same-size, in-place byte edit is NOT detected; that is a
 # deliberately accepted gap because no code path in this repo ever does that
 # to a status file.
 #
@@ -541,13 +540,16 @@ EOF
 # Not a pure status-file read: this writes/rewrites the sibling cursor file
 # (state/.decision-cursor-<task>) as a side effect, the library's second
 # documented exception to the pure-read rule after crew_absorb_class. The
-# write is atomic (temp file + rename), so a crash between calls leaves either
-# the prior cursor or the new one, never a partial one. bin/cs-wake-drain.sh
-# calls this only after releasing the wake-queue lock, so a hypothetical race
-# between two overlapping drains can at worst redo a little folding work twice
-# - never drop an open decision - because a losing writer's offset can only
-# ever be equal to or behind an already-recorded byte position, and the next
-# call re-derives from whatever offset actually landed on disk.
+# cursor format is self-describing: offset, device+inode identity, effective
+# resolve/held fold contract, then the folded open-set records. The write is
+# atomic (temp file + rename), so a crash between calls leaves either the prior
+# cursor or the new one, never a partial one. bin/cs-wake-drain.sh calls this
+# only after releasing the wake-queue lock, so overlapping drains compare those
+# bounded header fields immediately before rename. A slower writer discards its
+# candidate when the same identity already records a later offset, or the same
+# offset under the same fold contract, instead of moving persisted state
+# backward. No extra lock file is needed; a losing writer's one-call output may
+# be stale, and the next drain reads the monotonic persisted cursor.
 _cs_decision_cursor_path() {  # <status-file>
   local f=$1 dir base
   dir=$(dirname "$f")
@@ -566,12 +568,19 @@ _cs_decision_file_ident() {  # <file> -> "dev:inode", empty on I/O failure
 }
 
 status_open_decisions_incremental() {  # <status-file>
-  local f=$1 cf offset ident open='' trusted_open='' cursor_data first rest ident_line
-  local size cur_ident resolve held chunk_file chunk_size line
+  local f=$1 cf offset ident cursor_contract open='' trusted_open=''
+  local cursor_data first rest ident_line contract_line loaded_offset loaded_ident loaded_contract
+  local size cur_ident resolve held fold_contract chunk_file chunk_size line write_cursor=0
+  local tmp_file replace_cursor disk_offset_line disk_ident_line disk_contract_line
+  local disk_offset disk_ident disk_contract
   [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 0
   cf=$(_cs_decision_cursor_path "$f")
+  resolve=${CS_CLASSIFY_RESOLVE_VERB:-$CS_CLASSIFY_RESOLVE_VERB_DEFAULT}
+  held=${CS_CLASSIFY_BOSS_HELD_VERB:-$CS_CLASSIFY_BOSS_HELD_VERB_DEFAULT}
+  fold_contract="resolve:${resolve}"$'\t'"held:${held}"
   offset=0
   ident=''
+  cursor_contract=''
   if [ -f "$cf" ] && [ -r "$cf" ] && [ ! -L "$cf" ]; then
     if cursor_data=$(LC_ALL=C command cat "$cf" 2>/dev/null); then
       first=${cursor_data%%$'\n'*}
@@ -589,9 +598,22 @@ status_open_decisions_incremental() {  # <status-file>
                     ident=*)
                       ident=${ident_line#ident=}
                       case "$rest" in
-                        *$'\n'*) open=${rest#*$'\n'} ;;
+                        *$'\n'*)
+                          rest=${rest#*$'\n'}
+                          contract_line=${rest%%$'\n'*}
+                          case "$contract_line" in
+                            fold-contract=*)
+                              cursor_contract=${contract_line#fold-contract=}
+                              case "$rest" in
+                                *$'\n'*) open=${rest#*$'\n'} ;;
+                              esac
+                              [ "$cursor_contract" = "$fold_contract" ] && trusted_open=$open
+                              ;;
+                            *) offset=0 ;;
+                          esac
+                          ;;
+                        *) offset=0 ;;
                       esac
-                      trusted_open=$open
                       ;;
                     *) offset=0 ;;
                   esac
@@ -604,6 +626,9 @@ status_open_decisions_incremental() {  # <status-file>
       esac
     fi
   fi
+  loaded_offset=$offset
+  loaded_ident=$ident
+  loaded_contract=$cursor_contract
 
   # A stat/size-read failure is a genuine I/O error, not "the file is empty" -
   # report the already-trusted persisted set unchanged rather than risking a
@@ -615,9 +640,11 @@ status_open_decisions_incremental() {  # <status-file>
   size=${size//[[:space:]]/}
   case "$size" in ''|*[!0-9]*) printf '%s' "$trusted_open"; return 0 ;; esac
 
-  if [ -z "$ident" ] || [ "$ident" != "$cur_ident" ] || [ "$offset" -gt "$size" ]; then
+  if [ -z "$ident" ] || [ "$ident" != "$cur_ident" ] \
+    || [ "$offset" -gt "$size" ] || [ "$cursor_contract" != "$fold_contract" ]; then
     offset=0
     open=''
+    write_cursor=1
   fi
 
   if [ "$offset" -lt "$size" ]; then
@@ -636,21 +663,66 @@ status_open_decisions_incremental() {  # <status-file>
     # than re-reading the whole file, without relying on timing or source text.
     [ -n "${CS_OPEN_DECISIONS_READ_PROBE:-}" ] \
       && printf '%s\t%s\n' "$f" "$chunk_size" >> "$CS_OPEN_DECISIONS_READ_PROBE"
-    resolve=${CS_CLASSIFY_RESOLVE_VERB:-$CS_CLASSIFY_RESOLVE_VERB_DEFAULT}
-    held=${CS_CLASSIFY_BOSS_HELD_VERB:-$CS_CLASSIFY_BOSS_HELD_VERB_DEFAULT}
     while IFS= read -r line || [ -n "$line" ]; do
       open=$(_cs_decision_fold_line "$open" "$line" "$resolve" "$held")
     done < "$chunk_file"
     rm -f "$chunk_file"
+    write_cursor=1
+  fi
+
+  if [ "$write_cursor" -eq 1 ]; then
+    tmp_file="$cf.tmp.$$"
     {
       printf 'offset=%s\n' "$size"
       printf 'ident=%s\n' "$cur_ident"
+      printf 'fold-contract=%s\n' "$fold_contract"
       # An `if` (not `[ -n "$open" ] && printf ...`) so the group's exit status
       # is always 0 even when open is empty (fully resolved) - a bare `&&`
       # there would make the whole group fail on that condition, silently
       # skipping the mv below and leaving the cursor stuck on the OLD offset.
       if [ -n "$open" ]; then printf '%s' "$open"; fi
-    } > "$cf.tmp.$$" && mv -f "$cf.tmp.$$" "$cf"
+    } > "$tmp_file"
+    replace_cursor=1
+    disk_offset_line=''
+    disk_ident_line=''
+    disk_contract_line=''
+    if [ -f "$cf" ] && [ -r "$cf" ] && [ ! -L "$cf" ] && {
+      IFS= read -r disk_offset_line \
+        && IFS= read -r disk_ident_line \
+        && IFS= read -r disk_contract_line
+    } < "$cf" 2>/dev/null; then
+      disk_offset=${disk_offset_line#offset=}
+      disk_ident=${disk_ident_line#ident=}
+      disk_contract=${disk_contract_line#fold-contract=}
+      case "$disk_offset" in
+        ''|*[!0-9]*) : ;;
+        *)
+          if [ "$disk_offset_line" = "offset=$disk_offset" ] \
+            && [ "$disk_ident_line" = "ident=$disk_ident" ] \
+            && [ "$disk_contract_line" = "fold-contract=$disk_contract" ]; then
+            if [ "$disk_ident" = "$cur_ident" ]; then
+              if [ "$disk_offset" -gt "$size" ]; then
+                if [ "$disk_offset" != "$loaded_offset" ] \
+                  || [ "$disk_ident" != "$loaded_ident" ] \
+                  || [ "$disk_contract" != "$loaded_contract" ]; then
+                  replace_cursor=0
+                fi
+              elif [ "$disk_offset" -eq "$size" ] \
+                && [ "$disk_contract" = "$fold_contract" ]; then
+                replace_cursor=0
+              fi
+            elif [ -n "$disk_ident" ] && [ "$disk_ident" != "$loaded_ident" ]; then
+              replace_cursor=0
+            fi
+          fi
+          ;;
+      esac
+    fi
+    if [ "$replace_cursor" -eq 1 ]; then
+      mv -f "$tmp_file" "$cf" 2>/dev/null || rm -f "$tmp_file"
+    else
+      rm -f "$tmp_file"
+    fi
   fi
   printf '%s' "$open"
 }
