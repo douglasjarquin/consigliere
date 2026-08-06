@@ -28,7 +28,7 @@
 #   Codex accepts max and ultra through model_reasoning_effort; default omits it.
 #   Claude accepts max but not ultra.
 #   A claude home whose account policy forbids --dangerously-skip-permissions
-#   selects a narrower launch mode in config/host/permission-mode.conf (auto|acceptEdits|
+#   selects a narrower launch mode in config/permission-mode.conf (auto|acceptEdits|
 #   bypassPermissions); an unusable or malformed record blocks the dispatch.
 #   The exact format is in docs/configuration.md.
 #   --scout marks the task kind=scout (report deliverable, scratch worktree).
@@ -211,7 +211,7 @@ if ! cs_harness_effort_valid "$HARNESS" "$EFFORT"; then
   esac
   exit 2
 fi
-# Resolve config/host/permission-mode.conf up front. The launch builders read it too, but
+# Resolve config/permission-mode.conf up front. The launch builders read it too, but
 # they run after the worktree and metadata exist; validating here keeps a
 # malformed file from leaving a half-created task behind.
 cs_harness_permission_mode "$HARNESS" >/dev/null || exit 2

@@ -12,7 +12,7 @@
 # format, so the format has exactly one parser and cannot drift.
 #
 # What this script owns (never delegated):
-#   - resolving the capo home from config/host/capos.md;
+#   - resolving the capo home from host/capos.md;
 #   - proving the destination is a genuine seeded capo home (.cs-capo-home
 #     marker with a matching id, AGENTS.md + bin/, safe operational dirs),
 #     never a project clone, the active home, or the consigliere repo;
@@ -45,7 +45,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cs_resolve_root
 # shellcheck source=bin/cs-capo-registry-lib.sh
 . "$SCRIPT_DIR/cs-capo-registry-lib.sh"
-REG="$CONFIG_HOST/capos.md"
+REG="$HOST_DIR/capos.md"
 MAIN_BACKLOG="$CONFIG/backlog.md"
 # shellcheck source=bin/cs-tasks-lib.sh
 . "$SCRIPT_DIR/cs-tasks-lib.sh"

@@ -5,7 +5,7 @@ Each producing script's header and help own exact child fields and mutation mech
 
 ## Homes
 
-`CS_HOME` selects an instance's private `config/`, `data/`, `state/`, and `projects/`.
+`CS_HOME` selects an instance's private `config/`, `host/`, `data/`, `state/`, and `projects/`.
 Scripts always come from their tracked code root (`CS_ROOT`, the repo checkout).
 The main home is the repo checkout itself; each capo has a persistent isolated `CS_HOME` under `${CS_CAPOS_ROOT:-~/.consigliere/capos}/<id>` - a plain detached git worktree of this repo, never a herdr-managed worktree (a capo home must survive server restarts and empty workspaces).
 
@@ -19,12 +19,12 @@ Test and script overrides: `CS_ROOT_OVERRIDE`, `CS_STATE_OVERRIDE` narrow a sing
 - `CS_HERDR_SESSION` overrides the session for lab work only.
 - Verified herdr behavior and gaps: `docs/herdr.md`.
 
-## config/ - the user-owned tree (LOCAL, gitignored)
+## config/ and host/ - the user-owned tree and its machine-local sibling (LOCAL, gitignored)
 
-`config/` is the one directory a person owns, backs up, and restores.
-Backup is `cp -a <home>/config`; restore on a new machine is everything except `config/host/`, then recreate `config/host/` for that machine and run `bin/cs-doctor.sh`.
-Portable files sit flat in `config/`; `config/host/` is the single subdirectory, for files that are correct only on the machine that wrote them.
-Prose and records use `.md`; settings use `.conf`.
+`config/` is the one directory a person owns, backs up, and restores: `cp -a <home>/config`, no exclusions, and restore on a new machine is that same copy.
+`host/` is a top-level sibling, not part of the user tree: machine-local runtime configuration, mostly script-written, correct only on the machine that wrote it.
+It is never backed up, restored, or propagated; on a new machine run `bin/cs-doctor.sh` and fill in `host/` fresh.
+Prose and records use `.md`; settings use `.conf`; the extension marks the format, never the tier - `config/` holds three genuinely portable `.conf` files, and every other `.conf` file is machine-local and lives in `host/`.
 `bin/cs-migrate-config.sh` owns the one-shot move from the pre-2026-08 layout, and the fail-closed gate in `bin/cs-root-lib.sh` refuses every script while any old-name path exists.
 
 | file | tier | semantics |
@@ -40,20 +40,20 @@ Prose and records use `.md`; settings use `.conf`.
 | `config/charter.md` | portable, capo homes only | the capo's filled charter brief |
 | `config/backlog-backend.conf` | portable | absent or `tasks-axi` = tasks-axi against `config/backlog.md`; `manual` = hand-edit the markdown |
 | `config/dispatch-policy.conf` | portable | optional per-home profiles for task dispatch; `bin/cs-spawn.sh` owns its strict four-column schema below |
-| `config/host/capos.md` | host | capo routing table; every record embeds an absolute machine-local home path |
-| `config/host/harness.conf` | host | pins the root harness (`codex` or `claude`) regardless of environment |
-| `config/host/permission-mode.conf` | host | optional narrower claude launch permission mode for a machine whose account policy forbids full bypass; absent = full autonomy; `bin/cs-harness-lib.sh` owns the two-column schema below |
-| `config/host/upstream.conf` | host | path of the firstmate checkout for `/upstream-review`; absent = `../firstmate` |
-| `config/host/activation.conf` | host | per-home activation scope: `always`, `afk-only`, or `off`; absent = `afk-only`; `bin/cs-activate.sh` owns the policy, and `bin/cs-home-seed.sh --help` owns capo seed and bootstrap convergence |
-| `config/host/wedge-alarm.conf` | host | away-mode wedge-alarm active-alert directives; absent = auto (macOS Notification Center when available) |
+| `config/permission-mode.conf` | portable | optional narrower claude launch permission mode; absent = full autonomy; `bin/cs-harness-lib.sh` owns the two-column schema below. This is a Claude ACCOUNT policy, not a machine property - the record is `<harness> <mode>` with no machine-specific content, so the same file is correct verbatim on every machine that account uses; do not re-derive it as host-specific |
+| `host/capos.md` | host | capo routing table; every record embeds an absolute machine-local home path |
+| `host/harness.conf` | host | pins the root harness (`codex` or `claude`) regardless of environment |
+| `host/upstream.conf` | host | path of the firstmate checkout for `/upstream-review`; absent = `../firstmate` |
+| `host/activation.conf` | host | per-home activation scope: `always`, `afk-only`, or `off`; absent = `afk-only`; `bin/cs-activate.sh` owns the policy, and `bin/cs-home-seed.sh --help` owns capo seed and bootstrap convergence |
+| `host/wedge-alarm.conf` | host | away-mode wedge-alarm active-alert directives; absent = auto (macOS Notification Center when available) |
 
 Symlink policy, established empirically (2026-08-06, tasks-axi 0.2.x):
 
-- `boss.md`, `boss-shared.md`, `learnings.md`, `projects.md`, `boards.md`, and the two `.conf` portable files are read-only to scripts and safe to symlink out to a dotfiles repository.
-- `backlog.md`, `done-archive.md`, `note-archive.md`, and `config/host/capos.md` are rewritten by rename (tasks-axi and the registry writers), which replaces a symlink with a regular file and silently forks the content; they must be real files, and the doctor fails when one is a symlink.
-- A `config/host/` entry whose symlink target resolves outside the home defeats the host tier (the `capos.md`-across-two-machines mistake); the doctor fails on it.
+- `boss.md`, `boss-shared.md`, `learnings.md`, `projects.md`, `boards.md`, and the three portable `.conf` files are read-only to scripts and safe to symlink out to a dotfiles repository.
+- `backlog.md`, `done-archive.md`, `note-archive.md`, and `host/capos.md` are rewritten by rename (tasks-axi and the registry writers), which replaces a symlink with a regular file and silently forks the content; they must be real files, and the doctor fails when one is a symlink.
+- A `host/` entry whose symlink target resolves outside the home defeats the host tier (the `capos.md`-across-two-machines mistake); the doctor fails on it.
 
-Inheritance into capo homes: `config/boss-shared.md` is propagated read-only, and `config/backlog-backend.conf` is copied at seed time; nothing else is inherited, and nothing in `config/host/` ever propagates.
+Inheritance into capo homes: `config/boss-shared.md` is propagated read-only, and `config/backlog-backend.conf` is copied at seed time; nothing else is inherited, and nothing in `host/` ever propagates.
 Capo activation is local rather than inherited; see `bin/cs-home-seed.sh --help` for its seed and bootstrap convergence contract.
 The main-side source of either may be a symlink that resolves to a regular file, because propagation only reads it; an unresolved symlink stops propagation instead of mirroring absence.
 The capo-side destination must be a plain regular file, because propagation writes there and following a link out of the capo home is exactly what that check prevents.
@@ -91,7 +91,7 @@ An absent policy or absent matching line retains the existing harness default.
 
 ### Permission mode
 
-`config/host/permission-mode.conf` is optional and local to one Consigliere home.
+`config/permission-mode.conf` is optional and local to one Consigliere home.
 It exists for a claude home on a Claude account whose managed policy forbids `--dangerously-skip-permissions`: without it, every soldier pane would start in the harness default and need a human to widen it by hand.
 One non-comment line has exactly two whitespace-separated fields:
 
@@ -117,7 +117,7 @@ Every record is validated, not just the one matching the running harness, so a t
 A malformed file, an unknown harness, an unusable mode, or a duplicate record fails the launch rather than falling back to full autonomy.
 
 The mode is resolved from the home that builds the launch, so a capo launched by a configured home inherits that home's mode.
-`config/host/permission-mode.conf` itself is not seeded into a capo home; set it there too if that capo spawns its own soldiers.
+`config/permission-mode.conf` itself is not seeded into a capo home; set it there too if that capo spawns its own soldiers.
 
 Operational consequence: under `auto` or `acceptEdits` a soldier can still stop on a permission prompt.
 That pane looks busy rather than failed, so it surfaces through the ordinary stale-liveness path in `docs/supervision.md` instead of as an immediate failure.
@@ -212,7 +212,7 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_HARNESS_OVERRIDE` | cs-harness-lib | force the root harness (codex\|claude); highest precedence, test/escape seam |
 | `CS_ROOT_OVERRIDE` `CS_STATE_OVERRIDE` | single scripts | test-only resolution overrides |
 
-Root harness resolution (`cs_harness_detect_root`): `CS_HARNESS_OVERRIDE` → `config/host/harness.conf` file → `CLAUDECODE=1` ⇒ claude → default codex. A soldier inherits the resolved value (persisted as `harness=` in meta).
+Root harness resolution (`cs_harness_detect_root`): `CS_HARNESS_OVERRIDE` → `host/harness.conf` file → `CLAUDECODE=1` ⇒ claude → default codex. A soldier inherits the resolved value (persisted as `harness=` in meta).
 
 
 Per-harness launch flags and hook facts: `docs/codex.md`, `docs/claude.md`.

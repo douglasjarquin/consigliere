@@ -51,12 +51,12 @@ test_migrates_and_preserves_symlinks() {
   [ "$(readlink "$HOME_DIR/config/boss.md")" = "$DOTFILES/boss.md" ] \
     || fail "boss.md symlink target changed"
   [ "$(cat "$HOME_DIR/config/learnings.md")" = "learned things" ] || fail "learnings.md content lost"
-  [ "$(cat "$HOME_DIR/config/host/permission-mode.conf")" = "claude auto" ] \
-    || fail "permission-mode did not land in config/host/ with its .conf name"
-  [ -f "$HOME_DIR/config/host/capos.md" ] || fail "capos.md did not land in config/host/"
+  [ "$(cat "$HOME_DIR/config/permission-mode.conf")" = "claude auto" ] \
+    || fail "permission-mode did not land in host/ with its .conf name"
+  [ -f "$HOME_DIR/host/capos.md" ] || fail "capos.md did not land in host/"
   [ ! -e "$HOME_DIR/data/boss.md" ] || fail "old boss.md path still exists"
   [ ! -e "$HOME_DIR/config/permission-mode" ] || fail "old permission-mode path still exists"
-  pass "old names move to config/ and config/host/ with symlinks intact"
+  pass "old names move to config/ and host/ with symlinks intact"
 }
 
 # --- idempotence and the nix re-link absorption --------------------------------

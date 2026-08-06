@@ -68,11 +68,11 @@ cs_layout_pairs() {
   printf '%s\t%s\n' \
     "$CONFIG/backlog-backend"  "$CONFIG/backlog-backend.conf" \
     "$CONFIG/dispatch-policy"  "$CONFIG/dispatch-policy.conf" \
-    "$CONFIG/permission-mode"  "$CONFIG/host/permission-mode.conf" \
-    "$CONFIG/upstream"         "$CONFIG/host/upstream.conf" \
-    "$CONFIG/activation"       "$CONFIG/host/activation.conf" \
-    "$CONFIG/wedge-alarm"      "$CONFIG/host/wedge-alarm.conf" \
-    "$CONFIG/harness"          "$CONFIG/host/harness.conf" \
+    "$CONFIG/permission-mode"  "$CONFIG/permission-mode.conf" \
+    "$CONFIG/upstream"         "$HOST_DIR/upstream.conf" \
+    "$CONFIG/activation"       "$HOST_DIR/activation.conf" \
+    "$CONFIG/wedge-alarm"      "$HOST_DIR/wedge-alarm.conf" \
+    "$CONFIG/harness"          "$HOST_DIR/harness.conf" \
     "$DATA/boss.md"            "$CONFIG/boss.md" \
     "$DATA/boss-shared.md"     "$CONFIG/boss-shared.md" \
     "$DATA/learnings.md"       "$CONFIG/learnings.md" \
@@ -81,7 +81,7 @@ cs_layout_pairs() {
     "$DATA/backlog.md"         "$CONFIG/backlog.md" \
     "$DATA/done-archive.md"    "$CONFIG/done-archive.md" \
     "$DATA/note-archive.md"    "$CONFIG/note-archive.md" \
-    "$DATA/capos.md"           "$CONFIG/host/capos.md" \
+    "$DATA/capos.md"           "$HOST_DIR/capos.md" \
     "$DATA/charter.md"         "$CONFIG/charter.md"
 }
 
@@ -108,8 +108,9 @@ cs_layout_gate() {
   return 0
 }
 
-# DATA/STATE/CONFIG/CONFIG_HOST are set for the caller, not used within this
-# library.
+# DATA/STATE/CONFIG/HOST_DIR are set for the caller, not used within this
+# library. HOST_DIR is the machine-local tier: a top-level sibling of config/,
+# never backed up, re-created per machine.
 # shellcheck disable=SC2034
 cs_resolve_root() {
   local _cs_root_lib_dir
@@ -129,6 +130,6 @@ cs_resolve_root() {
   DATA=$(cs_abs_path "${CS_DATA_OVERRIDE:-$CS_HOME/data}") || return 1
   STATE=$(cs_abs_path "${CS_STATE_OVERRIDE:-$CS_HOME/state}") || return 1
   CONFIG=$(cs_abs_path "${CS_CONFIG_OVERRIDE:-$CS_HOME/config}") || return 1
-  CONFIG_HOST="$CONFIG/host"
+  HOST_DIR=$(cs_abs_path "${CS_HOST_OVERRIDE:-$CS_HOME/host}") || return 1
   cs_layout_gate
 }

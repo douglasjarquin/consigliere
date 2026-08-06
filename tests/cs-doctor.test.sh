@@ -125,7 +125,7 @@ assert_contains "$(cs_deps_hint no-mistakes)" \
 # inventory these checks read.
 
 CFG_HOME="$TMP/cfg-home"
-mkdir -p "$CFG_HOME/config/host" "$CFG_HOME/data" "$TMP/elsewhere"
+mkdir -p "$CFG_HOME/config" "$CFG_HOME/host" "$CFG_HOME/data" "$TMP/elsewhere"
 
 cfg_doctor() { PATH="$BASE_PATH" CS_HOME="$CFG_HOME" "$DOCTOR" 2>&1; }
 
@@ -138,12 +138,21 @@ assert_line "$out" 'FAIL +boss.md +- +pre-move path still exists' 'a pre-move pa
 assert_contains "$out" 'cs-migrate-config.sh' 'the migration failure names the migrator'
 rm "$CFG_HOME/data/boss.md"
 
-printf 'claude auto\n' > "$TMP/elsewhere/permission-mode"
-ln -s "$TMP/elsewhere/permission-mode" "$CFG_HOME/config/host/permission-mode.conf"
+printf 'claude\n' > "$TMP/elsewhere/harness"
+ln -s "$TMP/elsewhere/harness" "$CFG_HOME/host/harness.conf"
 out=$(cfg_doctor)
-assert_line "$out" 'FAIL +permission-mode\.conf +- +host-tier file symlinked outside' \
+assert_line "$out" 'FAIL +harness\.conf +- +host-tier file symlinked outside' \
   'a host-tier symlink out of the home is a failure, not a note'
-rm "$CFG_HOME/config/host/permission-mode.conf"
+rm "$CFG_HOME/host/harness.conf"
+
+# permission-mode is a Claude ACCOUNT policy, deliberately portable: the same
+# symlink arrangement that fails in host/ is fine in config/.
+printf 'claude auto\n' > "$TMP/elsewhere/permission-mode"
+ln -s "$TMP/elsewhere/permission-mode" "$CFG_HOME/config/permission-mode.conf"
+out=$(cfg_doctor)
+assert_line "$out" 'ok +permission-mode\.conf +- +symlink ->' \
+  'a portable permission-mode symlink is reported, never failed'
+rm "$CFG_HOME/config/permission-mode.conf"
 
 ln -s "$TMP/elsewhere/backlog.md" "$CFG_HOME/config/backlog.md"
 out=$(cfg_doctor)
@@ -153,7 +162,7 @@ rm "$CFG_HOME/config/backlog.md"
 
 printf 'x\n' > "$CFG_HOME/config/stray.txt"
 out=$(cfg_doctor)
-assert_line "$out" 'WARN +stray\.txt +- +not a known config/ name' 'an unknown entry is reported by name'
+assert_line "$out" 'WARN +stray\.txt +- +not a known name for this tier' 'an unknown entry is reported by name'
 rm "$CFG_HOME/config/stray.txt"
 
 printf 'the boss\n' > "$TMP/elsewhere/boss.md"

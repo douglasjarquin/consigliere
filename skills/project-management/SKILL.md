@@ -23,7 +23,7 @@ The registry records the boss's standing posture for a project and is advisory: 
 Keep each registry description useful for identifying the project, but keep boss-private state and detailed project knowledge in their existing designated homes.
 Do not turn the registry into project documentation.
 
-Before adding, cloning, creating, or registering any project in the main home, read `config/host/capos.md` and judge the proposed project or domain against every registered natural-language `scope:`.
+Before adding, cloning, creating, or registering any project in the main home, read `host/capos.md` and judge the proposed project or domain against every registered natural-language `scope:`.
 Apply `AGENTS.md` section 7's routing rules: when an existing scope owns that domain, route the operation to that capo instead of standing up a duplicate main-home clone.
 Absence from `config/projects.md` is never evidence that no capo owns the domain, because a capo's own clones live in its home and never appear in the main registry.
 If the owning capo cannot accept the route, report that concrete blocker or get an explicit boss redirection rather than silently duplicating the project here.

@@ -18,7 +18,7 @@
 #              still-open boss decision), the scout report pointer at
 #              data/<id>/report.md, and the last status EVENT (history, never
 #              current-state truth).
-#   capos    - registered rows from config/host/capos.md, parsed by the single owner
+#   capos    - registered rows from host/capos.md, parsed by the single owner
 #              bin/cs-capo-registry-lib.sh. Each capo home gets a bounded
 #              structured read (in-flight child meta count, backlog headline
 #              counts) ONLY after validation: the recorded home must exist and
@@ -34,7 +34,7 @@
 # Env (tests and large fleets):
 #   CS_FLEET_BACKLOG_LIMIT   max backlog listing lines shown (default 30)
 #   CS_FLEET_CAPOS           max capo registry rows read (default 20)
-#   CS_FLEET_REGISTRY_BYTES  max bytes read from config/host/capos.md (default 65536)
+#   CS_FLEET_REGISTRY_BYTES  max bytes read from host/capos.md (default 65536)
 #   CS_FLEET_CAPO_MAX_BYTES  max bytes read from a capo backlog (default 262144)
 #   CS_CREW_STATE_BIN        current-state reader override (tests stub it)
 #   CS_FLEET_NOW             fixed generated timestamp override
@@ -50,7 +50,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
 BACKLOG="$CONFIG/backlog.md"
-CAPO_REG="$CONFIG_HOST/capos.md"
+CAPO_REG="$HOST_DIR/capos.md"
 NOW=${CS_FLEET_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
 
 CS_FLEET_BACKLOG_LIMIT=${CS_FLEET_BACKLOG_LIMIT:-30}

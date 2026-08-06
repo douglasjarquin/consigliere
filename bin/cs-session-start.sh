@@ -15,7 +15,7 @@
 #   4. supervision   - the ONE foreground-checkpoint operating block, inlined
 #                      here (the protocol is identical across harnesses and
 #                      one wait shape; there is no protocol renderer).
-#   5. context       - config/projects.md, config/host/capos.md, config/boss.md,
+#   5. context       - config/projects.md, host/capos.md, config/boss.md,
 #                      config/boss-shared.md, config/learnings.md, each with an
 #                      explicit ABSENT marker when missing (absence is
 #                      meaningful and never confused with empty-but-present).
@@ -325,7 +325,7 @@ fi
 section "CONTEXT"
 print_file_or_absent "$CONFIG/projects.md" "config/projects.md"
 print_file_or_absent "$CONFIG/boards.md" "config/boards.md (GitHub board mapping for the contracts and casino skills)"
-print_file_or_absent "$CONFIG_HOST/capos.md" "config/host/capos.md (host-local; ABSENT = no capos provisioned here)"
+print_file_or_absent "$HOST_DIR/capos.md" "host/capos.md (host-local; ABSENT = no capos provisioned here)"
 print_startup_memory "$CONFIG/boss.md" "config/boss.md"
 print_startup_memory "$CONFIG/boss-shared.md" "config/boss-shared.md (shared, main-authoritative, read-only in capo homes)"
 print_startup_memory "$CONFIG/learnings.md" "config/learnings.md"
@@ -419,7 +419,7 @@ EOF
 fi
 cat <<'EOF'
 The digest above is complete for this session start. Do NOT re-read
-config/projects.md, config/boards.md, data/sweeps.md, config/host/capos.md, config/boss.md,
+config/projects.md, config/boards.md, data/sweeps.md, host/capos.md, config/boss.md,
 config/boss-shared.md, config/learnings.md, or state/*.meta now - they were just
 printed in full.
 Do NOT bulk-read config/backlog.md now either: the compact listing was just

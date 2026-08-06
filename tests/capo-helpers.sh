@@ -21,7 +21,7 @@ cs_capo_fixture_repo() {
   mkdir -p "$dir/bin"
   printf '# fixture consigliere\n' > "$dir/AGENTS.md"
   printf 'tool\n' > "$dir/bin/tool.sh"
-  printf 'data/\nstate/\nconfig/\nprojects/\n.env\n.no-mistakes/\n' > "$dir/.gitignore"
+  printf 'data/\nstate/\nconfig/\nhost/\nprojects/\n.env\n.no-mistakes/\n' > "$dir/.gitignore"
   git -C "$dir" init -q -b main
   git -C "$dir" add -A
   git -C "$dir" -c user.name='Consigliere Tests' -c user.email='tests@example.invalid' commit -qm initial
@@ -42,7 +42,7 @@ cs_capo_fixture_project() {
 }
 
 # cs_capo_registry_line <id> <summary> <home> <scope> [projects] [added] - one
-# canonical config/host/capos.md row, exactly as bin/cs-home-seed.sh writes it.
+# canonical host/capos.md row, exactly as bin/cs-home-seed.sh writes it.
 cs_capo_registry_line() {
   printf -- '- %s - %s (home: %s; scope: %s; projects: %s; added %s)\n' \
     "$1" "$2" "$3" "$4" "${5:-}" "${6:-2026-01-01}"

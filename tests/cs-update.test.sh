@@ -24,7 +24,7 @@ mk_fixture() { # <name> -> sets ORIGIN, CLONE
   git -C "$ORIGIN" add -A
   git -C "$ORIGIN" commit -qm v1
   git clone -q "$ORIGIN" "$CLONE"
-  mkdir -p "$CLONE/state" "$CLONE/data" "$CLONE/config/host"
+  mkdir -p "$CLONE/state" "$CLONE/data" "$CLONE/config" "$CLONE/host"
   # cs-update runs cs-guard.sh from its own script dir; give the clone a stub.
   printf '#!/usr/bin/env bash\nexit 0\n' > "$CLONE/bin/cs-guard.sh"
   chmod +x "$CLONE/bin/cs-guard.sh"
@@ -103,7 +103,7 @@ pass "tangled checkout skips"
 # tests/cs-home-seed.test.sh ("CAPO_SYNC: capo alpha-capo: updated").
 mk_fixture nudge
 printf -- '- alpha-capo - a (home: %s; scope: s; projects: p; added 2026-01-01)\n' \
-  "$TMP/alpha-home" > "$CLONE/config/host/capos.md"
+  "$TMP/alpha-home" > "$CLONE/host/capos.md"
 cat > "$CLONE/bin/cs-home-seed.sh" <<'SH'
 #!/usr/bin/env bash
 # Stand-in for the sweep, emitting its real reported shapes.

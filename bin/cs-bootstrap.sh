@@ -96,7 +96,7 @@ if [ "$DETECT_ONLY" != 1 ]; then
     sync_out=$("$SCRIPT_DIR/cs-fleet-sync.sh" --all 2>&1) || true
     [ -z "$sync_out" ] || printf '%s\n' "$sync_out" | sed 's/^/FLEET_SYNC: /'
   fi
-  if [ -x "$SCRIPT_DIR/cs-home-seed.sh" ] && [ -f "$CONFIG_HOST/capos.md" ]; then
+  if [ -x "$SCRIPT_DIR/cs-home-seed.sh" ] && [ -f "$HOST_DIR/capos.md" ]; then
     capo_out=$("$SCRIPT_DIR/cs-home-seed.sh" --sweep 2>&1) || true
     [ -z "$capo_out" ] || printf '%s\n' "$capo_out"
   fi

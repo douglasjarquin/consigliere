@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavior: bin/cs-capo-registry-lib.sh, the single owner of config/host/capos.md
+# Behavior: bin/cs-capo-registry-lib.sh, the single owner of host/capos.md
 # parsing. This suite owns the parse CONTRACT every consumer inherits:
 #   - the anchored suffix parse, so a `;` or `()` inside natural-language
 #     summary or scope text cannot truncate a field or steal the home;

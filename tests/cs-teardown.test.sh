@@ -12,7 +12,8 @@ TMP=$(cs_test_tmproot cs-teardown)
 export CS_DATA_OVERRIDE="$TMP/data"
 export CS_STATE_OVERRIDE="$TMP/state"
 export CS_CONFIG_OVERRIDE="$TMP/config"
-mkdir -p "$TMP/data" "$TMP/state" "$TMP/config/host"
+export CS_HOST_OVERRIDE="$TMP/host"
+mkdir -p "$TMP/data" "$TMP/state" "$TMP/config" "$TMP/host"
 
 FAKEBIN=$(cs_fakebin "$TMP")
 cat > "$FAKEBIN/herdr" <<'SH'
@@ -280,15 +281,15 @@ printf 'axb\n' > "$TMP/capo-axb/.cs-capo-home"
 {
   printf -- '- a.b - Dotted domain. (home: %s; scope: dotted work; projects: ; added 2026-01-01)\n' "$TMP/capo-ab"
   printf -- '- axb - Near miss domain. (home: %s; scope: near-miss work; projects: ; added 2026-01-01)' "$TMP/capo-axb"
-} > "$TMP/config/host/capos.md"
+} > "$TMP/host/capos.md"
 cs_write_meta "$TMP/state/a.b.meta" \
   "workspace=w7" "pane=w7:p7" "kind=capo" "mode=capo" "home=$TMP/capo-ab"
 out=$(CS_ROOT_OVERRIDE="$CAPO_ROOT" "$BIN" a.b 2>&1) || fail "capo retirement failed: $out"
 assert_contains "$out" "teardown a.b complete" "capo retirement reports completion"
 assert_absent "$TMP/capo-ab" "the retired capo home is removed"
 assert_present "$TMP/capo-axb" "an unrelated capo home must survive a near-miss id"
-assert_no_grep '- a.b ' "$TMP/config/host/capos.md" "the retired capo's route is removed"
-assert_grep '- axb - Near miss domain.' "$TMP/config/host/capos.md" \
+assert_no_grep '- a.b ' "$TMP/host/capos.md" "the retired capo's route is removed"
+assert_grep '- axb - Near miss domain.' "$TMP/host/capos.md" \
   "retiring a dotted id must not delete the near-miss route"
 assert_absent "$TMP/state/a.b.meta" "capo records cleared after retirement"
 pass "retiring a dotted capo id leaves the near-miss route intact"

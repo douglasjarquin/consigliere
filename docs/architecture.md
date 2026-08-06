@@ -52,7 +52,7 @@ Scout tasks leave a report at `data/<id>/report.md`, never push, and their scrat
 ## Capos
 
 A capo is a soldier with an isolated consigliere home (`CS_HOME`) and a charter, not a second architecture: own data/state/config/projects, own session lock, own watcher, workspace `capo-<id>`.
-`bin/cs-home-seed.sh` provisions transactionally and sweeps (fast-forward plus liveness respawn for recorded endpoints, reporting missing endpoints and staying silent for seeded homes without metadata) at bootstrap; `config/host/capos.md` is the routing table; marked requests travel with the byte-compatible `from-consigliere` kind and a `corr=` token, with parent-owned expectations in `bin/cs-pending-reply-lib.sh`.
+`bin/cs-home-seed.sh` provisions transactionally and sweeps (fast-forward plus liveness respawn for recorded endpoints, reporting missing endpoints and staying silent for seeded homes without metadata) at bootstrap; `host/capos.md` is the routing table; marked requests travel with the byte-compatible `from-consigliere` kind and a `corr=` token, with parent-owned expectations in `bin/cs-pending-reply-lib.sh`.
 Inheritance is deliberately tiny: `config/boss-shared.md` (read-only) and the backlog-backend choice (`bin/cs-inherit-lib.sh`).
 
 ## Away mode

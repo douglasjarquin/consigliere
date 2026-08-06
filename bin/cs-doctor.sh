@@ -83,10 +83,10 @@ say 'consigliere doctor - dependency preflight (checks only; installs nothing)'
 say "repo   $CS_ROOT"
 if [ -n "${CS_HARNESS_OVERRIDE:-}" ]; then
   say "harness $(cs_harness_detect_root) (from CS_HARNESS_OVERRIDE)"
-elif [ -f "$CONFIG_HOST/harness.conf" ]; then
-  say "harness $(cs_harness_detect_root) (from config/host/harness.conf)"
+elif [ -f "$HOST_DIR/harness.conf" ]; then
+  say "harness $(cs_harness_detect_root) (from host/harness.conf)"
 else
-  say "harness $(cs_harness_detect_root) (auto-detected; config/host/harness.conf overrides)"
+  say "harness $(cs_harness_detect_root) (auto-detected; host/harness.conf overrides)"
 fi
 
 # --- required -----------------------------------------------------------------
@@ -160,14 +160,15 @@ else
   problem
 fi
 
-# --- config: the tree you back up ----------------------------------------------
+# --- config and host: the tree you back up, and the tier you never do ----------
 #
-# config/ is the user-owned tree (docs/configuration.md owns the inventory).
-# Everything here is a read: presence, names, and symlink targets. Failures are
-# the two arrangements that silently lose boss data: an unmigrated home, and a
-# symlink where a rename-writer or the host tier will sever or defeat it.
+# config/ is the user-owned tree and host/ is its machine-local sibling
+# (docs/configuration.md owns the inventory). Everything here is a read:
+# presence, names, and symlink targets. Failures are the two arrangements that
+# silently lose boss data: an unmigrated home, and a symlink where a
+# rename-writer or the host tier will sever or defeat it.
 
-heading 'CONFIG - the user-owned tree (back up config/; restore all but host/)'
+heading 'CONFIG + HOST - back up config/ wholesale; host/ is per-machine'
 
 # 1. Migration state: any pre-move path is a hard failure naming the migrator.
 UNMIGRATED=0
@@ -198,8 +199,8 @@ resolve_link_target() {
 }
 
 # 2-5. Known names, symlink visibility, host-tier tripwire, sever tripwire.
-CONFIG_KNOWN=' boss.md boss-shared.md learnings.md projects.md boards.md backlog.md done-archive.md note-archive.md charter.md backlog-backend.conf dispatch-policy.conf host '
-HOST_KNOWN=' capos.md harness.conf permission-mode.conf upstream.conf activation.conf wedge-alarm.conf '
+CONFIG_KNOWN=' boss.md boss-shared.md learnings.md projects.md boards.md backlog.md done-archive.md note-archive.md charter.md backlog-backend.conf dispatch-policy.conf permission-mode.conf '
+HOST_KNOWN=' capos.md harness.conf upstream.conf activation.conf wedge-alarm.conf '
 NEVER_SYMLINK=' backlog.md done-archive.md note-archive.md capos.md '
 
 check_config_entry() {  # <path> <tier: flat|host>
@@ -208,7 +209,7 @@ check_config_entry() {  # <path> <tier: flat|host>
   if [ "$tier" = flat ]; then known=$CONFIG_KNOWN; else known=$HOST_KNOWN; fi
   case "$known" in
     *" $name "*) ;;
-    *) report WARN "$name" - "not a known config/ name; a stray, a leaked temp, or a typo ($entry)" ;;
+    *) report WARN "$name" - "not a known name for this tier; a stray, a leaked temp, or a typo ($entry)" ;;
   esac
   if [ -L "$entry" ]; then
     target=$(resolve_link_target "$entry" || echo '(unresolvable)')
@@ -237,15 +238,14 @@ check_config_entry() {  # <path> <tier: flat|host>
 if [ -d "$CONFIG" ]; then
   for entry in "$CONFIG"/* "$CONFIG"/.[!.]*; do
     [ -e "$entry" ] || [ -L "$entry" ] || continue
-    [ "$entry" = "$CONFIG_HOST" ] && continue
     check_config_entry "$entry" flat
   done
-  if [ -d "$CONFIG_HOST" ]; then
-    for entry in "$CONFIG_HOST"/* "$CONFIG_HOST"/.[!.]*; do
-      [ -e "$entry" ] || [ -L "$entry" ] || continue
-      check_config_entry "$entry" host
-    done
-  fi
+fi
+if [ -d "$HOST_DIR" ]; then
+  for entry in "$HOST_DIR"/* "$HOST_DIR"/.[!.]*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    check_config_entry "$entry" host
+  done
 fi
 
 # --- optional -----------------------------------------------------------------

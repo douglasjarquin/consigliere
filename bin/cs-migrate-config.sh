@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # cs-migrate-config.sh - move this home's user-owned files into the config/
-# userspace layout (issue #38): flat portable files plus config/host/ for
+# userspace layout (issue #38): flat portable files plus host/ for
 # machine-specific ones, truthful extensions (.md prose, .conf settings).
 #
 # The mapping is owned by cs_layout_pairs in bin/cs-root-lib.sh; the fail-closed
@@ -79,5 +79,5 @@ while IFS=$'\t' read -r old new; do
   RC=1
 done < <(cs_layout_pairs)
 
-mkdir -p "$CONFIG/host"
+mkdir -p "$CONFIG" "$HOST_DIR"
 exit "$RC"
