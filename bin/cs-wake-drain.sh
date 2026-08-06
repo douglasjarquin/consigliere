@@ -12,6 +12,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/cs-wake-lib.sh"
 # shellcheck source=bin/cs-classify-lib.sh
 . "$SCRIPT_DIR/cs-classify-lib.sh"
+# shellcheck source=bin/cs-line-cap-lib.sh
+. "$SCRIPT_DIR/cs-line-cap-lib.sh"
 
 DRAIN_TMP=
 DRAIN_LOCK_HELD=false
@@ -60,7 +62,12 @@ print_open_decisions() {
       printed=true
     fi
     shown=$((shown + 1))
-    printf '  %s [key=%s] %s: %s\n' "$task" "$key" "$verb" "$note"
+    # A note is agent-written and unbounded; cut each item with the shared
+    # per-line cap (cs-line-cap-lib.sh) so this section and the session-start
+    # status tails carry one truncation marker. The lede keeps the task id that
+    # names the durable state/<id>.status source for the full text.
+    cs_cap_line_var "$task [key=$key] $verb: $note"
+    printf '  %s\n' "$CS_LINE_CAP_LINE"
   done <<EOF
 $rows
 EOF

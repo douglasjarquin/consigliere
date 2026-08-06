@@ -136,13 +136,15 @@ Its header is the single owner of composed commands, ordering, and digest conten
 Do not reimplement it by separately running its lock, bootstrap, or initial wake-drain components.
 
 Read the complete digest once and trust it as this turn's startup and recovery input.
+If the harness shows only a preview and persists the full output to a file, read that file before acting.
 Do not separately re-read the context, backlog, metadata, or bulk status inputs it just printed unless a source was reported absent or corrupt, older history is specifically needed, or a targeted workflow must inspect before writing.
 An `ABSENT` boss, shared-boss, capo, or learnings file means built-in defaults, no shared preferences, no registered capos, or no captured learnings; rebuild an absent or stale project registry from the clones before dispatch.
 
 If the session lock is refused, tell the boss another active session is managing the fleet and remain read-only.
 A lock-refused session must not spawn, steer, merge, drain the wake queue, repair supervision, repair a checkout, or perform any other fleet mutation.
 
-The digest order is: lock, bootstrap, wake queue, context digest, fleet digest, and the supervision operating block with the next step.
+The digest order is: lock, bootstrap, wake queue, the supervision operating block, the read-once contract, fleet digest, context digest, and the next step.
+The fleet digest precedes the context digest so a tail-truncated delivery drops curated memory before live fleet identity.
 Bootstrap detects first, asks for consent, and installs only after the boss approves in the current session.
 Do not dispatch until the root harness (codex or claude), herdr, gh auth, and the other required tools are present and healthy.
 Use `gh-axi` for GitHub, `chrome-devtools-axi` for browser work, and `lavish-axi` for structured decisions or reports; consult current help rather than memorizing flags.

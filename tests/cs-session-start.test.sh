@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Behavior (portable): the session-start digest's startup-memory budget.
+# Behavior (portable): the session-start digest's startup-memory budget,
+# truncation-safe section ordering, per-line status-tail cap, and the
+# recovery-input backlog composition on both backlog backends.
 #
 # config/boss.md, config/boss-shared.md, and config/learnings.md are read IN FULL at
 # every session start of every home, so their size is a standing cost paid
@@ -10,6 +12,11 @@
 # The digest REPORTS over-budget files and never truncates them: this script
 # does not get to decide which of the boss's own preferences to drop. These
 # tests pin both halves of that - the report fires, and the content survives.
+#
+# The digest is delivered through a harness that truncates an oversized payload
+# from the TAIL, so section order decides what a truncated startup loses: the
+# safety preamble stays pinned, live fleet state precedes the curated memory a
+# truncated tail may take, and the read-once contract precedes both.
 #
 # The digest always exits 0 and prints its context section even when the session
 # lock is refused, so these cases do not depend on acquiring a lock.
@@ -89,4 +96,309 @@ out=$(CS_HOME="$HOME_DIR" CS_STARTUP_MEMORY_MAX_BYTES=not-a-number "$BIN" 2>/dev
 assert_contains "$out" 'against a 8192-byte budget' "a malformed budget falls back to the default"
 pass "a malformed budget falls back to the default rather than silently disabling the check"
 
-pass "cs-session-start startup-memory budget"
+# --- section ordering: preamble pinned, fleet state before curated memory ------
+# grep -n positions of the real emitted headers; every header regex is anchored
+# so the closing reminder's mention of the contract never matches.
+section_line() { printf '%s\n' "$1" | grep -n "^$2\$" | head -1 | cut -d: -f1; }
+
+HOME_DIR=$(fresh_home ordering)
+printf 'window=x:w1\nkind=ship\n' > "$HOME_DIR/state/task-a.meta"
+printf 'working: on it\n' > "$HOME_DIR/state/task-a.status"
+printf 'Boss memory that may be truncated away safely.\n' > "$HOME_DIR/config/boss.md"
+out=$(CS_HOME="$HOME_DIR" "$BIN" 2>/dev/null)
+
+lock_line=$(section_line "$out" 'LOCK')
+boot_line=$(section_line "$out" 'BOOTSTRAP')
+wake_line=$(section_line "$out" 'WAKE QUEUE')
+read_once_line=$(section_line "$out" 'READ-ONCE CONTRACT')
+fleet_line=$(section_line "$out" 'FLEET STATE')
+context_line=$(section_line "$out" 'CONTEXT')
+next_line=$(section_line "$out" 'NEXT STEP')
+inventory_line=$(section_line "$out" '--- task-a ---')
+
+if [ -z "$lock_line" ] || [ -z "$boot_line" ] || [ -z "$wake_line" ] \
+  || [ -z "$read_once_line" ] || [ -z "$fleet_line" ] || [ -z "$context_line" ] \
+  || [ -z "$next_line" ] || [ -z "$inventory_line" ]; then
+  fail "one or more section headers missing from digest: $out"
+fi
+
+# The safety preamble's order is unchanged: mutation authority, then
+# diagnostics, then this turn's work queue, before anything bulky is read.
+[ "$lock_line" -lt "$boot_line" ] || fail "LOCK did not precede BOOTSTRAP"
+[ "$boot_line" -lt "$wake_line" ] || fail "BOOTSTRAP did not precede WAKE QUEUE"
+[ "$wake_line" -lt "$read_once_line" ] || fail "WAKE QUEUE did not precede the read-once contract"
+
+[ "$read_once_line" -lt "$fleet_line" ] || fail "the read-once contract did not precede FLEET STATE"
+[ "$fleet_line" -lt "$context_line" ] || fail "FLEET STATE did not precede CONTEXT"
+[ "$context_line" -lt "$next_line" ] || fail "CONTEXT did not precede NEXT STEP"
+
+# The live-task inventory - the record recovery actually depends on - must sit
+# ahead of the curated memory a truncated tail is allowed to take.
+[ "$inventory_line" -lt "$context_line" ] \
+  || fail "the live-task inventory was buried behind the curated memory files"
+assert_contains "$out" 'Boss memory that may be truncated away safely.' \
+  "the ordering fixture did not actually print a memory file"
+pass "digest sections are ordered safety-preamble first, live fleet state before curated memory"
+
+# --- the read-once contract is stated once, ahead of its subject ---------------
+# It has to survive tail truncation and stay honest once it precedes the
+# sections it governs, so it carries the never-emitted-stage escape itself.
+assert_contains "$out" 'Do NOT re-read any of them after reading this digest' \
+  "the read-once contract lost its core instruction"
+assert_contains "$out" 'reports a stage as never emitted' \
+  "the read-once contract does not void itself for a stage that never ran"
+assert_contains "$out" 'The READ-ONCE CONTRACT' \
+  "the closing reminder does not point back at the contract"
+contract_count=$(printf '%s\n' "$out" | grep -c 'Do NOT re-read any of them')
+[ "$contract_count" -eq 1 ] \
+  || fail "the read-once contract is stated $contract_count times instead of once"
+pass "the read-once contract is stated once, ahead of the sources it governs"
+
+# --- status-tail per-line cap ---------------------------------------------------
+# A soldier writes its own status lines, so nothing upstream bounds their
+# length. The tail is a wake-EVENT view whose full log path is printed beside
+# it, so a long line is cut, marked, and left recoverable rather than allowed
+# to scale the digest with fleet load.
+HOME_DIR=$(fresh_home line-cap)
+lede='needs-decision: [key=cap] pick the rendering strategy'
+printf 'window=x:w1\nkind=ship\n' > "$HOME_DIR/state/task-cap.meta"
+{
+  printf '%s' "$lede"
+  awk 'BEGIN { while (i++ < 400) printf " padding" }'
+  printf '\n'
+  printf 'working: short line kept whole\n'
+} > "$HOME_DIR/state/task-cap.status"
+
+out=$(CS_HOME="$HOME_DIR" "$BIN" 2>/dev/null)
+
+assert_contains "$out" "$lede" "the cap discarded the lede that carries the state word and decision key"
+assert_contains "$out" ' [truncated]' "an over-long status line was not marked as truncated"
+assert_contains "$out" 'working: short line kept whole' "the cap mangled a status line already under it"
+assert_contains "$out" 'each capped at 220 characters' "the status tail header does not disclose its per-line cap"
+assert_contains "$out" "$HOME_DIR/state/task-cap.status" "a capped tail dropped the full log path that recovers the rest"
+
+# Nothing the tail emits may exceed the cap, and the padded line really was
+# long enough to exercise it.
+tail_section=$(printf '%s\n' "$out" | awk '/^status tail \(/ { flag = 1; next } flag && /^$/ { flag = 0 } flag')
+longest=$(printf '%s\n' "$tail_section" | awk '{ if (length($0) > max) max = length($0) } END { print max + 0 }')
+[ "$longest" -le 220 ] || fail "a status tail line ran $longest characters past the 220-character cap"
+capped=$(printf '%s\n' "$tail_section" | grep -c ' \[truncated\]$')
+[ "$capped" -eq 1 ] || fail "expected exactly one truncated tail line, got $capped: $tail_section"
+pass "status tail lines are capped with a truncation marker while the full log stays reachable"
+
+# --- backlog composition fixtures ----------------------------------------------
+# A backlog whose Done section, held row, blocked row, and plain queued rows can
+# each be told apart in the rendered digest. DONE-ROW-LINE and the *-BODY-LINE
+# markers exist so a leak is unmistakable.
+write_long_body_backlog() {
+  local path=$1 i=1
+  cat > "$path" <<'EOF'
+# Backlog
+
+## In flight
+- [ ] compact-startup - Compact startup digest (repo: consigliere) (kind: ship)
+  OVERSIZED-BODY-LINE this is a long multiline note that must never print.
+
+## Queued
+- [ ] blocked-followup - Follow compact startup blocked-by: compact-startup - waits for implementation (repo: consigliere) (kind: scout)
+  QUEUED-BODY-LINE this is another long multiline note.
+- [ ] held-queued - Held queued work (repo: consigliere) (kind: ship) (hold: boss choice pending) (hold-kind: captain)
+EOF
+  while [ "$i" -le 25 ]; do
+    printf -- '- [ ] plain-%s - Plain queued item %s (repo: consigliere) (kind: ship)\n' "$i" "$i" >> "$path"
+    i=$((i + 1))
+  done
+  cat >> "$path" <<'EOF'
+
+## Done
+- [x] landed-earlier - DONE-ROW-LINE already landed and torn down (repo: consigliere) (kind: ship)
+EOF
+}
+
+# make_fake_tasks_axi <fakebin>: a tasks-axi boundary that answers the four
+# group filters the startup listing composes (in-flight, held, blocked queued,
+# and the dispatchable ready set) and REFUSES anything the recovery listing must
+# never ask for: a body field, an unfiltered whole-backlog listing, or done
+# rows. CS_FAKE_TASKS_AXI_READY sizes the ready set so the queued bound can be
+# driven past its limit.
+make_fake_tasks_axi() {
+  local fakebin=$1
+  cat > "$fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+set -u
+log=${CS_FAKE_TASKS_AXI_LOG:-}
+[ -n "$log" ] && printf '%s\n' "$*" >> "$log"
+ready_count=${CS_FAKE_TASKS_AXI_READY:-2}
+require_file() {
+  case "$*" in *'--file '*) return 0 ;; esac
+  printf '%s\n' 'missing explicit backlog file' >&2
+  exit 9
+}
+task_header() {
+  printf 'count: %s\n' "$1"
+  printf 'tasks[%s]{id,state,kind,repo,title,blocked_by,hold_kind,hold_reason}:\n' "$1"
+}
+list_help() {
+  printf 'help[1]:\n'
+  printf '%s\n' '  - Run `tasks-axi show <id> --full` for full notes on a task'
+}
+case "${1:-}" in
+  --version|-v|-V)
+    printf '%s\n' '0.2.4'
+    exit 0
+    ;;
+  ready)
+    require_file "$@"
+    printf 'count: %s\n' "$ready_count"
+    printf 'ready[%s]{id,state,kind,repo,title}:\n' "$ready_count"
+    i=1
+    while [ "$i" -le "$ready_count" ]; do
+      printf '  ready-%s,queued,ship,consigliere,Ready item %s\n' "$i" "$i"
+      i=$((i + 1))
+    done
+    printf 'ready_public_followups: 0 delivery-ready obligations\n'
+    printf 'help[1]:\n'
+    printf '%s\n' '  - Run `tasks-axi start <id>` to dispatch one of these'
+    exit 0
+    ;;
+  list)
+    case "$*" in
+      *'--fields '*'body'*|*'--fields='*'body'*)
+        printf '%s\n' 'compact listing must not request body' >&2
+        exit 9
+        ;;
+    esac
+    require_file "$@"
+    case "$*" in
+      *'--state done'*)
+        printf '%s\n' 'startup recovery must never list done rows' >&2
+        exit 9
+        ;;
+      *'--state in_flight'*)
+        task_header 1
+        printf '%s\n' '  compact-startup,in_flight,ship,consigliere,Compact startup digest,none,captain,boss choice pending'
+        ;;
+      *'--state held'*)
+        task_header 1
+        printf '%s\n' '  held-queued,queued,ship,consigliere,Held queued work,none,captain,boss choice pending'
+        ;;
+      *'--state queued'*'--blocked'*)
+        task_header 1
+        printf '%s\n' '  blocked-followup,queued,scout,consigliere,Follow compact startup,compact-startup,"-","-"'
+        ;;
+      *)
+        printf '%s\n' 'startup recovery must not request an unfiltered whole-backlog listing' >&2
+        exit 9
+        ;;
+    esac
+    list_help
+    exit 0
+    ;;
+esac
+exit 0
+SH
+  chmod +x "$fakebin/tasks-axi"
+}
+
+# --- backlog: tasks-axi composition drops done rows, keeps actionable rows -----
+HOME_DIR=$(fresh_home axi-compose)
+FAKEBIN=$(cs_fakebin "$TMP/axi-compose-tools")
+make_fake_tasks_axi "$FAKEBIN"
+write_long_body_backlog "$HOME_DIR/config/backlog.md"
+AXI_LOG="$TMP/axi-compose.log"
+: > "$AXI_LOG"
+
+out=$(CS_HOME="$HOME_DIR" CS_FAKE_TASKS_AXI_LOG="$AXI_LOG" CS_FAKE_TASKS_AXI_READY=3 \
+  PATH="$FAKEBIN:$PATH" "$BIN" 2>/dev/null)
+
+assert_contains "$out" 'compact backlog listing (tasks-axi; done rows omitted; every in-flight, held, and blocked row shown in full; ready queued bounded to 20; task bodies omitted)' \
+  "tasks-axi backend did not render the composed recovery listing"
+assert_contains "$out" 'compact-startup,in_flight,ship,consigliere,Compact startup digest,none,captain,boss choice pending' \
+  "tasks-axi listing omitted in-flight identity, state, or hold metadata"
+assert_contains "$out" 'held-queued,queued,ship,consigliere,Held queued work,none,captain,boss choice pending' \
+  "tasks-axi listing omitted a held row or its hold metadata"
+assert_contains "$out" 'blocked-followup,queued,scout,consigliere,Follow compact startup,compact-startup,"-","-"' \
+  "tasks-axi listing omitted blocked-by metadata"
+assert_contains "$out" 'ready-3,queued,ship,consigliere,Ready item 3' \
+  "tasks-axi listing omitted a dispatchable queued row inside the bound"
+assert_not_contains "$out" 'DONE-ROW-LINE' "tasks-axi digest listed a done row at startup"
+assert_contains "$out" 'ready_public_followups: 0 delivery-ready obligations' \
+  "the composed listing dropped a real signal from the dispatchable set"
+# One section pointer, not one repeated help block per composed group.
+assert_not_contains "$out" 'help[1]:' \
+  "the composed listing repeated tasks-axi's per-group help block"
+assert_contains "$out" 'Full task bodies remain available on demand: tasks-axi show <id> --full' \
+  "the composed listing omitted the full-body lookup pointer"
+
+# The fake refuses a body field, an unfiltered listing, and a done listing, so
+# a clean render already proves those were never asked for; pin the group
+# filters the listing is built from.
+assert_grep '--state in_flight --fields blocked_by,hold_kind,hold_reason' "$AXI_LOG" \
+  "session start did not ask tasks-axi for the in-flight group"
+assert_grep '--state held --fields blocked_by,hold_kind,hold_reason' "$AXI_LOG" \
+  "session start did not ask tasks-axi for the held group"
+assert_grep '--state queued --blocked --fields blocked_by,hold_kind,hold_reason' "$AXI_LOG" \
+  "session start did not ask tasks-axi for the blocked queued group"
+assert_grep "ready --file $HOME_DIR/config/backlog.md" "$AXI_LOG" \
+  "session start did not ask tasks-axi for the dispatchable queued set"
+pass "tasks-axi backlog rendering drops done rows and keeps every in-flight, held, and blocked row"
+
+# --- backlog: the queued bound cuts only dispatchable rows and discloses it ----
+HOME_DIR=$(fresh_home axi-bound)
+FAKEBIN=$(cs_fakebin "$TMP/axi-bound-tools")
+make_fake_tasks_axi "$FAKEBIN"
+write_long_body_backlog "$HOME_DIR/config/backlog.md"
+
+out=$(CS_HOME="$HOME_DIR" CS_FAKE_TASKS_AXI_READY=7 CS_SESSION_START_QUEUED_LIMIT=3 \
+  PATH="$FAKEBIN:$PATH" "$BIN" 2>/dev/null)
+
+assert_contains "$out" 'ready-3,queued,ship,consigliere,Ready item 3' \
+  "the queued bound dropped a row inside its own limit"
+assert_not_contains "$out" 'ready-4,queued' "the queued bound did not actually bound the ready listing"
+assert_contains "$out" '(shown 3 of 7 ready queued item(s))' \
+  "the bounded queued listing did not report what it showed"
+assert_contains "$out" "(4 more queued - tasks-axi ready --file $HOME_DIR/config/backlog.md)" \
+  "the bounded queued listing did not disclose an exact remainder and how to see it"
+
+# The bound is for dispatchable work only: held and blocked rows stay whole.
+assert_contains "$out" 'held-queued,queued,ship,consigliere,Held queued work,none,captain,boss choice pending' \
+  "the queued bound swallowed a held row"
+assert_contains "$out" 'blocked-followup,queued,scout,consigliere,Follow compact startup,compact-startup,"-","-"' \
+  "the queued bound swallowed a blocked row"
+assert_contains "$out" 'compact-startup,in_flight,ship,consigliere,Compact startup digest,none,captain,boss choice pending' \
+  "the queued bound swallowed an in-flight row"
+pass "the startup backlog bound cuts only dispatchable queued rows and discloses the remainder exactly"
+
+# --- backlog: manual backend composition ----------------------------------------
+HOME_DIR=$(fresh_home manual-compose)
+printf 'manual\n' > "$HOME_DIR/config/backlog-backend.conf"
+write_long_body_backlog "$HOME_DIR/config/backlog.md"
+
+out=$(CS_HOME="$HOME_DIR" CS_SESSION_START_QUEUED_LIMIT=4 "$BIN" 2>/dev/null)
+
+assert_contains "$out" 'compact backlog listing (manual backend; done rows omitted; every in-flight, held, and blocked title line kept; other queued bounded to 4; indented task bodies omitted)' \
+  "manual backend did not use the composed title-line rendering"
+assert_contains "$out" '## In flight' "manual rendering omitted the in-flight section heading"
+assert_contains "$out" '- [ ] compact-startup - Compact startup digest' \
+  "manual rendering omitted an in-flight title line"
+assert_contains "$out" '(hold: boss choice pending)' "manual rendering omitted hold metadata"
+assert_contains "$out" 'blocked-by: compact-startup - waits for implementation' \
+  "manual rendering omitted blocker metadata"
+assert_contains "$out" '- [ ] held-queued - Held queued work' \
+  "manual rendering dropped a held queued title line"
+assert_not_contains "$out" 'OVERSIZED-BODY-LINE' "manual digest leaked an in-flight task body"
+assert_not_contains "$out" 'QUEUED-BODY-LINE' "manual digest leaked a queued task body"
+assert_not_contains "$out" 'DONE-ROW-LINE' "manual digest listed a done row at startup"
+assert_not_contains "$out" '## Done' "manual digest printed the done heading it never fills"
+assert_contains "$out" '- [ ] plain-4 - Plain queued item 4' \
+  "manual rendering dropped a queued title line inside its bound"
+assert_not_contains "$out" '- [ ] plain-5 - Plain queued item 5' \
+  "manual rendering did not bound its plain queued listing"
+assert_contains "$out" '(shown 1 in-flight, 2 held or blocked queued, 4 of 25 other queued title line(s); 1 done row(s) omitted)' \
+  "manual rendering did not report its bound accounting"
+assert_contains "$out" '(21 more queued - raise CS_SESSION_START_QUEUED_LIMIT or read config/backlog.md for the rest)' \
+  "manual rendering did not disclose an exact queued remainder"
+assert_contains "$out" 'or config/backlog.md' "manual digest omitted the config/backlog.md full-body pointer"
+pass "manual backlog rendering drops done rows, keeps every held or blocked title line, and bounds the rest"
+
+pass "cs-session-start digest composition"
