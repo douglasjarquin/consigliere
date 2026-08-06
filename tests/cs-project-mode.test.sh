@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Behavior: cs-project-mode.sh resolves delivery mode + yolo from
-# data/projects.md, defaulting to "no-mistakes off" on missing registry,
+# config/projects.md, defaulting to "no-mistakes off" on missing registry,
 # unknown project, or unknown mode - a typo never silently drops the gate.
 set -u
 # shellcheck source=tests/lib.sh
@@ -8,7 +8,8 @@ set -u
 
 TMP=$(cs_test_tmproot cs-project-mode)
 export CS_DATA_OVERRIDE="$TMP/data"
-mkdir -p "$TMP/data"
+export CS_CONFIG_OVERRIDE="$TMP/config"
+mkdir -p "$TMP/data" "$TMP/config"
 
 BIN="$ROOT/bin/cs-project-mode.sh"
 
@@ -16,7 +17,7 @@ out=$("$BIN" ghost 2>/dev/null)
 [ "$out" = "no-mistakes off" ] || fail "missing registry defaults: got '$out'"
 pass "missing registry defaults to no-mistakes off"
 
-cat > "$TMP/data/projects.md" <<'EOF'
+cat > "$TMP/config/projects.md" <<'EOF'
 # Projects
 - alpha - plain default project (added 2026-07-01)
 - beta [direct-PR] - direct PR project (added 2026-07-01)

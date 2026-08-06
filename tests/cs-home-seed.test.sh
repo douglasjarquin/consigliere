@@ -20,11 +20,11 @@ cs_git_identity
 MAIN="$TMP/mainrepo"
 HOME_DIR="$TMP/home"
 cs_capo_fixture_repo "$MAIN"
-mkdir -p "$HOME_DIR/data" "$HOME_DIR/state" "$HOME_DIR/config" "$HOME_DIR/projects"
+mkdir -p "$HOME_DIR/data" "$HOME_DIR/state" "$HOME_DIR/config" "$HOME_DIR/host" "$HOME_DIR/projects"
 cs_capo_fixture_project "$TMP" "$HOME_DIR" alpha
-printf -- '- alpha [direct-PR] - test project (added 2026-01-01)\n' > "$HOME_DIR/data/projects.md"
-printf 'be nice\n' > "$HOME_DIR/data/boss-shared.md"
-printf 'manual\n' > "$HOME_DIR/config/backlog-backend"
+printf -- '- alpha [direct-PR] - test project (added 2026-01-01)\n' > "$HOME_DIR/config/projects.md"
+printf 'be nice\n' > "$HOME_DIR/config/boss-shared.md"
+printf 'manual\n' > "$HOME_DIR/config/backlog-backend.conf"
 
 export CS_ROOT_OVERRIDE="$MAIN"
 export CS_HOME="$HOME_DIR"
@@ -36,7 +36,7 @@ export CS_CAPO_CHARTER='Own alpha maintenance end to end.'
 export CS_CAPO_SCOPE='All alpha project work.'
 
 BIN="$ROOT/bin/cs-home-seed.sh"
-REG="$HOME_DIR/data/capos.md"
+REG="$HOME_DIR/host/capos.md"
 CAPO="$TMP/capos/alpha-capo"
 
 # 1. happy-path seed
@@ -50,19 +50,19 @@ git -C "$CAPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "home mus
 for d in data state config projects; do
   [ -d "$CAPO/$d" ] || fail "seed must create $d/ in the home"
 done
-assert_grep 'Own alpha maintenance end to end.' "$CAPO/data/charter.md" "charter copied into the home"
+assert_grep 'Own alpha maintenance end to end.' "$CAPO/config/charter.md" "charter copied into the home"
 [ "$(git -C "$CAPO/projects/alpha" remote get-url origin)" = "$(git -C "$HOME_DIR/projects/alpha" remote get-url origin)" ] \
   || fail "seeded project clone must share the main clone's origin"
-assert_grep '- alpha [direct-PR]' "$CAPO/data/projects.md" "home project registry carries the main registry line"
+assert_grep '- alpha [direct-PR]' "$CAPO/config/projects.md" "home project registry carries the main registry line"
 line=$(grep '^- alpha-capo ' "$REG") || fail "registry entry missing"
 case "$line" in
   "- alpha-capo - Own alpha maintenance end to end. (home: $CAPO; scope: All alpha project work.; projects: alpha; added "*")") : ;;
   *) fail "registry line format drifted: $line" ;;
 esac
-assert_grep 'DO NOT EDIT' "$CAPO/data/boss-shared.md" "inherited boss-shared carries the do-not-edit header"
-assert_grep 'be nice' "$CAPO/data/boss-shared.md" "inherited boss-shared carries the main content"
-[ ! -w "$CAPO/data/boss-shared.md" ] || fail "inherited boss-shared must be read-only"
-[ "$(cat "$CAPO/config/backlog-backend")" = manual ] || fail "backlog-backend must be copied at seed time"
+assert_grep 'DO NOT EDIT' "$CAPO/config/boss-shared.md" "inherited boss-shared carries the do-not-edit header"
+assert_grep 'be nice' "$CAPO/config/boss-shared.md" "inherited boss-shared carries the main content"
+[ ! -w "$CAPO/config/boss-shared.md" ] || fail "inherited boss-shared must be read-only"
+[ "$(cat "$CAPO/config/backlog-backend.conf")" = manual ] || fail "backlog-backend must be copied at seed time"
 pass "happy-path seed provisions a marked detached-worktree home"
 
 # 2. re-seed same id converges to one registry line
@@ -121,7 +121,7 @@ printf 'beta\n' > "$HOME_DIR/projects/beta/README.md"
 git -C "$HOME_DIR/projects/beta" add -A
 git -C "$HOME_DIR/projects/beta" -c user.name=t -c user.email=t@e.invalid commit -qm initial
 git -C "$HOME_DIR/projects/beta" remote add origin "$TMP/nonexistent-remote.git"
-printf -- '- beta [direct-PR] - test (added 2026-01-01)\n' >> "$HOME_DIR/data/projects.md"
+printf -- '- beta [direct-PR] - test (added 2026-01-01)\n' >> "$HOME_DIR/config/projects.md"
 cp "$REG" "$TMP/reg-before-rollback"
 out=$(CS_CAPO_CHARTER='Beta domain.' CS_CAPO_SCOPE='Beta work.' "$BIN" beta-capo alpha beta 2>&1) \
   && fail "seed with a failing clone must fail"
@@ -239,46 +239,46 @@ assert_contains "$out" "CAPO_LIVENESS: capo alpha-capo: skipped: local record ha
 cp "$TMP/alpha-capo.meta.orig" "$HOME_DIR/state/alpha-capo.meta"
 pass "sweep reports a live record that has no endpoint"
 
-# 10. sweep retrofits an ABSENT config/activation and never overwrites a
+# 10. sweep retrofits an ABSENT host/activation.conf and never overwrites a
 #     present one. A home seeded before per-home activation existed has no
 #     file, resolves to afk-only, and can never start its own turn.
-rm -f "$CAPO/config/activation"
+rm -f "$CAPO/host/activation.conf"
 out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "retrofit sweep failed: $out"
 assert_contains "$out" "CAPO_SYNC: capo alpha-capo: activation set to always (was unset)" \
   "an absent activation is reported when filled"
-[ "$(cat "$CAPO/config/activation")" = always ] || fail "sweep must retrofit activation to always"
+[ "$(cat "$CAPO/host/activation.conf")" = always ] || fail "sweep must retrofit activation to always"
 out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "idempotent sweep failed: $out"
 [ -z "$out" ] || fail "a converged sweep must be silent, got: $out"
-pass "sweep retrofits an absent config/activation (idempotently)"
+pass "sweep retrofits an absent host/activation.conf (idempotently)"
 
 # 10a. a deliberate value survives: the retrofit fills absence only
-printf 'off\n' > "$CAPO/config/activation"
+printf 'off\n' > "$CAPO/host/activation.conf"
 out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "deliberate-value sweep failed: $out"
-[ "$(cat "$CAPO/config/activation")" = off ] || fail "sweep must never overwrite a deliberate activation choice"
+[ "$(cat "$CAPO/host/activation.conf")" = off ] || fail "sweep must never overwrite a deliberate activation choice"
 [ -z "$out" ] || fail "leaving a present value alone must be silent, got: $out"
-printf 'always\n' > "$CAPO/config/activation"
-pass "sweep never overwrites a present config/activation"
+printf 'always\n' > "$CAPO/host/activation.conf"
+pass "sweep never overwrites a present host/activation.conf"
 
-rm -f "$CAPO/config/activation" "$TMP/external-activation"
-ln -s "$TMP/external-activation" "$CAPO/config/activation"
+rm -f "$CAPO/host/activation.conf" "$TMP/external-activation"
+ln -s "$TMP/external-activation" "$CAPO/host/activation.conf"
 out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "dangling-symlink sweep failed: $out"
-[ -L "$CAPO/config/activation" ] || fail "sweep must preserve a dangling activation symlink"
+[ -L "$CAPO/host/activation.conf" ] || fail "sweep must preserve a dangling activation symlink"
 assert_absent "$TMP/external-activation" "sweep must not create a dangling activation symlink target"
 [ -z "$out" ] || fail "leaving a dangling activation symlink alone must be silent, got: $out"
-rm "$CAPO/config/activation"
-printf 'always\n' > "$CAPO/config/activation"
-pass "sweep preserves a dangling config/activation symlink"
+rm "$CAPO/host/activation.conf"
+printf 'always\n' > "$CAPO/host/activation.conf"
+pass "sweep preserves a dangling host/activation.conf symlink"
 
-mv "$CAPO/config" "$TMP/capo-config"
-mkdir "$TMP/external-config"
-ln -s "$TMP/external-config" "$CAPO/config"
-out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "config-symlink sweep failed: $out"
-[ -L "$CAPO/config" ] || fail "sweep must preserve a symlinked config directory"
-assert_absent "$TMP/external-config/activation" "sweep must not create activation through a symlinked config directory"
-assert_contains "$out" "CAPO_SYNC: capo alpha-capo: skipped: unsafe config/ for activation" \
-  "a symlinked config directory must be reported as unsafe"
-rm "$CAPO/config"
-mv "$TMP/capo-config" "$CAPO/config"
-pass "sweep rejects a symlinked config directory"
+mv "$CAPO/host" "$TMP/capo-host"
+mkdir "$TMP/external-host"
+ln -s "$TMP/external-host" "$CAPO/host"
+out=$(env FAKE_PANE_EXISTS=1 FAKE_AGENT=codex "$BIN" --sweep 2>&1) || fail "host-symlink sweep failed: $out"
+[ -L "$CAPO/host" ] || fail "sweep must preserve a symlinked host directory"
+assert_absent "$TMP/external-host/activation.conf" "sweep must not create activation through a symlinked host directory"
+assert_contains "$out" "CAPO_SYNC: capo alpha-capo: skipped: unsafe host/ for activation" \
+  "a symlinked host directory must be reported as unsafe"
+rm "$CAPO/host"
+mv "$TMP/capo-host" "$CAPO/host"
+pass "sweep rejects a symlinked host directory"
 
 pass "cs-home-seed provisioning, rollback, and sweep behavior"

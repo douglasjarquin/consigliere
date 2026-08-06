@@ -66,7 +66,7 @@ cd consigliere
 codex                 # or: claude
 ```
 
-`AGENTS.md` is the always-loaded operating contract (claude loads it via the `CLAUDE.md` symlink). The session starts with `bin/cs-session-start.sh` (one digest: lock, bootstrap, wake queue, context, fleet state, supervision block). The root harness is auto-detected (`CLAUDECODE=1` ⇒ claude, else codex; `config/harness` overrides).
+`AGENTS.md` is the always-loaded operating contract (claude loads it via the `CLAUDE.md` symlink). The session starts with `bin/cs-session-start.sh` (one digest: lock, bootstrap, wake queue, context, fleet state, supervision block). The root harness is auto-detected (`CLAUDECODE=1` ⇒ claude, else codex; `host/harness.conf` overrides).
 
 Then talk to it in plain language: describe the work, name the project when it is ambiguous, and it dispatches, supervises, and brings back PRs for your word. It never merges without you - `yolo` lets it answer routine review decisions on its own, but landing is always your call - never writes to a project itself, and never tears down unlanded work.
 
@@ -76,7 +76,17 @@ Then talk to it in plain language: describe the work, name the project when it i
 - `skills/` - agent-loaded procedures (afk, rundown, the-books, vault, capo-provisioning, upstream-review, ...)
 - `docs/` - architecture, configuration schema (owner), supervision protocol, verified herdr/codex/claude/lavish facts
 - `tests/` - colocated behavior tests (`bash tests/<name>.test.sh`, or `bin/cs-test-run.sh --portable`; live suites opt in via `CS_TEST_HERDR_LIVE=1` / `CS_TEST_CODEX_LIVE=1`)
-- `data/ state/ config/ projects/` - boss-private operational home, gitignored
+- `config/` - the user-owned tree (settings and durable memory), boss-private and gitignored; back it up wholesale
+- `host/` - machine-local sibling (capo roster, harness pin, activation); never backed up, re-created per machine
+- `data/ state/ projects/` - generated output, volatile runtime state, and clones; boss-private, gitignored, disposable or re-creatable
+
+Backup and restore need no tool:
+
+```
+back up:      cp -a <home>/config <backup>/          # no exclusions
+new machine:  cp -a <backup>/config <newhome>/config
+              then fill in host/ for this machine and run bin/cs-doctor.sh
+```
 
 ## CI
 
@@ -90,7 +100,7 @@ checks cannot drift from what you run before pushing:
 | Shell lint | `bin/cs-lint.sh` (single owner of the file set, config, and pinned ShellCheck version; `--required-version` prints the pin) |
 | Portable behavior | `bin/cs-test-run.sh --portable` (every hermetic test, serial) |
 | Real Herdr behavior | `CS_TEST_HERDR_LIVE=1 bin/cs-test-run.sh --herdr` (needs a real herdr + a running default session for the lab tripwire) |
-| Repo invariants | `git ls-files -- .env data state config projects .no-mistakes` prints nothing; tracked symlinks stay symlinks |
+| Repo invariants | `git ls-files -- .env data state config host projects .no-mistakes` prints nothing; tracked symlinks stay symlinks |
 | Coverage guard | `bin/cs-test-run.sh --check-coverage` (proves every `tests/*.test.sh` is in exactly one lane) |
 
 Each lane except repo invariants runs only when the change can affect it.
@@ -112,4 +122,4 @@ by `tests/cs-ci-contract.test.sh`.
 
 ## Upstream
 
-Firstmate improvements are ported editorially through `/upstream-review` (`bin/cs-upstream-log.sh` + `data/upstream-review.md`); never merged, never cherry-picked.
+Firstmate improvements are ported editorially through `/upstream-review` (`bin/cs-upstream-log.sh` + the tracked ledger `docs/upstream-review.md`); never merged, never cherry-picked.

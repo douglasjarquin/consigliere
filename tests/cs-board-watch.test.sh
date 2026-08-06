@@ -10,8 +10,9 @@ set -u
 
 TMP=$(cs_test_tmproot cs-board-watch)
 export CS_HOME="$TMP/home"
-mkdir -p "$CS_HOME/data" "$CS_HOME/state"
+mkdir -p "$CS_HOME/data" "$CS_HOME/state" "$CS_HOME/config"
 DATA="$CS_HOME/data"
+CONFIG_DIR="$CS_HOME/config"
 STATE="$CS_HOME/state"
 
 FAKEBIN=$(cs_fakebin "$TMP")
@@ -85,7 +86,7 @@ assert_absent "$DATA/sweeps.md" "no sweep record written for an unmapped project
 assert_absent "$POLL" "no poll armed for an unmapped project"
 pass "arm fails closed on an unmapped board"
 
-printf 'proj o 7\n' > "$DATA/boards.md"
+printf 'proj o 7\n' > "$CONFIG_DIR/boards.md"
 
 out=$("$BIN" arm 'bad name' 2>&1) && fail "arm must refuse an invalid project name"
 assert_contains "$out" "invalid project name" "invalid name named"

@@ -358,8 +358,8 @@ test_local_only_skipped() {
   home=$(new_home)
   clone=$(build_pair "$home" iota)
   advance_origin "$home" iota C1
-  mkdir -p "$home/data"
-  printf -- '- iota [local-only] - test project (added 2026-07-22)\n' > "$home/data/projects.md"
+  mkdir -p "$home/data" "$home/config"
+  printf -- '- iota [local-only] - test project (added 2026-07-22)\n' > "$home/config/projects.md"
 
   out=$(run_sync "$home" "$clone")
 

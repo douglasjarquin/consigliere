@@ -164,7 +164,7 @@ origin_open_decisions() {  # <origin-id>
 
 verify_hold_active() {  # <hold-id>
   local id=$1 show state held kind hold_kind
-  show=$(task_show "$id") || fail "boss hold $id is absent from $CS_HOME/data/backlog.md"
+  show=$(task_show "$id") || fail "boss hold $id is absent from $CS_HOME/config/backlog.md"
   state=$(show_field "$show" state)
   held=$(show_field "$show" held)
   kind=$(show_field "$show" kind)
@@ -191,7 +191,7 @@ verify_hold_resolved() {  # <hold-id>
 
 verify_hold_durable() {  # <hold-id>
   local id=$1 show state held kind hold_kind body
-  show=$(task_show "$id") || fail "boss decision $id is absent from $CS_HOME/data/backlog.md"
+  show=$(task_show "$id") || fail "boss decision $id is absent from $CS_HOME/config/backlog.md"
   state=$(show_field "$show" state)
   held=$(show_field "$show" held)
   kind=$(show_field "$show" kind)

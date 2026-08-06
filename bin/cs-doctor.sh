@@ -26,9 +26,14 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Checks-only bypass of the layout gate: the doctor reports an unmigrated home
+# as a named failure in its config section instead of dying before it can say
+# anything useful.
+CS_LAYOUT_GATE_SKIP=1
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
+CS_LAYOUT_GATE_SKIP=
 # shellcheck source=bin/cs-deps-lib.sh
 . "$SCRIPT_DIR/cs-deps-lib.sh"
 # shellcheck source=bin/cs-herdr-lib.sh
@@ -78,10 +83,10 @@ say 'consigliere doctor - dependency preflight (checks only; installs nothing)'
 say "repo   $CS_ROOT"
 if [ -n "${CS_HARNESS_OVERRIDE:-}" ]; then
   say "harness $(cs_harness_detect_root) (from CS_HARNESS_OVERRIDE)"
-elif [ -f "$CONFIG/harness" ]; then
-  say "harness $(cs_harness_detect_root) (from config/harness)"
+elif [ -f "$HOST_DIR/harness.conf" ]; then
+  say "harness $(cs_harness_detect_root) (from host/harness.conf)"
 else
-  say "harness $(cs_harness_detect_root) (auto-detected; config/harness overrides)"
+  say "harness $(cs_harness_detect_root) (auto-detected; host/harness.conf overrides)"
 fi
 
 # --- required -----------------------------------------------------------------
@@ -153,6 +158,94 @@ else
   report MISSING bash "${BASH_VERSION%%(*}" "below the required ${BASH_FLOOR_MAJOR}.${BASH_FLOOR_MINOR}"
   suggest 'brew install bash, or run under a newer bash'
   problem
+fi
+
+# --- config and host: the tree you back up, and the tier you never do ----------
+#
+# config/ is the user-owned tree and host/ is its machine-local sibling
+# (docs/configuration.md owns the inventory). Everything here is a read:
+# presence, names, and symlink targets. Failures are the two arrangements that
+# silently lose boss data: an unmigrated home, and a symlink where a
+# rename-writer or the host tier will sever or defeat it.
+
+heading 'CONFIG + HOST - back up config/ wholesale; host/ is per-machine'
+
+# 1. Migration state: any pre-move path is a hard failure naming the migrator.
+UNMIGRATED=0
+while IFS=$'\t' read -r old _; do
+  if [ -e "$old" ] || [ -L "$old" ]; then
+    report FAIL "$(basename "$old")" - "pre-move path still exists: $old"
+    UNMIGRATED=1
+    problem
+  fi
+done <<EOF
+$(cs_layout_pairs)
+EOF
+if [ "$UNMIGRATED" -eq 1 ]; then
+  suggest 'run bin/cs-migrate-config.sh (idempotent; safe on a live fleet)'
+else
+  report ok 'layout' - 'no pre-move paths; the config/ layout is in effect'
+fi
+
+# resolve_link_target <link> -> absolute target path (relative targets resolve
+# against the link's own directory; the target need not exist).
+resolve_link_target() {
+  local t
+  t=$(readlink "$1") || return 1
+  case "$t" in
+    /*) printf '%s\n' "$t" ;;
+    *)  printf '%s/%s\n' "$(CDPATH='' cd -- "$(dirname "$1")" && pwd -P)" "$t" ;;
+  esac
+}
+
+# 2-5. Known names, symlink visibility, host-tier tripwire, sever tripwire.
+CONFIG_KNOWN=' boss.md boss-shared.md learnings.md projects.md boards.md backlog.md done-archive.md note-archive.md charter.md backlog-backend.conf dispatch-policy.conf permission-mode.conf wedge-alarm.conf '
+HOST_KNOWN=' capos.md harness.conf upstream.conf activation.conf '
+NEVER_SYMLINK=' backlog.md done-archive.md note-archive.md capos.md '
+
+check_config_entry() {  # <path> <tier: flat|host>
+  local entry=$1 tier=$2 name known target
+  name=$(basename "$entry")
+  if [ "$tier" = flat ]; then known=$CONFIG_KNOWN; else known=$HOST_KNOWN; fi
+  case "$known" in
+    *" $name "*) ;;
+    *) report WARN "$name" - "not a known name for this tier; a stray, a leaked temp, or a typo ($entry)" ;;
+  esac
+  if [ -L "$entry" ]; then
+    target=$(resolve_link_target "$entry" || echo '(unresolvable)')
+    case "$NEVER_SYMLINK" in
+      *" $name "*)
+        report FAIL "$name" - "symlinked, but its writer replaces it by rename, severing the link -> $target"
+        problem
+        return
+        ;;
+    esac
+    if [ "$tier" = host ]; then
+      case "$target" in
+        "$CS_HOME"/*) report ok "$name" - "symlink within the home -> $target" ;;
+        *)
+          report FAIL "$name" - "host-tier file symlinked outside this home -> $target"
+          suggest 'host/ entries are per-machine; materialize a real file instead of sharing it'
+          problem
+          ;;
+      esac
+    else
+      report ok "$name" - "symlink -> $target"
+    fi
+  fi
+}
+
+if [ -d "$CONFIG" ]; then
+  for entry in "$CONFIG"/* "$CONFIG"/.[!.]*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    check_config_entry "$entry" flat
+  done
+fi
+if [ -d "$HOST_DIR" ]; then
+  for entry in "$HOST_DIR"/* "$HOST_DIR"/.[!.]*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    check_config_entry "$entry" host
+  done
 fi
 
 # --- optional -----------------------------------------------------------------

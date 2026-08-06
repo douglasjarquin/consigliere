@@ -9,7 +9,8 @@ set -u
 
 TMP=$(cs_test_tmproot cs-board)
 export CS_DATA_OVERRIDE="$TMP/data"
-mkdir -p "$TMP/data"
+export CS_CONFIG_OVERRIDE="$TMP/config"
+mkdir -p "$TMP/data" "$TMP/config"
 
 FAKEBIN=$(cs_fakebin "$TMP")
 # Fake gh: canned project view / field-list / item-list, and an item-edit that
@@ -66,7 +67,7 @@ assert_contains "$out" "no board mapping" "missing mapping named"
 pass "missing board mapping fails closed"
 
 # markdown comments and blank lines are ignored; mapping keyed by project name
-cat > "$TMP/data/boards.md" <<'EOF'
+cat > "$TMP/config/boards.md" <<'EOF'
 # Board mappings for the contracts and casino skills
 # <project> <owner> <number> [labels...]
 
@@ -136,34 +137,34 @@ assert_contains "$out" "human approval gate" "check states the Backlog->Ready ga
 pass "check reports board sanity + workflow reminder"
 
 # custom labels via underscores
-printf 'todoproj o 9 Todo In_Progress Status\n' > "$TMP/data/boards.md"
+printf 'todoproj o 9 Todo In_Progress Status\n' > "$TMP/config/boards.md"
 out=$("$BIN" ready todoproj 2>&1)
 # fixture items are labeled "Ready", not "Todo", so a Todo board finds none
 [ -z "$out" ] || fail "custom ready label should match nothing in this fixture, got: $out"
 pass "custom label config is honored"
 
-printf 'badproj o 7 Ready In_Progress Status Inbox Ready\n' > "$TMP/data/boards.md"
+printf 'badproj o 7 Ready In_Progress Status Inbox Ready\n' > "$TMP/config/boards.md"
 edits_before=$(wc -l < "$EDIT_LOG")
 out=$("$BIN" specced badproj PVTI_f 2>&1) && fail "Ready alias must fail closed"
 assert_contains "$out" "Ready option 'Ready' aliases Backlog option 'Ready'" "Ready alias is rejected"
 [ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "Ready alias must not edit a card"
 pass "specced rejects a Ready alias"
 
-printf 'badwipproj o 7 Ready In_Progress Status Inbox In_Progress\n' > "$TMP/data/boards.md"
+printf 'badwipproj o 7 Ready In_Progress Status Inbox In_Progress\n' > "$TMP/config/boards.md"
 edits_before=$(wc -l < "$EDIT_LOG")
 out=$("$BIN" specced badwipproj PVTI_f 2>&1) && fail "In Progress alias must fail closed"
 assert_contains "$out" "In Progress option 'In Progress' aliases Backlog option 'In Progress'" "In Progress alias is rejected"
 [ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "In Progress alias must not edit a card"
 pass "specced rejects an In Progress alias"
 
-printf 'badstartproj o 7 Ready Ready Status Inbox Backlog\n' > "$TMP/data/boards.md"
+printf 'badstartproj o 7 Ready Ready Status Inbox Backlog\n' > "$TMP/config/boards.md"
 edits_before=$(wc -l < "$EDIT_LOG")
 out=$("$BIN" start badstartproj PVTI_a 2>&1) && fail "Ready alias must fail closed"
 assert_contains "$out" "Ready option 'Ready' aliases In Progress option 'Ready'" "start Ready alias is rejected"
 [ "$(wc -l < "$EDIT_LOG")" = "$edits_before" ] || fail "start Ready alias must not edit a card"
 pass "start rejects a Ready alias"
 
-printf 'badreadyproj o 7 Backlog In_Progress Status Inbox Backlog\n' > "$TMP/data/boards.md"
+printf 'badreadyproj o 7 Backlog In_Progress Status Inbox Backlog\n' > "$TMP/config/boards.md"
 edits_before=$(wc -l < "$EDIT_LOG")
 out=$("$BIN" start badreadyproj PVTI_i 2>&1) && fail "Backlog Ready alias must fail closed"
 assert_contains "$out" "Ready option 'Backlog' aliases Backlog option 'Backlog'" "Backlog Ready alias is rejected"

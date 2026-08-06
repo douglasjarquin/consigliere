@@ -45,7 +45,7 @@ exit 1
 SH
 chmod +x "$FAKEBIN/gh-axi"
 
-cat > "$HOME_DIR/data/backlog.md" <<'MD'
+cat > "$HOME_DIR/config/backlog.md" <<'MD'
 ## In flight
 
 - [ ] live-a - first live task
@@ -56,7 +56,7 @@ cat > "$HOME_DIR/data/backlog.md" <<'MD'
 
 - [ ] ready-c - replacement work
 MD
-backlog_before=$(shasum -a 256 "$HOME_DIR/data/backlog.md")
+backlog_before=$(shasum -a 256 "$HOME_DIR/config/backlog.md")
 
 cs_write_meta "$STATE/live-a.meta" \
   "pane=live-a" "worktree=$TMP_ROOT/live-a" "project=$PROJECT_ABS" "kind=ship"
@@ -86,6 +86,6 @@ if git -C "$PROJECT" worktree list --porcelain | grep -F "$ORPHAN" >/dev/null; t
   fail "orphan fixture was registered as a git worktree"
 fi
 
-backlog_after=$(shasum -a 256 "$HOME_DIR/data/backlog.md")
+backlog_after=$(shasum -a 256 "$HOME_DIR/config/backlog.md")
 [ "$backlog_before" = "$backlog_after" ] || fail "capacity accounting modified the stale backlog"
 pass "capacity owner frees one lane for a merged unregistered orphan without touching cleanup"

@@ -51,8 +51,14 @@ cs_harness_config_dir() {
   printf '%s\n' "${CS_CONFIG_OVERRIDE:-${CS_HOME:-${CS_ROOT:-$PWD}}/config}"
 }
 
+# cs_harness_host_dir - the machine-local host/ directory of the active home.
+# CS_HOST_OVERRIDE (test/escape seam) wins; else <CS_HOME|CS_ROOT|PWD>/host.
+cs_harness_host_dir() {
+  printf '%s\n' "${CS_HOST_OVERRIDE:-${CS_HOME:-${CS_ROOT:-$PWD}}/host}"
+}
+
 # cs_harness_detect_root - resolve the ROOT session's harness.
-# Precedence: CS_HARNESS_OVERRIDE (test/escape seam) -> config/harness file ->
+# Precedence: CS_HARNESS_OVERRIDE (test/escape seam) -> host/harness.conf ->
 # CLAUDECODE=1 (a Claude Code session) -> CS_HARNESS_DEFAULT (codex).
 cs_harness_detect_root() {
   local override config_dir file value
@@ -60,8 +66,8 @@ cs_harness_detect_root() {
   if [ -n "$override" ]; then
     cs_harness_valid "$override" && { printf '%s\n' "$override"; return 0; }
   fi
-  config_dir=$(cs_harness_config_dir)
-  file="$config_dir/harness"
+  config_dir=$(cs_harness_host_dir)
+  file="$config_dir/harness.conf"
   if [ -f "$file" ]; then
     value=$(tr -d '[:space:]' < "$file" 2>/dev/null || true)
     cs_harness_valid "$value" && { printf '%s\n' "$value"; return 0; }
@@ -124,7 +130,7 @@ cs_harness_permission_mode_valid() {
 }
 
 # cs_harness_permission_mode <h> - the configured launch permission mode for <h>
-# from config/permission-mode, or empty when the file has no record for it.
+# from config/permission-mode.conf, or empty when the file has no record for it.
 # Fails loudly on a malformed file, an unconfigurable harness, a duplicate
 # record, or a mode that would leave a soldier waiting on a human. Validation
 # covers every record, not just the running harness, so a typo surfaces at the
@@ -132,22 +138,22 @@ cs_harness_permission_mode_valid() {
 # docs/configuration.md owns the schema.
 cs_harness_permission_mode() {
   local h=$1 file key mode rest found=''
-  file="$(cs_harness_config_dir)/permission-mode"
+  file="$(cs_harness_config_dir)/permission-mode.conf"
   [ -f "$file" ] || return 0
   while read -r key mode rest || [ -n "$key" ]; do
     case "$key" in ''|'#'*) continue ;; esac
     if [ -z "$mode" ] || [ -n "$rest" ]; then
-      printf 'cs-harness: config/permission-mode needs exactly "<harness> <mode>" per line: %s\n' "$key" >&2
+      printf 'cs-harness: config/permission-mode.conf needs exactly "<harness> <mode>" per line: %s\n' "$key" >&2
       return 1
     fi
     case "$key" in
       claude) ;;
       codex)
-        printf 'cs-harness: config/permission-mode does not configure codex; its autonomy flag is fixed\n' >&2
+        printf 'cs-harness: config/permission-mode.conf does not configure codex; its autonomy flag is fixed\n' >&2
         return 1
         ;;
       *)
-        printf 'cs-harness: unknown harness "%s" in config/permission-mode\n' "$key" >&2
+        printf 'cs-harness: unknown harness "%s" in config/permission-mode.conf\n' "$key" >&2
         return 1
         ;;
     esac
@@ -157,7 +163,7 @@ cs_harness_permission_mode() {
     fi
     if [ "$key" = "$h" ]; then
       if [ -n "$found" ]; then
-        printf 'cs-harness: duplicate config/permission-mode record for %s\n' "$h" >&2
+        printf 'cs-harness: duplicate config/permission-mode.conf record for %s\n' "$h" >&2
         return 1
       fi
       found=$mode
@@ -170,7 +176,7 @@ cs_harness_permission_mode() {
 # cs_harness_autonomy_flag <h> - the unattended full-autonomy flag, or the
 # narrower launch permission mode this home configured instead. A claude home
 # under an org policy that forbids bypassPermissions selects `auto` (or
-# `acceptEdits`) in config/permission-mode; every other home keeps full autonomy.
+# `acceptEdits`) in config/permission-mode.conf; every other home keeps full autonomy.
 # Exactly one flag is emitted, never both.
 cs_harness_autonomy_flag() {
   local h=$1 mode
@@ -379,7 +385,7 @@ cs_harness_capo_launch() {
   bin=$(cs_harness_binary "$h")
   env=$(cs_harness_launch_env "$h")
   # shellcheck disable=SC2016
-  printf '%sCS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_HOME=%s %s %s%s%s "$(%s encode launch-brief < %s)"' \
+  printf '%sCS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME=%s %s %s%s%s "$(%s encode launch-brief < %s)"' \
     "$env" "$sq_home" "$bin" "$mf" "$ef" "$auto" "$sq_op" "$sq_brief"
 }
 

@@ -2,20 +2,20 @@
 name: capo-provisioning
 description: >-
   Agent-only reference for persistent capo setup and retirement.
-  Use when creating, seeding, validating, launching, recovering, handing backlog to, pushing inherited local material into, or retiring a capo home, or when editing data/capos.md.
+  Use when creating, seeding, validating, launching, recovering, handing backlog to, pushing inherited local material into, or retiring a capo home, or when editing host/capos.md.
   Covers detached-worktree homes, transactional seeding, project clone restrictions, inherited local-material push, idle charter, handoff helper, and teardown safety.
 user-invocable: false
 ---
 
 # capo-provisioning
 
-Use this reference before creating, seeding, validating, launching, handing backlog to, recovering, pushing inherited local material into, or retiring a persistent capo, and before editing `data/capos.md`.
+Use this reference before creating, seeding, validating, launching, handing backlog to, recovering, pushing inherited local material into, or retiring a persistent capo, and before editing `host/capos.md`.
 
 Keep the always-inline routing rules in `AGENTS.md` authoritative: route by natural-language `scope:`, local-only projects stay with the main consigliere, and capos are idle by default.
 
 ## Routing table
 
-`data/capos.md` has one parser-compatible line per persistent capo:
+`host/capos.md` has one parser-compatible line per persistent capo:
 
 ```markdown
 - <id> - <one-sentence charter summary> (home: <absolute-home-path>; scope: <natural-language responsibility>; projects: <project-a>, <project-b>; added <date>)
@@ -23,8 +23,8 @@ Keep the always-inline routing rules in `AGENTS.md` authoritative: route by natu
 
 `bin/cs-home-seed.sh` writes that line and `bin/cs-capo-registry-lib.sh` is the single owner of reading it back, in every consumer; a row it cannot parse is refused or surfaced with a reason, never silently skipped.
 Each registry entry stays concise and single-line: the summary is one sentence naming the durable charter, `scope:` is the natural-language intake responsibility, `projects:` is the non-exclusive clone list, and any extra prose is limited to genuinely domain-specific hard rules that change routing or safety for that capo.
-The `home:` path points to the seeded home containing `data/charter.md`; no extra registry pointer field is needed.
-The home-seeded `data/charter.md` is the sole owner of boilerplate idle-by-default behavior, the normal delegation lifecycle, and standard escalation contracts, so point to that charter rather than restating those contracts in the registry entry.
+The `home:` path points to the seeded home containing `config/charter.md`; no extra registry pointer field is needed.
+The home-seeded `config/charter.md` is the sole owner of boilerplate idle-by-default behavior, the normal delegation lifecycle, and standard escalation contracts, so point to that charter rather than restating those contracts in the registry entry.
 The `scope:` field is used during intake.
 The `projects:` field is a non-exclusive clone list, not ownership.
 
@@ -49,10 +49,10 @@ Set `CS_CAPO_CHARTER='<charter>'` to fill the charter text and `CS_CAPO_SCOPE='<
 If you scaffold without `CS_CAPO_CHARTER`, replace the `{TASK}` placeholder before seeding.
 Pass `--no-projects` instead of a project list to scaffold a project-less charter for a domain whose subject is the consigliere repo itself; its home is already a worktree of this repo, and its soldiers take worktrees of the same repo.
 `--no-projects` is mutually exclusive with a project list, and omitting both still fails loudly, so an accidental omission is never mistaken for a deliberate project-less seed.
-Re-seeding a populated home as project-less is refused non-destructively when the home contains project clones or `data/projects.md` entries.
+Re-seeding a populated home as project-less is refused non-destructively when the home contains project clones or `config/projects.md` entries.
 Retire or clean that home first, and re-scaffold a stale project-bearing charter with `--no-projects` before seeding.
 Keep custom charter text focused on the persistent responsibility, available project clones, and genuinely domain-specific hard rules.
-The scaffolded charter, later copied to `data/charter.md`, owns the standard lifecycle and escalation wording, including the marked-request return channel and idle-by-default contract; preserve those generated sections unless the domain genuinely needs a hard rule.
+The scaffolded charter, later copied to `config/charter.md`, owns the standard lifecycle and escalation wording, including the marked-request return channel and idle-by-default contract; preserve those generated sections unless the domain genuinely needs a hard rule.
 
 Provision the persistent home and registry entry after the charter is filled:
 
@@ -60,7 +60,7 @@ Provision the persistent home and registry entry after the charter is filled:
 bin/cs-home-seed.sh <id> {<project>...|--no-projects}
 ```
 
-It creates the detached worktree home at `${CS_CAPOS_ROOT:-~/.consigliere/capos}/<id>`, writes the `.cs-capo-home` identity marker (which must remain in place for home validation), seeds the private `data/`, `state/`, `config/`, and `projects/` dirs, clones the project list, copies the charter to `data/charter.md`, seeds the inherited local material, and writes the `data/capos.md` entry.
+It creates the detached worktree home at `${CS_CAPOS_ROOT:-~/.consigliere/capos}/<id>`, writes the `.cs-capo-home` identity marker (which must remain in place for home validation), seeds the private `data/`, `state/`, `config/`, and `projects/` dirs, clones the project list, copies the charter to `config/charter.md`, seeds the inherited local material, and writes the `host/capos.md` entry.
 `bin/cs-home-seed.sh` refuses to copy a missing or placeholder charter; a direct seed without a preexisting brief requires `CS_CAPO_CHARTER`.
 Run `bin/cs-home-seed.sh validate` when checking registry integrity; it refuses duplicate ids, duplicate homes, and nested or overlapping homes.
 
@@ -89,12 +89,12 @@ The sweep also converges capo activation according to the contract owned by `bin
 
 Inheritance is deliberately tiny and one-way (`bin/cs-inherit-lib.sh` owns the allowlist):
 
-- `data/boss-shared.md` is main-authoritative and propagated into each capo home's `data/` as a read-only (mode 444) copy with a generated do-not-edit header, converged at seed time and on every sweep.
-- `config/backlog-backend` is copied once at seed time only.
+- `config/boss-shared.md` is main-authoritative and propagated into each capo home's `config/` as a read-only (mode 444) copy with a generated do-not-edit header, converged at seed time and on every sweep.
+- `config/backlog-backend.conf` is copied once at seed time only.
 
 Every convergence rewrites the capo copy only when it no longer matches what the main copy renders to; a divergent capo-local edit is quarantined to a dated private sibling and reported as a `CAPO_SYNC:` line, and a main-copy absence converges by quarantining the capo copy too.
-Never copy any capo `data/boss-shared.md` back into the primary.
-Keep each home's `data/boss.md` domain-local, and keep every `data/learnings.md` fully local; route fleet-general facts into tracked documentation instead of inventing shared learnings propagation.
+Never copy any capo `config/boss-shared.md` back into the primary.
+Keep each home's `config/boss.md` domain-local, and keep every `config/learnings.md` fully local; route fleet-general facts into tracked documentation instead of inventing shared learnings propagation.
 
 The same `--sweep` also guarantees liveness: for every live capo meta (`state/<id>.meta` with `kind=capo` and a recorded pane), it probes the pane for a real agent through `bin/cs-herdr-lib.sh` and respawns via `bin/cs-spawn.sh <id> <home> --capo` only on a confident dead reading.
 An inconclusive probe is reported as a `CAPO_LIVENESS:` skip and never acted on, because a false-dead reading would spawn a duplicate supervisor into the same home.
@@ -112,14 +112,14 @@ Do not read a capo's chat to check on a request; the correlated status channel i
 Apply `AGENTS.md` section 10's work-items-only backlog contract before creation or handoff.
 When a capo is created for a domain, existing main-backlog items that fall under its scope should become its work instead of staying stranded in the main backlog.
 Scope-matching is consigliere's judgment against the capo's natural-language scope, not a keyword rule.
-Read `data/backlog.md`, pick queued items that fit the new scope, and move them with:
+Read `config/backlog.md`, pick queued items that fit the new scope, and move them with:
 
 ```sh
 bin/cs-backlog-handoff.sh <capo-id> <item-key>...
 ```
 
-The helper resolves and validates the capo home from `data/capos.md`, then delegates the item move to `tasks-axi mv` (the single owner of the backlog format), which moves each named item - and a whole connected set, blocker plus dependents, atomically - from the main `data/backlog.md` into the capo home's `data/backlog.md`.
-This delegated route remains required when `config/backlog-backend=manual`, which controls only routine consigliere backlog edits.
+The helper resolves and validates the capo home from `host/capos.md`, then delegates the item move to `tasks-axi mv` (the single owner of the backlog format), which moves each named item - and a whole connected set, blocker plus dependents, atomically - from the main `config/backlog.md` into the capo home's `config/backlog.md`.
+This delegated route remains required when `config/backlog-backend.conf=manual`, which controls only routine consigliere backlog edits.
 It accepts in-scope `## Queued` entries only and refuses `## In flight` and historical `## Done` entries; Done records stay with their home for pruning or archiving.
 It refuses a selected item with a single-space or tab-indented continuation rather than risk leaving content orphaned.
 It is idempotent; an item already in the capo backlog is skipped.
@@ -136,7 +136,7 @@ bin/cs-spawn.sh <id> <home> --capo
 
 Use the recorded `home=` in meta.
 A meta with no recorded endpoint is a reported recovery condition, not permission to search herdr by name or respawn blindly.
-If meta is missing but `data/capos.md` still registers the capo, leave it idle as a seeded-but-not-yet-launched home rather than respawning from the registry entry.
+If meta is missing but `host/capos.md` still registers the capo, leave it idle as a seeded-but-not-yet-launched home rather than respawning from the registry entry.
 A restart never re-seeds: the home, charter, and registry entry are durable, and the bootstrap sweep re-converges the home as described above on the next session start.
 
 Do not reconstruct a capo's whole tree from the main home.
@@ -153,7 +153,7 @@ Run `bin/cs-teardown.sh <id>` for `kind=capo` only when the boss or main consigl
 
 The safety check is the capo's own home.
 Teardown refuses while its `state/*.meta` contains in-flight work, and refuses to remove a directory that is not marked by `.cs-capo-home`.
-When safe, teardown closes the capo pane and workspace, removes the home through `git worktree remove` plus prune (so the repo's worktree registry stays consistent), removes the `data/capos.md` route, and clears the main home metadata.
+When safe, teardown closes the capo pane and workspace, removes the home through `git worktree remove` plus prune (so the repo's worktree registry stays consistent), removes the `host/capos.md` route, and clears the main home metadata.
 Removing the home never touches anything under `projects/` clones.
 
 With `--force`, teardown is the explicit discard path.

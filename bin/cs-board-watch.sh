@@ -107,7 +107,7 @@ shell_quote() {
 #
 # One record per line: "<project> <lanes> <resurface> <armed-utc>". Blank lines
 # and '#' comments are ignored so the file reads as ordinary markdown, matching
-# data/boards.md. This script is the only writer.
+# config/boards.md. This script is the only writer.
 
 SWEEPS_HEADER='# Active board sweeps. Owned by bin/cs-board-watch.sh; do not hand-edit.
 # <project> <lane-cap> <resurface-secs> <armed-utc>'
@@ -303,7 +303,7 @@ cmd_arm() {
   # Fail closed on an unmapped board rather than arming a poll that can only
   # ever be silent. cs-board.sh owns the boards.md format, so it answers this.
   "$BOARD" mapped "$project" >/dev/null \
-    || die "no board mapping for '$project' is usable (see any error above); add or fix its line in $DATA/boards.md"
+    || die "no board mapping for '$project' is usable (see any error above); add or fix its line in $CONFIG/boards.md"
 
   sweeps_put "$project" "$lanes" "$resurface"
   arm_poll "$project" "$lanes" "$resurface"

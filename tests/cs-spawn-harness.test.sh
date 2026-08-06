@@ -49,7 +49,7 @@ chmod +x "$FAKEBIN/herdr"
 
 HOME_DIR="$TMP/home"
 mkdir -p "$HOME_DIR/data" "$HOME_DIR/state" "$HOME_DIR/config"
-printf -- '- project [local-only] - fixture\n' > "$HOME_DIR/data/projects.md"
+printf -- '- project [local-only] - fixture\n' > "$HOME_DIR/config/projects.md"
 REPO="$TMP/project"
 cs_git_init_commit "$REPO"
 
@@ -89,7 +89,7 @@ assert_not_contains "$launch" '--settings' "codex root does not use --settings"
 assert_absent "$HOME_DIR/state/t-codex.claude-settings.json" "codex root writes no claude settings file"
 pass "codex root: harness=codex, codex notify launch, no settings file"
 
-cat > "$HOME_DIR/config/dispatch-policy" <<'EOF'
+cat > "$HOME_DIR/config/dispatch-policy.conf" <<'EOF'
 # harness kind model effort
 codex scout gpt-5.6-sol max
 codex ship gpt-5.6-terra ultra
@@ -144,15 +144,15 @@ assert_no_grep 'cs-turnend-guard' "$SETTINGS" "soldier settings must not run the
 assert_contains "$launch" "$SETTINGS" "claude launch references the settings file"
 pass "claude root: harness=claude, --settings launch, settings file written"
 
-# --- config/permission-mode reaches a real spawn ----------------------------
+# --- config/permission-mode.conf reaches a real spawn ----------------------------
 # End-to-end, not just the launch-string unit: proves the home's config dir
 # resolves the same way for the harness lib as it does for cs-spawn itself.
-printf 'claude auto\n' > "$HOME_DIR/config/permission-mode"
+printf 'claude auto\n' > "$HOME_DIR/config/permission-mode.conf"
 launch=$(spawn_one claude t-claude-permmode --mode no-mistakes --yolo off)
 assert_contains "$launch" "--permission-mode 'auto'" "configured permission mode reaches the spawn launch"
 assert_not_contains "$launch" '--dangerously-skip-permissions' "configured mode replaces the bypass flag"
 
-printf 'claude plan\n' > "$HOME_DIR/config/permission-mode"
+printf 'claude plan\n' > "$HOME_DIR/config/permission-mode.conf"
 mkdir -p "$HOME_DIR/data/t-permmode-invalid"
 printf 'implement the fixture\n' > "$HOME_DIR/data/t-permmode-invalid/brief.md"
 if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude \
@@ -164,10 +164,10 @@ if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude \
 fi
 assert_contains "$output" "not a usable claude launch permission mode" "unusable mode error is specific"
 assert_absent "$HOME_DIR/state/t-permmode-invalid.meta" "unusable mode writes no metadata"
-rm -f "$HOME_DIR/config/permission-mode"
-pass "config/permission-mode selects the claude launch mode and blocks an unusable one"
+rm -f "$HOME_DIR/config/permission-mode.conf"
+pass "config/permission-mode.conf selects the claude launch mode and blocks an unusable one"
 
-printf 'codex ship gpt-5.6-sol too-much\n' > "$HOME_DIR/config/dispatch-policy"
+printf 'codex ship gpt-5.6-sol too-much\n' > "$HOME_DIR/config/dispatch-policy.conf"
 mkdir -p "$HOME_DIR/data/t-policy-invalid"
 printf 'implement the fixture\n' > "$HOME_DIR/data/t-policy-invalid/brief.md"
 if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
@@ -182,7 +182,7 @@ assert_absent "$HOME_DIR/state/t-policy-invalid.meta" "malformed policy writes n
 pass "malformed dispatch policy blocks dispatch"
 
 # --- policy path shapes: a resolving symlink is honored, a dangling one stops -
-POLICY="$HOME_DIR/config/dispatch-policy"
+POLICY="$HOME_DIR/config/dispatch-policy.conf"
 rm -f "$POLICY"
 printf 'codex ship gpt-5.6-luna high\n' > "$TMP/external-policy"
 ln -s "$TMP/external-policy" "$POLICY"
@@ -208,7 +208,7 @@ assert_absent "$HOME_DIR/state/t-policy-dangling.meta" "dangling symlink writes 
 rm -f "$POLICY"
 pass "a dangling dispatch policy symlink blocks dispatch"
 
-: > "$HOME_DIR/config/dispatch-policy"
+: > "$HOME_DIR/config/dispatch-policy.conf"
 mkdir -p "$HOME_DIR/data/t-claude-ultra"
 printf 'implement the fixture\n' > "$HOME_DIR/data/t-claude-ultra/brief.md"
 if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude \

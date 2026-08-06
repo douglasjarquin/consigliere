@@ -197,7 +197,7 @@ $CAPO_SCOPE
 $PROJECT_CLONES_BODY
 
 # Operating model
-You are in an isolated consigliere home. The local \`AGENTS.md\` is your job description, and your local \`data/\`, \`state/\`, \`config/\`, and \`projects/\` dirs are yours to operate.
+You are in an isolated consigliere home. The local \`AGENTS.md\` is your job description, and your local \`config/\` (your user-owned tree), \`data/\`, \`state/\`, and \`projects/\` dirs are yours to operate.
 $PROJECT_CLONES_NOTE
 Delegate project work to your own soldiers with the normal consigliere lifecycle: brief, spawn, status, watcher, steer, teardown, and recovery.
 Do not invent a second delegation system.

@@ -1,10 +1,14 @@
 # Boss-private operational home — never tracked.
-.env
 data/
 state/
 config/
+host/
 projects/
 .no-mistakes/
+
+# Local review artifacts and macOS noise — never tracked.
+.lavish/
+.DS_Store
 
 # Executor worktrees (Agent isolation) — never tracked.
 .claude/worktrees/

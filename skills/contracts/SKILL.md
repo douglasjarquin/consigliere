@@ -12,7 +12,7 @@ This is ordinary section-7 ship lifecycle with a board front door - the safety c
 
 ## Preconditions (check once, fast)
 
-1. The project is registered in `data/projects.md` and its board is mapped in `data/boards.md`, beside the registry and keyed by the same project name; `docs/configuration.md` owns the mapping line format.
+1. The project is registered in `config/projects.md` and its board is mapped in `config/boards.md`, beside the registry and keyed by the same project name; `docs/configuration.md` owns the mapping line format.
    The registry's standing posture is advisory, while each ship task's flags are chosen explicitly at intake.
    If the board mapping is missing, tell the boss the one line they need to add and stop.
 2. Run `bin/cs-board.sh check <project>`. It confirms the Ready / In Progress / Done options exist and reminds you the closed->Done workflow must be enabled on the board. If it warns that a `Done` option or the workflow is missing, surface that to the boss before sweeping - with built-in-only Done moves, a missing workflow silently strands cards.

@@ -14,31 +14,31 @@ TMP=$(cs_test_tmproot cs-harness)
 # lib.sh exports CS_HARNESS_OVERRIDE=codex; each case controls the inputs it needs.
 
 # Override wins over everything.
-got=$(CS_HARNESS_OVERRIDE=claude CLAUDECODE=1 CS_CONFIG_OVERRIDE=/nonexistent cs_harness_detect_root)
+got=$(CS_HARNESS_OVERRIDE=claude CLAUDECODE=1 CS_HOST_OVERRIDE=/nonexistent cs_harness_detect_root)
 [ "$got" = claude ] || fail "override must win (got $got)"
-got=$(CS_HARNESS_OVERRIDE=codex CLAUDECODE=1 CS_CONFIG_OVERRIDE=/nonexistent cs_harness_detect_root)
+got=$(CS_HARNESS_OVERRIDE=codex CLAUDECODE=1 CS_HOST_OVERRIDE=/nonexistent cs_harness_detect_root)
 [ "$got" = codex ] || fail "override codex must win over CLAUDECODE (got $got)"
 pass "CS_HARNESS_OVERRIDE has highest precedence"
 
-# config/harness file beats env, when override is absent. Use a subshell to
+# host/harness.conf file beats env, when override is absent. Use a subshell to
 # scope the unset (a prefix var assignment on a function call works in bash, but
 # `env` cannot run a shell function).
 mkdir -p "$TMP/cfg"
-printf 'claude\n' > "$TMP/cfg/harness"
-got=$(unset CS_HARNESS_OVERRIDE CLAUDECODE; CS_CONFIG_OVERRIDE="$TMP/cfg" cs_harness_detect_root)
-[ "$got" = claude ] || fail "config/harness must be read (got $got)"
-printf '  codex \n' > "$TMP/cfg/harness"  # whitespace tolerated
-got=$(unset CS_HARNESS_OVERRIDE; CLAUDECODE=1 CS_CONFIG_OVERRIDE="$TMP/cfg" cs_harness_detect_root)
-[ "$got" = codex ] || fail "config/harness must beat CLAUDECODE (got $got)"
-printf 'garbage\n' > "$TMP/cfg/harness"  # invalid value ignored
-got=$(unset CS_HARNESS_OVERRIDE CLAUDECODE; CS_CONFIG_OVERRIDE="$TMP/cfg" cs_harness_detect_root)
-[ "$got" = codex ] || fail "invalid config/harness must fall through to default (got $got)"
-pass "config/harness beats env and ignores invalid values"
+printf 'claude\n' > "$TMP/cfg/harness.conf"
+got=$(unset CS_HARNESS_OVERRIDE CLAUDECODE; CS_HOST_OVERRIDE="$TMP/cfg" cs_harness_detect_root)
+[ "$got" = claude ] || fail "host/harness.conf must be read (got $got)"
+printf '  codex \n' > "$TMP/cfg/harness.conf"  # whitespace tolerated
+got=$(unset CS_HARNESS_OVERRIDE; CLAUDECODE=1 CS_HOST_OVERRIDE="$TMP/cfg" cs_harness_detect_root)
+[ "$got" = codex ] || fail "host/harness.conf must beat CLAUDECODE (got $got)"
+printf 'garbage\n' > "$TMP/cfg/harness.conf"  # invalid value ignored
+got=$(unset CS_HARNESS_OVERRIDE CLAUDECODE; CS_HOST_OVERRIDE="$TMP/cfg" cs_harness_detect_root)
+[ "$got" = codex ] || fail "invalid host/harness.conf must fall through to default (got $got)"
+pass "host/harness.conf beats env and ignores invalid values"
 
 # CLAUDECODE env, then default codex.
-got=$(unset CS_HARNESS_OVERRIDE; CLAUDECODE=1 CS_CONFIG_OVERRIDE="$TMP/empty" cs_harness_detect_root)
+got=$(unset CS_HARNESS_OVERRIDE; CLAUDECODE=1 CS_HOST_OVERRIDE="$TMP/empty" cs_harness_detect_root)
 [ "$got" = claude ] || fail "CLAUDECODE=1 must resolve claude (got $got)"
-got=$(unset CS_HARNESS_OVERRIDE CLAUDECODE; CS_CONFIG_OVERRIDE="$TMP/empty" cs_harness_detect_root)
+got=$(unset CS_HARNESS_OVERRIDE CLAUDECODE; CS_HOST_OVERRIDE="$TMP/empty" cs_harness_detect_root)
 [ "$got" = codex ] || fail "default must be codex (got $got)"
 pass "CLAUDECODE env then default codex"
 
@@ -61,10 +61,11 @@ cs_harness_effort_valid codex bogus && fail "codex must reject bogus" || true
 pass "effort validation (codex accepts max and ultra, claude rejects ultra)"
 
 # --- flags ------------------------------------------------------------------
-# The autonomy flag reads config/permission-mode from the active home, so every
+# The autonomy flag reads config/permission-mode.conf from the active home, so every
 # assertion below is pinned to a config dir that does not exist. Without this a
 # real home's permission-mode file would change the expected launch strings.
 export CS_CONFIG_OVERRIDE="$TMP/no-such-config"
+export CS_HOST_OVERRIDE="$TMP/no-such-host"
 
 [ -z "$(cs_harness_model_flag codex default)" ] || fail "default model -> empty flag"
 [ "$(cs_harness_model_flag codex gpt-5)" = "--model 'gpt-5' " ] || fail "codex model flag"
@@ -77,13 +78,13 @@ export CS_CONFIG_OVERRIDE="$TMP/no-such-config"
 [ "$(cs_harness_autonomy_flag claude)" = "--dangerously-skip-permissions" ] || fail "claude autonomy"
 pass "model/effort/autonomy flags per harness"
 
-# --- config/permission-mode -------------------------------------------------
+# --- config/permission-mode.conf -------------------------------------------------
 # A claude home whose org policy forbids bypassPermissions selects a narrower
 # launch mode here; the flag replaces the bypass flag, never joins it.
 PM=$TMP/pm
 mkdir -p "$PM"
 pm_flag() { CS_CONFIG_OVERRIDE="$PM" cs_harness_autonomy_flag "$1"; }
-pm_write() { printf '%s\n' "$1" > "$PM/permission-mode"; }
+pm_write() { printf '%s\n' "$1" > "$PM/permission-mode.conf"; }
 
 [ -z "$(CS_CONFIG_OVERRIDE="$PM" cs_harness_permission_mode claude)" ] ||
   fail "absent permission-mode file -> empty"
@@ -98,25 +99,25 @@ pm_write "claude auto"
 [ "$(pm_flag codex)" = "--dangerously-bypass-approvals-and-sandbox" ] ||
   fail "a claude-only record must leave codex on its own flag"
 
-printf '# comment\n\n   claude   auto   \n' > "$PM/permission-mode"
+printf '# comment\n\n   claude   auto   \n' > "$PM/permission-mode.conf"
 [ "$(pm_flag claude)" = "--permission-mode 'auto'" ] ||
   fail "comments, blank lines, and surrounding whitespace must be tolerated"
-pass "config/permission-mode selects a narrower claude launch mode"
+pass "config/permission-mode.conf selects a narrower claude launch mode"
 
 # Rejections. Every one must fail closed: a bad file stops the dispatch instead
 # of silently launching a soldier with wider or unusable permissions.
 for bad in "claude plan" "claude manual" "claude dontAsk" "claude bogus" \
            "codex never" "gemini auto" "claude" "claude auto extra"; do
-  printf '%s\n' "$bad" > "$PM/permission-mode"
+  printf '%s\n' "$bad" > "$PM/permission-mode.conf"
   if pm_flag claude 2>/dev/null; then
-    fail "config/permission-mode must reject: $bad"
+    fail "config/permission-mode.conf must reject: $bad"
   fi
 done
-printf 'claude auto\nclaude acceptEdits\n' > "$PM/permission-mode"
+printf 'claude auto\nclaude acceptEdits\n' > "$PM/permission-mode.conf"
 if pm_flag claude 2>/dev/null; then
-  fail "config/permission-mode must reject a duplicate claude record"
+  fail "config/permission-mode.conf must reject a duplicate claude record"
 fi
-pass "config/permission-mode fails closed on unusable, unknown, and duplicate records"
+pass "config/permission-mode.conf fails closed on unusable, unknown, and duplicate records"
 
 # --- launch strings ---------------------------------------------------------
 # Pin the credential-store selector so launch assertions never depend on the
@@ -155,21 +156,21 @@ assert_not_contains "$capo_claude" '--settings' "capo has no turn-end wiring"
 assert_not_contains "$capo_claude" 'notify=' "capo has no turn-end wiring"
 pass "launch strings per harness and role"
 
-# Every claude launch role honors config/permission-mode, and the configured mode
+# Every claude launch role honors config/permission-mode.conf, and the configured mode
 # REPLACES the bypass flag in each one.
-printf 'claude auto\n' > "$PM/permission-mode"
+printf 'claude auto\n' > "$PM/permission-mode.conf"
 for role in soldier scout capo; do
   case $role in
     soldier) line=$(CS_CONFIG_OVERRIDE="$PM" cs_harness_soldier_launch claude default default "$op" "$br" "$te" "$se") ;;
     scout) line=$(CS_CONFIG_OVERRIDE="$PM" cs_harness_scout_launch claude default default "$op" "$br" "$st") ;;
     capo) line=$(CS_CONFIG_OVERRIDE="$PM" cs_harness_capo_launch claude default default "$op" "$br" "$hm") ;;
   esac
-  assert_contains "$line" "--permission-mode 'auto'" "claude $role honors config/permission-mode"
+  assert_contains "$line" "--permission-mode 'auto'" "claude $role honors config/permission-mode.conf"
   assert_not_contains "$line" '--dangerously-skip-permissions' "claude $role drops the bypass flag"
 done
 
 # A malformed file stops every launch role rather than falling back to bypass.
-printf 'claude plan\n' > "$PM/permission-mode"
+printf 'claude plan\n' > "$PM/permission-mode.conf"
 for role in soldier scout capo; do
   case $role in
     soldier) CS_CONFIG_OVERRIDE="$PM" cs_harness_soldier_launch claude default default "$op" "$br" "$te" "$se" 2>/dev/null ;;
@@ -177,7 +178,7 @@ for role in soldier scout capo; do
     capo) CS_CONFIG_OVERRIDE="$PM" cs_harness_capo_launch claude default default "$op" "$br" "$hm" 2>/dev/null ;;
   esac && fail "claude $role must refuse an unusable permission mode"
 done
-rm -f "$PM/permission-mode"
+rm -f "$PM/permission-mode.conf"
 pass "configured permission mode reaches every claude launch role and fails closed"
 
 # --- credential-store forwarding ---------------------------------------------

@@ -61,11 +61,11 @@ SH
 chmod +x "$FAKEBIN/cs-crew-state.sh"
 
 # --- fixture home: backlog, task metas, statuses, reports, capo registry -----
-mkdir -p "$HOME_DIR/state" "$HOME_DIR/data/t2" "$HOME_DIR/config" \
+mkdir -p "$HOME_DIR/state" "$HOME_DIR/data/t2" "$HOME_DIR/config" "$HOME_DIR/host" \
   "$TMP_ROOT/wt1" "$TMP_ROOT/wt2"
-printf 'manual\n' > "$HOME_DIR/config/backlog-backend"   # deterministic offline listing
+printf 'manual\n' > "$HOME_DIR/config/backlog-backend.conf"   # deterministic offline listing
 
-cat > "$HOME_DIR/data/backlog.md" <<'MD'
+cat > "$HOME_DIR/config/backlog.md" <<'MD'
 # Backlog
 
 ## In flight
@@ -108,10 +108,10 @@ printf 'done: headless scout finished; read the report\n' > "$HOME_DIR/state/t4.
 printf '# headless findings\n' > "$HOME_DIR/data/t4/report.md"
 
 # Capo homes: alpha is valid+marked, beta lacks the marker, gamma is missing.
-mkdir -p "$TMP_ROOT/capoA/state" "$TMP_ROOT/capoA/data" "$TMP_ROOT/capoB"
+mkdir -p "$TMP_ROOT/capoA/state" "$TMP_ROOT/capoA/config" "$TMP_ROOT/capoB"
 : > "$TMP_ROOT/capoA/.cs-capo-home"
 cs_write_meta "$TMP_ROOT/capoA/state/childx.meta" "pane=w9:p1" "kind=ship"
-cat > "$TMP_ROOT/capoA/data/backlog.md" <<'MD'
+cat > "$TMP_ROOT/capoA/config/backlog.md" <<'MD'
 ## In flight
 
 - [ ] c1 - Capo child work
@@ -124,7 +124,7 @@ cat > "$TMP_ROOT/capoA/data/backlog.md" <<'MD'
 ## Done
 MD
 
-cat > "$HOME_DIR/data/capos.md" <<MD
+cat > "$HOME_DIR/host/capos.md" <<MD
 # Capos
 
 - alpha (home: $TMP_ROOT/capoA; scope: infra work)
@@ -265,7 +265,7 @@ test_capo_bound_disclosed() {
 # --- registry read fails closed -------------------------------------------------
 
 test_registry_reads_fail_closed() {
-  local reg="$HOME_DIR/data/capos.md" saved
+  local reg="$HOME_DIR/host/capos.md" saved
   saved=$(cat "$reg")
 
   # A registry whose last line has no trailing newline must keep its last capo.
@@ -337,8 +337,33 @@ test_usage_errors() {
   pass "usage errors exit 2 and --help documents the contract"
 }
 
+# --- absent registry is the empty set, not a gap --------------------------------
+
+test_absent_registry_is_not_a_gap() {
+  local reg="$HOME_DIR/host/capos.md" saved
+  saved=$(cat "$reg")
+  rm -f "$reg"
+
+  # A home that never provisioned a capo has no registry, and that is healthy:
+  # the review must read it as zero capos, never as a missing artifact.
+  run_view
+  expect_code 0 "$RC" "absent-registry view"
+  assert_contains "$OUT" "No capos provisioned from this home." \
+    "absent registry must render as the empty set"
+  assert_not_contains "$OUT" "No capo registry" \
+    "absent registry must not be reported as a missing file"
+  run_view --json
+  printf '%s' "$OUT" | jq -e '
+    .capos.present == false and (.capos.records | length) == 0 and .capos.error == null
+  ' >/dev/null || fail "absent registry JSON must stay present:false with no error: $OUT"
+
+  printf '%s\n' "$saved" > "$reg"
+  pass "an absent capo registry renders as zero capos provisioned, not a gap"
+}
+
 test_markdown_review
 test_json_snapshot
 test_capo_bound_disclosed
 test_registry_reads_fail_closed
+test_absent_registry_is_not_a_gap
 test_usage_errors

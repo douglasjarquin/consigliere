@@ -45,15 +45,15 @@ GitHub only; GitLab URLs are refused loudly at arm time.
 
 Ship tasks change projects and land by the mode decided per task at intake and passed explicitly to `bin/cs-brief.sh`, `bin/cs-spawn.sh`, and `bin/cs-promote.sh`: `no-mistakes` (the external pipeline owns review through PR; consigliere feeds gate decisions, never drives a soldier-owned run), `direct-PR`, or `local-only` (guarded fast-forward via `bin/cs-merge-local.sh`).
 `bin/cs-delivery-lib.sh` owns that vocabulary and the one machine-readable line (`Delivery contract: mode=<mode>`) the brief carries so `bin/cs-spawn.sh` can refuse a spawn whose `--mode` disagrees with it - before the worktree exists - instead of letting the worker's definition of done and the task's durable record diverge.
-`data/projects.md` (`bin/cs-project-mode.sh`) records only the boss's advisory standing posture per project: a task shipping with less rigor gets a deviation notice and continues, and an unregistered project has no standing posture at all.
+`config/projects.md` (`bin/cs-project-mode.sh`) records only the boss's advisory standing posture per project: a task shipping with less rigor gets a deviation notice and continues, and an unregistered project has no standing posture at all.
 Scout tasks leave a report at `data/<id>/report.md`, never push, and their scratch worktree is discarded only after the report exists and `bin/cs-decision-hold.sh verify` passes; a scout records no delivery posture at all, so `bin/cs-promote.sh` - which flips a scout to ship in place - is where a promoted task first states one.
 `bin/cs-teardown.sh` owns the fail-closed landed-work proofs (uncommitted never landed; landed = remote-reachable OR merged-PR-head containment OR content already in the up-to-date default branch), with the git-lock staleness proof from `bin/cs-lock-lib.sh`.
 
 ## Capos
 
 A capo is a soldier with an isolated consigliere home (`CS_HOME`) and a charter, not a second architecture: own data/state/config/projects, own session lock, own watcher, workspace `capo-<id>`.
-`bin/cs-home-seed.sh` provisions transactionally and sweeps (fast-forward plus liveness respawn for recorded endpoints, reporting missing endpoints and staying silent for seeded homes without metadata) at bootstrap; `data/capos.md` is the routing table; marked requests travel with the byte-compatible `from-consigliere` kind and a `corr=` token, with parent-owned expectations in `bin/cs-pending-reply-lib.sh`.
-Inheritance is deliberately tiny: `data/boss-shared.md` (read-only) and the backlog-backend choice (`bin/cs-inherit-lib.sh`).
+`bin/cs-home-seed.sh` provisions transactionally and sweeps (fast-forward plus liveness respawn for recorded endpoints, reporting missing endpoints and staying silent for seeded homes without metadata) at bootstrap; `host/capos.md` is the routing table; marked requests travel with the byte-compatible `from-consigliere` kind and a `corr=` token, with parent-owned expectations in `bin/cs-pending-reply-lib.sh`.
+Inheritance is deliberately tiny: `config/boss-shared.md` (read-only) and the backlog-backend choice (`bin/cs-inherit-lib.sh`).
 
 ## Away mode
 

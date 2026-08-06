@@ -8,7 +8,7 @@
 # What it gathers (all bounded, all read-only):
 #   backlog  - compact listing via tasks-axi when the configured backend selects
 #              it and the tool is installed, else title lines from
-#              data/backlog.md; plus per-section headline counts.
+#              config/backlog.md; plus per-section headline counts.
 #   tasks    - one row per state/<id>.meta: kind, optional mode/yolo, project, pr
 #              (bin/cs-meta-lib.sh), endpoint liveness (herdr pane exists plus
 #              corroborated agent status via bin/cs-herdr-lib.sh), the
@@ -18,7 +18,7 @@
 #              still-open boss decision), the scout report pointer at
 #              data/<id>/report.md, and the last status EVENT (history, never
 #              current-state truth).
-#   capos    - registered rows from data/capos.md, parsed by the single owner
+#   capos    - registered rows from host/capos.md, parsed by the single owner
 #              bin/cs-capo-registry-lib.sh. Each capo home gets a bounded
 #              structured read (in-flight child meta count, backlog headline
 #              counts) ONLY after validation: the recorded home must exist and
@@ -34,7 +34,7 @@
 # Env (tests and large fleets):
 #   CS_FLEET_BACKLOG_LIMIT   max backlog listing lines shown (default 30)
 #   CS_FLEET_CAPOS           max capo registry rows read (default 20)
-#   CS_FLEET_REGISTRY_BYTES  max bytes read from data/capos.md (default 65536)
+#   CS_FLEET_REGISTRY_BYTES  max bytes read from host/capos.md (default 65536)
 #   CS_FLEET_CAPO_MAX_BYTES  max bytes read from a capo backlog (default 262144)
 #   CS_CREW_STATE_BIN        current-state reader override (tests stub it)
 #   CS_FLEET_NOW             fixed generated timestamp override
@@ -49,8 +49,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
-BACKLOG="$DATA/backlog.md"
-CAPO_REG="$DATA/capos.md"
+BACKLOG="$CONFIG/backlog.md"
+CAPO_REG="$HOST_DIR/capos.md"
 NOW=${CS_FLEET_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
 
 CS_FLEET_BACKLOG_LIMIT=${CS_FLEET_BACKLOG_LIMIT:-30}
@@ -105,7 +105,7 @@ lines_json() {  # stdin lines -> JSON array of strings
 # --- backlog -----------------------------------------------------------------
 
 backlog_backend() {
-  case "$(cat "$CONFIG/backlog-backend" 2>/dev/null || true)" in
+  case "$(cat "$CONFIG/backlog-backend.conf" 2>/dev/null || true)" in
     manual) printf 'manual' ;;
     *) printf 'tasks-axi' ;;
   esac
@@ -272,7 +272,7 @@ capo_record_json() {  # <id> <home> <scope>
       [ -e "$m" ] && n=$((n + 1))
     done
     children=$n
-    bl="$home/data/backlog.md"
+    bl="$home/config/backlog.md"
     if [ -f "$bl" ]; then
       if counts=$(head -c "$CS_FLEET_CAPO_MAX_BYTES" "$bl" 2>/dev/null | backlog_counts); then
         blog=$(jq -n --arg path "$bl" \
@@ -399,7 +399,7 @@ printf '%s\n' "$SNAPSHOT" | jq -r '
    else ($decisions[] | "- \(.id) [key=\(.key)] \(.verb): \(.summary)") end),
   "",
   "## Capos (idle endpoint is healthy; route by scope, read state not chat)",
-  (if .capos.present | not then "No capo registry at \(.capos.path)."
+  (if .capos.present | not then "No capos provisioned from this home."
    elif .capos.error != null then "UNREADABLE capo registry: \(.capos.error). Registered capos are NOT listed below; this is not an empty fleet."
    elif (.capos.records | length) == 0 then "Registry present, no registered capos."
    else

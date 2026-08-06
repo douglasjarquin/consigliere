@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Report a project's STANDING delivery posture: the mode and yolo flag the boss
-# recorded for it in the data/projects.md registry.
+# recorded for it in the config/projects.md registry.
 # Prints two words to stdout: "<mode> <yolo>" where mode is one of
 # no-mistakes|direct-PR|local-only and yolo is on|off.
 #
@@ -13,7 +13,7 @@
 # cs-fleet-sync.sh (skip local-only clones) and cs-home-seed.sh (capo route
 # eligibility and no-mistakes initialization).
 #
-# Registry line format (data/projects.md):
+# Registry line format (config/projects.md):
 #   - <name> - <desc> (added <date>)                  -> no-mistakes off  (default)
 #   - <name> [<mode>] - <desc> (added <date>)          -> <mode> off
 #   - <name> [<mode> +yolo] - <desc> (added <date>)    -> <mode> on
@@ -45,7 +45,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
-REG="$DATA/projects.md"
+REG="$CONFIG/projects.md"
 STANDING_ONLY=0
 if [ "${1:-}" = --standing ]; then
   STANDING_ONLY=1

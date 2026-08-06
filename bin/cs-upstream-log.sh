@@ -5,15 +5,15 @@
 # ported editorially (fresh implementations against consigliere's structure),
 # never merged or cherry-picked. This read-only helper feeds the
 # /upstream-review skill:
-#   - resolves the firstmate checkout from config/upstream (a local path;
+#   - resolves the firstmate checkout from host/upstream.conf (a local path;
 #     default ../firstmate relative to the consigliere repo root),
 #   - fetches its origin,
-#   - reads the last-reviewed SHA from the first line of
-#     data/upstream-review.md ("last-reviewed: <sha>"),
+#   - reads the last-reviewed SHA from the first line of the tracked ledger
+#     docs/upstream-review.md ("last-reviewed: <sha>"),
 #   - prints `git log --reverse --stat <last-sha>..origin/HEAD`.
 #
-# The skill owns triage, porting decisions, and advancing the last-reviewed
-# marker; this script never writes anything.
+# The ledger is shared tracked material: the skill advances it through the
+# ordinary branch-and-PR path, and this script never writes anything.
 # Usage: cs-upstream-log.sh [--oneline]
 set -eu
 
@@ -30,11 +30,11 @@ case "${1:-}" in
   *) echo "error: unknown argument $1" >&2; exit 2 ;;
 esac
 
-UPSTREAM=$(cat "$CONFIG/upstream" 2>/dev/null || true)
+UPSTREAM=$(cat "$HOST_DIR/upstream.conf" 2>/dev/null || true)
 [ -n "$UPSTREAM" ] || UPSTREAM="$CS_ROOT/../firstmate"
-[ -d "$UPSTREAM/.git" ] || { echo "error: no firstmate checkout at '$UPSTREAM' (set config/upstream)" >&2; exit 1; }
+[ -d "$UPSTREAM/.git" ] || { echo "error: no firstmate checkout at '$UPSTREAM' (set host/upstream.conf)" >&2; exit 1; }
 
-REVIEW="$DATA/upstream-review.md"
+REVIEW="$CS_ROOT/docs/upstream-review.md"
 LAST=""
 if [ -f "$REVIEW" ]; then
   LAST=$(sed -n '1s/^last-reviewed:[[:space:]]*//p' "$REVIEW")

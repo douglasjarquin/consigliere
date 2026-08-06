@@ -90,7 +90,7 @@ CS_LOCK_LOG_PREFIX="cs-teardown" . "$SCRIPT_DIR/cs-lock-lib.sh"
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
-CAPO_REG="$DATA/capos.md"
+CAPO_REG="$HOST_DIR/capos.md"
 
 ID=${1:?usage: cs-teardown.sh <task-id> [--force]}
 FORCE=${2:-}

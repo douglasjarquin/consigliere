@@ -6,7 +6,7 @@
 # `tasks-axi update --help` exposes --archive-body for recoverable note rewrites,
 # and `tasks-axi mv --help` exposes [<id>...] for atomic multi-ID moves required
 # by capo handoffs (introduced in tasks-axi 0.2.2).
-# `config/backlog-backend=manual` opts out of tasks-axi for routine consigliere
+# `config/backlog-backend.conf=manual` opts out of tasks-axi for routine consigliere
 # backlog mutations, but validated capo handoffs always use `tasks-axi mv`.
 # Absent or any other value keeps the default tasks-axi backend path, falling
 # back to manual mutation when the tool is not compatible.
@@ -55,7 +55,7 @@ cs_tasks_axi_mv_has_multi_id() {
 
 cs_backlog_backend_value() {
   local config_dir=$1 backend_file value
-  backend_file="$config_dir/backlog-backend"
+  backend_file="$config_dir/backlog-backend.conf"
   if [ -f "$backend_file" ]; then
     value=$(tr -d '[:space:]' < "$backend_file" 2>/dev/null || true)
     [ -n "$value" ] || value=tasks-axi

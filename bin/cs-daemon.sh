@@ -39,7 +39,7 @@
 #   - Max-defer alarm: if a digest stays undelivered past CS_MAX_DEFER_SECS,
 #     the daemon retries one normal flush and, if that cannot confirm a
 #     submit, writes state/.subsuper-inject-wedged and fires a configurable
-#     active alert (config/wedge-alarm; default auto = macOS Notification
+#     active alert (config/wedge-alarm.conf; default auto = macOS Notification
 #     Center via osascript; `herdr notification show` is also available).
 #   - Cheap heartbeat catch-all: every CS_HEARTBEAT_SCAN_SECS the daemon runs
 #     scan_boss_relevant_statuses (bin/cs-classify-lib.sh) over state/*.status
@@ -87,7 +87,7 @@
 #     CS_MAX_DEFER_SECS        max secs a buffered escalation may sit
 #                              undelivered before one flush retry then a wedge
 #                              alarm (default 300; 0 disables)
-#     CS_WEDGE_ALARM_CHANNEL   override config/wedge-alarm with one directive
+#     CS_WEDGE_ALARM_CHANNEL   override config/wedge-alarm.conf with one directive
 #                              (off|auto|osascript|herdr|command:<cmd>)
 #     CS_WEDGE_ALARM_EXEC      notifier test seam: replaces every channel with
 #                              `<cmd> <channel> <summary>`; "discard" fires
@@ -450,7 +450,7 @@ escalate_flush() {  # <state>
 # --- active wedge alert --------------------------------------------------------
 # A wedged escalation must never be silent: beyond the log ERROR and the
 # durable state/.subsuper-inject-wedged marker, a configurable active alert
-# can reach the boss away from the machine. Config: config/wedge-alarm (LOCAL,
+# can reach the boss away from the machine. Config: config/wedge-alarm.conf (LOCAL,
 # gitignored), one directive per non-empty non-comment line;
 # CS_WEDGE_ALARM_CHANNEL overrides the file with a single directive.
 #   off              disable the active alert (marker + log remain)
@@ -467,7 +467,7 @@ wedge_alarm_configured_channels() {
     printf '%s\n' "$CS_WEDGE_ALARM_CHANNEL"
     return 0
   fi
-  cfg="${CS_CONFIG_OVERRIDE:-$CS_HOME/config}/wedge-alarm"
+  cfg="${CS_CONFIG_OVERRIDE:-$CS_HOME/config}/wedge-alarm.conf"
   if [ -f "$cfg" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
       line="${line#"${line%%[![:space:]]*}"}"
@@ -598,7 +598,7 @@ wedge_alarm_notify() {  # <summary> <marker>
   for ch in "${channels[@]}"; do
     case "$ch" in auto|default) ch=$(wedge_alarm_platform_default) ;; esac
     case "$ch" in
-      '') log "wedge alarm: no OS-level alert channel on $(uname); durable marker $marker is the only signal - set config/wedge-alarm (e.g. a command: directive)" ;;
+      '') log "wedge alarm: no OS-level alert channel on $(uname); durable marker $marker is the only signal - set config/wedge-alarm.conf (e.g. a command: directive)" ;;
       osascript|herdr) wedge_alarm_emit "$ch" "$summary" || true ;;
       command:*) wedge_alarm_emit command "$summary" "${ch#command:}" || true ;;
       *) log "wedge alarm: unrecognized active-alert channel directive (redacted); marker still written" ;;

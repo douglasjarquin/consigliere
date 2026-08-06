@@ -17,15 +17,15 @@ It does not replace `capo-provisioning`, which owns project clones inside persis
 
 ## Preconditions and registry
 
-Projects live flat under `projects/`, and `data/projects.md` is the private fleet registry.
+Projects live flat under `projects/`, and `config/projects.md` is the private fleet registry.
 Use the registry format and parser contract owned by the header of `bin/cs-project-mode.sh`.
 The registry records the boss's standing posture for a project and is advisory: per `AGENTS.md` section 7, each ship task's mode and yolo are decided at intake and passed explicitly, so a registry entry is the default the boss expects rather than an enforced setting.
 Keep each registry description useful for identifying the project, but keep boss-private state and detailed project knowledge in their existing designated homes.
 Do not turn the registry into project documentation.
 
-Before adding, cloning, creating, or registering any project in the main home, read `data/capos.md` and judge the proposed project or domain against every registered natural-language `scope:`.
+Before adding, cloning, creating, or registering any project in the main home, read `host/capos.md` and judge the proposed project or domain against every registered natural-language `scope:`.
 Apply `AGENTS.md` section 7's routing rules: when an existing scope owns that domain, route the operation to that capo instead of standing up a duplicate main-home clone.
-Absence from `data/projects.md` is never evidence that no capo owns the domain, because a capo's own clones live in its home and never appear in the main registry.
+Absence from `config/projects.md` is never evidence that no capo owns the domain, because a capo's own clones live in its home and never appear in the main registry.
 If the owning capo cannot accept the route, report that concrete blocker or get an explicit boss redirection rather than silently duplicating the project here.
 
 Resolve the project name, destination, delivery mode, and autonomy posture before changing local or remote state.

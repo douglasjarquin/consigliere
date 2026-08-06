@@ -95,7 +95,7 @@ cs_deps_purpose() {
     gh) printf 'GitHub auth and API for PR-based delivery\n' ;;
     gh-axi) printf 'the GitHub interface consigliere and its soldiers actually call\n' ;;
     git) printf 'clones, worktrees, branches, and every landing check\n' ;;
-    tasks-axi) printf 'backlog backend; without it the backlog is hand-edited (config/backlog-backend)\n' ;;
+    tasks-axi) printf 'backlog backend; without it the backlog is hand-edited (config/backlog-backend.conf)\n' ;;
     no-mistakes) printf 'delivery pipeline for no-mistakes projects; other delivery modes are unaffected\n' ;;
     lavish-axi) printf 'visual review surfaces for structured decisions and reports\n' ;;
     chrome-devtools-axi) printf 'browser work for soldiers that must drive a real page\n' ;;

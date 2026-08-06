@@ -15,7 +15,7 @@
 # no session-lock change - the agent taking the turn is the pane's own agent,
 # which already holds this home's lock.
 #
-# SCOPE IS DELIBERATELY ASYMMETRIC (config/activation):
+# SCOPE IS DELIBERATELY ASYMMETRIC (host/activation.conf):
 #   always    - activate whenever the queue has sat. The default for CAPO homes,
 #               whose queues rot any time the parent is busy, not just overnight.
 #   afk-only  - activate only while state/.afk is present. The default EVERYWHERE
@@ -81,12 +81,12 @@ decision() { [ "$STATUS_ONLY" = 1 ] && printf '%s\n' "$1"; return 0; }
 # --- scope ------------------------------------------------------------------
 
 mode=afk-only
-if [ -f "$CONFIG/activation" ]; then
-  mode=$(awk 'NF && $0 !~ /^[[:space:]]*#/ { gsub(/[[:space:]]/, "", $0); print; exit }' "$CONFIG/activation")
+if [ -f "$HOST_DIR/activation.conf" ]; then
+  mode=$(awk 'NF && $0 !~ /^[[:space:]]*#/ { gsub(/[[:space:]]/, "", $0); print; exit }' "$HOST_DIR/activation.conf")
 fi
 case "$mode" in
   always|afk-only|off) ;;
-  *) decision "refuse: config/activation is '${mode:-<empty>}', expected always|afk-only|off"; exit 0 ;;
+  *) decision "refuse: host/activation.conf is '${mode:-<empty>}', expected always|afk-only|off"; exit 0 ;;
 esac
 [ "$mode" != off ] || { decision "off: activation disabled for this home"; exit 0; }
 if [ "$mode" = afk-only ] && [ ! -e "$STATE/.afk" ]; then
