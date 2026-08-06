@@ -112,4 +112,4 @@ by `tests/cs-ci-contract.test.sh`.
 
 ## Upstream
 
-Firstmate improvements are ported editorially through `/upstream-review` (`bin/cs-upstream-log.sh` + `data/upstream-review.md`); never merged, never cherry-picked.
+Firstmate improvements are ported editorially through `/upstream-review` (`bin/cs-upstream-log.sh` + the tracked ledger `docs/upstream-review.md`); never merged, never cherry-picked.

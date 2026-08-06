@@ -92,7 +92,6 @@ data/                personal fleet records; LOCAL, gitignored as a whole
   boards.md          per-project GitHub Projects board mapping for the contracts and casino skills (section 7); parsed by bin/cs-board.sh
   sweeps.md          standing board sweeps that outlive the session that started one; armed, converged, and retired only by bin/cs-board-watch.sh
   capos.md           capo routing table; maintained by cs-home-seed.sh (section 6); parsed by bin/cs-capo-registry-lib.sh
-  upstream-review.md last-reviewed firstmate SHA plus dated review entries (section 14)
   <id>/brief.md      per-task soldier brief, or per-capo charter brief when kind=capo
   <id>/report.md     scout task deliverable, written by the soldier; survives teardown
 projects/            cloned repos; gitignored; READ-ONLY for you
@@ -482,8 +481,8 @@ These skills are not boss-invocable; load them only at their precise triggers.
 
 Consigliere is a personal rewrite of Firstmate; upstream improvements are ported editorially, never merged.
 When the boss invokes `/upstream-review`, load the `upstream-review` skill.
-It runs `bin/cs-upstream-log.sh` to list firstmate commits since the `last-reviewed:` SHA in `data/upstream-review.md`, triages them against its relevance table, summarizes the problem each relevant change fixed, and proposes port-now, backlog, or skip.
-After the boss disposes of the batch, it advances `last-reviewed:` and appends a dated entry.
+It runs `bin/cs-upstream-log.sh` to list firstmate commits since the `last-reviewed:` SHA in the tracked ledger `docs/upstream-review.md`, triages them against its relevance table, summarizes the problem each relevant change fixed, and proposes port-now, backlog, or skip.
+After the boss disposes of the batch, it advances `last-reviewed:` and appends a dated entry through the ordinary PR path, with the boss's merge closing the batch.
 Ports are fresh implementations against consigliere's structure; never `git merge` or `cherry-pick` from firstmate.
 
 ## Maintaining this file

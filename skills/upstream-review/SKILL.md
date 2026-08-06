@@ -10,8 +10,11 @@ Upstream improvements arrive by editorial review, never by git merge or cherry-p
 
 ## Procedure
 
+0. Before anything else, check for an open PR touching `docs/upstream-review.md`.
+   If one exists, the previous batch is not yet on the books: surface that PR to the boss and stop.
+   One review batch is in flight at a time, because `last-reviewed:` on the default branch is the only value `bin/cs-upstream-log.sh` reads, and starting a second batch against it would re-triage the previous batch's range.
 1. Run `bin/cs-upstream-log.sh` (add `--oneline` first when the backlog of commits is long, then `--stat` for the shortlist).
-   If it warns that no `last-reviewed:` SHA exists, seed `data/upstream-review.md` with a first line `last-reviewed: <sha>` before reviewing; never guess the seed - ask the boss which firstmate commit the port baseline was.
+   If it warns that no `last-reviewed:` SHA exists, seed the tracked ledger `docs/upstream-review.md` with a first line `last-reviewed: <sha>` through the same PR path as step 5; never guess the seed - ask the boss which firstmate commit the port baseline was.
 2. Triage every commit against the relevance table below.
    Triage by the PROBLEM the commit fixed, not by whether its diff applies; the diff never applies directly.
 3. For each relevant commit, summarize the problem it fixed in one or two sentences and propose exactly one disposition:
@@ -19,7 +22,8 @@ Upstream improvements arrive by editorial review, never by git merge or cherry-p
    - **backlog** - file a backlog item linking the firstmate commit SHA.
    - **skip** - with the reason (out of scope, already handled differently, dropped subsystem).
 4. Present the triage to the boss as one batch (use `lavish-axi` when the batch is large), and act on their dispositions.
-5. After the batch is dispositioned, update `data/upstream-review.md`: advance the `last-reviewed:` first line to the newest reviewed SHA and append a dated entry recording the range and each disposition.
+5. After the batch is dispositioned, ship the ledger update through the ordinary consigliere-repo delivery path: on a branch, advance the `last-reviewed:` first line of `docs/upstream-review.md` to the newest reviewed SHA, append a dated entry recording the range and each disposition, open a PR, and give the boss the full PR URL.
+   The ledger is shared tracked material under `AGENTS.md` section 1: never edit it directly on the default branch, and never treat the review as closed until the boss merges the ledger PR.
 
 ## Relevance table
 
@@ -47,7 +51,7 @@ Always relevant, regardless of which harness or backend triggered the fix:
 
 Everything else: judge by the problem statement; when unsure, present it rather than silently skipping.
 
-## data/upstream-review.md format
+## docs/upstream-review.md format
 
 ```
 last-reviewed: <firstmate-sha>

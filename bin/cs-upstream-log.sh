@@ -8,12 +8,12 @@
 #   - resolves the firstmate checkout from config/upstream (a local path;
 #     default ../firstmate relative to the consigliere repo root),
 #   - fetches its origin,
-#   - reads the last-reviewed SHA from the first line of
-#     data/upstream-review.md ("last-reviewed: <sha>"),
+#   - reads the last-reviewed SHA from the first line of the tracked ledger
+#     docs/upstream-review.md ("last-reviewed: <sha>"),
 #   - prints `git log --reverse --stat <last-sha>..origin/HEAD`.
 #
-# The skill owns triage, porting decisions, and advancing the last-reviewed
-# marker; this script never writes anything.
+# The ledger is shared tracked material: the skill advances it through the
+# ordinary branch-and-PR path, and this script never writes anything.
 # Usage: cs-upstream-log.sh [--oneline]
 set -eu
 
@@ -34,7 +34,7 @@ UPSTREAM=$(cat "$CONFIG/upstream" 2>/dev/null || true)
 [ -n "$UPSTREAM" ] || UPSTREAM="$CS_ROOT/../firstmate"
 [ -d "$UPSTREAM/.git" ] || { echo "error: no firstmate checkout at '$UPSTREAM' (set config/upstream)" >&2; exit 1; }
 
-REVIEW="$DATA/upstream-review.md"
+REVIEW="$CS_ROOT/docs/upstream-review.md"
 LAST=""
 if [ -f "$REVIEW" ]; then
   LAST=$(sed -n '1s/^last-reviewed:[[:space:]]*//p' "$REVIEW")
