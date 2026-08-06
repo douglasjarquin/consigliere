@@ -61,8 +61,8 @@
 #   - Done rows are never listed. Retained completion history belongs to the
 #     reporting surfaces (bin/cs-fleet-view.sh, /the-books); at startup it is
 #     pure weight.
-#   - Every in-flight, held, and blocked row is listed IN FULL, with its
-#     hold_kind/hold_reason and blocked_by. Those are the rows AGENTS.md
+#   - Every in-flight, held, blocked, and public-followup row is listed IN FULL,
+#     with its hold_kind/hold_reason and blocked_by. Those are the rows AGENTS.md
 #     sections 7 and 10 make actionable at startup, so they are never bounded
 #     away.
 #   - Only the plain queued (dispatchable-now) listing is bounded, by
@@ -75,8 +75,8 @@
 # state; the groups can overlap, because an in-flight item that is also held
 # appears under both. When manual mode is selected, or tasks-axi is
 # unavailable, only backlog section headings and item title lines print, with
-# the same never-bound-a-held-or-blocked-row rule recognized from the title
-# line's own hold/blocked-by markers.
+# the same never-bound-held, blocked, or public-followup rule recognized from
+# the title line's own hold/blocked-by/kind markers.
 #
 # STATUS TAILS: CS_SESSION_START_STATUS_TAIL bounds how many lines each task's
 # tail prints, and bin/cs-line-cap-lib.sh bounds how long each of those lines
@@ -172,16 +172,17 @@ backlog_backend() {
   esac
 }
 
-# A queued title line whose own text already marks it held or blocked. The
-# manual renderer has no task model, so this is the only signal it gets, and it
-# is the one tasks-axi's markdown backend writes: "(hold: ...)", "(hold-kind:
-# ...)", and "blocked-by: ...". Bracket expressions rather than backslashes,
-# because awk's -v applies escape processing before the regex is ever compiled.
-MANUAL_KEEP_RE='[(]hold|blocked-by:'
+# A queued title line whose own text marks it held, blocked, or a public
+# follow-up. The manual renderer has no task model, so this is the only signal
+# it gets, and it is the one tasks-axi's markdown backend writes: "(hold: ...)",
+# "(hold-kind: ...)", "blocked-by: ...", and "(kind: public-followup)". Bracket
+# expressions rather than backslashes, because awk's -v applies escape
+# processing before the regex is ever compiled.
+MANUAL_KEEP_RE='[(]hold|blocked-by:|[(]kind:[[:space:]]*public-followup[)]'
 
 print_backlog_manual_compact() {
   local path=$1 reason=$2
-  printf 'compact backlog listing (%s; done rows omitted; every in-flight, held, and blocked title line kept; other queued bounded to %s; indented task bodies omitted)\n' \
+  printf 'compact backlog listing (%s; done rows omitted; every in-flight, held, blocked, and public-followup title line kept; other queued bounded to %s; indented task bodies omitted)\n' \
     "$reason" "$QUEUED_LIMIT"
   awk -v max="$QUEUED_LIMIT" -v keep_re="$MANUAL_KEEP_RE" '
     function state_for_heading(line, heading) {
@@ -203,17 +204,17 @@ print_backlog_manual_compact() {
     state == "done" && /^[-*][[:space:]]+/ { done_total++; next }
     state == "queued" && /^[-*][[:space:]]+/ {
       queued_total++
-      if ($0 ~ keep_re) { gated++; print $0; next }
+      if ($0 ~ keep_re) { protected++; print $0; next }
       if (plain_shown < max) { plain_shown++; print $0 }
       next
     }
     END {
-      plain_total = queued_total - gated
+      plain_total = queued_total - protected
       if (in_flight + queued_total + done_total == 0) {
         print "(no backlog item title lines found)"
       } else {
-        printf "(shown %d in-flight, %d held or blocked queued, %d of %d other queued title line(s); %d done row(s) omitted)\n", \
-          in_flight, gated, plain_shown, plain_total, done_total
+        printf "(shown %d in-flight, %d held, blocked, or public-followup queued, %d of %d other queued title line(s); %d done row(s) omitted)\n", \
+          in_flight, protected, plain_shown, plain_total, done_total
         if (plain_total > plain_shown) {
           printf "(%d more queued - raise CS_SESSION_START_QUEUED_LIMIT or read config/backlog.md for the rest)\n", plain_total - plain_shown
         }

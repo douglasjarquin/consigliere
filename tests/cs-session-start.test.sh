@@ -110,6 +110,7 @@ out=$(CS_HOME="$HOME_DIR" "$BIN" 2>/dev/null)
 lock_line=$(section_line "$out" 'LOCK')
 boot_line=$(section_line "$out" 'BOOTSTRAP')
 wake_line=$(section_line "$out" 'WAKE QUEUE')
+supervision_line=$(section_line "$out" 'SUPERVISION (foreground checkpoint)')
 read_once_line=$(section_line "$out" 'READ-ONCE CONTRACT')
 fleet_line=$(section_line "$out" 'FLEET STATE')
 context_line=$(section_line "$out" 'CONTEXT')
@@ -117,6 +118,7 @@ next_line=$(section_line "$out" 'NEXT STEP')
 inventory_line=$(section_line "$out" '--- task-a ---')
 
 if [ -z "$lock_line" ] || [ -z "$boot_line" ] || [ -z "$wake_line" ] \
+  || [ -z "$supervision_line" ] \
   || [ -z "$read_once_line" ] || [ -z "$fleet_line" ] || [ -z "$context_line" ] \
   || [ -z "$next_line" ] || [ -z "$inventory_line" ]; then
   fail "one or more section headers missing from digest: $out"
@@ -126,7 +128,8 @@ fi
 # diagnostics, then this turn's work queue, before anything bulky is read.
 [ "$lock_line" -lt "$boot_line" ] || fail "LOCK did not precede BOOTSTRAP"
 [ "$boot_line" -lt "$wake_line" ] || fail "BOOTSTRAP did not precede WAKE QUEUE"
-[ "$wake_line" -lt "$read_once_line" ] || fail "WAKE QUEUE did not precede the read-once contract"
+[ "$wake_line" -lt "$supervision_line" ] || fail "WAKE QUEUE did not precede SUPERVISION"
+[ "$supervision_line" -lt "$read_once_line" ] || fail "SUPERVISION did not precede the read-once contract"
 
 [ "$read_once_line" -lt "$fleet_line" ] || fail "the read-once contract did not precede FLEET STATE"
 [ "$fleet_line" -lt "$context_line" ] || fail "FLEET STATE did not precede CONTEXT"
@@ -139,6 +142,23 @@ fi
 assert_contains "$out" 'Boss memory that may be truncated away safely.' \
   "the ordering fixture did not actually print a memory file"
 pass "digest sections are ordered safety-preamble first, live fleet state before curated memory"
+
+HOME_DIR=$(fresh_home ordering-migration)
+printf 'Legacy project registry.\n' > "$HOME_DIR/data/projects.md"
+migration_out=$(CS_HOME="$HOME_DIR" "$BIN" 2>/dev/null)
+
+migration_lock_line=$(section_line "$migration_out" 'LOCK')
+migration_line=$(section_line "$migration_out" 'LAYOUT MIGRATION')
+migration_boot_line=$(section_line "$migration_out" 'BOOTSTRAP')
+if [ -z "$migration_lock_line" ] || [ -z "$migration_line" ] || [ -z "$migration_boot_line" ]; then
+  fail "the conditional layout-migration fixture did not emit the full opening preamble: $migration_out"
+fi
+[ "$migration_lock_line" -lt "$migration_line" ] || fail "LOCK did not precede LAYOUT MIGRATION"
+[ "$migration_line" -lt "$migration_boot_line" ] || fail "LAYOUT MIGRATION did not precede BOOTSTRAP"
+assert_contains "$migration_out" \
+  "cs-migrate-config: moved $HOME_DIR/data/projects.md -> $HOME_DIR/config/projects.md" \
+  "the ordering fixture did not exercise a real layout migration"
+pass "conditional layout migration stays pinned between lock and bootstrap"
 
 # --- the read-once contract is stated once, ahead of its subject ---------------
 # It has to survive tail truncation and stay honest once it precedes the
@@ -161,18 +181,21 @@ pass "the read-once contract is stated once, ahead of the sources it governs"
 # to scale the digest with fleet load.
 HOME_DIR=$(fresh_home line-cap)
 lede='needs-decision: [key=cap] pick the rendering strategy'
+unicode_exact=$(awk 'BEGIN { while (i++ < 220) printf "é" }')
 printf 'window=x:w1\nkind=ship\n' > "$HOME_DIR/state/task-cap.meta"
 {
   printf '%s' "$lede"
-  awk 'BEGIN { while (i++ < 400) printf " padding" }'
+  awk 'BEGIN { while (i++ < 400) printf "€" }'
   printf '\n'
+  printf '%s\n' "$unicode_exact"
   printf 'working: short line kept whole\n'
 } > "$HOME_DIR/state/task-cap.status"
 
-out=$(CS_HOME="$HOME_DIR" "$BIN" 2>/dev/null)
+out=$(LC_ALL=C CS_HOME="$HOME_DIR" "$BIN" 2>/dev/null)
 
 assert_contains "$out" "$lede" "the cap discarded the lede that carries the state word and decision key"
 assert_contains "$out" ' [truncated]' "an over-long status line was not marked as truncated"
+assert_contains "$out" "$unicode_exact" "the inherited C locale truncated a 220-character UTF-8 line"
 assert_contains "$out" 'working: short line kept whole' "the cap mangled a status line already under it"
 assert_contains "$out" 'each capped at 220 characters' "the status tail header does not disclose its per-line cap"
 assert_contains "$out" "$HOME_DIR/state/task-cap.status" "a capped tail dropped the full log path that recovers the rest"
@@ -180,7 +203,9 @@ assert_contains "$out" "$HOME_DIR/state/task-cap.status" "a capped tail dropped 
 # Nothing the tail emits may exceed the cap, and the padded line really was
 # long enough to exercise it.
 tail_section=$(printf '%s\n' "$out" | awk '/^status tail \(/ { flag = 1; next } flag && /^$/ { flag = 0 } flag')
-longest=$(printf '%s\n' "$tail_section" | awk '{ if (length($0) > max) max = length($0) } END { print max + 0 }')
+longest=$(printf '%s\n' "$tail_section" | python3 -c \
+  'import sys; lines = sys.stdin.buffer.read().decode("utf-8").splitlines(); print(max(map(len, lines), default=0))' \
+  2>/dev/null) || fail "a capped status tail contained invalid UTF-8"
 [ "$longest" -le 220 ] || fail "a status tail line ran $longest characters past the 220-character cap"
 capped=$(printf '%s\n' "$tail_section" | grep -c ' \[truncated\]$')
 [ "$capped" -eq 1 ] || fail "expected exactly one truncated tail line, got $capped: $tail_section"
@@ -209,6 +234,7 @@ EOF
     i=$((i + 1))
   done
   cat >> "$path" <<'EOF'
+- [ ] publish-obligation - Publish required follow-up (repo: consigliere) (kind: public-followup)
 
 ## Done
 - [x] landed-earlier - DONE-ROW-LINE already landed and torn down (repo: consigliere) (kind: ship)
@@ -376,7 +402,7 @@ write_long_body_backlog "$HOME_DIR/config/backlog.md"
 
 out=$(CS_HOME="$HOME_DIR" CS_SESSION_START_QUEUED_LIMIT=4 "$BIN" 2>/dev/null)
 
-assert_contains "$out" 'compact backlog listing (manual backend; done rows omitted; every in-flight, held, and blocked title line kept; other queued bounded to 4; indented task bodies omitted)' \
+assert_contains "$out" 'compact backlog listing (manual backend; done rows omitted; every in-flight, held, blocked, and public-followup title line kept; other queued bounded to 4; indented task bodies omitted)' \
   "manual backend did not use the composed title-line rendering"
 assert_contains "$out" '## In flight' "manual rendering omitted the in-flight section heading"
 assert_contains "$out" '- [ ] compact-startup - Compact startup digest' \
@@ -386,6 +412,8 @@ assert_contains "$out" 'blocked-by: compact-startup - waits for implementation' 
   "manual rendering omitted blocker metadata"
 assert_contains "$out" '- [ ] held-queued - Held queued work' \
   "manual rendering dropped a held queued title line"
+assert_contains "$out" '- [ ] publish-obligation - Publish required follow-up (repo: consigliere) (kind: public-followup)' \
+  "manual rendering bounded away a public-followup obligation"
 assert_not_contains "$out" 'OVERSIZED-BODY-LINE' "manual digest leaked an in-flight task body"
 assert_not_contains "$out" 'QUEUED-BODY-LINE' "manual digest leaked a queued task body"
 assert_not_contains "$out" 'DONE-ROW-LINE' "manual digest listed a done row at startup"
@@ -394,11 +422,11 @@ assert_contains "$out" '- [ ] plain-4 - Plain queued item 4' \
   "manual rendering dropped a queued title line inside its bound"
 assert_not_contains "$out" '- [ ] plain-5 - Plain queued item 5' \
   "manual rendering did not bound its plain queued listing"
-assert_contains "$out" '(shown 1 in-flight, 2 held or blocked queued, 4 of 25 other queued title line(s); 1 done row(s) omitted)' \
+assert_contains "$out" '(shown 1 in-flight, 3 held, blocked, or public-followup queued, 4 of 25 other queued title line(s); 1 done row(s) omitted)' \
   "manual rendering did not report its bound accounting"
 assert_contains "$out" '(21 more queued - raise CS_SESSION_START_QUEUED_LIMIT or read config/backlog.md for the rest)' \
   "manual rendering did not disclose an exact queued remainder"
 assert_contains "$out" 'or config/backlog.md' "manual digest omitted the config/backlog.md full-body pointer"
-pass "manual backlog rendering drops done rows, keeps every held or blocked title line, and bounds the rest"
+pass "manual backlog rendering keeps held, blocked, and public-followup rows while bounding the rest"
 
 pass "cs-session-start digest composition"

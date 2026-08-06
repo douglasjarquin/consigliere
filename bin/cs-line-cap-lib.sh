@@ -15,9 +15,10 @@
 # still owns how many tail lines it prints per task. This file owns only the
 # per-line cut.
 #
-# The cap counts characters, so a plain-ASCII line - what status lines are in
-# practice - is bounded to the same number of bytes, and a multibyte character
-# is never cut in half into an invalid sequence.
+# The cap counts characters under its own UTF-8 locale, so an inherited byte
+# locale cannot change the measurement or slice. A plain-ASCII line is bounded
+# to the same number of bytes, and a multibyte character is never cut in half
+# into an invalid sequence.
 # Truncation stays recoverable because the session-start digest prints each
 # task's full status log path, while every OPEN DECISIONS entry begins with the
 # task id that identifies its durable state/<id>.status source.
@@ -32,6 +33,7 @@ CS_LINE_CAP_SUFFIX=' [truncated]'
 # a larger section never pays a command substitution per item on a path that
 # runs at the top of every wake-handling turn.
 cs_cap_line_var() {
+  local LC_ALL=C.UTF-8
   local line=$1 max=${2:-$CS_LINE_CAP_DEFAULT} keep
   if [ "${#line}" -le "$max" ]; then
     CS_LINE_CAP_LINE=$line
