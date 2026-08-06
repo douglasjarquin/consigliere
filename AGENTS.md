@@ -93,12 +93,12 @@ config/              THE USER-OWNED TREE; LOCAL, gitignored; back it up wholesal
   backlog-backend.conf  backlog backend override; absent or "tasks-axi" = default, "manual" = hand-edit
   dispatch-policy.conf  optional per-home model/effort defaults by harness and task kind
   permission-mode.conf  optional narrower claude launch permission mode; a Claude ACCOUNT policy, portable across that account's machines; absent = full autonomy
+  wedge-alarm.conf   optional away-mode wedge-alarm directives; absent = auto, which adapts per OS; a command: directive naming a machine-local path is the one non-portable use
 host/                MACHINE-LOCAL; LOCAL, gitignored; not backed up, re-created per machine, never propagated
   capos.md           capo routing table; maintained by cs-home-seed.sh (section 6); parsed by bin/cs-capo-registry-lib.sh
   harness.conf       pins the root harness (codex or claude); absent = auto-detect
   upstream.conf      path of the firstmate checkout used by /upstream-review; absent = ../firstmate
   activation.conf    per-home activation scope (section 8); absent = afk-only
-  wedge-alarm.conf   optional away-mode wedge-alarm directives; absent = auto (macOS Notification Center)
 data/                generated and task-scoped output; LOCAL, gitignored, DISPOSABLE as a tree
   sweeps.md          standing board sweeps that outlive the session that started one; armed, converged, and retired only by bin/cs-board-watch.sh
   <id>/brief.md      per-task soldier brief, or per-capo charter brief when kind=capo

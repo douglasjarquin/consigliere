@@ -71,7 +71,7 @@ cs_layout_pairs() {
     "$CONFIG/permission-mode"  "$CONFIG/permission-mode.conf" \
     "$CONFIG/upstream"         "$HOST_DIR/upstream.conf" \
     "$CONFIG/activation"       "$HOST_DIR/activation.conf" \
-    "$CONFIG/wedge-alarm"      "$HOST_DIR/wedge-alarm.conf" \
+    "$CONFIG/wedge-alarm"      "$CONFIG/wedge-alarm.conf" \
     "$CONFIG/harness"          "$HOST_DIR/harness.conf" \
     "$DATA/boss.md"            "$CONFIG/boss.md" \
     "$DATA/boss-shared.md"     "$CONFIG/boss-shared.md" \

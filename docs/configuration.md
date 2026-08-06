@@ -24,7 +24,7 @@ Test and script overrides: `CS_ROOT_OVERRIDE`, `CS_STATE_OVERRIDE` narrow a sing
 `config/` is the one directory a person owns, backs up, and restores: `cp -a <home>/config`, no exclusions, and restore on a new machine is that same copy.
 `host/` is a top-level sibling, not part of the user tree: machine-local runtime configuration, mostly script-written, correct only on the machine that wrote it.
 It is never backed up, restored, or propagated; on a new machine run `bin/cs-doctor.sh` and fill in `host/` fresh.
-Prose and records use `.md`; settings use `.conf`; the extension marks the format, never the tier - `config/` holds three genuinely portable `.conf` files, and every other `.conf` file is machine-local and lives in `host/`.
+Prose and records use `.md`; settings use `.conf`; the extension marks the format, never the tier - `config/` holds four genuinely portable `.conf` files, and every other `.conf` file is machine-local and lives in `host/`.
 `bin/cs-migrate-config.sh` owns the one-shot move from the pre-2026-08 layout, and the fail-closed gate in `bin/cs-root-lib.sh` refuses every script while any old-name path exists.
 
 | file | tier | semantics |
@@ -41,15 +41,15 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 | `config/backlog-backend.conf` | portable | absent or `tasks-axi` = tasks-axi against `config/backlog.md`; `manual` = hand-edit the markdown |
 | `config/dispatch-policy.conf` | portable | optional per-home profiles for task dispatch; `bin/cs-spawn.sh` owns its strict four-column schema below |
 | `config/permission-mode.conf` | portable | optional narrower claude launch permission mode; absent = full autonomy; `bin/cs-harness-lib.sh` owns the two-column schema below. This is a Claude ACCOUNT policy, not a machine property - the record is `<harness> <mode>` with no machine-specific content, so the same file is correct verbatim on every machine that account uses; do not re-derive it as host-specific |
+| `config/wedge-alarm.conf` | portable | away-mode wedge-alarm active-alert directives; absent = auto (macOS Notification Center when available, degrading elsewhere). A boss preference, boss-authored only; the directives are channel selectors that adapt per OS, so the file is portable. The one non-portable use is a `command:` directive naming a machine-local path - keep such a value out of shared dotfiles |
 | `host/capos.md` | host | capo routing table; every record embeds an absolute machine-local home path |
 | `host/harness.conf` | host | pins the root harness (`codex` or `claude`) regardless of environment |
 | `host/upstream.conf` | host | path of the firstmate checkout for `/upstream-review`; absent = `../firstmate` |
 | `host/activation.conf` | host | per-home activation scope: `always`, `afk-only`, or `off`; absent = `afk-only`; `bin/cs-activate.sh` owns the policy, and `bin/cs-home-seed.sh --help` owns capo seed and bootstrap convergence |
-| `host/wedge-alarm.conf` | host | away-mode wedge-alarm active-alert directives; absent = auto (macOS Notification Center when available) |
 
 Symlink policy, established empirically (2026-08-06, tasks-axi 0.2.x):
 
-- `boss.md`, `boss-shared.md`, `learnings.md`, `projects.md`, `boards.md`, and the three portable `.conf` files are read-only to scripts and safe to symlink out to a dotfiles repository.
+- `boss.md`, `boss-shared.md`, `learnings.md`, `projects.md`, `boards.md`, and the four portable `.conf` files are read-only to scripts and safe to symlink out to a dotfiles repository.
 - `backlog.md`, `done-archive.md`, `note-archive.md`, and `host/capos.md` are rewritten by rename (tasks-axi and the registry writers), which replaces a symlink with a regular file and silently forks the content; they must be real files, and the doctor fails when one is a symlink.
 - A `host/` entry whose symlink target resolves outside the home defeats the host tier (the `capos.md`-across-two-machines mistake); the doctor fails on it.
 
