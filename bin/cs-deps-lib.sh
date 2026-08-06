@@ -148,14 +148,17 @@ cs_deps_version() {
 
 # cs_deps_version_at_least <tool> <floor> - exit 0 when the installed version is
 # at or above <floor>, comparing dotted numeric fields. Exits nonzero when the
-# tool is absent or its version cannot be parsed, so an unparseable build reads
-# as below-floor rather than silently passing. Floor values are owned by the
-# calling script (bin/cs-deps-lib.sh header lists the owners), never here.
+# tool is absent, --version fails, or its complete output is not a clean dotted
+# release number, so an unparseable or prerelease build reads as below-floor
+# rather than silently passing. Floor values are owned by the calling script
+# (bin/cs-deps-lib.sh header lists the owners), never here.
 cs_deps_version_at_least() {
   local tool=${1:-} floor=${2:-} have
   [ -n "$tool" ] && [ -n "$floor" ] || return 1
-  have=$(cs_deps_version "$tool") || return 1
-  [ -n "$have" ] || return 1
+  command -v "$tool" >/dev/null 2>&1 || return 1
+  have=$("$tool" --version 2>/dev/null) || return 1
+  [[ "$have" =~ ^[0-9]+(\.[0-9]+)+$ ]] || return 1
+  [[ "$floor" =~ ^[0-9]+(\.[0-9]+)+$ ]] || return 1
   awk -v have="$have" -v floor="$floor" 'BEGIN {
     n = split(have, H, "."); m = split(floor, F, ".")
     len = (n > m ? n : m)

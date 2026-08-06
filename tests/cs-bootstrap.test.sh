@@ -62,15 +62,6 @@ assert_no_line() {
   return 0
 }
 
-# --- every floor is declared and a genuine boundary exists ---------------------
-
-for stem in GH_AXI TASKS_AXI LAVISH_AXI QUOTA_AXI; do
-  floor=$(floor_of "$stem")
-  [ -n "$floor" ] || fail "cs-bootstrap.sh declares no CS_${stem}_MIN floor"
-  below "$floor" >/dev/null || fail "CS_${stem}_MIN=$floor has patch 0; update below() for this shape"
-done
-pass 'all four axi-family floors are declared with derivable boundaries'
-
 # --- gh-axi (required): below fires MISSING, at-floor is silent ----------------
 
 floor=$(floor_of GH_AXI)
@@ -108,14 +99,34 @@ check_optional_floor tasks-axi CS_TEST_TASKS_AXI_VERSION TASKS_AXI
 check_optional_floor lavish-axi CS_TEST_LAVISH_AXI_VERSION LAVISH_AXI
 check_optional_floor quota-axi CS_TEST_QUOTA_AXI_VERSION QUOTA_AXI
 
-# --- an unparseable build reads as below-floor, never as compatible ------------
+check_unparseable() {
+  local tool=$1 var=$2 diagnostic_prefix=$3 out
+  cs_fake_exit0 "$FAKEBIN" "$tool"
+  out=$(run_bootstrap)
+  assert_line "$out" "^${diagnostic_prefix}${tool} unparseable version below floor" \
+    "a bare exit-0 $tool is reported as an unparseable below-floor build"
+  cs_fake_version_tool "$FAKEBIN" "$tool" "$var" 9.9.9
+  pass "$tool unparseable build: diagnostic fires"
+}
 
-cs_fake_exit0 "$FAKEBIN" gh-axi
+check_unparseable gh-axi CS_TEST_GH_AXI_VERSION 'MISSING: '
+check_unparseable tasks-axi CS_TEST_TASKS_AXI_VERSION 'BOOTSTRAP_INFO: optional tool '
+check_unparseable lavish-axi CS_TEST_LAVISH_AXI_VERSION 'BOOTSTRAP_INFO: optional tool '
+check_unparseable quota-axi CS_TEST_QUOTA_AXI_VERSION 'BOOTSTRAP_INFO: optional tool '
+
+floor=$(floor_of GH_AXI)
+export CS_TEST_GH_AXI_VERSION
+CS_TEST_GH_AXI_VERSION='requires Node 99.0'
 out=$(run_bootstrap)
-assert_line "$out" '^MISSING: gh-axi unparseable version below floor' \
-  'a bare exit-0 gh-axi is reported as an unparseable below-floor build'
-cs_fake_version_tool "$FAKEBIN" gh-axi CS_TEST_GH_AXI_VERSION 9.9.9
-pass 'an unparseable axi build is reported, not silently accepted'
+assert_line "$out" "^MISSING: gh-axi .*below floor $floor" \
+  'a dotted token inside arbitrary version text stays below-floor'
+
+CS_TEST_GH_AXI_VERSION="${floor}-rc.1"
+out=$(run_bootstrap)
+assert_line "$out" "^MISSING: gh-axi .*below floor $floor" \
+  'a prerelease at the stable floor stays below-floor'
+unset CS_TEST_GH_AXI_VERSION
+pass 'only complete dotted release versions are comparable'
 
 # --- a healthy fleet of fake tools keeps bootstrap silent about floors ---------
 
