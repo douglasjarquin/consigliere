@@ -72,8 +72,8 @@ Never symlink `config/backlog.md`, its archive siblings, or `host/capos.md` out 
 ```
 AGENTS.md            this file
 README.md            public overview
-.codex/              codex Stop-hook turn-end guard, committed
-.claude/             claude Stop-hook turn-end guard (settings.json), committed
+.codex/              codex SessionStart digest run and Stop-hook turn-end guard, committed
+.claude/             claude SessionStart digest run and Stop-hook turn-end guard (settings.json), committed
 CLAUDE.md            symlink to AGENTS.md (claude loads CLAUDE.md; codex loads AGENTS.md)
 .tasks.toml          tracked tasks-axi backlog backend config (section 10)
 .no-mistakes.yaml    tracked per-repo no-mistakes overrides; gate-agent scope, canonical lint, and local evidence placement
@@ -110,6 +110,7 @@ state/               volatile runtime signals; gitignored
   <id>.meta          written by cs-spawn; kind-specific posture fields and the complete schema, including cs-pr-check's PR-ready fields, live in docs/configuration.md
   <id>.check.sh      authenticated slow poll; watcher runs registered checks from hash-validated snapshots only
   .home-pane         this home's own agent pane, recorded at session start; revalidated before any activation
+  .session-start-complete  completion proof gating the session-open re-emit; bin/cs-sessionstart-run.sh
   .activation-stalled  present when this home cannot self-activate (pane gone or agent dead); needs recovery
   <id>.check-trust   content binding created by cs-check-register.sh
   <id>.pr-poll       validated data sidecar for the byte-static PR merge poll
@@ -133,6 +134,7 @@ Treat `config/boss.md` as the record of boss preferences and `config/learnings.m
 ## 3. Session start (run once at every session start)
 
 Run `bin/cs-session-start.sh` exactly once at session start.
+A run-tier harness runs it for you at session open (`bin/cs-sessionstart-run.sh` owns that routing), so confirm the digest is already present in this session and run it yourself only when it is not.
 Its header is the single owner of composed commands, ordering, and digest contents.
 Do not reimplement it by separately running its lock, bootstrap, or initial wake-drain components.
 

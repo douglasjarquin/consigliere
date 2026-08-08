@@ -102,13 +102,137 @@
 # status log path, and AGENTS.md section 8 treats a status line as a wake EVENT
 # rather than current state - bin/cs-crew-state.sh owns current state.
 #
-# Usage: cs-session-start.sh
+# RUNTIME BOUND: the digest is executed by the session-open hooks (see
+# bin/cs-sessionstart-run.sh), which block session initialization while it
+# runs, so an unbounded digest is no longer merely slow - it can strand a whole
+# session behind one hung subprocess. Not every step is individually bounded:
+# bootstrap's gh auth probe, its tool presence probes, the backlog listing, and
+# the per-task endpoint reads are not. So the whole digest runs as ONE bounded
+# child of this script (CS_SESSION_START_TIMEOUT, default 120s). The child
+# writes the digest straight to this script's stdout, so everything it emitted
+# before the bound was hit is already delivered; the parent then prints a loud
+# STARTUP TRUNCATED banner naming the stage that did not finish and the stages
+# that were therefore never emitted, and still exits 0. That banner is the
+# never-emitted-stage condition the READ-ONCE CONTRACT names as voiding its
+# trust for the sources those stages would have printed. The child records its
+# progress in CS_SESSION_START_STAGE_FILE, which is also the flag that tells a
+# child it is the child - the parent never recurses. Bounded execution routes
+# through bin/cs-timeout-lib.sh, so hosts without timeout, gtimeout, or perl
+# still get the same hard bound from the pure-Bash watchdog. A host where that
+# library cannot even establish the bound reports itself separately
+# (CS_TIMEOUT_UNAVAILABLE), because a digest that never started must not be
+# announced as a digest that stalled.
+#
+# Usage: cs-session-start.sh [--reemit]
 #   Prints the full ordered digest to stdout and always exits 0: this is a
 #   reporting command, not a gate. A lock refusal is reported as a loud banner
 #   inline, never a silent failure that would make an agent skip the digest.
+#
+#   --reemit  This session ALREADY completed a full startup and has only lost
+#             its context (a /clear or a compaction). Skip the mutating sweeps
+#             startup already reconciled - the config/ layout migration and
+#             bootstrap's mutating sweeps (fleet sync, capo fast-forward, capo
+#             liveness; bootstrap runs CS_BOOTSTRAP_DETECT_ONLY=1 with
+#             CS_BOOTSTRAP_LOCKED=1 so repair ownership stays with this
+#             session) - and re-emit the rest. The wake-queue drain is NOT
+#             skipped: queued records arrived after startup and are this turn's
+#             work, and the session that owns the lock is exactly the session
+#             that must take them. Lock acquisition still runs, because
+#             ownership must be re-verified rather than assumed: cs-lock.sh
+#             already treats a lock this session's own harness holds as its
+#             own, so the re-emit proceeds, while a lock another live session
+#             took meanwhile still produces the ordinary read-only path.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+REEMIT=0
+for arg in "$@"; do
+  case "$arg" in
+    --reemit) REEMIT=1 ;;
+    -h|--help)
+      sed -n '2,/^set -u$/p' "$SCRIPT_DIR/cs-session-start.sh" | sed 's/^# \{0,1\}//; $d'
+      exit 0
+      ;;
+    *)
+      printf 'cs-session-start: unknown argument: %s\n' "$arg" >&2
+      printf 'usage: cs-session-start.sh [--reemit]\n' >&2
+      exit 2
+      ;;
+  esac
+done
+
+# --- 0. runtime bound --------------------------------------------------------
+# The ordered stage list is the contract behind the truncation banner: the
+# child names the stage it is entering, and the parent reports every stage
+# after that one as never emitted. Keep it in the exact order the digest
+# prints.
+SESSION_START_STAGES='lock bootstrap wake-queue supervision read-once fleet-state context next-step'
+
+stage() {  # <stage-name>: breadcrumb for the parent's truncation banner
+  [ -n "${CS_SESSION_START_STAGE_FILE:-}" ] || return 0
+  printf '%s\n' "$1" > "$CS_SESSION_START_STAGE_FILE" 2>/dev/null || true
+}
+
+# shellcheck source=bin/cs-timeout-lib.sh
+. "$SCRIPT_DIR/cs-timeout-lib.sh"
+
+if [ -z "${CS_SESSION_START_STAGE_FILE:-}" ]; then
+  SESSION_START_BUDGET=${CS_SESSION_START_TIMEOUT:-120}
+  # A non-positive or non-numeric budget is not a budget (`timeout 0` disables
+  # the deadline outright), so an unusable value falls back to the default
+  # rather than silently removing the bound.
+  case "$SESSION_START_BUDGET" in ''|*[!0-9]*|0) SESSION_START_BUDGET=120 ;; esac
+  SESSION_START_STAGE_FILE=$(mktemp "${TMPDIR:-/tmp}/cs-session-start-stage.XXXXXX" 2>/dev/null) || SESSION_START_STAGE_FILE=
+  if [ -z "$SESSION_START_STAGE_FILE" ]; then
+    # Without a breadcrumb the bound still holds; only the banner's precision
+    # is lost, so the child still runs bounded.
+    SESSION_START_STAGE_FILE=/dev/null
+  fi
+  cs_run_timed "$SESSION_START_BUDGET" \
+    env CS_SESSION_START_STAGE_FILE="$SESSION_START_STAGE_FILE" \
+    "$SCRIPT_DIR/cs-session-start.sh" "$@"
+  SESSION_START_RC=$?
+  BAR='●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+  if [ "$SESSION_START_RC" -eq "$CS_TIMEOUT_UNAVAILABLE" ]; then
+    # The bound could not be established, so the digest never started. Saying
+    # "it stalled" here would name a stage that never ran; the honest report is
+    # that nothing above came from this session at all.
+    printf '\n%s\n' "$BAR"
+    printf '●  STARTUP DID NOT RUN - THE RUNTIME BOUND COULD NOT BE ESTABLISHED\n'
+    printf '●  The bounded runner could not create its temporary state (check TMPDIR),\n'
+    printf '●  so the digest was never started and NONE of these stages ran:\n'
+    printf '●    %s\n' "$SESSION_START_STAGES"
+    printf '●  The READ-ONCE CONTRACT covers nothing from this session: no source was\n'
+    printf '●  printed, so nothing here has been reconciled.\n'
+    printf '●  Fix the temp directory and rerun bin/cs-session-start.sh before acting on\n'
+    printf '●  fleet state - a home this session never read is a home it cannot steer.\n'
+    printf '%s\n' "$BAR"
+  elif [ "$SESSION_START_RC" -eq 124 ]; then
+    SESSION_START_LAST_STAGE=$(cat "$SESSION_START_STAGE_FILE" 2>/dev/null) || SESSION_START_LAST_STAGE=
+    [ -n "$SESSION_START_LAST_STAGE" ] || SESSION_START_LAST_STAGE=unknown
+    SESSION_START_PENDING=$(
+      printf '%s\n' "$SESSION_START_STAGES" | tr ' ' '\n' |
+        awk -v from="$SESSION_START_LAST_STAGE" '$0 == from {seen = 1; next} seen' | tr '\n' ' '
+    )
+    [ -n "${SESSION_START_PENDING% }" ] || SESSION_START_PENDING='(unknown - the digest may be incomplete anywhere)'
+    printf '\n%s\n' "$BAR"
+    printf '●  STARTUP TRUNCATED - SESSION START HIT ITS %ss RUNTIME BOUND\n' "$SESSION_START_BUDGET"
+    printf '●  It STALLED during the "%s" stage, so everything above is complete only\n' "$SESSION_START_LAST_STAGE"
+    printf '●  up to that point, and these stages NEVER RAN:\n'
+    printf '●    %s\n' "${SESSION_START_PENDING% }"
+    printf '●  The READ-ONCE CONTRACT does not cover the stalled stage or the stages that\n'
+    printf '●  never ran: their sources were never printed and must be reconciled before\n'
+    printf '●  acting on anything they would have shown.\n'
+    printf '●  Rerun bin/cs-session-start.sh now to finish startup. If it truncates again,\n'
+    printf '●  raise CS_SESSION_START_TIMEOUT and report the slow stage - a stage that\n'
+    printf '●  cannot finish inside the bound is a fleet problem, not a reporting detail.\n'
+    printf '%s\n' "$BAR"
+  fi
+  [ "$SESSION_START_STAGE_FILE" = /dev/null ] || rm -f "$SESSION_START_STAGE_FILE" 2>/dev/null || true
+  exit 0
+fi
+
 # Session start is one of the two legitimate layout-gate bypasses: it must be
 # able to acquire the lock and run the migrator against a not-yet-migrated
 # home. The bypass is NOT exported: every child except cs-lock.sh and the
@@ -373,15 +497,30 @@ print_status_tail() {
   done < <(tail -n "$STATUS_TAIL" "$status")
 }
 
+# Completion proof for the session-open router: bin/cs-sessionstart-run.sh
+# re-emits on clear/compact only when this file records the current lock
+# owner's pid, so a startup killed mid-sweep is finished first.
+COMPLETION_FILE="$STATE/.session-start-complete"
+
 # Prefix the complete digest with its structural type. section starts with a
 # newline, which becomes the first byte of the body after the canonical ": ".
 cs_operational_input_construct session-start '' SESSION_START_PREFIX
 printf '%s' "$SESSION_START_PREFIX"
-section "SESSION START - $CS_HOME"
+if [ "$REEMIT" -eq 1 ]; then
+  section "SESSION START (CONTEXT RE-EMIT) - $CS_HOME"
+  printf 'This session already completed a full startup and has only lost its context.\n'
+  printf 'Lock ownership is re-verified and the durable records below are reprinted, but\n'
+  printf 'the sweeps startup already reconciled - the config/ layout migration, project\n'
+  printf 'clone refresh, and capo fast-forward and liveness - are NOT repeated.\n'
+  printf 'Queued wakes ARE still drained: they arrived after startup and are this turn'"'"'s work.\n'
+else
+  section "SESSION START - $CS_HOME"
+fi
 
 # --- 1. lock -----------------------------------------------------------
 # The gate bypass covers only the lock: an unmigrated home must still be able
 # to elect the one session that will migrate it.
+stage lock
 subsection "LOCK"
 LOCK_OUT=$(CS_LAYOUT_GATE_SKIP=1 "$SCRIPT_DIR/cs-lock.sh" 2>&1)
 LOCK_RC=$?
@@ -402,13 +541,20 @@ if [ "$LOCK_RC" -ne 0 ]; then
     printf '%s\n' "$BAR"
   }
 fi
+# A FULL locked startup invalidates any earlier completion proof until every
+# stage below has run, so a truncated run can never be re-emitted from.
+if [ "$READ_ONLY" -eq 0 ] && [ "$REEMIT" -eq 0 ]; then
+  rm -f "$COMPLETION_FILE" 2>/dev/null || true
+fi
 
 # --- 1b. config/ layout migration (one-shot, idempotent, quiet no-op) ----
 # Runs only in the locked session, immediately after the lock, so every later
 # step - and every other script's fail-closed layout gate - sees a migrated
 # home. A refusal (divergent old+new content) stops the digest: nothing else
-# can run correctly until the named files are reconciled.
-if [ "$READ_ONLY" -eq 0 ]; then
+# can run correctly until the named files are reconciled. A re-emit skips it:
+# completion proof means the startup that owns this context already converged
+# it.
+if [ "$READ_ONLY" -eq 0 ] && [ "$REEMIT" -eq 0 ]; then
   MIGRATE_OUT=$("$SCRIPT_DIR/cs-migrate-config.sh" 2>&1)
   MIGRATE_RC=$?
   if [ -n "$MIGRATE_OUT" ]; then
@@ -423,9 +569,15 @@ if [ "$READ_ONLY" -eq 0 ]; then
 fi
 
 # --- 2. bootstrap --------------------------------------------------------
+stage bootstrap
 subsection "BOOTSTRAP"
 if [ "$READ_ONLY" -eq 1 ]; then
   BOOT_OUT=$(CS_BOOTSTRAP_DETECT_ONLY=1 "$SCRIPT_DIR/cs-bootstrap.sh" 2>&1)
+elif [ "$REEMIT" -eq 1 ]; then
+  # Detect-only because startup already ran the sweeps, LOCKED because this
+  # session still owns repair - it must not defer to a lock holder that is
+  # itself.
+  BOOT_OUT=$(CS_BOOTSTRAP_DETECT_ONLY=1 CS_BOOTSTRAP_LOCKED=1 "$SCRIPT_DIR/cs-bootstrap.sh" 2>&1)
 else
   BOOT_OUT=$("$SCRIPT_DIR/cs-bootstrap.sh" 2>&1)
 fi
@@ -436,6 +588,7 @@ else
 fi
 
 # --- 3. wake-drain -------------------------------------------------------
+stage wake-queue
 subsection "WAKE QUEUE"
 if [ "$READ_ONLY" -eq 1 ]; then
   QLEN=0
@@ -453,6 +606,7 @@ else
 fi
 
 # --- 4. supervision operating instructions ----------------------------------
+stage supervision
 AFK_PRESENT=0
 [ -e "$STATE/.afk" ] && AFK_PRESENT=1
 
@@ -504,7 +658,11 @@ fi
 # exactly what drops a closing reminder, and this contract is what stops the
 # next turn from re-reading everything the digest just printed. Because it
 # arrives BEFORE its subject, it also names the one condition that voids it -
-# a stage this digest reports as never emitted.
+# a stage this digest reports as never emitted. That condition is a real
+# signal, not prose: the runtime bound's STARTUP TRUNCATED banner (see this
+# file's RUNTIME BOUND note) is what reports a stalled stage and the stages
+# that never ran.
+stage read-once
 section "READ-ONCE CONTRACT"
 cat <<'EOF'
 Everything below is printed in full for this session start: every state/*.meta,
@@ -534,6 +692,7 @@ EOF
 # --- 6. fleet-state digest ---------------------------------------------
 # Before CONTEXT: see this file's ORDERING note. Live fleet identity is what a
 # truncated tail must never take.
+stage fleet-state
 section "FLEET STATE"
 
 # The live-task inventory opens the section, ahead of the backlog listing and
@@ -609,6 +768,7 @@ fi
 # session, already reported against CS_STARTUP_MEMORY_MAX_BYTES, and
 # recoverable with one targeted read, so it is the cheapest thing for a
 # truncated tail to take (see this file's ORDERING note).
+stage context
 section "CONTEXT"
 print_file_or_absent "$CONFIG/projects.md" "config/projects.md"
 print_file_or_absent "$CONFIG/boards.md" "config/boards.md (GitHub board mapping for the contracts and casino skills)"
@@ -618,6 +778,7 @@ print_startup_memory "$CONFIG/boss-shared.md" "config/boss-shared.md (shared, ma
 print_startup_memory "$CONFIG/learnings.md" "config/learnings.md"
 
 # --- 8. closing reminder -----------------------------------------------
+stage next-step
 section "NEXT STEP"
 if [ "$READ_ONLY" -eq 1 ]; then
   cat <<'EOF'
@@ -643,5 +804,24 @@ cat <<'EOF'
 The digest above is complete for this session start. The READ-ONCE CONTRACT
 section near the top of it governs what may still be read from disk.
 EOF
+
+# Record completion proof for the session-open router, atomically and only for
+# a full locked startup that reached this point: the recorded pid must match
+# the lock owner or a later clear/compact runs a full startup instead.
+if [ "$READ_ONLY" -eq 0 ] && [ "$REEMIT" -eq 0 ]; then
+  COMPLETION_PID=$(cat "$STATE/.lock" 2>/dev/null || true)
+  case "$COMPLETION_PID" in
+    ''|*[!0-9]*) COMPLETION_PID= ;;
+  esac
+  COMPLETION_TMP=$(mktemp "$STATE/.session-start-complete.XXXXXX" 2>/dev/null || true)
+  if [ -n "$COMPLETION_PID" ] && [ -n "$COMPLETION_TMP" ] \
+    && printf '%s\n' "$COMPLETION_PID" > "$COMPLETION_TMP" 2>/dev/null \
+    && mv -f "$COMPLETION_TMP" "$COMPLETION_FILE" 2>/dev/null; then
+    :
+  else
+    [ -z "$COMPLETION_TMP" ] || rm -f "$COMPLETION_TMP" 2>/dev/null || true
+    printf '\nSESSION_START_COMPLETION: not recorded - the next clear or compact will run a full startup.\n'
+  fi
+fi
 
 exit 0

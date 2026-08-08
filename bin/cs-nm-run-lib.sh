@@ -28,24 +28,16 @@
 # mutates a run. Teardown owns the one state-changing step (the abort) itself,
 # because only teardown carries the discard authority for it.
 
-# Bounded-timeout selection, resolved once at source time. The perl fallback
-# reproduces `timeout` on a box that ships neither timeout nor gtimeout, killing
-# the whole process group so a wedged no-mistakes child cannot outlive the wait.
-CS_NM_HAVE_TIMEOUT=none
-if command -v timeout >/dev/null 2>&1; then CS_NM_HAVE_TIMEOUT=timeout
-elif command -v gtimeout >/dev/null 2>&1; then CS_NM_HAVE_TIMEOUT=gtimeout
-elif command -v perl >/dev/null 2>&1; then CS_NM_HAVE_TIMEOUT=perl
-fi
+# Bounded execution routes through the shared owner (bin/cs-timeout-lib.sh),
+# which selects timeout/gtimeout/perl/bash and kills the whole process group so
+# a wedged no-mistakes child cannot outlive the wait.
+# shellcheck source=bin/cs-timeout-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cs-timeout-lib.sh"
 
 cs_nm_run_read() {
   local wt=$1 timeout=$2
   shift 2
-  case "$CS_NM_HAVE_TIMEOUT" in
-    timeout)  ( cd "$wt" && timeout "$timeout" no-mistakes "$@" ) 2>/dev/null ;;
-    gtimeout) ( cd "$wt" && gtimeout "$timeout" no-mistakes "$@" ) 2>/dev/null ;;
-    perl)     ( cd "$wt" && perl -e 'my $t = shift; my $pid = fork; die "fork failed" unless defined $pid; if (!$pid) { setpgrp(0, 0); exec @ARGV } local $SIG{ALRM} = sub { kill "TERM", -$pid; select undef, undef, undef, 0.2; kill "KILL", -$pid; exit 124 }; alarm $t; waitpid $pid, 0; exit($? >> 8)' "$timeout" no-mistakes "$@" ) 2>/dev/null ;;
-    *)        return 127 ;;
-  esac
+  ( cd "$wt" && cs_run_timed "$timeout" no-mistakes "$@" ) 2>/dev/null
 }
 
 # Bounded no-mistakes call from inside a worktree; stdout only, never fails the

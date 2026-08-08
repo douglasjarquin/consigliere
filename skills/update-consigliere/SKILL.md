@@ -12,3 +12,4 @@ description: Self-update a running consigliere and its capos to the latest from 
 4. For each id in `nudge-capos:`, steer that capo to update itself:
    `CS_HOME=<main-home> bin/cs-send.sh <id> 'Your home was fast-forwarded; re-read AGENTS.md and continue under the refreshed instructions.'`
 5. Nothing under `projects/` is ever touched by this flow; project clones are refreshed separately by the guarded fleet sync.
+6. When the fast-forward changed `.codex/hooks.json`, tell the boss that each codex home's next interactive session must approve the changed hooks once before they fire again (persisted hook trust; see `docs/codex.md`).
