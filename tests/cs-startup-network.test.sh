@@ -5,15 +5,20 @@
 # The session-start digest runs on a session-open hook that blocks session
 # initialization, so it is now composed from local reads alone and every
 # external-network call runs in this detached bounded worker instead. Deferral
-# is only safe if three things hold, so each is pinned here:
+# is only safe if these hold, so each is pinned here:
 #   - the result always surfaces: inline when a live claimant harvests it in
 #     time, and as a durable `check: startup-network` wake when it does not,
-#     with only a recorded delivery suppressing that wake;
+#     with only a recorded delivery suppressing that wake, and the reader that
+#     wake names being one that records that delivery for what it printed;
+#   - no result is ever lost to a later one: results are never merged, so a
+#     publish that would land on an unread result moves it into the bounded
+#     pending store first, whatever coverage either of them speaks for;
 #   - a worker never sweeps for a session it cannot prove owns the fleet lock -
 #     it refuses to reserve one, and a hand-run pass downgrades to the
 #     read-only probe rather than sweeping on someone else's authority;
-#   - while the checks are still running the digest names EXACTLY what is not
-#     yet confirmed and never prints anything that reads as passed.
+#   - the digest names EXACTLY what is unconfirmed and never prints anything
+#     that reads as passed, including on the paths where the pass that ran is
+#     narrower than the one this session asked for.
 # The two closing cases drive the real bin/cs-session-start.sh end to end
 # against a hanging network dependency, one concern each so neither has to win a
 # race: the digest completes with the stage still running and keeps its
@@ -458,9 +463,9 @@ pass "a publish that cannot land keeps the acknowledgement it did not supersede"
 # --- a narrower run never destroys an unread WIDER result ---------------------
 # The re-emit sequence: a full startup's worker finishes after the digest is out,
 # so its findings surface only as a queued wake that names
-# `cs-startup-network.sh report`. Before that wake is drained the harness
-# re-emits, which runs a probe-only pass over the same state. The fleet-sync
-# findings that pass cannot re-derive must still be there afterwards.
+# `cs-startup-network.sh read`. Before that wake is drained the harness re-emits,
+# which runs a probe-only pass over the same state. The fleet-sync findings that
+# pass cannot re-derive must still be there afterwards.
 HOME_DIR=$(fresh_home narrow-over-wide)
 FB=$(fakebin "$TMP/fb-narrow-over-wide")
 printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
@@ -503,7 +508,7 @@ pass "a wider run preserves an unread narrower result rather than replacing it"
 # publish, so the record is left `running` while the result file still holds the
 # earlier findings. How the record that came after a result ended says nothing
 # about whether anything has read that result, so it stays reachable through the
-# same `report` the queued wake names, and the next publish still pends it.
+# same `read` the queued wake names, and the next publish still pends it.
 HOME_DIR=$(fresh_home abandoned)
 FB=$(fakebin "$TMP/fb-abandoned")
 printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
@@ -627,6 +632,37 @@ assert_contains "$out" 'NOT yet confirmed: GitHub authentication' \
 assert_not_contains "$out" 'completed off the startup path' \
   "an adopted in-flight pass reported itself as completed"
 pass "adopting a narrower pass names the check that pass does not cover"
+
+# --- an adopted pass that then dies still names what it never covered ---------
+# The same adoption, followed by the worker dying before it publishes. This is
+# the reader path where the gap is easiest to lose: nothing finished, so there is
+# no result to label, and the record still names the NARROWER reservation that
+# was adopted. The section has to name the sweep this session asked for and never
+# got, and the rerun it offers has to be one that can actually cover it - a
+# probe-only rerun would read as a remedy while provably not being one.
+HOME_DIR=$(fresh_home dead-narrow)
+FB=$(fakebin "$TMP/fb-dead-narrow")
+printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
+sleep 30 &
+LIVE_PID=$!
+write_status "$HOME_DIR" state=running "pid=$LIVE_PID" "started=$(date +%s)" \
+  locked=0 phases=probe requested=probe generation=g-dead-narrow lock_pid=999999
+snet "$HOME_DIR" "$FB" start --locked 1 --harvest-pid $$ \
+  || fail "start refused to adopt the live probe-only pass"
+kill "$LIVE_PID" 2>/dev/null || true
+wait "$LIVE_PID" 2>/dev/null || true
+
+out=$(snet "$HOME_DIR" "$FB" report)
+assert_contains "$out" 'stopped before publishing' \
+  "a worker that died before publishing was not reported"
+assert_contains "$out" 'NOT covered by this run: project clone refresh with its drift reporting' \
+  "the one reader path where the worker died hid the sweep this session asked for"
+stopped_line=$(printf '%s\n' "$out" | grep 'stopped before publishing' || true)
+case "$stopped_line" in
+  *'run --locked 1') ;;
+  *) fail "the rerun offered cannot cover the sweep that is missing: $stopped_line" ;;
+esac
+pass "an adopted pass whose worker dies still names the uncovered check and a rerun that covers it"
 
 # --- end to end: a slow network never blocks the digest -----------------------
 # The real session-start digest, driven against a network dependency that is

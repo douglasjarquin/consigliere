@@ -673,6 +673,22 @@ print_uncovered() {
   printf 'Cover it with %s/bin/cs-startup-network.sh run --locked 1.\n' "$CS_ROOT"
 }
 
+# The --locked value a rerun needs to cover everything the session asked for.
+#
+# A pass reached through adoption or downgrade records the NARROWER `locked` it
+# actually ran with, so echoing that back names a probe-only rerun that provably
+# cannot cover the missing sweep - worse than naming nothing, because it reads as
+# a remedy and is not. What the session asked for is what a rerun has to satisfy.
+rerun_locked() {
+  case "$(status_get requested)" in
+    *sweeps*) printf '1' ; return 0 ;;
+  esac
+  case "$(status_get locked)" in
+    1) printf '1' ;;
+    *) printf '0' ;;
+  esac
+}
+
 # Results that finished and were never read, oldest first, each labelled with the
 # coverage it speaks for. Printed ahead of the current result because they are
 # older than it, and drained by the harvest that prints them.
@@ -715,11 +731,10 @@ print_finished() {  # <state>
     *) took=$((finished - started)) ;;
   esac
   printf 'completed off the startup path in %ss: %s.\n' "$took" "$(phase_label "$phases")"
-  print_uncovered
   [ "$state" = 'done' ] || printf 'The stage itself did not finish cleanly (%s) - the NETWORK_CHECKS line below names what to rerun.\n' "$state"
   if [ "$report_published" = 0 ]; then
     printf 'NETWORK_CHECKS: could not publish the deferred check report, so %s results are unavailable; rerun %s/bin/cs-startup-network.sh run --locked %s\n' \
-      "$(phase_label "$phases")" "$CS_ROOT" "$(status_get locked)"
+      "$(phase_label "$phases")" "$CS_ROOT" "$(rerun_locked)"
     print_outstanding
   elif result_has_body "$REPORT_FILE"; then
     result_body "$REPORT_FILE"
@@ -736,7 +751,6 @@ print_pending() {
   age=$(age_of "$started")
   printf 'IN PROGRESS - the deferred network checks have not finished yet.\n'
   printf 'NOT yet confirmed: %s.\n' "$(phase_label "$phases")"
-  print_uncovered
   [ -z "$age" ] || printf 'Started %ss ago, bounded at %ss.\n' "$age" "$(stage_budget)"
   # shellcheck disable=SC2016  # The backticked wake name is literal digest text.
   printf 'The result is durable in state/.startup-network.report and arrives as a `check: startup-network` wake.\n'
@@ -744,6 +758,10 @@ print_pending() {
   print_outstanding
 }
 
+# The gap disclosure is emitted HERE, once, rather than by each branch: a reader
+# path that forgets it hides exactly what the session asked for and never got,
+# and that is what happened while three branches each carried their own call.
+# One call site means every branch, including any added later, discloses.
 print_state() {
   print_pending_store
   case "$(status_get state)" in
@@ -753,12 +771,13 @@ print_state() {
         print_pending
       else
         printf 'NETWORK_CHECKS: the deferred check worker stopped before publishing, so %s did not complete; rerun %s/bin/cs-startup-network.sh run --locked %s\n' \
-          "$(phase_label "$(status_get phases)")" "$CS_ROOT" "$(status_get locked)"
+          "$(phase_label "$(status_get phases)")" "$CS_ROOT" "$(rerun_locked)"
         print_outstanding
       fi
       ;;
     *) printf 'not started - no deferred network checks have run for this home yet.\n' ;;
   esac
+  print_uncovered
 }
 
 # Did print_state print the CURRENT result? A terminal record that published one
