@@ -169,14 +169,17 @@ fi
 # a brand-new script is linted before it is ever committed. Deletions are kept
 # apart rather than discarded: ShellCheck cannot read a file that is gone, but
 # deleting a library is a change the files that still source it are judged on, so
-# a deleted path has to reach the reverse pass below. Each query's exit status is
-# checked on its own, because a pipeline into `sort` would report `sort`'s success
-# and turn a failed query into an empty change set.
+# a deleted path has to reach the reverse pass below. `--no-renames` is what makes
+# that hold for a rename: with rename detection on, git reports a move as one R
+# entry naming only the destination, so the path this branch moved away from would
+# reach neither query and a consumer left pointing at it would never be linted.
+# Each query's exit status is checked on its own, because a pipeline into `sort`
+# would report `sort`'s success and turn a failed query into an empty change set.
 changed=
 deleted=
 if [ -z "$full_reason" ]; then
-  if tracked_changed=$(git diff --name-only --diff-filter=d "$merge_base" --) &&
-    tracked_deleted=$(git diff --name-only --diff-filter=D "$merge_base" --) &&
+  if tracked_changed=$(git diff --no-renames --name-only --diff-filter=d "$merge_base" --) &&
+    tracked_deleted=$(git diff --no-renames --name-only --diff-filter=D "$merge_base" --) &&
     untracked=$(git ls-files --others --exclude-standard --); then
     changed=$(printf '%s\n%s\n' "$tracked_changed" "$untracked" | LC_ALL=C sort -u)
     deleted=$(printf '%s\n' "$tracked_deleted" | LC_ALL=C sort -u)

@@ -315,3 +315,25 @@ assert_not_contains "$out" 'nothing to lint' 'a deleted library is not an empty 
 assert_contains "$out" 'linting 0 changed file(s) plus 4 source-linked file(s) since origin/main' \
   'the deleted path is counted as source-linked, never as an input'
 pass 'a deleted library lints the canonical files that still source it, and is not linted itself'
+
+# --- a renamed library still pulls in the consumer left pointing at it ---------
+#
+# A rename is a deletion of the old path as far as a stale directive is concerned,
+# but git reports a move as one entry naming only the destination, so the path the
+# branch moved away from has to be recovered or the forgotten consumer is missed.
+
+git -C "$REPO" reset -q --hard
+git -C "$REPO" checkout -q -b rename-shared-lib
+git -C "$REPO" mv bin/shared-lib.sh bin/renamed-lib.sh
+# Only one of the two consumers is updated; tests/kept.test.sh is left pointing at
+# a path that no longer exists, which is what a full run fails on.
+sed 's|bin/shared-lib.sh|bin/renamed-lib.sh|' "$REPO/bin/kept.sh" >"$TMP/kept.sh"
+mv "$TMP/kept.sh" "$REPO/bin/kept.sh"
+
+out=$(run_lint)
+got=$(linted)
+[ "$got" = 'bin/kept.sh bin/lib-one.sh bin/lib-two.sh bin/renamed-lib.sh tests/kept.test.sh ' ] \
+  || fail "a renamed library must lint the consumer left pointing at its old path, got: $got"
+assert_contains "$out" 'linting 2 changed file(s) plus 3 source-linked file(s) since origin/main' \
+  'the path renamed away from is counted through its consumers'
+pass 'a renamed library pulls in the consumer whose directive was never updated'

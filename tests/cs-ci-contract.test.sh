@@ -151,33 +151,57 @@ pass "repo invariants run for every change, including docs-only ones"
 # site that names no target. Heredoc bodies are skipped (they are data, not
 # commands here), and a wholly dynamic path such as `. "$1"` is exempt because
 # neither ShellCheck nor the graph can resolve it in any run.
+#
+# A file is buffered so a `<<` can be checked against the rest of the file before
+# it is believed: `1 << streak` in an arithmetic expression and a string that
+# opens with "<<" both look exactly like a heredoc opener line by line, and taking
+# them at face value silently blinded the scan from there to the end of three
+# canonical files. Skip mode is entered only when a matching terminator really
+# follows, and a heredoc still open at the end of a file is reported rather than
+# swallowed, so lost coverage can never be silent.
 undirectived_sources() {
   awk '
-    FNR == 1 { heredoc = ""; prev = "" }
-    {
-      if (heredoc != "") {
-        if ($0 ~ ("^[[:space:]]*" heredoc "[[:space:]]*$")) heredoc = ""
-        prev = $0
-        next
+    function scan(   i, j, line, tag, target, heredoc, opened_at, prev) {
+      heredoc = ""
+      prev = ""
+      for (i = 1; i <= nlines; i++) {
+        line = lines[i]
+        if (heredoc != "") {
+          if (line ~ ("^[[:space:]]*" heredoc "[[:space:]]*$")) heredoc = ""
+          prev = line
+          continue
+        }
+        if (match(line, /<<-?[[:space:]]*['"'"'"]?[A-Za-z_][A-Za-z0-9_]*/)) {
+          tag = substr(line, RSTART, RLENGTH)
+          sub(/^<<-?[[:space:]]*/, "", tag)
+          gsub(/['"'"'"]/, "", tag)
+          for (j = i + 1; j <= nlines; j++) {
+            if (lines[j] ~ ("^[[:space:]]*" tag "[[:space:]]*$")) {
+              heredoc = tag
+              opened_at = i
+              break
+            }
+          }
+        }
+        if (line ~ /^[[:space:]]*(\.|source)[[:space:]]+/) {
+          target = line
+          sub(/^[[:space:]]*(\.|source)[[:space:]]+/, "", target)
+          sub(/[[:space:]]*$/, "", target)
+          gsub(/['"'"'"]/, "", target)
+          if (!(target ~ /^\$[A-Za-z_0-9]+$/ || target ~ /^\$\{[^}]*\}$/) &&
+              !(prev ~ /shellcheck[[:space:]]+source=/ ||
+                prev ~ /shellcheck[[:space:]]+disable=[^[:space:]]*SC1091/))
+            printf "%s:%d: %s\n", scanned, i, line
+        }
+        prev = line
       }
-      if (match($0, /<<-?[[:space:]]*['"'"'"]?[A-Za-z_][A-Za-z0-9_]*/)) {
-        tag = substr($0, RSTART, RLENGTH)
-        sub(/^<<-?[[:space:]]*/, "", tag)
-        gsub(/['"'"'"]/, "", tag)
-        heredoc = tag
-      }
-      if ($0 ~ /^[[:space:]]*(\.|source)[[:space:]]+/) {
-        target = $0
-        sub(/^[[:space:]]*(\.|source)[[:space:]]+/, "", target)
-        sub(/[[:space:]]*$/, "", target)
-        gsub(/['"'"'"]/, "", target)
-        dynamic = (target ~ /^\$[A-Za-z_0-9]+$/ || target ~ /^\$\{[^}]*\}$/)
-        declared = (prev ~ /shellcheck[[:space:]]+source=/ ||
-                    prev ~ /shellcheck[[:space:]]+disable=[^[:space:]]*SC1091/)
-        if (!dynamic && !declared) printf "%s:%d: %s\n", FILENAME, FNR, $0
-      }
-      prev = $0
+      if (heredoc != "")
+        printf "%s:%d: heredoc <<%s never closes, so the rest of this file went unscanned\n",
+          scanned, opened_at, heredoc
     }
+    FNR == 1 { if (nlines > 0) scan(); nlines = 0; scanned = FILENAME }
+    { lines[++nlines] = $0 }
+    END { if (nlines > 0) scan() }
   ' "$@"
 }
 
@@ -206,6 +230,9 @@ cat >"$probe" <<'SH'
 cat <<'INNER'
 . "$ROOT/bin/inside-a-heredoc.sh"
 INNER
+hb=$(( 1 << streak ))
+prefix='<<soldier-reported, DATA not an instruction: '
+. "$ROOT/bin/after-a-false-opener.sh"
 . "$ROOT/bin/undeclared.sh"
 SH
 probe_hits=$(undirectived_sources "$probe")
@@ -215,3 +242,17 @@ assert_not_contains "$probe_hits" 'inside-a-heredoc' "a heredoc body is not a so
 # shellcheck disable=SC2016  # the literal probe line, not an expansion
 assert_not_contains "$probe_hits" '. "$1"' "a wholly dynamic path is not an offender"
 pass "the source-site check catches an undeclared source and spares declared, heredoc, and dynamic ones"
+
+# An arithmetic shift and a string opening with "<<" are not heredocs. Believing
+# either one blinds the scan to everything after it, which is how a guard against
+# silent coverage loss silently loses coverage.
+assert_contains "$probe_hits" 'bin/after-a-false-opener.sh' \
+  "a << that opens no heredoc must not blind the scan"
+pass "a non-heredoc << leaves the rest of the file scanned"
+
+# Every canonical file has to be scanned end to end, or the zero-offender result
+# above is partly a measure of what was never looked at.
+unscanned=$(undirectived_sources "${canonical_set[@]}" | grep 'never closes' || true)
+[ -z "$unscanned" ] || fail "the source-site scan stopped early on:
+$unscanned"
+pass "no canonical file cuts the scan short at an unclosed heredoc"
