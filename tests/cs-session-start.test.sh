@@ -288,6 +288,7 @@ log=${CS_FAKE_TASKS_AXI_LOG:-}
 [ -n "$log" ] && printf '%s\n' "$*" >> "$log"
 ready_count=${CS_FAKE_TASKS_AXI_READY:-2}
 active_count=${CS_FAKE_TASKS_AXI_ACTIVE:-1}
+followup_count=${CS_FAKE_TASKS_AXI_FOLLOWUPS:-1}
 pad_rows() {  # <prefix> <state> - the filler rows after the canonical first one
   i=2
   while [ "$i" -le "$active_count" ]; do
@@ -351,6 +352,24 @@ case "${1:-}" in
         printf '%s\n' '  held-queued,queued,ship,consigliere,Held queued work,none,captain,boss choice pending'
         pad_rows held queued
         ;;
+      *'--kind public-followup'*)
+        # An obligation is only actionable with its delivery_state, so the real
+        # boundary is asked for it; refuse a listing that leaves it out.
+        case "$*" in
+          *'--fields '*'delivery_state'*) : ;;
+          *)
+            printf '%s\n' 'obligation listing must request delivery_state' >&2
+            exit 9
+            ;;
+        esac
+        printf 'count: %s\n' "$followup_count"
+        printf 'tasks[%s]{id,state,kind,repo,title,delivery_state,blocked_by,hold_kind,hold_reason}:\n' "$followup_count"
+        i=1
+        while [ "$i" -le "$followup_count" ]; do
+          printf '  publish-obligation-%s,queued,public-followup,consigliere,Publish required follow-up %s,intent,none,"-","-"\n' "$i" "$i"
+          i=$((i + 1))
+        done
+        ;;
       *'--state queued'*'--blocked'*)
         task_header "$active_count"
         printf '%s\n' '  blocked-followup,queued,scout,consigliere,Follow compact startup,compact-startup,"-","-"'
@@ -381,7 +400,7 @@ AXI_LOG="$TMP/axi-compose.log"
 out=$(CS_HOME="$HOME_DIR" CS_FAKE_TASKS_AXI_LOG="$AXI_LOG" CS_FAKE_TASKS_AXI_READY=3 \
   PATH="$FAKEBIN:$PATH" "$BIN" 2>/dev/null)
 
-assert_contains "$out" 'compact backlog listing (tasks-axi; done rows omitted; in-flight, held, and blocked rows shown in full up to 40 per group; ready queued bounded to 20; task bodies omitted)' \
+assert_contains "$out" 'compact backlog listing (tasks-axi; done rows omitted; in-flight, held, and blocked rows shown in full up to 40 per group; queued public-followup obligations always shown in full; ready queued bounded to 20; task bodies omitted)' \
   "tasks-axi backend did not render the composed recovery listing"
 assert_contains "$out" 'compact-startup,in_flight,ship,consigliere,Compact startup digest,none,captain,boss choice pending' \
   "tasks-axi listing omitted in-flight identity, state, or hold metadata"
@@ -394,6 +413,10 @@ assert_contains "$out" 'ready-3,queued,ship,consigliere,Ready item 3' \
 assert_not_contains "$out" 'DONE-ROW-LINE' "tasks-axi digest listed a done row at startup"
 assert_contains "$out" 'ready_public_followups: 0 delivery-ready obligations' \
   "the composed listing dropped a real signal from the dispatchable set"
+# An obligation still in `intent` reaches ready_public_followups only once it is
+# delivery-ready, so its own group is the only thing that can surface it.
+assert_contains "$out" 'publish-obligation-1,queued,public-followup,consigliere,Publish required follow-up 1,intent,none,"-","-"' \
+  "the composed listing dropped a queued public-followup obligation"
 # One section pointer, not one repeated help block per composed group.
 assert_not_contains "$out" 'help[1]:' \
   "the composed listing repeated tasks-axi's per-group help block"
@@ -414,6 +437,8 @@ assert_grep '--state held --fields blocked_by,hold_kind,hold_reason' "$AXI_LOG" 
   "session start did not ask tasks-axi for the held group"
 assert_grep '--state queued --blocked --fields blocked_by,hold_kind,hold_reason' "$AXI_LOG" \
   "session start did not ask tasks-axi for the blocked queued group"
+assert_grep '--state queued --kind public-followup --fields delivery_state,blocked_by,hold_kind,hold_reason' "$AXI_LOG" \
+  "session start did not ask tasks-axi for the queued obligations group"
 assert_grep "ready --file $HOME_DIR/config/backlog.md" "$AXI_LOG" \
   "session start did not ask tasks-axi for the dispatchable queued set"
 pass "tasks-axi backlog rendering drops done rows and keeps every in-flight, held, and blocked row"
@@ -479,6 +504,33 @@ assert_contains "$out" '(shown 2 of 5 blocked queued item(s))' \
 assert_contains "$out" "(3 more blocked queued - tasks-axi list --file $HOME_DIR/config/backlog.md --state queued --blocked --fields $FIELDS)" \
   "the bounded blocked queued group did not disclose an exact remainder and how to see it"
 pass "tasks-axi actionable groups are bounded per group with an exact disclosed remainder"
+
+# --- backlog: obligations survive every bound on the tasks-axi path too ---------
+# A queued public-followup row is a delivery the boss is already owed, and it
+# reaches ready_public_followups only once it is delivery-ready. With both
+# bounds squeezed to 1, the digest must still print every obligation while it
+# visibly cuts the groups that are allowed to be cut.
+HOME_DIR=$(fresh_home axi-obligations)
+FAKEBIN=$(cs_fakebin "$TMP/axi-obligations-tools")
+make_fake_tasks_axi "$FAKEBIN"
+write_long_body_backlog "$HOME_DIR/config/backlog.md"
+
+out=$(CS_HOME="$HOME_DIR" CS_FAKE_TASKS_AXI_FOLLOWUPS=5 CS_FAKE_TASKS_AXI_ACTIVE=3 \
+  CS_FAKE_TASKS_AXI_READY=3 CS_SESSION_START_ACTIVE_LIMIT=1 CS_SESSION_START_QUEUED_LIMIT=1 \
+  PATH="$FAKEBIN:$PATH" "$BIN" 2>/dev/null)
+
+i=1
+while [ "$i" -le 5 ]; do
+  assert_contains "$out" "publish-obligation-$i,queued,public-followup,consigliere,Publish required follow-up $i,intent,none," \
+    "an obligation was withheld by a bound that must not reach it"
+  i=$((i + 1))
+done
+assert_not_contains "$out" 'more public-followup' \
+  "the digest disclosed a withheld obligation instead of printing it"
+# The same run really is bounding what it is allowed to bound.
+assert_not_contains "$out" 'in-flight-2,in_flight' "the in-flight bound stopped applying"
+assert_not_contains "$out" 'ready-2,queued' "the ready queued bound stopped applying"
+pass "queued public-followup obligations are exempt from every bound on the tasks-axi path"
 
 # --- backlog: manual backend composition ----------------------------------------
 HOME_DIR=$(fresh_home manual-compose)

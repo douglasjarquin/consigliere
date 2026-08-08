@@ -72,11 +72,11 @@
 #     - but a pathological fleet may not spend the whole digest on them either,
 #     because this section shares the payload with the live-task inventory above
 #     it.
-#   - Queued public-followup rows are the one group NO bound may touch. They are
-#     delivery obligations the boss is already owed, so a startup that hides one
-#     behind a row limit is worse than a long digest; on the manual path, which
-#     runs exactly when tasks-axi is unavailable, they print in full however many
-#     there are and are counted separately so the accounting stays exact.
+#   - Queued public-followup rows are the one group NO bound may touch, on
+#     EITHER backend. They are delivery obligations the boss is already owed, so
+#     a startup that hides one behind a row limit is worse than a long digest.
+#     They print in full however many there are, and the manual path counts them
+#     separately so its accounting stays exact.
 #   - The plain queued (dispatchable-now) listing is bounded separately, by
 #     CS_SESSION_START_QUEUED_LIMIT, default 20, so a deep queue costs a counter
 #     rather than kilobytes.
@@ -85,13 +85,15 @@
 #     which is also what the READ-ONCE CONTRACT sanctions going back to.
 # When the tasks-axi backend is selected and available, the groups are the
 # tool's own filters (`--state in_flight`, `--state held`, `--state queued
-# --blocked`, and `tasks-axi ready`), so this script never reimplements task
-# state; the groups can overlap, because an in-flight item that is also held
-# appears under both. That path needs no public-followup rule of its own:
-# `tasks-axi ready` renders obligations under their own ready_public_followups
-# group, which is not the bounded ready[ row group. When manual mode is
-# selected, or tasks-axi is unavailable, only backlog section headings and item
-# title lines print, and the groups are recognized from the title line's own
+# --blocked`, `--state queued --kind public-followup`, and `tasks-axi ready`),
+# so this script never reimplements task state; the groups can overlap, because
+# an in-flight item that is also held appears under both. The obligations filter
+# is its own group because no other one reaches them: `tasks-axi ready` counts
+# only DELIVERY-ready obligations, so an obligation still in `intent` is absent
+# from both ready[ and ready_public_followups, and a blocked one would otherwise
+# appear only inside the bounded blocked group. When manual mode is selected, or
+# tasks-axi is unavailable, only backlog section headings and item title lines
+# print, and the groups are recognized from the title line's own
 # hold/blocked-by/kind markers.
 #
 # STATUS TAILS: CS_SESSION_START_STATUS_TAIL bounds how many lines each task's
@@ -133,6 +135,7 @@ case "$QUEUED_LIMIT" in ''|*[!0-9]*|0) QUEUED_LIMIT=20 ;; esac
 ACTIVE_LIMIT=${CS_SESSION_START_ACTIVE_LIMIT:-40}
 case "$ACTIVE_LIMIT" in ''|*[!0-9]*|0) ACTIVE_LIMIT=40 ;; esac
 BACKLOG_FIELDS=blocked_by,hold_kind,hold_reason
+FOLLOWUP_FIELDS=delivery_state,$BACKLOG_FIELDS
 
 RULE='================================================================================'
 SUBRULE='--------------------------------------------------------------------------------'
@@ -270,7 +273,7 @@ print_backlog_manual_compact() {
 # disclosed with an exact remainder count and the command that prints the rest.
 #
 # tasks-axi also closes every listing with its own help block. This section
-# composes four listings, so keeping them would repeat the same pointers four
+# composes five listings, so keeping them would repeat the same pointers five
 # times, once per group; the section prints one equivalent pointer of its own
 # instead, so each group stops at its `help[` header.
 print_axi_group_bounded() {  # <text> <header-prefix> <max> <label> <full-command>
@@ -295,18 +298,27 @@ print_axi_group_bounded() {  # <text> <header-prefix> <max> <label> <full-comman
   '
 }
 
+# The obligations group takes no bound at all, so it needs no counters either:
+# the tool's own count header already says how many there are, and every row
+# under it prints.
+print_axi_group_unbounded() {  # <text>
+  printf '%s\n' "$1" | awk '/^help\[/ { exit } { print }'
+}
+
 print_backlog_tasks_axi_compact() {
-  local path=$1 in_flight held blocked ready err
+  local path=$1 in_flight held blocked followups ready err
   if ! in_flight=$(tasks-axi list --file "$path" --state in_flight --fields "$BACKLOG_FIELDS" 2>&1); then
     err=$in_flight
   elif ! held=$(tasks-axi list --file "$path" --state held --fields "$BACKLOG_FIELDS" 2>&1); then
     err=$held
   elif ! blocked=$(tasks-axi list --file "$path" --state queued --blocked --fields "$BACKLOG_FIELDS" 2>&1); then
     err=$blocked
+  elif ! followups=$(tasks-axi list --file "$path" --state queued --kind public-followup --fields "$FOLLOWUP_FIELDS" 2>&1); then
+    err=$followups
   elif ! ready=$(tasks-axi ready --file "$path" 2>&1); then
     err=$ready
   else
-    printf 'compact backlog listing (tasks-axi; done rows omitted; in-flight, held, and blocked rows shown in full up to %s per group; ready queued bounded to %s; task bodies omitted)\n' \
+    printf 'compact backlog listing (tasks-axi; done rows omitted; in-flight, held, and blocked rows shown in full up to %s per group; queued public-followup obligations always shown in full; ready queued bounded to %s; task bodies omitted)\n' \
       "$ACTIVE_LIMIT" "$QUEUED_LIMIT"
     printf '\nin flight:\n'
     print_axi_group_bounded "$in_flight" 'tasks[' "$ACTIVE_LIMIT" 'in-flight' \
@@ -317,6 +329,8 @@ print_backlog_tasks_axi_compact() {
     printf '\nblocked queued:\n'
     print_axi_group_bounded "$blocked" 'tasks[' "$ACTIVE_LIMIT" 'blocked queued' \
       "tasks-axi list --file $path --state queued --blocked --fields $BACKLOG_FIELDS"
+    printf '\nqueued public-followup obligations (never bounded; delivery the boss is already owed):\n'
+    print_axi_group_unbounded "$followups"
     printf '\nready queued (dispatchable now):\n'
     print_axi_group_bounded "$ready" 'ready[' "$QUEUED_LIMIT" 'ready queued' \
       "tasks-axi ready --file $path"
