@@ -1,6 +1,9 @@
 ---
 name: contracts
-description: Work a project's GitHub board - pull issues in the Ready column, dispatch soldiers to implement them, and land PRs that close each issue so the board's own workflow moves the card to Done. Use when the boss invokes /contracts, or asks to knock out / clear / work the ready issues on a project, take the open contracts, work the board, or fill lanes from a project board. The boss names a project; consigliere fills up to 3 lanes with independent Ready issues and keeps pulling as lanes free.
+description: >-
+  Work a project's GitHub board - pull issues in the Ready column, dispatch soldiers to implement them, and land PRs that close each issue so the board's own workflow moves the card to Done.
+  Use when the boss invokes /contracts, or asks to knock out / clear / work the ready issues on a project, take the open contracts, work the board, or fill lanes from a project board.
+  The boss names a project; consigliere fills three lanes by default or five under the boss-selected Nice Uptime policy and keeps pulling as lanes free.
 ---
 
 # Contracts
@@ -60,7 +63,7 @@ The poll goes quiet on its own once both columns are clear, and stays quiet whil
 
 - A soldier reports done per its delivery mode (`no-mistakes`: `done: PR <url> checks green`; `direct-PR`: `done: PR <url>`).
   Arm the merge poll with `bin/cs-pr-check.sh <task-id> <PR url>` and relay the full https URL to the boss.
-  For a no-mistakes board task, that PR-ready entrypoint records the armed sweep's exact-head capacity attestation automatically.
+  For a no-mistakes board task under an armed `release-green-prs` sweep, that PR-ready entrypoint records the exact-head capacity attestation when GitHub supplies a valid head; otherwise capacity stays held.
 - On the boss's merge - the only merge authority, `yolo` or not - the PR's `Closes #<n>` closes the issue and the board workflow moves the card to Done. Consigliere does not touch the card.
 - After teardown, read-only verify the card is no longer stuck: `bin/cs-board.sh status <project> <item-id>`. If it still reads `In Progress` after the issue is closed, the board's closed->Done workflow is off - warn the boss (with the card and issue) and let them enable it; do not move the card yourself (Done is built-in-only by the boss's choice).
 - For a `local-only` project, after the approved local merge, close the issue yourself (`gh-axi issue close <n>`) so the board workflow can still move its card.

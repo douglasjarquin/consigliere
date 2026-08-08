@@ -231,8 +231,8 @@ poll_matches_record() {
 }
 
 # Emit the poll source for a project. Only the project name, the lane cap, the
-# resurface interval, and this home's absolute paths are interpolated; the
-# logic below them is identical for every sweep.
+# resurface interval, the green-PR policy, and this home's absolute paths are
+# interpolated; the logic below them is identical for every sweep.
 poll_source() {
   local project=$1 lanes=$2 resurface=$3 green_pr_policy=$4 id=$5
   cat <<EOF

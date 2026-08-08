@@ -124,7 +124,7 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
 
 ## data/ and state/
 
-The complete field-level inventory lives in AGENTS.md section 2; producing scripts own mutation:
+`AGENTS.md` section 2 owns the every-session file tree; this section owns field-level reference detail; producing scripts own mutation:
 
 - `config/boards.md` - per-project GitHub Projects (v2) board mapping for the `contracts` and `casino` skills, kept beside `config/projects.md` and keyed by the same project name. Blank lines and `#` comments ignored; every other line is `<project> <owner> <number> [ready-label] [in-progress-label] [status-field] [inbox-label] [backlog-label]`. Labels/field default to `Ready` / `In Progress` / `Status` / `Inbox` / `Backlog`; use `_` for spaces in a label token. `<owner>` is a user/org login or `@me`. `bin/cs-board.sh` reads it; the board mapping is optional (only projects worked via the board need a line), and the Inbox/Backlog columns matter only to `casino`.
 - `data/sweeps.md` - the boss's standing intent to work a project's board, so a sweep outlives the session that started it.
@@ -137,7 +137,7 @@ The complete field-level inventory lives in AGENTS.md section 2; producing scrip
   A `kind=ship` task also records the posture its spawn stated explicitly: `mode=` (no-mistakes|direct-PR|local-only) and `yolo=` (on|off).
   A `kind=scout` records NEITHER, because a report deliverable has no mode to honour and no approval posture to apply, which is why `cs-promote.sh` is where a promoted scout first states both.
   `kind=capo` records `mode=capo`, `yolo=off`, and `home=`.
-  `cs-spawn.sh` also records `issue=` for board-driven work and `headless=1` for a headless scout (`codex exec` / `claude -p`); `cs-pr-check.sh` appends `pr=` and `pr_head=`.
+  `cs-spawn.sh` also records `issue=` for board-driven work and `headless=1` for a headless scout (`codex exec` / `claude -p`); `cs-pr-check.sh` appends `pr=` and any available `pr_head=`.
 - `state/<id>.status` - appended by soldiers; wake events, never current state. `bin/cs-classify-lib.sh` owns the verb vocabulary.
 - `state/.decision-cursor-<task>` - per-status-file byte cursor plus folded open-decision set, written only by `bin/cs-classify-lib.sh`'s `status_open_decisions_incremental` so the wake drain's fleet-wide open-decision scan folds only newly appended status bytes. Removed by teardown with the other watcher markers, along with any `.read.*` / `.tmp.*` staging temps a killed drain left beside it; always safe to delete by hand, which only costs one full re-fold of that task's status log.
   If `state/` is unwritable so no cursor can be staged at all, the drain falls back to the unbounded whole-file fold for that call rather than reporting nothing open.
