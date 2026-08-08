@@ -65,33 +65,49 @@
 #          Block until the report is published, up to <seconds> (default 120).
 #          For operators and tests only; a session start never waits.
 #
+# RESULTS ARE NEVER MERGED. Two passes can cover different checks - a re-emit
+# runs the probe alone, a full startup runs the sweeps too - so a result only
+# means something together with the coverage it speaks for. Every published
+# result is therefore a WHOLE self-describing unit: its first line records the
+# phases that run covered, and nothing is ever folded, wrapped, or concatenated
+# into it. A publish that would land on an unread result MOVES that result into
+# the pending store first and then writes its own, so "which coverage wins" is
+# never a question this stage has to answer.
+#
 # STATE, all under this home's state/ and gitignored with it:
 #   .startup-network.status   key=value record - generation, lock_pid, state,
 #                             pid, started, finished, rc, locked, phases,
-#                             requested, carried, and whether the report was
-#                             published. The single source of truth for what ran
-#                             and how it ended. `phases` is what the running pass
-#                             COVERS; `requested` is the union of what every
-#                             session attached to it ASKED for, so the difference
-#                             is exactly what has to be named as not covered.
-#                             `carried` marks a record whose report file still
-#                             holds a previous run's finished-but-unread result.
-#   .startup-network.report   the sweep output, byte for byte as
+#                             requested, and whether the report was published.
+#                             The single source of truth for what ran and how it
+#                             ended. `phases` is what the running pass COVERS;
+#                             `requested` is the union of what every session
+#                             attached to it ASKED for, so the difference is
+#                             exactly what has to be named as not covered.
+#   .startup-network.report   the CURRENT result: a `covered=<phases>` first
+#                             line, then the sweep output byte for byte as
 #                             bin/cs-bootstrap.sh produced it, plus a
 #                             NETWORK_CHECKS: line whenever the stage itself
-#                             could not complete or had to downgrade, and, when
-#                             the record that named it is `carried`, a previous
-#                             run's unread result ahead of it inside one
-#                             delimited block. At most one such block ever
-#                             exists, which is what bounds the carry.
+#                             could not complete or had to downgrade. Only the
+#                             body is ever printed, so the reported lines are
+#                             exactly what the unsplit blocking run printed.
+#   .startup-network.pending/ results that finished and were never read, one
+#                             whole result per file in the same format, named so
+#                             the plain name order is oldest first. A harvest
+#                             prints them ahead of the current result and then
+#                             empties this directory, so a harvest always leaves
+#                             it with nothing for the next publish to pend.
+#                             It holds at most STARTUP_NETWORK_PENDING_MAX
+#                             results; a publish that exceeds that drops the
+#                             oldest and counts the drop in .pending/.dropped,
+#                             which every harvest discloses by number.
 #   .startup-network.claim    the generation and pid of a session start that
 #                             intends to print the result inline; a matching
 #                             live claimant gives harvest a bounded chance to
 #                             finish before a wake is queued.
 #   .startup-network.delivered
 #                             a durable acknowledgement that a harvest printed
-#                             the current finished result; only this suppresses
-#                             its wake.
+#                             the current result; only this suppresses its wake,
+#                             and only its absence makes that result pendable.
 #   .startup-network.lock     serializes publication, harvest acknowledgement,
 #                             and the wake decision.
 #
@@ -114,9 +130,17 @@ cs_resolve_root
 
 STATUS_FILE="$STATE/.startup-network.status"
 REPORT_FILE="$STATE/.startup-network.report"
+PENDING_DIR="$STATE/.startup-network.pending"
+DROPPED_FILE="$PENDING_DIR/.dropped"
 CLAIM_FILE="$STATE/.startup-network.claim"
 DELIVERED_FILE="$STATE/.startup-network.delivered"
 PUBLISH_LOCK="$STATE/.startup-network.lock"
+
+# How many unread results the pending store keeps. The bound is enforced by
+# prune_pending on every pend, which removes oldest-first until the count is at
+# or under it, so after any publish the store holds at most this many results no
+# matter how many publishes preceded it and whether anything ever harvested.
+STARTUP_NETWORK_PENDING_MAX=4
 
 usage() {
   sed -n '2,/^set -u$/p' "$SCRIPT_DIR/cs-startup-network.sh" | sed 's/^# \{0,1\}//; $d'
@@ -220,84 +244,76 @@ uncovered_label() {  # <covered> <requested>
   case "$2" in *sweeps*) printf 'project clone refresh with its drift reporting' ;; esac
 }
 
-# Would reserving a new generation destroy a report nothing has read?
-#
-# The predicate is exactly: publication was not recorded as failed, no delivery
-# was acknowledged, and the report file has content. The record's STATE is
-# deliberately NOT part of it, and must not be added back. The question is about
-# the REPORT FILE, not about how the record that produced it ended: a record left
-# `running` because its worker was killed before publishing still has the PREVIOUS
-# run's unread report sitting in that file, and gating on a terminal state would
-# hand exactly that case to the overwrite this guard exists to prevent. Nothing is
-# lost by dropping the gate either, because a `running` record that published
-# nothing has either an empty report or a delivery still on record, and both are
-# already rejected above.
-#
-# This is the ONLY thing that stands between a `--reemit` and the findings an
-# already-queued `check: startup-network` wake announced: the re-emit reserves a
-# narrower probe-only pass, and without this its publish would overwrite the
-# report that wake points at. Preserving the prior result is chosen over refusing
-# the reservation because it converges on its own, whereas refusing would let one
-# session that died before harvesting disable the stage for good.
-carry_undelivered() {
-  [ "$(status_get report_published)" != 0 ] || return 1
+# --- results -----------------------------------------------------------------
+# One format for the current result and every pending one, so a result read from
+# either place answers "which checks does this speak for?" on its own.
+
+result_covered() {  # <result-file>
+  sed -n '1s/^covered=//p' "$1" 2>/dev/null
+}
+
+result_body() {  # <result-file>
+  sed '1d' "$1" 2>/dev/null
+}
+
+result_has_body() {  # <result-file>
+  [ -f "$1" ] || return 1
+  [ -n "$(result_body "$1" | head -c 1)" ]
+}
+
+# Is the current result one that nothing has read? The predicate is exactly: no
+# delivery was acknowledged, and the result has content. Nothing else belongs in
+# it - not the status record's state, which describes the run that came AFTER the
+# result rather than the result, and not report_published, which is 0 precisely
+# when a write FAILED and so left the earlier unread result in place.
+result_unread() {
   [ ! -f "$DELIVERED_FILE" ] || return 1
-  [ -s "$REPORT_FILE" ]
+  result_has_body "$REPORT_FILE"
 }
 
-# The carried result is a DELIMITED block, so the report's own structure - not a
-# counter some later edit can forget to keep - is what bounds the carry.
-CARRIED_HEADER='Carried forward from the previous deferred run, which finished before anything read it:'
-CARRIED_FOOTER='End of the carried result; the lines below are this run.'
-
-# What a fold carries forward: the existing carried block when the report already
-# has one, and otherwise the whole report.
-#
-# This is what makes the carry converge instead of growing. A report is always at
-# most `header + carried + footer + this run's own output`, so folding it again
-# reuses the SAME carried block and replaces only the tail. Re-derived output is
-# safe to drop from that tail because these sweeps are idempotent detectors and
-# the run doing the folding just produced its own copy; what cannot be
-# re-derived - a wider earlier run's findings - stays in the block until a
-# delivery is recorded. Exactly one block therefore ever exists, and its content
-# never repeats.
-carried_payload() {  # <report-file>
-  local f=$1
-  if grep -Fxq "$CARRIED_HEADER" "$f" 2>/dev/null \
-    && grep -Fxq "$CARRIED_FOOTER" "$f" 2>/dev/null; then
-    awk -v head="$CARRIED_HEADER" -v foot="$CARRIED_FOOTER" '
-      $0 == foot { inblock = 0; next }
-      inblock { print }
-      $0 == head { inblock = 1 }
-    ' "$f"
-  else
-    cat "$f"
-  fi
+# Entry names, oldest first. The names are fixed-width counters, so the glob's
+# own sort IS chronological order and no separate index has to be kept correct.
+pending_names() {
+  local entry name
+  for entry in "$PENDING_DIR"/*; do
+    [ -f "$entry" ] || continue
+    name=${entry##*/}
+    case "$name" in
+      [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) printf '%s\n' "$name" ;;
+    esac
+  done
 }
 
-emit_carried_block() {  # <report-file>
-  printf '%s\n' "$CARRIED_HEADER"
-  carried_payload "$1"
-  printf '%s\n' "$CARRIED_FOOTER"
+# Enforce the store's bound: drop oldest-first until the count is at or under it,
+# counting every drop so a harvest can name the number. Called by pend_current on
+# every pend, which is what makes the bound a property of the store rather than
+# of how often callers happen to harvest.
+prune_pending() {
+  local names count over dropped
+  names=$(pending_names)
+  count=$(printf '%s' "$names" | grep -c . || true)
+  over=$((count - STARTUP_NETWORK_PENDING_MAX))
+  [ "$over" -gt 0 ] || return 0
+  printf '%s\n' "$names" | grep . | head -n "$over" | while IFS= read -r name; do
+    rm -f "$PENDING_DIR/$name" 2>/dev/null || true
+  done
+  dropped=$(cat "$DROPPED_FILE" 2>/dev/null || true)
+  case "$dropped" in ''|*[!0-9]*) dropped=0 ;; esac
+  printf '%s\n' "$((dropped + over))" > "$DROPPED_FILE" 2>/dev/null || true
 }
 
-# Does state/.lock still name <expected-pid>?
-#
-# The question is deliberately "does the lock still name the session that asked
-# for this work?", not "is that session still alive". The hazard being closed is
-# a SECOND session sweeping concurrently, and taking the lock is exactly what
-# rewrites this value - bin/cs-lock.sh overwrites a dead holder's pid with its
-# own. An unchanged value therefore proves no one else owns the sweeps, which is
-# the whole guarantee. Requiring liveness instead would refuse to finish work
-# nobody else has claimed, and the sweeps are idempotent, so finishing it is
-# strictly better than abandoning it. A missing, unreadable, or replaced lock all
-# fail closed to the read-only probe.
-lock_unchanged() {  # <expected-pid>
-  local expected=$1 current
-  case "$expected" in ''|*[!0-9]*) return 1 ;; esac
-  [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 1
-  current=$(cat "$STATE/.lock" 2>/dev/null) || return 1
-  [ "$current" = "$expected" ]
+# Move the current result into the store, whole and unchanged. A move, never a
+# copy or a merge: the result that was there keeps its own coverage line and its
+# own body, and the caller then has an empty slot to write its own result into.
+pend_current() {
+  local last next
+  mkdir -p "$PENDING_DIR" 2>/dev/null || return 1
+  last=$(pending_names | tail -1)
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  next=$(printf '%012d' "$((10#$last + 1))")
+  mv -f "$REPORT_FILE" "$PENDING_DIR/$next" 2>/dev/null || return 1
+  prune_pending
+  return 0
 }
 
 # Does state/.lock name THIS session, rather than merely someone?
@@ -308,7 +324,8 @@ lock_unchanged() {  # <expected-pid>
 # ancestry walk, asked for through its `harness-pid` mode, so harness identity
 # is never re-derived here and the two can never drift apart. The detached
 # worker does not use this: its authority is the generation reservation `start`
-# made for it while it still held the lock, plus lock_unchanged at run time.
+# made for it while it still held the lock, plus bin/cs-lock.sh's `holds` check
+# at run time.
 session_lock_owned_by_self() {
   local mine current
   [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 1
@@ -322,7 +339,7 @@ session_lock_owned_by_self() {
 
 cmd_start() {  # <locked> <harvest-pid>
   local locked=$1 harvest_pid=$2 lock_pid generation worker_pid phases started
-  local monitor_was_on=0 carried=0
+  local monitor_was_on=0
   mkdir -p "$STATE" 2>/dev/null || return 1
   phases=probe
   [ "$locked" != 1 ] || phases=probe,sweeps
@@ -362,7 +379,6 @@ cmd_start() {  # <locked> <harvest-pid>
 
   generation="$(now).$$.$harvest_pid"
   started=$(now)
-  ! carry_undelivered || carried=1
   if ! write_atomic "$STATUS_FILE" <<EOF
 state=running
 pid=0
@@ -370,7 +386,6 @@ started=$started
 locked=$locked
 phases=$phases
 requested=$phases
-carried=$carried
 generation=$generation
 lock_pid=$lock_pid
 EOF
@@ -411,7 +426,6 @@ started=$started
 locked=$locked
 phases=$phases
 requested=$phases
-carried=$carried
 generation=$generation
 lock_pid=$lock_pid
 EOF
@@ -480,35 +494,28 @@ EOF
 
 publish() {  # <generation> <state> <phases> <locked> <started> <rc> <output-file>
   local generation=$1 state=$2 phases=$3 locked=$4 started=$5 rc=$6 out=$7 report_published=1
-  local requested merged=
+  local requested
   cs_lock_acquire_wait "$PUBLISH_LOCK"
   if [ "$(status_get generation)" != "$generation" ]; then
     cs_lock_release "$PUBLISH_LOCK"
     return 0
   fi
   requested=$(phases_union "$(status_get requested)" "$phases")
-  # The report file still holds the carried result at this point, so folding it
-  # in here - ahead of this run's own output, inside the delimited block - is what
-  # keeps the wake that announced it pointing at something that still contains it.
-  # The fold takes carried_payload, not the whole file, so a report that already
-  # carries a block contributes that block rather than itself: the result is
-  # always one block plus this run's output, whatever the file it replaced looked
-  # like. Repeated folds with nothing ever harvesting therefore hold the report at
-  # a fixed shape instead of doubling it into the digest.
-  if [ "$(status_get carried)" = 1 ] && [ -s "$REPORT_FILE" ]; then
-    if merged=$(mktemp "${TMPDIR:-/tmp}/cs-startup-network-carry.XXXXXX" 2>/dev/null); then
-      {
-        emit_carried_block "$REPORT_FILE"
-        cat "$out"
-      } > "$merged" 2>/dev/null && out=$merged
-    fi
-  fi
-  if ! write_atomic "$REPORT_FILE" < "$out"; then
+  # An unread result is MOVED aside before this one is written, never merged with
+  # it and never overwritten: the two can cover different checks, and the wake
+  # that announced the older one still points at a `report` that must show it.
+  # A pend that cannot be made is the one case where writing here would destroy
+  # something unread, so it fails closed - the older result stays exactly where it
+  # is and this publish reports that it could not land, which the rerun line names.
+  if result_unread && ! pend_current; then
+    state=failed
+    rc=1
+    report_published=0
+  elif ! { printf 'covered=%s\n' "$phases"; cat "$out"; } | write_atomic "$REPORT_FILE"; then
     state=failed
     rc=1
     report_published=0
   fi
-  [ -z "$merged" ] || rm -f "$merged" 2>/dev/null || true
   rm -f "$DELIVERED_FILE" 2>/dev/null || true
   write_atomic "$STATUS_FILE" <<EOF || true
 state=$state
@@ -519,7 +526,6 @@ rc=$rc
 locked=$locked
 phases=$phases
 requested=$requested
-carried=0
 generation=$generation
 lock_pid=$(status_get lock_pid)
 report_published=$report_published
@@ -530,7 +536,7 @@ EOF
 
 cmd_run() {  # <locked> <lock-pid> <generation>
   local locked=$1 lock_pid=$2 generation=$3 phases started budget out rc
-  local sweep_locked=0 downgraded=0 internal=0 carried=0
+  local sweep_locked=0 downgraded=0 internal=0
   mkdir -p "$STATE" 2>/dev/null || return 1
   started=$(now)
   budget=$(stage_budget)
@@ -556,8 +562,11 @@ cmd_run() {  # <locked> <lock-pid> <generation>
     fi
   fi
 
+  # bin/cs-lock.sh owns "does the lock STILL name the pid this pass captured?",
+  # and bin/cs-bootstrap.sh asks the same owner again before each sweep actually
+  # runs, so the label written here and the work that happens cannot drift apart.
   if [ "$locked" = 1 ]; then
-    if lock_unchanged "$lock_pid"; then
+    if "$SCRIPT_DIR/cs-lock.sh" holds "$lock_pid" 2>/dev/null; then
       sweep_locked=1
       phases=probe,sweeps
     else
@@ -572,8 +581,6 @@ cmd_run() {  # <locked> <lock-pid> <generation>
       cs_lock_release "$PUBLISH_LOCK"
       return 1
     fi
-    carried=0
-    ! carry_undelivered || carried=1
     write_atomic "$STATUS_FILE" <<EOF || true
 state=running
 pid=$$
@@ -581,7 +588,6 @@ started=$started
 locked=$sweep_locked
 phases=$phases
 requested=$phases
-carried=$carried
 generation=$generation
 lock_pid=$lock_pid
 EOF
@@ -634,21 +640,48 @@ EOF
 # same plain way the read-only branch of bin/cs-session-start.sh names the checks
 # it skipped, rather than being left to notice that a phase label never mentions
 # it.
+# Only the FACT: which check this run leaves uncovered and how to cover it. The
+# reason is deliberately left to the NETWORK_CHECKS line in the result body,
+# which already states the accurate one for each path that gets here - adoption
+# of a narrower live pass, and a mutating pass downgraded when the fleet lock
+# changed hands - and a single sentence cannot be true of both.
 print_uncovered() {
   local uncovered
   uncovered=$(uncovered_label "$(status_get phases)" "$(status_get requested)")
   [ -n "$uncovered" ] || return 0
   printf 'NOT covered by this run: %s.\n' "$uncovered"
-  printf 'The pass this session attached to was started for the read-only probe only, and a second\n'
-  printf 'pass over the same clones is never started beside a live one. Cover it with\n'
-  printf '%s/bin/cs-startup-network.sh run --locked 1 once that pass has finished.\n' "$CS_ROOT"
+  printf 'Cover it with %s/bin/cs-startup-network.sh run --locked 1.\n' "$CS_ROOT"
 }
 
-# The previous run's unread result, still sitting in the report file because the
-# record that replaced it was reserved before anything read it.
-print_carried() {
-  [ "$(status_get carried)" = 1 ] && [ -s "$REPORT_FILE" ] || return 0
-  emit_carried_block "$REPORT_FILE"
+# Results that finished and were never read, oldest first, each labelled with the
+# coverage it speaks for. Printed ahead of the current result because they are
+# older than it, and drained by the harvest that prints them.
+print_pending_store() {
+  local entry name dropped
+  for name in $(pending_names); do
+    entry="$PENDING_DIR/$name"
+    [ -f "$entry" ] || continue
+    printf 'Finished earlier and never read - that run covered: %s.\n' \
+      "$(phase_label "$(result_covered "$entry")")"
+    result_body "$entry"
+  done
+  dropped=$(cat "$DROPPED_FILE" 2>/dev/null || true)
+  case "$dropped" in
+    ''|*[!0-9]*|0) ;;
+    *) printf '(%s more unread earlier results - the store keeps the %s most recent, so re-derive those findings with %s/bin/cs-startup-network.sh run --locked 1)\n' \
+        "$dropped" "$STARTUP_NETWORK_PENDING_MAX" "$CS_ROOT" ;;
+  esac
+}
+
+# The current result when it is one nothing has read yet and no other branch is
+# about to print it: a record left running or a publish that could not land keeps
+# the previous result in place, and it stays reachable through the same `report`
+# the wake that announced it names.
+print_outstanding() {
+  result_unread || return 0
+  printf 'Finished earlier and never read - that run covered: %s.\n' \
+    "$(phase_label "$(result_covered "$REPORT_FILE")")"
+  result_body "$REPORT_FILE"
 }
 
 print_finished() {  # <state>
@@ -667,8 +700,9 @@ print_finished() {  # <state>
   if [ "$report_published" = 0 ]; then
     printf 'NETWORK_CHECKS: could not publish the deferred check report, so %s results are unavailable; rerun %s/bin/cs-startup-network.sh run --locked %s\n' \
       "$(phase_label "$phases")" "$CS_ROOT" "$(status_get locked)"
-  elif [ -s "$REPORT_FILE" ]; then
-    cat "$REPORT_FILE"
+    print_outstanding
+  elif result_has_body "$REPORT_FILE"; then
+    result_body "$REPORT_FILE"
     printf 'These ran AFTER the sections above were composed, so re-read any record a line here names.\n'
   else
     printf '(silent - no problems found)\n'
@@ -687,10 +721,11 @@ print_pending() {
   # shellcheck disable=SC2016  # The backticked wake name is literal digest text.
   printf 'The result is durable in state/.startup-network.report and arrives as a `check: startup-network` wake.\n'
   printf 'Read it now with %s/bin/cs-startup-network.sh report; until it lands, treat none of it as confirmed.\n' "$CS_ROOT"
-  print_carried
+  print_outstanding
 }
 
 print_state() {
+  print_pending_store
   case "$(status_get state)" in
     done|timeout|failed) print_finished "$(status_get state)" ;;
     running)
@@ -699,15 +734,29 @@ print_state() {
       else
         printf 'NETWORK_CHECKS: the deferred check worker stopped before publishing, so %s did not complete; rerun %s/bin/cs-startup-network.sh run --locked %s\n' \
           "$(phase_label "$(status_get phases)")" "$CS_ROOT" "$(status_get locked)"
-        print_carried
+        print_outstanding
       fi
       ;;
     *) printf 'not started - no deferred network checks have run for this home yet.\n' ;;
   esac
 }
 
+# Did print_state print the body of the CURRENT result? True when a terminal
+# record published one, and otherwise exactly when print_outstanding showed the
+# unread result still sitting in place.
+current_result_shown() {
+  case "$(status_get state)" in
+    done|timeout|failed)
+      if [ "$(status_get report_published)" != 0 ] && result_has_body "$REPORT_FILE"; then
+        return 0
+      fi
+      ;;
+  esac
+  result_unread
+}
+
 cmd_harvest() {  # <pid>
-  local pid=$1 generation state claim_record claim_generation claim_pid
+  local pid=$1 generation deliver=0 claim_record claim_generation claim_pid
   cs_lock_acquire_wait "$PUBLISH_LOCK"
   generation=$(status_get generation)
   # Another session's live claim is left alone; the worker reaps a dead one.
@@ -721,20 +770,16 @@ EOF
       rm -f "$CLAIM_FILE" 2>/dev/null || true
     fi
   fi
-  state=$(status_get state)
+  ! current_result_shown || deliver=1
   print_state
-  # print_state just printed the carried result, so this harvest IS its delivery
-  # and the next publish must not repeat it. Clearing here is what bounds the
-  # carry at a single hop: without it, every reservation that found the previous
-  # result unread would fold one more copy into the next report.
-  [ "$(status_get carried)" != 1 ] || status_set carried 0
-  case "$state" in
-    done|timeout|failed)
-      [ "$(status_get report_published)" = 0 ] || write_atomic "$DELIVERED_FILE" <<EOF || true
+  # Everything print_state just showed is acknowledged here, in one act under the
+  # publish lock: the store it drained, and the current result when that was
+  # printed too. Draining is what leaves the next publish with nothing to pend,
+  # so the store cannot carry a read result forward into a later digest.
+  rm -rf "$PENDING_DIR" 2>/dev/null || true
+  [ "$deliver" -eq 0 ] || write_atomic "$DELIVERED_FILE" <<EOF || true
 delivered
 EOF
-      ;;
-  esac
   cs_lock_release "$PUBLISH_LOCK"
 }
 

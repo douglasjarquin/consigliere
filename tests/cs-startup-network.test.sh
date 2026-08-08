@@ -324,92 +324,163 @@ sleep 2
   || fail "a result already printed inline was queued as a wake as well"
 pass "an inline harvest delivers the result and suppresses its wake"
 
-# --- a later, narrower run never destroys a finished result nothing has read ---
+# Results that finished and were never read live in the pending store, one whole
+# self-describing result per file. The suite reads that directory as the persisted
+# protocol bin/cs-startup-network.sh's header owns, never as a proxy for anything
+# else.
+pending_count() {  # <home>
+  local entry n=0
+  for entry in "$1"/state/.startup-network.pending/*; do
+    [ -f "$entry" ] || continue
+    n=$((n + 1))
+  done
+  printf '%s\n' "$n"
+}
+
+# --- a narrower run never destroys an unread WIDER result ---------------------
 # The re-emit sequence: a full startup's worker finishes after the digest is out,
 # so its findings surface only as a queued wake that names
 # `cs-startup-network.sh report`. Before that wake is drained the harness
-# re-emits, which reserves a probe-only pass over the same state. That pass must
-# not leave the wake pointing at a report that no longer contains what it
-# announced.
-HOME_DIR=$(fresh_home carry)
-FB=$(fakebin "$TMP/fb-carry")
+# re-emits, which runs a probe-only pass over the same state. The fleet-sync
+# findings that pass cannot re-derive must still be there afterwards.
+HOME_DIR=$(fresh_home narrow-over-wide)
+FB=$(fakebin "$TMP/fb-narrow-over-wide")
 printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
 snet "$HOME_DIR" "$FB" run --locked 1 || fail "the owning session's run must publish"
-assert_grep 'FLEET_SYNC: plainproj: skipped: not a git repo' \
-  "$HOME_DIR/state/.startup-network.report" "the locked run published no fleet-sync finding"
 assert_grep 'startup-network' "$HOME_DIR/state/.wake-queue" \
   "a finished result with no live claimant did not queue its wake"
 assert_absent "$HOME_DIR/state/.startup-network.delivered" \
   "nothing harvested the result, yet it was recorded as delivered"
 
-snet "$HOME_DIR" "$FB" start --locked 0 --harvest-pid $$ \
-  || fail "the re-emit could not start its probe-only pass"
-snet "$HOME_DIR" "$FB" wait 60 || fail "the probe-only pass never published"
+snet "$HOME_DIR" "$FB" run --locked 0 || fail "the re-emit's probe-only pass must publish"
 out=$(snet "$HOME_DIR" "$FB" report)
 assert_contains "$out" 'FLEET_SYNC: plainproj: skipped: not a git repo' \
   "the probe-only pass destroyed the unread finding its queued wake announced"
-assert_contains "$out" 'Carried forward from the previous deferred run' \
-  "the preserved finding was reprinted without saying which run it came from"
+assert_contains "$out" 'never read - that run covered: GitHub authentication, and project clone refresh' \
+  "the preserved result did not say which checks it speaks for"
 assert_contains "$out" 'NEEDS_GH_AUTH:' \
-  "the probe-only pass did not publish its own result alongside the carried one"
-snet "$HOME_DIR" "$FB" harvest --pid $$ >/dev/null
-pass "a later narrower run preserves a finished result nothing has read yet"
+  "the probe-only pass did not publish its own result beside the preserved one"
+pass "a narrower run preserves an unread wider result rather than replacing it"
 
-# --- an abandoned reservation still protects the unread report under it -------
-# A pass reserved over an unread report and was then killed before it could
-# publish, so the record is left `running` while the report file still holds the
-# earlier run's findings. The next reservation has to protect that report exactly
-# as it would protect a cleanly finished one: how the record that produced it
-# ended says nothing about whether anything has read it.
+# --- a wider run never destroys an unread NARROWER result ---------------------
+# The mirror ordering, which a merge that keeps only the wider side would lose:
+# the probe-only result is older, still unread, and must survive a full locked
+# pass landing on top of it.
+HOME_DIR=$(fresh_home wide-over-narrow)
+FB=$(fakebin "$TMP/fb-wide-over-narrow")
+snet "$HOME_DIR" "$FB" run --locked 0 || fail "the probe-only pass must publish"
+assert_absent "$HOME_DIR/state/.startup-network.delivered" \
+  "nothing harvested the probe result, yet it was recorded as delivered"
+printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
+snet "$HOME_DIR" "$FB" run --locked 1 || fail "the owning session's run must publish"
+out=$(snet "$HOME_DIR" "$FB" report)
+assert_contains "$out" 'never read - that run covered: GitHub authentication.' \
+  "the wider pass destroyed the unread probe-only result under it"
+assert_contains "$out" 'FLEET_SYNC: plainproj: skipped: not a git repo' \
+  "the wider pass did not publish its own result beside the preserved one"
+pass "a wider run preserves an unread narrower result rather than replacing it"
+
+# --- an abandoned record does not expose the unread result under it -----------
+# A pass was reserved over an unread result and then killed before it could
+# publish, so the record is left `running` while the result file still holds the
+# earlier findings. How the record that came after a result ended says nothing
+# about whether anything has read that result, so it stays reachable through the
+# same `report` the queued wake names, and the next publish still pends it.
 HOME_DIR=$(fresh_home abandoned)
 FB=$(fakebin "$TMP/fb-abandoned")
 printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
 snet "$HOME_DIR" "$FB" run --locked 1 || fail "the owning session's run must publish"
-assert_grep 'FLEET_SYNC: plainproj: skipped: not a git repo' \
-  "$HOME_DIR/state/.startup-network.report" "the locked run published no fleet-sync finding"
 bash -c 'exit 0' &
 DEAD_PID=$!
 wait "$DEAD_PID" 2>/dev/null || true
 write_status "$HOME_DIR" state=running "pid=$DEAD_PID" "started=$(date +%s)" \
-  locked=0 phases=probe requested=probe carried=1 generation=g-abandoned lock_pid=999999
+  locked=0 phases=probe requested=probe generation=g-abandoned lock_pid=999999
+out=$(snet "$HOME_DIR" "$FB" report)
+assert_contains "$out" 'FLEET_SYNC: plainproj: skipped: not a git repo' \
+  "an abandoned record hid the unread result still sitting under it"
 
 snet "$HOME_DIR" "$FB" run --locked 0 || fail "a probe-only pass must publish over an abandoned record"
-assert_grep 'FLEET_SYNC: plainproj: skipped: not a git repo' \
-  "$HOME_DIR/state/.startup-network.report" \
-  "reserving over an abandoned record destroyed the unread finding beneath it"
-pass "an abandoned reservation does not expose the unread report beneath it"
+out=$(snet "$HOME_DIR" "$FB" report)
+assert_contains "$out" 'FLEET_SYNC: plainproj: skipped: not a git repo' \
+  "publishing over an abandoned record destroyed the unread result beneath it"
+pass "an abandoned record neither hides nor loses the unread result under it"
 
-# --- repeated runs that nothing harvests hold the report at a fixed shape ------
+# --- repeated publishes with nothing harvesting stay inside the store's bound --
 # The degraded cycle this stage exists for: a digest truncated between starting
 # the stage and harvesting it never acknowledges the result, and the truncation
 # banner tells the operator to rerun, so the cycle repeats. A hand-run
-# `cs-startup-network.sh run` does the same. Each pass therefore reserves over an
-# unread report and folds it forward, and the fold has to converge - this report
-# is cat'd straight into the NETWORK CHECKS section, so a report that grew every
-# cycle would start costing the digest the sections its ordering protects.
-HOME_DIR=$(fresh_home carry-bound)
-FB=$(fakebin "$TMP/fb-carry-bound")
+# `cs-startup-network.sh run` does the same. The store has to hold at its bound
+# rather than grow, because everything in it is printed straight into the digest
+# whose tail-truncation ordering this change protects.
+HOME_DIR=$(fresh_home store-bound)
+FB=$(fakebin "$TMP/fb-store-bound")
 REPORT="$HOME_DIR/state/.startup-network.report"
-CARRY_HEADER='Carried forward from the previous deferred run, which finished before anything read it:'
 printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
 snet "$HOME_DIR" "$FB" run --locked 1 || fail "the owning session's run must publish"
 
 sizes=()
-for _ in 1 2 3 4; do
+for cycle in 1 2 3 4 5 6 7 8; do
   snet "$HOME_DIR" "$FB" run --locked 0 || fail "a hand-run probe pass must publish"
+  count=$(pending_count "$HOME_DIR")
+  [ "$count" -le 4 ] || fail "the pending store held $count results after cycle $cycle, past its bound of 4"
   sizes+=("$(wc -c < "$REPORT" | tr -d ' ')")
 done
 assert_absent "$HOME_DIR/state/.startup-network.delivered" \
   "nothing harvested these passes, yet a delivery was recorded"
-[ "${sizes[1]}" = "${sizes[3]}" ] \
-  || fail "the report kept growing across unharvested cycles (${sizes[0]} ${sizes[1]} ${sizes[2]} ${sizes[3]} bytes)"
-blocks=$(grep -Fxc "$CARRY_HEADER" "$REPORT" || true)
-[ "$blocks" = 1 ] || fail "the report carries $blocks carried blocks, not exactly one"
-assert_grep 'FLEET_SYNC: plainproj: skipped: not a git repo' "$REPORT" \
-  "the folds dropped the locked run's finding no later pass can re-derive"
-assert_grep 'NEEDS_GH_AUTH:' "$REPORT" \
-  "the report lost the latest pass's own result"
-pass "repeated unharvested folds keep exactly one carried block and stop growing"
+[ "$(pending_count "$HOME_DIR")" = 4 ] \
+  || fail "the store did not fill to its bound (holds $(pending_count "$HOME_DIR"))"
+[ "${sizes[1]}" = "${sizes[7]}" ] \
+  || fail "the current result grew across unharvested cycles (${sizes[1]} then ${sizes[7]} bytes)"
+# Eight pends, four kept: the four oldest were dropped and the count says so
+# exactly rather than the store shrinking silently.
+out=$(snet "$HOME_DIR" "$FB" report)
+assert_contains "$out" '(4 more unread earlier results' \
+  "the store dropped results past its bound without disclosing how many"
+assert_contains "$out" 'cs-startup-network.sh run --locked 1)' \
+  "the disclosure did not name how to re-derive the dropped findings"
+pass "repeated unharvested publishes hold the store at its bound and disclose the remainder"
+
+# --- a harvest prints the whole store plus the current result, then drains -----
+out=$(snet "$HOME_DIR" "$FB" harvest --pid $$)
+labels=$(printf '%s\n' "$out" | grep -c 'never read - that run covered:' || true)
+[ "$labels" = 4 ] \
+  || fail "the harvest printed $labels pending results, not the 4 the store held"
+assert_contains "$out" 'completed off the startup path' \
+  "the harvest printed the store but not the current result"
+assert_contains "$out" 'NEEDS_GH_AUTH:' "the harvest printed no result body"
+assert_present "$HOME_DIR/state/.startup-network.delivered" \
+  "the harvest printed the current result without recording its delivery"
+[ "$(pending_count "$HOME_DIR")" = 0 ] || fail "the harvest printed the store but did not drain it"
+
+snet "$HOME_DIR" "$FB" run --locked 0 || fail "a pass after a harvest must publish"
+[ "$(pending_count "$HOME_DIR")" = 0 ] \
+  || fail "a publish after a harvest pended a result that had already been read"
+pass "a harvest prints every pending result and the current one, then leaves nothing to pend"
+
+# --- a downgraded detached worker names the uncovered check without a reason ---
+# The reservation asked for the sweeps, so `requested` is wider than what the run
+# covers - but nothing was adopted and no live pass exists, so any sentence about
+# attaching to one would be false here. The section states the fact alone and
+# leaves the reason to the NETWORK_CHECKS line the run itself wrote.
+HOME_DIR=$(fresh_home downgrade)
+FB=$(fakebin "$TMP/fb-downgrade")
+printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
+(
+  printf 'state=running\npid=%s\nstarted=%s\nlocked=1\nphases=probe,sweeps\nrequested=probe,sweeps\ngeneration=g-downgrade\nlock_pid=999999\n' \
+    "$BASHPID" "$(date +%s)" > "$HOME_DIR/state/.startup-network.status"
+  exec env PATH="$FB:$PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$FIX_ROOT" \
+    "$SNET" run --locked 1 --lock-pid 999999 --generation g-downgrade
+) || fail "the reserved worker must still publish its downgraded pass"
+out=$(snet "$HOME_DIR" "$FB" report)
+assert_contains "$out" 'NOT covered by this run: project clone refresh with its drift reporting' \
+  "a downgraded pass did not name the sweep it could not run"
+assert_contains "$out" 'NETWORK_CHECKS: the fleet lock was no longer held by the session that requested these' \
+  "a downgraded pass did not report why the sweep was skipped"
+assert_not_contains "$out" 'never started beside a live one' \
+  "the uncovered line explained the gap with an adoption that never happened"
+assert_no_grep 'FLEET_SYNC:' "$HOME_DIR/state/.startup-network.report" \
+  "a downgraded pass swept on a lock it no longer holds"
+pass "a downgraded detached pass names the uncovered check as a fact, not a reason"
 
 # --- adoption names the check the adopted run does not cover ------------------
 # Single flight is liveness-only, so a lock-owning session that arrives while a
@@ -423,7 +494,7 @@ printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
 sleep 30 &
 LIVE_PID=$!
 write_status "$HOME_DIR" state=running "pid=$LIVE_PID" "started=$(date +%s)" \
-  locked=0 phases=probe requested=probe carried=0 generation=g-narrow lock_pid=999999
+  locked=0 phases=probe requested=probe generation=g-narrow lock_pid=999999
 snet "$HOME_DIR" "$FB" start --locked 1 --harvest-pid $$ \
   || fail "start refused to adopt the live probe-only pass"
 generation=$(sed -n 's/^generation=//p' "$HOME_DIR/state/.startup-network.status" | tail -1)

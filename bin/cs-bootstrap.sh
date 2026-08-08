@@ -94,17 +94,14 @@ network_phase() { [ "$NETWORK_PHASE" != skip ]; }
 
 # The deferred worker outlives the session start that launched it, so "my
 # session held the lock a moment ago" is not enough authority for a mutating
-# sweep. The question is whether state/.lock STILL names the session that asked:
-# taking the lock is exactly what rewrites that value, so an unchanged value
-# proves no one else owns the sweeps. An unset expectation means an ordinary
-# in-session run, which needs no re-verification.
+# sweep. Whether state/.lock STILL names the session that asked is bin/cs-lock.sh's
+# `holds` mode, which owns that predicate for every caller; its header states the
+# contract. An unset expectation means an ordinary in-session run, which needs no
+# re-verification.
 network_mutation_authorized() {
-  local expected=${CS_BOOTSTRAP_NETWORK_LOCK_PID:-} current
+  local expected=${CS_BOOTSTRAP_NETWORK_LOCK_PID:-}
   [ -n "$expected" ] || return 0
-  case "$expected" in *[!0-9]*) return 1 ;; esac
-  [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 1
-  current=$(cat "$STATE/.lock" 2>/dev/null) || return 1
-  [ "$current" = "$expected" ]
+  "$SCRIPT_DIR/cs-lock.sh" holds "$expected" 2>/dev/null
 }
 
 network_sweep_authorized() {  # <label>
