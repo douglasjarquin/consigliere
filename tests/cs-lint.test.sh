@@ -60,7 +60,7 @@ git -C "$REPO" symbolic-ref HEAD refs/heads/main
 cp "$LINT" "$REPO/bin/cs-lint.sh"
 chmod +x "$REPO/bin/cs-lint.sh"
 for f in bin/kept.sh bin/edited.sh bin/removed.sh bin/lib-one.sh bin/lib-two.sh \
-  tests/kept.test.sh tests/edited.test.sh tests/lib.sh; do
+  bin/shared-lib.sh tests/kept.test.sh tests/edited.test.sh tests/lib.sh; do
   printf '#!/usr/bin/env bash\ntrue\n' >"$REPO/$f"
 done
 printf 'notes\n' >"$REPO/docs/notes.md"
@@ -72,7 +72,8 @@ printf 'fixture\n' >"$REPO/README.md"
 # reports SC1091 against a line the full-set run resolves silently. The fixture
 # declares a two-deep chain, an indented directive carrying a trailing note, and
 # one out-of-set source, so the closure is exercised the way the repo actually
-# writes them.
+# writes them. bin/shared-lib.sh is the reverse case: two canonical files source
+# it, and a finding caused by changing it would be reported in them, not in it.
 cat >>"$REPO/bin/edited.sh" <<'SH'
 # shellcheck source=bin/lib-one.sh
 . "$(dirname "$0")/lib-one.sh"
@@ -86,6 +87,16 @@ SH
 cat >>"$REPO/tests/edited.test.sh" <<'SH'
   # shellcheck source=tests/lib.sh  # shared primitives
   . "$(dirname "$0")/lib.sh"
+SH
+cat >>"$REPO/bin/kept.sh" <<'SH'
+# shellcheck source=bin/shared-lib.sh
+. "$(dirname "$0")/shared-lib.sh"
+# shellcheck source=bin/lib-one.sh
+. "$(dirname "$0")/lib-one.sh"
+SH
+cat >>"$REPO/tests/kept.test.sh" <<'SH'
+# shellcheck source=bin/shared-lib.sh
+. "$(dirname "$0")/../bin/shared-lib.sh"
 SH
 git -C "$REPO" add -A
 git -C "$REPO" commit -qm initial
@@ -153,10 +164,17 @@ out=$(run_lint)
 got=$(linted)
 [ "$got" = 'bin/edited.sh bin/lib-one.sh bin/lib-two.sh bin/untracked.sh tests/edited.test.sh tests/lib.sh ' ] \
   || fail "a feature branch must lint its changed canonical files and their sourced closure, got: $got"
-assert_contains "$out" 'linting 3 changed file(s) plus 3 sourced dependency file(s) since origin/main' \
+assert_contains "$out" 'linting 3 changed file(s) plus 3 source-linked file(s) since origin/main' \
   'the selection run reports its counts and base'
 pass 'a feature branch lints its changed canonical files, including uncommitted and untracked ones'
 pass 'the sourced closure rides along, transitively and through an indented directive'
+# bin/kept.sh sources bin/lib-one.sh, which rode along here as an unchanged
+# library. Pulling in a library's consumers only makes sense for a library this
+# branch actually changed, so kept.sh must stay out.
+case "$got" in
+  *bin/kept.sh*) fail 'an unchanged library must not drag in its own consumers' ;;
+esac
+pass 'consumers of an unchanged, merely sourced library stay out of the selection'
 
 # The exclusions the selection depends on, stated as their own failures.
 case "$got" in
@@ -236,7 +254,7 @@ pass 'a checkout whose git toplevel is an outer repository lints the full canoni
 out=$(run_lint bin/kept.sh)
 [ "$(linted)" = 'bin/kept.sh ' ] \
   || fail "explicit paths must lint exactly what was named, got: $(linted)"
-assert_not_contains "$out" 'sourced dependency file(s)' \
+assert_not_contains "$out" 'source-linked file(s)' \
   'an explicit-path run does not report a selection'
 out=$(run_lint CI=true bin/kept.sh)
 [ "$(linted)" = 'bin/kept.sh ' ] \
@@ -257,3 +275,23 @@ expect_code 0 "$?" 'a change set with no canonical file exits 0'
 assert_contains "$out" 'no canonical-set file changed since origin/main' \
   'the empty-selection run says so'
 pass 'a change set with no canonical file lints nothing and exits 0'
+
+# --- a changed library pulls in the files that source it ----------------------
+#
+# ShellCheck blames a library's broken contract on the file that sources it, so a
+# branch that only touches bin/shared-lib.sh has to lint both of its consumers -
+# otherwise the narrowed run goes green where CI goes red. Those consumers then
+# need their own sourced libraries as inputs, or narrowing invents SC1091 in them.
+
+git -C "$REPO" checkout -q -b shared-lib
+git -C "$REPO" checkout -q -- docs/notes.md
+printf 'true\n' >>"$REPO/bin/shared-lib.sh"
+
+out=$(run_lint)
+got=$(linted)
+[ "$got" = 'bin/kept.sh bin/lib-one.sh bin/lib-two.sh bin/shared-lib.sh tests/kept.test.sh ' ] \
+  || fail "a changed library must lint its consumers and their own sourced libraries, got: $got"
+assert_contains "$out" 'linting 1 changed file(s) plus 4 source-linked file(s) since origin/main' \
+  'the reverse closure is counted in the summary'
+pass 'a changed library pulls in every canonical file that sources it'
+pass 'a pulled-in consumer brings its own sourced libraries along'

@@ -29,8 +29,9 @@
 # spiked one Mac to 190% CPU and 8.58 load) even though each run finished fast.
 # The change set comes from plain local git - the merge-base with origin/main
 # plus uncommitted edits - so the selection costs no network call. The libraries
-# those files source ride along, so a narrowed run reports exactly what a
-# full-set run reports.
+# those files source ride along, and so do the canonical files that source them,
+# so a narrowed run reports every finding a full-set run blames on the files this
+# branch changed.
 # CI ALWAYS LINTS THE FULL CANONICAL SET, and so does the default branch, and so
 # does any run whose change set cannot be determined: coverage never depends on
 # a local diff. The selection is a local-speed optimization only, never a weaker
@@ -170,29 +171,62 @@ if [ "${#selected[@]}" -eq 0 ]; then
   exit 0
 fi
 
-# A sourced library must be in the input list or ShellCheck reports SC1091
-# ("was not specified as input") against a `.` line that a full-set run resolves
-# silently - a finding created purely by narrowing the input, not by the code.
+# ShellCheck follows a `.` line only when the sourced file is an input too, so a
+# narrowed input set changes what it reports in BOTH directions:
+#   - forward: a sourced library missing from the inputs turns a line the full
+#     run resolves silently into SC1091 ("was not specified as input"), a finding
+#     created purely by narrowing;
+#   - reverse: a finding caused by a changed library is reported in the file that
+#     sources it, not in the library, so editing a library out from under its
+#     consumers (dropping a variable they read, say) is invisible unless those
+#     consumers are inputs as well - green locally, red in CI one push later.
 # Every source in this repo declares its target with a `# shellcheck source=`
-# directive, so following those directives to their transitive closure makes a
-# narrowed run report exactly what the full run reports. Sources outside the
-# canonical set (/dev/null, anything unshipped) are dropped: the full run does
-# not have them as input either, so keeping the parity means leaving them out.
-inputs=$(printf '%s\n' "${selected[@]}" | LC_ALL=C sort -u)
-frontier=$inputs
-while [ -n "$frontier" ]; do
-  deps=$(
-    printf '%s\n' "$frontier" | while IFS= read -r file; do
-      [ -f "$file" ] || continue
-      sed -n 's/^[[:space:]]*#[[:space:]]*shellcheck source=\([^[:space:]]*\).*/\1/p' "$file"
-    done | LC_ALL=C sort -u |
-      LC_ALL=C comm -12 - <(printf '%s\n' "$canonical_sorted") |
-      LC_ALL=C comm -23 - <(printf '%s\n' "$inputs")
-  )
-  [ -n "$deps" ] || break
-  inputs=$(printf '%s\n%s\n' "$inputs" "$deps" | LC_ALL=C sort -u)
-  frontier=$deps
-done
+# directive, so the directives are the graph. Sources outside the canonical set
+# (/dev/null, anything unshipped) are dropped: the full run does not have them as
+# input either, so keeping the parity means leaving them out.
+edges=$(
+  printf '%s\n' "$canonical_sorted" | while IFS= read -r file; do
+    [ -f "$file" ] || continue
+    sed -n 's/^[[:space:]]*#[[:space:]]*shellcheck source=\([^[:space:]]*\).*/\1/p' "$file" |
+      while IFS= read -r target; do
+        [ -n "$target" ] || continue
+        printf '%s\t%s\n' "$file" "$target"
+      done
+  done
+)
+
+# cs_close <dependents|sources> <file list> - grow a newline-separated file list
+# to its transitive closure over that edge direction, staying inside the
+# canonical set. Growth is monotonic and bounded by the canonical set, so a
+# source cycle simply runs the frontier dry.
+cs_close() {
+  local direction=$1 closed=$2 frontier=$2 next
+  while [ -n "$frontier" ]; do
+    next=$(
+      awk -F'\t' -v dir="$direction" '
+        NR == FNR { if ($0 != "") want[$0] = 1; next }
+        dir == "sources" { if ($1 in want) print $2; next }
+        { if ($2 in want) print $1 }
+      ' <(printf '%s\n' "$frontier") <(printf '%s\n' "$edges") |
+        LC_ALL=C sort -u |
+        LC_ALL=C comm -12 - <(printf '%s\n' "$canonical_sorted") |
+        LC_ALL=C comm -23 - <(printf '%s\n' "$closed")
+    )
+    [ -n "$next" ] || break
+    closed=$(printf '%s\n%s\n' "$closed" "$next" | LC_ALL=C sort -u)
+    frontier=$next
+  done
+  printf '%s\n' "$closed"
+}
+
+# Dependents first and only of the changed files, then sources of everything: a
+# finding can only be created by a change, so the files that source a change need
+# linting, while an unchanged library pulled in for its definitions does not drag
+# in its own unrelated consumers. Sourcing is transitive, so a dependent's
+# dependent sees the change too and the reverse pass runs to a fixpoint; the
+# forward pass then keeps every input SC1091-clean.
+inputs=$(cs_close dependents "$(printf '%s\n' "${selected[@]}" | LC_ALL=C sort -u)")
+inputs=$(cs_close sources "$inputs")
 
 lint_set=()
 while IFS= read -r path; do
@@ -200,6 +234,6 @@ while IFS= read -r path; do
   lint_set+=("$path")
 done <<<"$inputs"
 
-printf 'cs-lint.sh: linting %s changed file(s) plus %s sourced dependency file(s) since %s (CI lints the full set)\n' \
+printf 'cs-lint.sh: linting %s changed file(s) plus %s source-linked file(s) since %s (CI lints the full set)\n' \
   "${#selected[@]}" "$((${#lint_set[@]} - ${#selected[@]}))" "$BASE_REF" >&2
 exec shellcheck --norc "${lint_set[@]}"
