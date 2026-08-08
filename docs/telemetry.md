@@ -265,7 +265,8 @@ Claude, from the transcript under `~/.claude/projects/`:
 Retention runs at the turn-end boundary that already exists, at most once per 24 hours per home, behind a non-blocking lock.
 It can never block, delay, or interfere with supervision: a held lock, a missing `jq`, or an unwritable directory skips silently and the next turn end tries again.
 The lock is released by a trap on the subshell that holds it, and a lock directory older than one prune interval is reclaimed on the next attempt, so a hard kill mid-prune cannot wedge retention permanently while a genuinely held fresh lock is still skipped.
-The rewrite is a compare-and-swap on file size, so a record another emitter appended while the file was being filtered is never silently dropped; a detected append abandons that rewrite and the next interval retries.
+A pass that would drop nothing rewrites nothing: the live file is only ever replaced when records actually aged out, because emitters append without taking the retention lock and every replacement of the live file risks losing a record appended alongside it.
+When a rewrite is genuinely due, it is a compare-and-swap on file size, so a record another emitter appended while the file was being filtered is never silently dropped; a detected append abandons that rewrite and the next interval retries.
 
 ## Failure policy
 

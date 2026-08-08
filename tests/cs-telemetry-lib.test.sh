@@ -673,6 +673,40 @@ test_retention_drops_records_past_retain_days() {
   pass "cs-telemetry: retention drops aged records and keeps recent ones"
 }
 
+# Portable inode number, the same Darwin/GNU split bin/cs-telemetry-lib.sh uses
+# for mtime. Identity of the file, not of its content: a replaced file is a new
+# inode even when every byte matches.
+file_inode() { # <path>
+  if [ "$(uname 2>/dev/null)" = Darwin ]; then
+    stat -f %i "$1" 2>/dev/null
+  else
+    stat -c %i "$1" 2>/dev/null
+  fi
+}
+
+test_retention_never_rewrites_a_file_it_would_not_change() {
+  local home file before inode_before inode_after
+  home=$(make_home retention-noop 'enabled true')
+  mkdir -p "$home/data/telemetry"
+  file="$home/data/telemetry/turns.jsonl"
+  {
+    printf '{"schema":1,"timestamp":"%s","event_id":"a","role":"root","usage":{}}\n' "$(iso_days_ago 1)"
+    printf '{"schema":1,"timestamp":"%s","event_id":"b","role":"root","usage":{}}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$file"
+  before=$(records "$home")
+  inode_before=$(file_inode "$file")
+  in_home "$home" 'cs_telemetry_prune'
+  inode_after=$(file_inode "$file")
+  [ "$(records "$home")" = "$before" ] ||
+    fail "a prune with nothing past retain_days must leave every record alone:"$'\n'"$(records "$home")"
+  # And it must leave the same FILE, not an identical copy. Replacing the live
+  # file is exactly how a record an unlocked emitter appended goes missing, so
+  # retention never spends that risk on a pass that drops nothing.
+  [ "$inode_before" = "$inode_after" ] ||
+    fail "retention replaced a file it dropped nothing from ($inode_before -> $inode_after)"
+  pass "cs-telemetry: retention leaves the live file in place when nothing ages out"
+}
+
 test_retention_ages_out_session_cursors_and_crumbs() {
   local home old new old_crumbs new_crumbs
   home=$(make_home retention-cursors 'enabled true' 'retain_days 1')
@@ -828,6 +862,7 @@ test_usage_never_records_conversation_content
 test_harness_comes_from_the_payload_not_the_dispatch_pin
 test_an_ambiguous_harness_does_not_consume_the_usage_window
 test_retention_drops_records_past_retain_days
+test_retention_never_rewrites_a_file_it_would_not_change
 test_retention_ages_out_session_cursors_and_crumbs
 test_retention_runs_at_most_once_per_interval
 test_retention_skips_when_its_lock_is_held

@@ -1032,26 +1032,38 @@ cs_telemetry_prune() {
 # while this process holds the prune lock. Split out so the lock release is one
 # trap on one subshell rather than a release that every early exit must remember.
 cs_telemetry_prune_locked() {
-  local now=$1 cutoff tmp size_before size_after
+  local now=$1 cutoff tmp size_before size_after lines_before lines_after
   if [ -f "$CS_TELEMETRY_FILE" ]; then
     cutoff=$((now - CS_TELEMETRY_RETAIN_DAYS * 86400))
     tmp="$CS_TELEMETRY_FILE.prune.$$"
     size_before=$(wc -c < "$CS_TELEMETRY_FILE" 2>/dev/null | tr -d ' ')
+    lines_before=$(wc -l < "$CS_TELEMETRY_FILE" 2>/dev/null | tr -d ' ')
     if jq -R -c --argjson cutoff "$cutoff" '
           fromjson? // empty
           | select(type == "object")
           | select(((.timestamp // "") | try fromdateiso8601 catch 0) >= $cutoff)
         ' < "$CS_TELEMETRY_FILE" > "$tmp" 2>/dev/null; then
-      # Compare and swap on size. Emitters append without taking this lock, by
-      # design: an append must never wait on retention. So the rewrite is only
-      # allowed to replace a file that nobody appended to while it was being
-      # filtered - otherwise this rename would silently drop those records. A
-      # detected append abandons the rewrite and the next interval retries.
-      size_after=$(wc -c < "$CS_TELEMETRY_FILE" 2>/dev/null | tr -d ' ')
-      if [ -n "$size_before" ] && [ "$size_before" = "$size_after" ]; then
-        mv "$tmp" "$CS_TELEMETRY_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
-      else
+      lines_after=$(wc -l < "$tmp" 2>/dev/null | tr -d ' ')
+      if [ -n "$lines_before" ] && [ "$lines_before" = "$lines_after" ]; then
+        # Nothing aged out, so the rewrite would replace the file with its own
+        # content. Skip it: every rename over a file that unlocked emitters are
+        # appending to can only lose records, never gain any, and retention is
+        # not worth spending that risk on a no-op. A concurrent append can only
+        # inflate lines_before, so equality is a sound proof that this pass drops
+        # nothing - it never hides a record that was due to age out.
         rm -f "$tmp" 2>/dev/null || true
+      else
+        # Compare and swap on size. Emitters append without taking this lock, by
+        # design: an append must never wait on retention. So the rewrite is only
+        # allowed to replace a file that nobody appended to while it was being
+        # filtered - otherwise this rename would silently drop those records. A
+        # detected append abandons the rewrite and the next interval retries.
+        size_after=$(wc -c < "$CS_TELEMETRY_FILE" 2>/dev/null | tr -d ' ')
+        if [ -n "$size_before" ] && [ "$size_before" = "$size_after" ]; then
+          mv "$tmp" "$CS_TELEMETRY_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+        else
+          rm -f "$tmp" 2>/dev/null || true
+        fi
       fi
     else
       rm -f "$tmp" 2>/dev/null || true
