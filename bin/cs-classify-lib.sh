@@ -474,13 +474,19 @@ scan_boss_relevant_statuses() {  # <state>
 
 # Fold EVERY state/*.status file into the fleet-wide set of still-open keyed
 # decisions. Prints one TAB-separated "<task>\t<key>\t<verb>\t<summary>" line per
-# still-open decision, across all tasks. Reuses status_open_decisions (the ONE
-# open/resolved fold) per file, so a needs-decision/needs-review/blocked line
-# buried under later unrelated appends is still surfaced. That fold's own
-# guards skip a symlinked or unreadable status file silently. No dedup and no
-# cross-task ordering guarantee: each line already carries its task id. The
-# read cost matches the sibling scan_boss_relevant_statuses (one full read of
-# each small append-only status file), so this adds no unbounded fan-out.
+# still-open decision, across all tasks. Reuses status_open_decisions per file
+# (which applies the ONE open/resolved rule, _cs_decision_fold_line), so a
+# needs-decision/needs-review/blocked line buried under later unrelated appends
+# is still surfaced. That fold's own guards skip a symlinked or unreadable
+# status file silently. No dedup and no cross-task ordering guarantee: each
+# line already carries its task id. Every call re-reads each status file in
+# full, like the sibling scan_boss_relevant_statuses, so its cost grows with
+# total lifetime log size across the fleet - which is why the per-drain path
+# (bin/cs-wake-drain.sh) now uses scan_open_decisions_incremental below
+# instead. This whole-file walk remains the point-in-time fleet fold and the
+# agreement oracle the cursor tests fold every prefix against; the per-file
+# status_open_decisions is what the non-drain consumers (cs-fleet-view,
+# cs-afk-return, cs-decision-hold) call directly.
 scan_open_decisions() {  # <state>
   local state=$1 f task line
   for f in "$state"/*.status; do

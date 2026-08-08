@@ -18,9 +18,10 @@ finishing rather than removing the flag.
 
 > Line references are verified against the plan's base commit `55aa94e` (this
 > worktree). Anchor by **content**, not by line number, when reading a later
-> tree: `bin/cs-spawn.sh` and `bin/cs-teardown.sh` have shifted line numbers on
-> `main` (the operational-input / spawn-lock work landed after `55aa94e`);
-> `bin/cs-watch.sh` and `bin/cs-classify-lib.sh` line numbers match.
+> tree: `bin/cs-spawn.sh`, `bin/cs-teardown.sh`, and `bin/cs-classify-lib.sh`
+> have shifted line numbers on `main` (the operational-input / spawn-lock work
+> and the open-decision cursor fold landed after `55aa94e`); `bin/cs-watch.sh`
+> line numbers match.
 
 ## End-to-end trace: `cs-spawn.sh <id> <proj> --scout --headless`
 
