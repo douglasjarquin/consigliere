@@ -6,6 +6,10 @@
 # execution, and by cs-pr-check.sh to publish one.
 #
 # The stored identity is provider-tagged: provider, url, host, path, number.
+# The same hash-bound sidecar also carries the exact PR head when available and
+# one capacity token: hold or release-reviewed-green. The release token is an
+# authenticated PR-ready attestation, not a merge or cleanup state; consumers
+# must still verify the live PR is open at that exact head with green checks.
 # "path" is the full project path, which is owner/repository on GitHub and an
 # arbitrarily nested group/subgroup/project namespace on GitLab. A GitLab
 # project can sit at any depth, so no owner/repository pair can address one and
@@ -26,11 +30,14 @@ CS_PR_DATA_URL=
 CS_PR_DATA_HOST=
 CS_PR_DATA_PATH=
 CS_PR_DATA_NUMBER=
+CS_PR_DATA_HEAD=
+CS_PR_DATA_CAPACITY=
 CS_PR_META_PROVIDER=
 CS_PR_META_URL=
 CS_PR_META_HOST=
 CS_PR_META_PATH=
 CS_PR_META_NUMBER=
+CS_PR_META_HEAD=
 CS_PR_REG_ID=
 CS_PR_REG_PROVIDER=
 CS_PR_REG_URL=
@@ -53,6 +60,8 @@ CS_PR_POLL_EXPECT_URL=
 CS_PR_POLL_EXPECT_HOST=
 CS_PR_POLL_EXPECT_PATH=
 CS_PR_POLL_EXPECT_NUMBER=
+CS_PR_POLL_EXPECT_HEAD=
+CS_PR_POLL_EXPECT_CAPACITY=
 CS_PR_POLL_EXPECT_DATA_HASH=
 CS_PR_POLL_EXPECT_TEMPLATE_HASH=
 CS_PR_POLL_EXPECT_DATA_IDENTITY=
@@ -181,6 +190,13 @@ cs_pr_head_valid() {
   [[ "$head" =~ ^[0-9a-f]{40}$|^[0-9a-f]{64}$ ]]
 }
 
+cs_pr_capacity_token_valid() {
+  case "${1-}" in
+    hold|release-reviewed-green) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 cs_pr_file_mode() {
   if [ "$(uname)" = Darwin ]; then
     stat -f %Lp "$1" 2>/dev/null
@@ -254,12 +270,13 @@ cs_pr_regular_destination_on_device_or_absent() {
 }
 
 cs_pr_metadata_identity_parse() {
-  local file=$1 line value pr_count=0 seen_pr=0 post_pr_invalid=0
+  local file=$1 line value pr_count=0 head_count=0 seen_pr=0 post_pr_invalid=0
   CS_PR_META_PROVIDER=
   CS_PR_META_URL=
   CS_PR_META_HOST=
   CS_PR_META_PATH=
   CS_PR_META_NUMBER=
+  CS_PR_META_HEAD=
   [ -f "$file" ] && [ ! -L "$file" ] || return 1
   [ "$(cs_pr_file_link_count "$file")" = 1 ] || return 1
   while IFS= read -r line || [ -n "$line" ]; do
@@ -278,9 +295,16 @@ cs_pr_metadata_identity_parse() {
         seen_pr=1
         ;;
       pr_head=*)
-        if [ "$seen_pr" -eq 1 ]; then
-          value=${line#pr_head=}
-          cs_pr_head_valid "$value" || post_pr_invalid=1
+        head_count=$((head_count + 1))
+        if [ "$seen_pr" -ne 1 ] || [ "$head_count" -ne 1 ]; then
+          post_pr_invalid=1
+          continue
+        fi
+        value=${line#pr_head=}
+        if cs_pr_head_valid "$value"; then
+          CS_PR_META_HEAD=$value
+        else
+          post_pr_invalid=1
         fi
         ;;
       *)
@@ -293,16 +317,18 @@ cs_pr_metadata_identity_parse() {
   [ -n "$CS_PR_META_URL" ]
 }
 
-# Sidecar layout: provider, url, host, path, number, one per line. A sidecar
-# with any other shape fails the field count or the identity re-derivation and
-# is refused rather than misread.
+# Sidecar layout: provider, url, host, path, number, exact head or an empty
+# line, and capacity token, one per line. A sidecar with any other shape fails
+# the field count or identity re-derivation and is refused rather than misread.
 cs_pr_poll_data_parse() {
-  local file=$1 provider url host path number
+  local file=$1 provider url host path number head capacity
   CS_PR_DATA_PROVIDER=
   CS_PR_DATA_URL=
   CS_PR_DATA_HOST=
   CS_PR_DATA_PATH=
   CS_PR_DATA_NUMBER=
+  CS_PR_DATA_HEAD=
+  CS_PR_DATA_CAPACITY=
   [ -f "$file" ] && [ ! -L "$file" ] || return 1
   exec 8< "$file" || return 1
   IFS= read -r provider <&8 || { exec 8<&-; return 1; }
@@ -310,6 +336,8 @@ cs_pr_poll_data_parse() {
   IFS= read -r host <&8 || { exec 8<&-; return 1; }
   IFS= read -r path <&8 || { exec 8<&-; return 1; }
   IFS= read -r number <&8 || { exec 8<&-; return 1; }
+  IFS= read -r head <&8 || { exec 8<&-; return 1; }
+  IFS= read -r capacity <&8 || { exec 8<&-; return 1; }
   if IFS= read -r _extra <&8; then
     exec 8<&-
     return 1
@@ -320,11 +348,16 @@ cs_pr_poll_data_parse() {
   [ "$host" = "$CS_PR_HOST" ] || return 1
   [ "$path" = "$CS_PR_PATH" ] || return 1
   [ "$number" = "$CS_PR_NUMBER" ] || return 1
+  [ -z "$head" ] || cs_pr_head_valid "$head" || return 1
+  cs_pr_capacity_token_valid "$capacity" || return 1
+  [ "$capacity" != release-reviewed-green ] || cs_pr_head_valid "$head" || return 1
   CS_PR_DATA_PROVIDER=$CS_PR_PROVIDER
   CS_PR_DATA_URL=$CS_PR_URL
   CS_PR_DATA_HOST=$CS_PR_HOST
   CS_PR_DATA_PATH=$CS_PR_PATH
   CS_PR_DATA_NUMBER=$CS_PR_NUMBER
+  CS_PR_DATA_HEAD=$head
+  CS_PR_DATA_CAPACITY=$capacity
 }
 
 # Registration layout: version tag, task id, then the same provider-tagged
@@ -360,7 +393,7 @@ cs_pr_poll_registration_parse() {
     return 1
   fi
   exec 7<&-
-  [ "$version" = cs-pr-poll-registration-v2 ] || return 1
+  [ "$version" = cs-pr-poll-registration-v3 ] || return 1
   cs_pr_task_id_valid "$id" || return 1
   cs_pr_url_parse "$url" || return 1
   [ "$provider" = "$CS_PR_PROVIDER" ] || return 1
@@ -438,13 +471,17 @@ cs_pr_poll_retire() {
 }
 
 cs_pr_poll_prepare() {
-  local state=$1 id=$2 provider=$3 url=$4 host=$5 path=$6 number=$7 template=$8
+  local state=$1 id=$2 provider=$3 url=$4 host=$5 path=$6 number=$7
+  local head=$8 capacity=$9 template=${10}
   cs_pr_task_id_valid "$id" || return 1
   cs_pr_url_parse "$url" || return 1
   [ "$provider" = "$CS_PR_PROVIDER" ] || return 1
   [ "$host" = "$CS_PR_HOST" ] || return 1
   [ "$path" = "$CS_PR_PATH" ] || return 1
   [ "$number" = "$CS_PR_NUMBER" ] || return 1
+  [ -z "$head" ] || cs_pr_head_valid "$head" || return 1
+  cs_pr_capacity_token_valid "$capacity" || return 1
+  [ "$capacity" != release-reviewed-green ] || cs_pr_head_valid "$head" || return 1
   [ -f "$template" ] || return 1
 
   [ ! -L "$state" ] || return 1
@@ -460,6 +497,8 @@ cs_pr_poll_prepare() {
   CS_PR_POLL_EXPECT_HOST=$host
   CS_PR_POLL_EXPECT_PATH=$path
   CS_PR_POLL_EXPECT_NUMBER=$number
+  CS_PR_POLL_EXPECT_HEAD=$head
+  CS_PR_POLL_EXPECT_CAPACITY=$capacity
   CS_PR_POLL_TEMPLATE=$template
   CS_PR_POLL_STATE_DEVICE=$(cs_pr_file_device "$state") || return 1
   [ -n "$CS_PR_POLL_STATE_DEVICE" ] || return 1
@@ -473,7 +512,9 @@ cs_pr_poll_prepare() {
     return 1
   }
 
-  if ! printf '%s\n%s\n%s\n%s\n%s\n' "$provider" "$url" "$host" "$path" "$number" > "$CS_PR_POLL_DATA_TMP" \
+  if ! printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+      "$provider" "$url" "$host" "$path" "$number" "$head" "$capacity" \
+      > "$CS_PR_POLL_DATA_TMP" \
     || ! chmod 0600 "$CS_PR_POLL_DATA_TMP" \
     || ! cs_pr_private_file_valid "$CS_PR_POLL_DATA_TMP" 600 "$CS_PR_POLL_STATE_DEVICE" \
     || ! cs_pr_poll_data_parse "$CS_PR_POLL_DATA_TMP" \
@@ -482,6 +523,8 @@ cs_pr_poll_prepare() {
     || [ "$CS_PR_DATA_HOST" != "$host" ] \
     || [ "$CS_PR_DATA_PATH" != "$path" ] \
     || [ "$CS_PR_DATA_NUMBER" != "$number" ] \
+    || [ "$CS_PR_DATA_HEAD" != "$head" ] \
+    || [ "$CS_PR_DATA_CAPACITY" != "$capacity" ] \
     || ! cp "$template" "$CS_PR_POLL_CHECK_TMP" \
     || ! chmod 0600 "$CS_PR_POLL_CHECK_TMP" \
     || ! cs_pr_private_file_valid "$CS_PR_POLL_CHECK_TMP" 600 "$CS_PR_POLL_STATE_DEVICE" \
@@ -494,7 +537,7 @@ cs_pr_poll_prepare() {
   CS_PR_POLL_EXPECT_DATA_IDENTITY=$(cs_pr_file_identity "$CS_PR_POLL_DATA_TMP") || { cs_pr_poll_cleanup; return 1; }
   CS_PR_POLL_EXPECT_CHECK_IDENTITY=$(cs_pr_file_identity "$CS_PR_POLL_CHECK_TMP") || { cs_pr_poll_cleanup; return 1; }
   if ! printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
-      cs-pr-poll-registration-v2 "$id" "$provider" "$url" "$host" "$path" "$number" \
+      cs-pr-poll-registration-v3 "$id" "$provider" "$url" "$host" "$path" "$number" \
       "$CS_PR_POLL_EXPECT_DATA_HASH" "$CS_PR_POLL_EXPECT_TEMPLATE_HASH" \
       "$CS_PR_POLL_EXPECT_DATA_IDENTITY" "$CS_PR_POLL_EXPECT_CHECK_IDENTITY" \
       > "$CS_PR_POLL_REG_TMP" \
@@ -529,7 +572,9 @@ cs_pr_poll_publish_prepared() {
     || [ "$CS_PR_DATA_URL" != "$CS_PR_POLL_EXPECT_URL" ] \
     || [ "$CS_PR_DATA_HOST" != "$CS_PR_POLL_EXPECT_HOST" ] \
     || [ "$CS_PR_DATA_PATH" != "$CS_PR_POLL_EXPECT_PATH" ] \
-    || [ "$CS_PR_DATA_NUMBER" != "$CS_PR_POLL_EXPECT_NUMBER" ]; then
+    || [ "$CS_PR_DATA_NUMBER" != "$CS_PR_POLL_EXPECT_NUMBER" ] \
+    || [ "$CS_PR_DATA_HEAD" != "$CS_PR_POLL_EXPECT_HEAD" ] \
+    || [ "$CS_PR_DATA_CAPACITY" != "$CS_PR_POLL_EXPECT_CAPACITY" ]; then
     cs_pr_poll_revoke_final || true
     return 1
   fi
@@ -603,5 +648,6 @@ cs_pr_poll_artifacts_valid() {
   [ "$CS_PR_META_URL" = "$CS_PR_DATA_URL" ] || return 1
   [ "$CS_PR_META_HOST" = "$CS_PR_DATA_HOST" ] || return 1
   [ "$CS_PR_META_PATH" = "$CS_PR_DATA_PATH" ] || return 1
-  [ "$CS_PR_META_NUMBER" = "$CS_PR_DATA_NUMBER" ]
+  [ "$CS_PR_META_NUMBER" = "$CS_PR_DATA_NUMBER" ] || return 1
+  [ "$CS_PR_META_HEAD" = "$CS_PR_DATA_HEAD" ]
 }

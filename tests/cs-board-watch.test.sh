@@ -10,7 +10,7 @@ set -u
 
 TMP=$(cs_test_tmproot cs-board-watch)
 export CS_HOME="$TMP/home"
-mkdir -p "$CS_HOME/data" "$CS_HOME/state" "$CS_HOME/config"
+mkdir -p "$CS_HOME/data" "$CS_HOME/state" "$CS_HOME/config" "$CS_HOME/projects/proj"
 DATA="$CS_HOME/data"
 CONFIG_DIR="$CS_HOME/config"
 STATE="$CS_HOME/state"
@@ -100,19 +100,35 @@ pass "arm validates project name and lane cap"
 
 out=$("$BIN" arm proj --lanes 2 --resurface 900)
 assert_contains "$out" "armed: proj board sweep" "arm reports the sweep"
-assert_grep "proj 2 900 " "$DATA/sweeps.md" "sweep record carries project, lanes, resurface"
+assert_grep "proj 2 900 hold-green-prs " "$DATA/sweeps.md" \
+  "ordinary sweep record defaults to holding green PRs"
 assert_present "$POLL" "poll written"
 assert_present "$TRUST" "poll bound to a trust record"
 [ "$(file_mode "$POLL")" = 700 ] || fail "poll must be mode 0700"
 out=$("$BIN" list)
 assert_contains "$out" "proj lanes=2 resurface=900s" "list reports the sweep"
+assert_contains "$out" "green_prs=hold-green-prs" "list reports the default green-PR policy"
 assert_contains "$out" "poll=armed" "list reports the poll as armed"
-pass "arm records the sweep and binds its poll"
+out=$("$BIN" policy proj)
+[ "$out" = hold-green-prs ] || fail "default policy query was not hold-green-prs: $out"
+pass "ordinary arm records a hold-green-prs sweep and binds its poll"
+
+out=$("$BIN" arm proj --lanes 5 --resurface 900 --release-green-prs)
+assert_contains "$out" "release-green-prs" "explicit green-PR release is reported"
+assert_grep "proj 5 900 release-green-prs " "$DATA/sweeps.md" \
+  "release policy is durable beside the five-lane cap"
+out=$("$BIN" policy-path "$CS_HOME/projects/proj")
+[ "$out" = release-green-prs ] || fail "physical project policy lookup lost release: $out"
+"$BIN" arm proj --lanes 5 --resurface 900 >/dev/null
+out=$("$BIN" policy proj)
+[ "$out" = release-green-prs ] || fail "ordinary re-arm forgot the selected release policy: $out"
+pass "five-lane release policy survives re-arm and physical project lookup"
 
 # --- the generated poll -----------------------------------------------------
 
 out=$(bash "$POLL")
-assert_contains "$out" "2 ready, 1 inbox on the proj board (lane cap 2)" "first poll reports depth"
+assert_contains "$out" "2 ready, 1 inbox on the proj board (lane cap 5, release-green-prs)" \
+  "first poll reports depth and durable capacity policy"
 assert_present "$SEEN" "poll records what it reported"
 pass "poll reports a non-empty board on its first run"
 
@@ -161,6 +177,19 @@ pass "poll is silent when the board cannot be read"
 
 # --- drift and convergence --------------------------------------------------
 
+printf '%s\n%s\n' \
+  '# Active board sweeps. Owned by bin/cs-board-watch.sh; do not hand-edit.' \
+  'proj 5 900 hold-green-prs 2026-08-08T00:00:00Z' \
+  > "$DATA/sweeps.md"
+out=$("$BIN" list)
+assert_contains "$out" "poll=NOT ARMED" "record/poll configuration drift is not converged"
+out=$("$BIN" sync)
+assert_contains "$out" "re-armed the proj board sweep poll" \
+  "sync repairs an interrupted record-before-poll update"
+assert_grep "green_pr_policy='hold-green-prs'" "$POLL" \
+  "sync did not regenerate the recorded green-PR policy"
+pass "sync converges the poll bytes to the durable lane policy after interruption"
+
 printf '\n# tampered\n' >> "$POLL"
 out=$("$BIN" list)
 assert_contains "$out" "poll=NOT ARMED" "hand-edited poll is no longer trusted"
@@ -201,4 +230,6 @@ out=$("$BIN" disarm proj)
 assert_contains "$out" "no active sweep for proj" "disarm is idempotent"
 out=$("$BIN" list)
 assert_contains "$out" "(no active board sweeps)" "list reports an empty sweep set"
+out=$("$BIN" policy proj)
+[ "$out" = hold-green-prs ] || fail "a disarmed sweep did not return the safe default: $out"
 pass "disarm retires the record and every poll artifact"

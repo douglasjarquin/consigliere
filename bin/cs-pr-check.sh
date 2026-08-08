@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Record a PR-ready task: store one validated canonical pr=<url> and GitHub's
 # exact pr_head=<sha> when available, then atomically arm a static merge poll.
+# The poll's authenticated sidecar records hold by default. For a board issue
+# in no-mistakes mode, an armed sweep's release-green-prs policy changes that
+# token to release-reviewed-green at the exact recorded head. Capacity remains
+# a live decision by bin/cs-board-capacity.sh; this script does not merge,
+# close, clean up, discard, or move the task's board card.
 # The watcher check source is byte-for-byte bin/cs-pr-poll.sh; task and PR data
 # live only in a private sidecar and are never interpolated into shell source.
 # Consigliere watches GitHub pull requests only. bin/cs-pr-lib.sh also parses
@@ -50,12 +55,28 @@ fi
 # (bin/cs-teardown.sh) already treats it as optional and reads the head from
 # the forge at teardown time, falling back to its content check.
 WT=$(grep '^worktree=' "$META" | tail -1 | cut -d= -f2- || true)
+TASK_PROJECT=$(grep '^project=' "$META" | tail -1 | cut -d= -f2- || true)
+TASK_MODE=$(grep '^mode=' "$META" | tail -1 | cut -d= -f2- || true)
+TASK_ISSUE=$(grep '^issue=' "$META" | tail -1 | cut -d= -f2- || true)
+GREEN_PR_POLICY=$(
+  "$SCRIPT_DIR/cs-board-watch.sh" policy-path "$TASK_PROJECT" 2>/dev/null || true
+)
 PR_HEAD=
 if [ -n "$WT" ] && [ -d "$WT" ] && command -v gh >/dev/null 2>&1; then
   if REMOTE_HEAD=$(cd "$WT" && gh pr view "$URL" --json headRefOid -q .headRefOid 2>/dev/null) \
     && cs_pr_head_valid "$REMOTE_HEAD"; then
     PR_HEAD=$REMOTE_HEAD
   fi
+fi
+CAPACITY_TOKEN=hold
+case "$TASK_ISSUE" in
+  ''|0|0*|*[!0-9]*) TASK_ISSUE= ;;
+esac
+if [ "$GREEN_PR_POLICY" = release-green-prs ] \
+  && [ "$TASK_MODE" = no-mistakes ] \
+  && [ -n "$TASK_ISSUE" ] \
+  && cs_pr_head_valid "$PR_HEAD"; then
+  CAPACITY_TOKEN=release-reviewed-green
 fi
 
 META_TMP=
@@ -65,7 +86,8 @@ pr_check_cleanup() {
 }
 trap pr_check_cleanup EXIT
 trap 'exit 1' HUP INT TERM
-cs_pr_poll_prepare "$STATE" "$ID" "$PROVIDER" "$URL" "$HOST" "$PROJECT_PATH" "$NUMBER" "$SCRIPT_DIR/cs-pr-poll.sh" \
+cs_pr_poll_prepare "$STATE" "$ID" "$PROVIDER" "$URL" "$HOST" "$PROJECT_PATH" "$NUMBER" \
+  "$PR_HEAD" "$CAPACITY_TOKEN" "$SCRIPT_DIR/cs-pr-poll.sh" \
   || { echo "error: could not prepare PR poll" >&2; exit 1; }
 
 META_DEVICE=$(cs_pr_file_device "$META") || exit 1
@@ -99,4 +121,4 @@ cs_pr_poll_publish_prepared || {
   echo "error: could not publish PR poll" >&2
   exit 1
 }
-printf 'armed: state/%s.check.sh\n' "$ID"
+printf 'armed: state/%s.check.sh capacity=%s\n' "$ID" "$CAPACITY_TOKEN"

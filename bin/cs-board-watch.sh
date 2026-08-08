@@ -9,8 +9,9 @@
 # again. This script is the durable half of that loop:
 #
 #   1. data/sweeps.md records the boss's standing intent to work a project's
-#      board, with its lane cap. It survives session end, compaction, and
-#      reboot, and is reported at every session start.
+#      board, with its lane cap and green-PR capacity policy. It survives
+#      session end, compaction, and reboot, and is reported at every session
+#      start.
 #   2. state/sweep-<project>.check.sh is a watcher poll armed from that record.
 #      It reports column depth on the ordinary CS_CHECK_INTERVAL cadence, so a
 #      refilled column produces a `check:` wake instead of silence.
@@ -33,16 +34,25 @@
 #
 # Usage:
 #   cs-board-watch.sh arm <project> [--lanes <n>] [--resurface <secs>]
+#                         [--release-green-prs|--hold-green-prs]
 #                                          record the sweep and arm its poll;
-#                                          re-arming an existing sweep updates
-#                                          its lane cap and resurface interval
+#                                          re-arming updates the lane cap and
+#                                          resurface interval while retaining
+#                                          the existing green-PR policy unless
+#                                          one of its flags is passed
 #   cs-board-watch.sh disarm <project>     drop the record and retire the poll
 #   cs-board-watch.sh list                 active sweeps, arm state, and drift
 #   cs-board-watch.sh sync                 converge polls to records; prints
 #                                          only what it changed or cannot fix
+#   cs-board-watch.sh policy <project>      print the durable green-PR policy;
+#                                          no record prints hold-green-prs
+#   cs-board-watch.sh policy-path <path>    print the policy for the recorded
+#                                          project clone at physical <path>
 #
 # Defaults: --lanes 3 (the contracts skill's per-project concurrency cap),
-# --resurface 1800 (seconds before a still-full column is reported again).
+# --resurface 1800 (seconds before a still-full column is reported again), and
+# hold-green-prs. Green-PR release changes scheduling capacity only: it never
+# merges, lands, closes, cleans, discards, or moves a board card.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -95,6 +105,13 @@ valid_number() {
   [ "$n" -ge 1 ]
 }
 
+valid_green_pr_policy() {
+  case "${1-}" in
+    hold-green-prs|release-green-prs) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 sweep_id() { printf 'sweep-%s\n' "$1"; }
 
 # Single-quote an arbitrary string for the generated poll. Project names are
@@ -105,12 +122,33 @@ shell_quote() {
 
 # --- data/sweeps.md ---------------------------------------------------------
 #
-# One record per line: "<project> <lanes> <resurface> <armed-utc>". Blank lines
-# and '#' comments are ignored so the file reads as ordinary markdown, matching
-# config/boards.md. This script is the only writer.
+# docs/configuration.md owns the record schema; this script is its only writer.
 
 SWEEPS_HEADER='# Active board sweeps. Owned by bin/cs-board-watch.sh; do not hand-edit.
-# <project> <lane-cap> <resurface-secs> <armed-utc>'
+# <project> <lane-cap> <resurface-secs> <green-pr-policy> <armed-utc>'
+
+SWEEP_RECORD_PROJECT=
+SWEEP_RECORD_LANES=
+SWEEP_RECORD_RESURFACE=
+SWEEP_RECORD_GREEN_PRS=
+SWEEP_RECORD_STAMP=
+
+sweep_record_parse() {
+  local record=$1 extra=
+  SWEEP_RECORD_PROJECT=
+  SWEEP_RECORD_LANES=
+  SWEEP_RECORD_RESURFACE=
+  SWEEP_RECORD_GREEN_PRS=
+  SWEEP_RECORD_STAMP=
+  read -r SWEEP_RECORD_PROJECT SWEEP_RECORD_LANES SWEEP_RECORD_RESURFACE \
+    SWEEP_RECORD_GREEN_PRS SWEEP_RECORD_STAMP extra <<< "$record"
+  [ -z "$extra" ] || return 1
+  valid_project "$SWEEP_RECORD_PROJECT" || return 1
+  valid_number "$SWEEP_RECORD_LANES" || return 1
+  valid_number "$SWEEP_RECORD_RESURFACE" || return 1
+  valid_green_pr_policy "$SWEEP_RECORD_GREEN_PRS" || return 1
+  [[ "$SWEEP_RECORD_STAMP" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+}
 
 sweep_records() {
   [ -f "$SWEEPS" ] || return 0
@@ -122,8 +160,18 @@ sweep_record_of() {
   sweep_records | awk -v p="$project" '$1==p {print; exit}'
 }
 
-sweep_projects() {
-  sweep_records | awk '{print $1}'
+sweep_policy_of() {
+  local project=$1 records count
+  records=$(sweep_records | awk -v p="$project" '$1==p')
+  if [ -z "$records" ]; then
+    printf '%s\n' hold-green-prs
+    return 0
+  fi
+  count=$(printf '%s\n' "$records" | awk 'END {print NR}')
+  [ "$count" -eq 1 ] || return 1
+  sweep_record_parse "$records" || return 1
+  [ "$SWEEP_RECORD_PROJECT" = "$project" ] || return 1
+  printf '%s\n' "$SWEEP_RECORD_GREEN_PRS"
 }
 
 # Rewrite the whole file from a record list on stdin, atomically.
@@ -141,11 +189,12 @@ sweeps_write() {
 }
 
 sweeps_put() {
-  local project=$1 lanes=$2 resurface=$3 stamp
+  local project=$1 lanes=$2 resurface=$3 green_pr_policy=$4 stamp
   stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   {
     sweep_records | awk -v p="$project" '$1!=p'
-    printf '%s %s %s %s\n' "$project" "$lanes" "$resurface" "$stamp"
+    printf '%s %s %s %s %s\n' \
+      "$project" "$lanes" "$resurface" "$green_pr_policy" "$stamp"
   } | sort | sweeps_write
 }
 
@@ -162,11 +211,30 @@ poll_armed() {
   cs_custom_check_registered "$STATE" "$id"
 }
 
+poll_source_hash() {
+  if command -v shasum >/dev/null 2>&1; then
+    poll_source "$@" | shasum -a 256 | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    poll_source "$@" | sha256sum | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+poll_matches_record() {
+  local project=$1 lanes=$2 resurface=$3 green_pr_policy=$4 id expected_hash
+  id=$(sweep_id "$project")
+  poll_armed "$project" || return 1
+  expected_hash=$(poll_source_hash "$project" "$lanes" "$resurface" "$green_pr_policy" "$id") \
+    || return 1
+  [ "$expected_hash" = "$CS_CUSTOM_CHECK_HASH" ]
+}
+
 # Emit the poll source for a project. Only the project name, the lane cap, the
 # resurface interval, and this home's absolute paths are interpolated; the
 # logic below them is identical for every sweep.
 poll_source() {
-  local project=$1 lanes=$2 resurface=$3 id=$4
+  local project=$1 lanes=$2 resurface=$3 green_pr_policy=$4 id=$5
   cat <<EOF
 #!/usr/bin/env bash
 # GENERATED by cs-board-watch.sh for the '$project' board sweep.
@@ -183,6 +251,7 @@ board=$(shell_quote "$BOARD")
 seen=$(shell_quote "$STATE/$id.board-seen")
 lanes=$lanes
 resurface=$resurface
+green_pr_policy=$(shell_quote "$green_pr_policy")
 EOF
   cat <<'EOF'
 
@@ -248,14 +317,14 @@ tmp=$(mktemp "$seen.XXXXXX" 2>/dev/null) || exit 0
     && mv -f -- "$tmp" "$seen"
 } 2>/dev/null || { rm -f -- "$tmp" 2>/dev/null; exit 0; }
 
-printf '%s ready, %s inbox on the %s board (lane cap %s)\n' \
-  "$ready" "$inbox" "$project" "$lanes"
+printf '%s ready, %s inbox on the %s board (lane cap %s, %s)\n' \
+  "$ready" "$inbox" "$project" "$lanes" "$green_pr_policy"
 exit 0
 EOF
 }
 
 arm_poll() {
-  local project=$1 lanes=$2 resurface=$3 id check tmp
+  local project=$1 lanes=$2 resurface=$3 green_pr_policy=$4 id check tmp
   id=$(sweep_id "$project")
   cs_pr_task_id_valid "$id" || die "internal: '$id' is not a usable check id"
   [ -d "$STATE" ] && [ ! -L "$STATE" ] || die "state directory is unavailable"
@@ -265,7 +334,8 @@ arm_poll() {
   tmp=$(mktemp "$STATE/.cs-board-watch.XXXXXX") || die "cannot stage the sweep poll"
   CS_BW_TMP=$tmp
   trap bw_cleanup EXIT
-  poll_source "$project" "$lanes" "$resurface" "$id" > "$tmp" || die "cannot write the sweep poll"
+  poll_source "$project" "$lanes" "$resurface" "$green_pr_policy" "$id" > "$tmp" \
+    || die "cannot write the sweep poll"
   chmod 0700 "$tmp" || die "cannot set the sweep poll mode"
   mv -f -- "$tmp" "$check" || die "cannot publish the sweep poll"
   CS_BW_TMP=
@@ -289,25 +359,36 @@ retire_poll() {
 
 cmd_arm() {
   local project=$1 lanes=$DEFAULT_LANES resurface=$DEFAULT_RESURFACE
+  local green_pr_policy='' policy_explicit=0 existing_policy
   shift
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --lanes) [ "$#" -ge 2 ] || die "--lanes needs a value"; lanes=$2; shift 2 ;;
       --resurface) [ "$#" -ge 2 ] || die "--resurface needs a value"; resurface=$2; shift 2 ;;
-      *) die "unknown option '$1' (--lanes <n>, --resurface <secs>)" ;;
+      --release-green-prs) green_pr_policy=release-green-prs; policy_explicit=1; shift ;;
+      --hold-green-prs) green_pr_policy=hold-green-prs; policy_explicit=1; shift ;;
+      *) die "unknown option '$1' (--lanes <n>, --resurface <secs>, --release-green-prs, --hold-green-prs)" ;;
     esac
   done
   valid_project "$project" || die "invalid project name '$project'"
   valid_number "$lanes" || die "--lanes must be a positive integer, got '$lanes'"
   valid_number "$resurface" || die "--resurface must be a positive integer, got '$resurface'"
+  if [ "$policy_explicit" -eq 0 ]; then
+    existing_policy=$(sweep_policy_of "$project" 2>/dev/null || true)
+    case "$existing_policy" in
+      release-green-prs) green_pr_policy=release-green-prs ;;
+      *) green_pr_policy=hold-green-prs ;;
+    esac
+  fi
   # Fail closed on an unmapped board rather than arming a poll that can only
   # ever be silent. cs-board.sh owns the boards.md format, so it answers this.
   "$BOARD" mapped "$project" >/dev/null \
     || die "no board mapping for '$project' is usable (see any error above); add or fix its line in $CONFIG/boards.md"
 
-  sweeps_put "$project" "$lanes" "$resurface"
-  arm_poll "$project" "$lanes" "$resurface"
-  printf 'armed: %s board sweep (lane cap %s, resurface %ss)\n' "$project" "$lanes" "$resurface"
+  sweeps_put "$project" "$lanes" "$resurface" "$green_pr_policy"
+  arm_poll "$project" "$lanes" "$resurface" "$green_pr_policy"
+  printf 'armed: %s board sweep (lane cap %s, resurface %ss, %s)\n' \
+    "$project" "$lanes" "$resurface" "$green_pr_policy"
 }
 
 cmd_disarm() {
@@ -323,13 +404,27 @@ cmd_disarm() {
 }
 
 cmd_list() {
-  local found=0 project lanes resurface stamp state check id
-  while read -r project lanes resurface stamp; do
-    [ -n "$project" ] || continue
+  local found=0 record project lanes resurface green_pr_policy stamp state check id
+  while IFS= read -r record; do
+    [ -n "$record" ] || continue
+    if ! sweep_record_parse "$record"; then
+      printf 'UNUSABLE sweep record: %s\n' "$record"
+      found=1
+      continue
+    fi
+    project=$SWEEP_RECORD_PROJECT
+    lanes=$SWEEP_RECORD_LANES
+    resurface=$SWEEP_RECORD_RESURFACE
+    green_pr_policy=$SWEEP_RECORD_GREEN_PRS
+    stamp=$SWEEP_RECORD_STAMP
     found=1
-    if poll_armed "$project"; then state=armed; else state='NOT ARMED (run sync)'; fi
-    printf '%s lanes=%s resurface=%ss armed=%s poll=%s\n' \
-      "$project" "$lanes" "$resurface" "$stamp" "$state"
+    if poll_matches_record "$project" "$lanes" "$resurface" "$green_pr_policy"; then
+      state=armed
+    else
+      state='NOT ARMED (run sync)'
+    fi
+    printf '%s lanes=%s resurface=%ss green_prs=%s armed=%s poll=%s\n' \
+      "$project" "$lanes" "$resurface" "$green_pr_policy" "$stamp" "$state"
   done <<EOF
 $(sweep_records)
 EOF
@@ -347,7 +442,7 @@ EOF
 }
 
 cmd_sync() {
-  local changed=0 project lanes resurface stamp check id
+  local changed=0 record project lanes resurface green_pr_policy stamp check id
   # sync runs inside the session-start digest, where a missing state directory
   # is a bootstrap problem with its own owner. Report and step aside rather than
   # failing the digest.
@@ -355,17 +450,22 @@ cmd_sync() {
     printf 'cs-board-watch: no usable state directory at %s; sweeps left unconverged\n' "$STATE" >&2
     return 0
   fi
-  while read -r project lanes resurface stamp; do
-    [ -n "$project" ] || continue
-    : "$stamp"
-    if ! valid_project "$project" || ! valid_number "$lanes" || ! valid_number "$resurface"; then
-      printf 'cs-board-watch: unusable sweep record for "%s" in %s; fix or remove that line\n' \
-        "$project" "$SWEEPS" >&2
+  while IFS= read -r record; do
+    [ -n "$record" ] || continue
+    if ! sweep_record_parse "$record"; then
+      printf 'cs-board-watch: unusable sweep record "%s" in %s; re-arm or remove that line\n' \
+        "$record" "$SWEEPS" >&2
       changed=1
       continue
     fi
-    poll_armed "$project" && continue
-    if arm_poll "$project" "$lanes" "$resurface"; then
+    project=$SWEEP_RECORD_PROJECT
+    lanes=$SWEEP_RECORD_LANES
+    resurface=$SWEEP_RECORD_RESURFACE
+    green_pr_policy=$SWEEP_RECORD_GREEN_PRS
+    stamp=$SWEEP_RECORD_STAMP
+    : "$stamp"
+    poll_matches_record "$project" "$lanes" "$resurface" "$green_pr_policy" && continue
+    if arm_poll "$project" "$lanes" "$resurface" "$green_pr_policy"; then
       printf 're-armed the %s board sweep poll (record present, poll missing)\n' "$project"
       changed=1
     fi
@@ -386,11 +486,43 @@ EOF
   [ "$changed" -eq 1 ] || return 0
 }
 
+cmd_policy() {
+  local project=$1
+  valid_project "$project" || die "invalid project name '$project'"
+  sweep_policy_of "$project" || die "sweep record for '$project' is missing, duplicated, or malformed"
+}
+
+cmd_policy_path() {
+  local target=$1 record project_dir project_physical matched_policy='' matches=0
+  [ -d "$target" ] || { printf '%s\n' hold-green-prs; return 0; }
+  target=$(cd -- "$target" && pwd -P) || { printf '%s\n' hold-green-prs; return 0; }
+  while IFS= read -r record; do
+    [ -n "$record" ] || continue
+    sweep_record_parse "$record" || continue
+    project_dir="$CS_HOME/projects/$SWEEP_RECORD_PROJECT"
+    [ -d "$project_dir" ] || continue
+    project_physical=$(cd -- "$project_dir" && pwd -P) || continue
+    [ "$project_physical" = "$target" ] || continue
+    matches=$((matches + 1))
+    [ "$matches" -eq 1 ] || die "multiple sweep records resolve to project path '$target'"
+    matched_policy=$SWEEP_RECORD_GREEN_PRS
+  done <<EOF
+$(sweep_records)
+EOF
+  if [ "$matches" -eq 1 ]; then
+    printf '%s\n' "$matched_policy"
+  else
+    printf '%s\n' hold-green-prs
+  fi
+}
+
 case "${1:-}" in
   -h|--help|'') usage; exit 0 ;;
-  arm)     [ "$#" -ge 2 ] || die "usage: cs-board-watch.sh arm <project> [--lanes <n>] [--resurface <secs>]"; shift; cmd_arm "$@" ;;
+  arm)     [ "$#" -ge 2 ] || die "usage: cs-board-watch.sh arm <project> [--lanes <n>] [--resurface <secs>] [--release-green-prs|--hold-green-prs]"; shift; cmd_arm "$@" ;;
   disarm)  [ "$#" -ge 2 ] || die "usage: cs-board-watch.sh disarm <project>"; cmd_disarm "$2" ;;
   list)    cmd_list ;;
   sync)    cmd_sync ;;
-  *) die "unknown command '$1' (arm|disarm|list|sync)" ;;
+  policy)  [ "$#" -eq 2 ] || die "usage: cs-board-watch.sh policy <project>"; cmd_policy "$2" ;;
+  policy-path) [ "$#" -eq 2 ] || die "usage: cs-board-watch.sh policy-path <path>"; cmd_policy_path "$2" ;;
+  *) die "unknown command '$1' (arm|disarm|list|sync|policy|policy-path)" ;;
 esac

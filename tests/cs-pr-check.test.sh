@@ -311,7 +311,7 @@ test_valid_recording_and_artifacts() {
   cs_pr_poll_artifacts_valid "$dir/home/state" task-a "$POLL" \
     || fail "published poll provenance or metadata binding failed the real watcher validation"
   sidecar=$(cat "$dir/home/state/task-a.pr-poll")
-  [ "$sidecar" = $'github\nhttps://github.com/my-org/repo_name.with-dots/pull/37\ngithub.com\nmy-org/repo_name.with-dots\n37' ] \
+  [ "$sidecar" = $'github\nhttps://github.com/my-org/repo_name.with-dots/pull/37\ngithub.com\nmy-org/repo_name.with-dots\n37\n0123456789abcdef0123456789abcdef01234567\nhold' ] \
     || fail "published sidecar bytes were not exact"
   [ -s "$dir/guard.log" ] || fail "arming did not run the guard"
 
@@ -330,6 +330,37 @@ test_valid_recording_and_artifacts() {
   assert_no_grep 'pr_head=' "$dir/home/state/task-a.meta" "multiline PR head reached metadata"
   assert_no_grep 'pane=unexpected' "$dir/home/state/task-a.meta" "newline metadata key was injected"
   pass "valid direct flow records exact metadata, republishes idempotently, and rejects multiline head data"
+}
+
+test_release_policy_records_reviewed_green_attestation() {
+  local dir expected sidecar project
+  dir=$(make_case release-attestation)
+  project="$dir/home/projects/proj"
+  mkdir -p "$project" "$dir/home/data"
+  expected=0123456789abcdef0123456789abcdef01234567
+  cs_write_meta "$dir/home/state/task-a.meta" \
+    "pane=cs-task-a" \
+    "worktree=$dir/wt" \
+    "project=$project" \
+    "kind=ship" \
+    "mode=no-mistakes" \
+    "issue=42"
+  printf '%s\n%s\n' \
+    '# Active board sweeps. Owned by bin/cs-board-watch.sh; do not hand-edit.' \
+    'proj 5 1800 release-green-prs 2026-08-08T00:00:00Z' \
+    > "$dir/home/data/sweeps.md"
+
+  CS_TEST_GH_HEAD=$expected run_check_entry "$dir" task-a https://github.com/o/r/pull/42 \
+    > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "release-attestation: cs-pr-check failed: $(cat "$dir/stderr")"
+  assert_grep 'capacity=release-reviewed-green' "$dir/stdout" \
+    "release-attestation: arming output did not report the attestation"
+  sidecar=$(cat "$dir/home/state/task-a.pr-poll")
+  [ "$sidecar" = $'github\nhttps://github.com/o/r/pull/42\ngithub.com\no/r\n42\n0123456789abcdef0123456789abcdef01234567\nrelease-reviewed-green' ] \
+    || fail "release-attestation: authenticated sidecar did not carry exact head and release token"
+  cs_pr_poll_artifacts_valid "$dir/home/state" task-a "$POLL" \
+    || fail "release-attestation: real artifact validator rejected the release record"
+  pass "an armed board policy records one authenticated reviewed-green release attestation"
 }
 
 test_missing_meta_refuses_before_arming() {
@@ -378,8 +409,10 @@ SH
 make_poll_fixture() {
   local dir=$1
   cp "$POLL" "$dir/home/state/task-a.check.sh"
-  printf '%s\n%s\n%s\n%s\n%s\n' \
-    github https://github.com/o/r/pull/1 github.com o/r 1 > "$dir/home/state/task-a.pr-poll"
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+    github https://github.com/o/r/pull/1 github.com o/r 1 \
+    0123456789abcdef0123456789abcdef01234567 hold \
+    > "$dir/home/state/task-a.pr-poll"
   chmod 0600 "$dir/home/state/task-a.check.sh" "$dir/home/state/task-a.pr-poll"
 }
 
@@ -412,15 +445,21 @@ test_static_poll_contract() {
   out=$(run_poll "$dir")
   [ -z "$out" ] || fail "static poll emitted with missing sidecar"
   mv "$dir/home/state/task-a.pr-poll.missing" "$dir/home/state/task-a.pr-poll"
-  printf '%s\n%s\n%s\n%s\n%s\n%s\n' github https://github.com/o/r/pull/1 github.com o/r 1 extra \
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+    github https://github.com/o/r/pull/1 github.com o/r 1 \
+    0123456789abcdef0123456789abcdef01234567 hold extra \
     > "$dir/home/state/task-a.pr-poll"
   out=$(CS_TEST_GH_STATE=MERGED run_poll "$dir")
   [ -z "$out" ] || fail "static poll emitted with multiline sidecar"
-  printf '%s\n%s\n%s\n%s\n%s\n' github https://github.com/o/r/pull/1x github.com o/r 1x \
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+    github https://github.com/o/r/pull/1x github.com o/r 1x \
+    0123456789abcdef0123456789abcdef01234567 hold \
     > "$dir/home/state/task-a.pr-poll"
   out=$(CS_TEST_GH_STATE=MERGED run_poll "$dir")
   [ -z "$out" ] || fail "static poll emitted with malformed numeric data"
-  printf '%s\n%s\n%s\n%s\n%s\n' github https://github.com/other/r/pull/1 github.com o/r 1 \
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+    github https://github.com/other/r/pull/1 github.com o/r 1 \
+    0123456789abcdef0123456789abcdef01234567 hold \
     > "$dir/home/state/task-a.pr-poll"
   out=$(CS_TEST_GH_STATE=MERGED run_poll "$dir")
   [ -z "$out" ] || fail "static poll emitted for a sidecar whose URL does not reconstruct from its parts"
@@ -431,8 +470,9 @@ test_static_poll_gitlab_sidecar_stays_silent() {
   local dir out
   dir=$(make_case poll-gitlab-silent)
   cp "$POLL" "$dir/home/state/task-a.check.sh"
-  printf '%s\n%s\n%s\n%s\n%s\n' \
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
     gitlab https://gitlab.com/g/p/-/merge_requests/1 gitlab.com g/p 1 \
+    0123456789abcdef0123456789abcdef01234567 hold \
     > "$dir/home/state/task-a.pr-poll"
   chmod 0600 "$dir/home/state/task-a.check.sh" "$dir/home/state/task-a.pr-poll"
   # Consigliere drops GitLab merge-watch: a hand-crafted gitlab sidecar must
@@ -450,6 +490,7 @@ test_parser_matrix
 test_invalid_entrypoints_have_zero_side_effects
 test_gitlab_url_refused_loudly_with_zero_side_effects
 test_valid_recording_and_artifacts
+test_release_policy_records_reviewed_green_attestation
 test_missing_meta_refuses_before_arming
 test_atomic_interruption_leaves_no_partial_artifact
 test_static_poll_contract

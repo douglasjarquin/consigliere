@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Static watcher program for a validated PR poll sidecar.
+# Static watcher program for a validated PR poll sidecar. Direct sidecar reads
+# consume and validate its exact-head and capacity-attestation fields but never
+# interpret them; bin/cs-board-capacity.sh is their only scheduling consumer.
 # It emits exactly one merged line for a merged GitHub PR and stays silent
 # otherwise, including on every error, so a failed lookup can never be read as
 # a merge. The identity is data in the sidecar and is never interpolated into
@@ -32,10 +34,18 @@ elif [ "$#" -eq 0 ]; then
   IFS= read -r host <&3 || exit 0
   IFS= read -r path <&3 || exit 0
   IFS= read -r number <&3 || exit 0
+  IFS= read -r head <&3 || exit 0
+  IFS= read -r capacity <&3 || exit 0
   if IFS= read -r _extra <&3; then
     exit 0
   fi
   exec 3<&-
+  [[ -z "$head" || "$head" =~ ^[0-9a-f]{40}$|^[0-9a-f]{64}$ ]] || exit 0
+  case "$capacity" in
+    hold) ;;
+    release-reviewed-green) [ -n "$head" ] || exit 0 ;;
+    *) exit 0 ;;
+  esac
 else
   exit 0
 fi
