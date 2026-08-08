@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Behavior (portable): cs-lint.sh lints only the canonical-set files a branch
 # changed, and still lints the FULL canonical set wherever a local diff cannot
-# stand in for coverage - in CI, on the default branch, and on a branch with no
-# merge-base. The selection is a local-speed optimization, so the cases that
-# prove it cannot weaken the gate matter more than the happy path.
+# stand in for coverage - in CI, on the default branch, on a branch with no
+# merge-base, and in a checkout whose git toplevel is some outer repository. The
+# selection is a local-speed optimization, so the cases that prove it cannot
+# weaken the gate matter more than the happy path.
 #
 # The fixture is a throwaway git repo holding a copy of cs-lint.sh (the script
 # resolves its root from its own location) and a fake `shellcheck` that records
@@ -191,12 +192,52 @@ assert_contains "$out" 'no merge-base with origin/main' 'a missing base ref name
 git -C "$REPO" update-ref refs/remotes/origin/main main
 pass 'a branch with no merge-base falls back to the full canonical set'
 
+# --- a checkout nested inside another repo falls back to the full set ----------
+#
+# git names diff paths from the repository toplevel while the canonical globs are
+# relative to the script's own root, so a checkout sitting inside an outer repo
+# has no shared path base and the intersection would come back empty. That must
+# lint everything, never nothing.
+
+NESTED="$TMP/nested"
+mkdir -p "$NESTED/tools/cs/bin" "$NESTED/tools/cs/tests"
+git -C "$NESTED" init -q
+# Any branch but the default one, so the toplevel reason is what this case proves.
+git -C "$NESTED" symbolic-ref HEAD refs/heads/nested-feature
+cp "$LINT" "$NESTED/tools/cs/bin/cs-lint.sh"
+chmod +x "$NESTED/tools/cs/bin/cs-lint.sh"
+printf '#!/usr/bin/env bash\ntrue\n' >"$NESTED/tools/cs/bin/kept.sh"
+printf '#!/usr/bin/env bash\ntrue\n' >"$NESTED/tools/cs/tests/kept.test.sh"
+git -C "$NESTED" add -A
+git -C "$NESTED" commit -qm initial
+# A merge-base and a real canonical-set edit both exist, so an empty selection
+# here could only come from the mismatched path bases.
+git -C "$NESTED" update-ref refs/remotes/origin/main HEAD
+printf 'false\n' >>"$NESTED/tools/cs/bin/kept.sh"
+
+rm -f "$ARGS"
+out=$(
+  cd "$NESTED/tools/cs" || exit 1
+  PATH="$FAKEBIN:$PATH" env -u CI -u GITHUB_ACTIONS \
+    ${COLLATE_LOCALE:+LC_ALL="$COLLATE_LOCALE"} \
+    bin/cs-lint.sh 2>&1
+)
+nested_full=$(
+  cd "$NESTED/tools/cs" || exit 1
+  printf '%s\n' bin/*.sh tests/*.sh | LC_ALL=C sort | tr '\n' ' '
+)
+[ "$(linted)" = "$nested_full" ] \
+  || fail "a checkout nested inside another repo must lint the full set, got: $(linted)"
+assert_contains "$out" 'the repository toplevel is not' 'the nested-checkout run names its reason'
+pass 'a checkout whose git toplevel is an outer repository lints the full canonical set'
+
 # --- explicit paths bypass the selection entirely -----------------------------
 
 out=$(run_lint bin/kept.sh)
 [ "$(linted)" = 'bin/kept.sh ' ] \
   || fail "explicit paths must lint exactly what was named, got: $(linted)"
-assert_not_contains "$out" 'changed since' 'an explicit-path run does not report a selection'
+assert_not_contains "$out" 'sourced dependency file(s)' \
+  'an explicit-path run does not report a selection'
 out=$(run_lint CI=true bin/kept.sh)
 [ "$(linted)" = 'bin/kept.sh ' ] \
   || fail "explicit paths must bypass the CI full-set path too, got: $(linted)"

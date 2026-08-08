@@ -32,15 +32,16 @@
 # those files source ride along, so a narrowed run reports exactly what a
 # full-set run reports.
 # CI ALWAYS LINTS THE FULL CANONICAL SET, and so does the default branch, and so
-# does any branch with no merge-base: coverage never depends on a local diff.
-# The selection is a local-speed optimization only, never a weaker gate.
+# does any run whose change set cannot be determined: coverage never depends on
+# a local diff. The selection is a local-speed optimization only, never a weaker
+# gate.
 #
 # Usage:
 #   cs-lint.sh                    lint the canonical-set files changed since the
 #                                  merge-base with origin/main, including
 #                                  uncommitted edits; the full canonical set in
-#                                  CI, on the default branch, or with no
-#                                  merge-base
+#                                  CI, on the default branch, or whenever the
+#                                  change set cannot be determined
 #   cs-lint.sh <path>...          lint only the given paths with the same config,
 #                                  bypassing the change selection entirely
 #                                  (developer convenience; the gates never pass args)
@@ -101,23 +102,30 @@ canonical=(bin/*.sh tests/*.sh)
 
 # Decide whether this run must lint the whole canonical set. Each reason is a
 # case where a local diff cannot stand in for full coverage: CI is the gate of
-# record, the default branch has no branch diff to speak of, and a missing
-# merge-base means the change set is unknown.
+# record, the default branch has no branch diff to speak of, a repository
+# toplevel other than this directory puts git's paths on a different base than
+# the canonical globs, and a missing merge-base means the change set is unknown.
+# An undeterminable change set always falls back to the full set, never to
+# nothing.
 full_reason=
 if [ "${GITHUB_ACTIONS:-}" = true ] || [ "${CI:-}" = true ]; then
   full_reason=CI
 elif [ "$(git branch --show-current 2>/dev/null || true)" = "$DEFAULT_BRANCH" ]; then
   full_reason="on the default branch $DEFAULT_BRANCH"
+elif ! toplevel=$(git rev-parse --show-toplevel 2>/dev/null) ||
+  [ "$(cd "$toplevel" 2>/dev/null && pwd -P || true)" != "$(pwd -P)" ]; then
+  # `git diff --name-only` names paths from the repository toplevel while the
+  # canonical globs are relative to this directory, so the two share a base only
+  # when they are the same directory - a checkout nested inside another repo
+  # would otherwise intersect to nothing and silently lint nothing. Compared
+  # physically, because a symlinked component (macOS /tmp -> /private/tmp) is
+  # one directory to git and two different strings to the shell.
+  full_reason="the repository toplevel is not $ROOT"
 else
   # Plain local git only: no fetch, no remote call. An unknown BASE_REF, a
-  # shallow clone, an unrelated history, or no repo at all leaves this empty.
+  # shallow clone, or an unrelated history leaves this empty.
   merge_base=$(git merge-base HEAD "$BASE_REF" 2>/dev/null || true)
   [ -n "$merge_base" ] || full_reason="no merge-base with $BASE_REF"
-fi
-
-if [ -n "$full_reason" ]; then
-  printf 'cs-lint.sh: linting the full canonical set (%s)\n' "$full_reason" >&2
-  exec shellcheck --norc "${canonical[@]}"
 fi
 
 # Every sort and comm below runs under LC_ALL=C. `comm` compares in the ambient
@@ -129,13 +137,23 @@ fi
 # The branch's changed files: everything that differs from the merge-base in the
 # working tree (committed, staged, and unstaged alike), plus untracked files, so
 # a brand-new script is linted before it is ever committed. Deletions are
-# dropped, since ShellCheck cannot read a file that is gone.
-changed=$(
-  {
-    git diff --name-only --diff-filter=d "$merge_base" --
-    git ls-files --others --exclude-standard --
-  } | LC_ALL=C sort -u
-)
+# dropped, since ShellCheck cannot read a file that is gone. Each query's exit
+# status is checked on its own, because a pipeline into `sort` would report
+# `sort`'s success and turn a failed query into an empty change set.
+changed=
+if [ -z "$full_reason" ]; then
+  if tracked_changed=$(git diff --name-only --diff-filter=d "$merge_base" --) &&
+    untracked=$(git ls-files --others --exclude-standard --); then
+    changed=$(printf '%s\n%s\n' "$tracked_changed" "$untracked" | LC_ALL=C sort -u)
+  else
+    full_reason="the change set could not be determined"
+  fi
+fi
+
+if [ -n "$full_reason" ]; then
+  printf 'cs-lint.sh: linting the full canonical set (%s)\n' "$full_reason" >&2
+  exec shellcheck --norc "${canonical[@]}"
+fi
 
 # Intersect with the canonical set, so the selection can only ever be a subset of
 # what a full run lints.
