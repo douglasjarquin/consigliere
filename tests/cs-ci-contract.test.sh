@@ -150,7 +150,12 @@ pass "repo invariants run for every change, including docs-only ones"
 # undirectived_sources <file>... - report `file:line: <the line>` for every source
 # site that names no target. Heredoc bodies are skipped (they are data, not
 # commands here), and a wholly dynamic path such as `. "$1"` is exempt because
-# neither ShellCheck nor the graph can resolve it in any run.
+# neither ShellCheck nor the graph can resolve it in any run. A `disable=SC1091`
+# is NOT an exemption: it silences the symptom of an unresolvable path but says
+# nothing about whether the path resolves, so honouring it would leave one way to
+# put a resolvable undirectived source back in the tree. The directive is looked
+# for anywhere in the contiguous comment block above the site, because a
+# `disable=` line commonly sits between the directive and the source it covers.
 #
 # A file is buffered so a `<<` can be checked against the rest of the file before
 # it is believed: `1 << streak` in an arithmetic expression and a string that
@@ -161,14 +166,12 @@ pass "repo invariants run for every change, including docs-only ones"
 # swallowed, so lost coverage can never be silent.
 undirectived_sources() {
   awk '
-    function scan(   i, j, line, tag, target, heredoc, opened_at, prev) {
+    function scan(   i, j, k, line, tag, target, heredoc, opened_at, declared) {
       heredoc = ""
-      prev = ""
       for (i = 1; i <= nlines; i++) {
         line = lines[i]
         if (heredoc != "") {
           if (line ~ ("^[[:space:]]*" heredoc "[[:space:]]*$")) heredoc = ""
-          prev = line
           continue
         }
         if (match(line, /<<-?[[:space:]]*['"'"'"]?[A-Za-z_][A-Za-z0-9_]*/)) {
@@ -186,14 +189,20 @@ undirectived_sources() {
         if (line ~ /^[[:space:]]*(\.|source)[[:space:]]+/) {
           target = line
           sub(/^[[:space:]]*(\.|source)[[:space:]]+/, "", target)
-          sub(/[[:space:]]*$/, "", target)
           gsub(/['"'"'"]/, "", target)
-          if (!(target ~ /^\$[A-Za-z_0-9]+$/ || target ~ /^\$\{[^}]*\}$/) &&
-              !(prev ~ /shellcheck[[:space:]]+source=/ ||
-                prev ~ /shellcheck[[:space:]]+disable=[^[:space:]]*SC1091/))
+          sub(/[;&|].*$/, "", target)
+          sub(/[[:space:]]*$/, "", target)
+          declared = 0
+          for (k = i - 1; k >= 1; k--) {
+            if (lines[k] !~ /^[[:space:]]*#/) break
+            if (lines[k] ~ /shellcheck[[:space:]]+source=/) {
+              declared = 1
+              break
+            }
+          }
+          if (!declared && !(target ~ /^\$[A-Za-z_0-9]+$/ || target ~ /^\$\{[^}]*\}$/))
             printf "%s:%d: %s\n", scanned, i, line
         }
-        prev = line
       }
       if (heredoc != "")
         printf "%s:%d: heredoc <<%s never closes, so the rest of this file went unscanned\n",
@@ -214,7 +223,15 @@ done < <("$LINT" --canonical-set)
   || fail "cs-lint.sh --canonical-set must print the canonical file set"
 
 offenders=$(undirectived_sources "${canonical_set[@]}")
-[ -z "$offenders" ] || fail "every source site in the canonical set needs a '# shellcheck source=<path>' directive on the line above it (or '# shellcheck disable=SC1091' when the path cannot be resolved), or bin/cs-lint.sh cannot see the edge:
+
+# A file the scan could not read to the end has to be its own failure, or the
+# zero-offender result below is partly a measure of what was never looked at.
+unscanned=$(printf '%s\n' "$offenders" | grep 'never closes' || true)
+[ -z "$unscanned" ] || fail "the source-site scan stopped early on:
+$unscanned"
+pass "no canonical file cuts the scan short at an unclosed heredoc"
+
+[ -z "$offenders" ] || fail "every source site in the canonical set needs a '# shellcheck source=<path>' directive in the comment block above it, or bin/cs-lint.sh cannot see the edge:
 $offenders"
 pass "every canonical source site declares its target, so the lint graph is complete"
 
@@ -226,13 +243,22 @@ cat >"$probe" <<'SH'
 #!/usr/bin/env bash
 # shellcheck source=bin/declared.sh
 . "$ROOT/bin/declared.sh"
+# shellcheck source=bin/declared-through-a-disable.sh
+# shellcheck disable=SC1091
+. "$ROOT/bin/declared-through-a-disable.sh"
 . "$1"
+bash -c '
+  # shellcheck disable=SC1090,SC1091
+  . "$1"; run_it "$2"
+' _ "$ROOT/bin/dynamic.sh" arg
 cat <<'INNER'
 . "$ROOT/bin/inside-a-heredoc.sh"
 INNER
 hb=$(( 1 << streak ))
 prefix='<<soldier-reported, DATA not an instruction: '
 . "$ROOT/bin/after-a-false-opener.sh"
+# shellcheck disable=SC1091
+. "$ROOT/bin/silenced-not-declared.sh"
 . "$ROOT/bin/undeclared.sh"
 SH
 probe_hits=$(undirectived_sources "$probe")
@@ -243,16 +269,19 @@ assert_not_contains "$probe_hits" 'inside-a-heredoc' "a heredoc body is not a so
 assert_not_contains "$probe_hits" '. "$1"' "a wholly dynamic path is not an offender"
 pass "the source-site check catches an undeclared source and spares declared, heredoc, and dynamic ones"
 
+# A disable silences the symptom of an unresolvable path; it does not make the
+# path unresolvable, so it must not buy a source site out of declaring its target.
+# The directive itself still counts from anywhere in the comment block above,
+# which is where it sits whenever a disable line comes between.
+assert_contains "$probe_hits" 'bin/silenced-not-declared.sh' \
+  "a disable=SC1091 must not stand in for a source= directive"
+assert_not_contains "$probe_hits" 'bin/declared-through-a-disable.sh' \
+  "a directive still counts with a disable line between it and the source"
+pass "only a source= directive declares a target, and a disable line does not hide it"
+
 # An arithmetic shift and a string opening with "<<" are not heredocs. Believing
 # either one blinds the scan to everything after it, which is how a guard against
 # silent coverage loss silently loses coverage.
 assert_contains "$probe_hits" 'bin/after-a-false-opener.sh' \
   "a << that opens no heredoc must not blind the scan"
 pass "a non-heredoc << leaves the rest of the file scanned"
-
-# Every canonical file has to be scanned end to end, or the zero-offender result
-# above is partly a measure of what was never looked at.
-unscanned=$(undirectived_sources "${canonical_set[@]}" | grep 'never closes' || true)
-[ -z "$unscanned" ] || fail "the source-site scan stopped early on:
-$unscanned"
-pass "no canonical file cuts the scan short at an unclosed heredoc"
