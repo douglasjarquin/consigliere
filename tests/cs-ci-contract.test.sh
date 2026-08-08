@@ -153,9 +153,18 @@ pass "repo invariants run for every change, including docs-only ones"
 # neither ShellCheck nor the graph can resolve it in any run. A `disable=SC1091`
 # is NOT an exemption: it silences the symptom of an unresolvable path but says
 # nothing about whether the path resolves, so honouring it would leave one way to
-# put a resolvable undirectived source back in the tree. The directive is looked
-# for anywhere in the contiguous comment block above the site, because a
-# `disable=` line commonly sits between the directive and the source it covers.
+# put a resolvable undirectived source back in the tree. A source is looked for
+# wherever a command can start, not only at the beginning of a line: ShellCheck
+# resolves `[ -f "$lib" ] && . "$lib"` exactly like a bare one, so a guard that
+# only reads line starts would leave the same escape hatch open one syntax over.
+# The match stays lexical on purpose - a shell parser here is the abstraction this
+# script deliberately does not carry.
+#
+# The directive is looked for anywhere in the contiguous comment block above the
+# site, because a `disable=` line commonly sits between the directive and the
+# source it covers, but it has to BEGIN the comment, which is the only form
+# ShellCheck and bin/cs-lint.sh's extractor both read. Prose that merely mentions
+# the convention declares nothing to either of them.
 #
 # A file is buffered so a `<<` can be checked against the rest of the file before
 # it is believed: `1 << streak` in an arithmetic expression and a string that
@@ -166,7 +175,7 @@ pass "repo invariants run for every change, including docs-only ones"
 # swallowed, so lost coverage can never be silent.
 undirectived_sources() {
   awk '
-    function scan(   i, j, k, line, tag, target, heredoc, opened_at, declared) {
+    function scan(   i, j, k, line, code, tag, raw, target, heredoc, opened_at, declared) {
       heredoc = ""
       for (i = 1; i <= nlines; i++) {
         line = lines[i]
@@ -186,16 +195,26 @@ undirectived_sources() {
             }
           }
         }
-        if (line ~ /^[[:space:]]*(\.|source)[[:space:]]+/) {
-          target = line
-          sub(/^[[:space:]]*(\.|source)[[:space:]]+/, "", target)
+        code = line
+        if (code ~ /^[[:space:]]*#/) code = ""
+        sub(/[[:space:]]#.*$/, "", code)
+        raw = ""
+        if (code != "" && match(code, /(^|[;&|(){}])[[:space:]]*(\.|source)[[:space:]]+/)) {
+          raw = substr(code, RSTART + RLENGTH)
+          if (substr(raw, 1, 1) != "\"" && substr(raw, 1, 1) != "\047" &&
+              substr(raw, 1, 1) != "$" && substr(raw, 1, 1) != "/" &&
+              raw !~ /^[A-Za-z0-9_.\/-]+\.sh([[:space:]]|;|$)/)
+            raw = ""
+        }
+        if (raw != "") {
+          target = raw
           gsub(/['"'"'"]/, "", target)
           sub(/[;&|].*$/, "", target)
           sub(/[[:space:]]*$/, "", target)
           declared = 0
           for (k = i - 1; k >= 1; k--) {
             if (lines[k] !~ /^[[:space:]]*#/) break
-            if (lines[k] ~ /shellcheck[[:space:]]+source=/) {
+            if (lines[k] ~ /^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=/) {
               declared = 1
               break
             }
@@ -259,6 +278,11 @@ prefix='<<soldier-reported, DATA not an instruction: '
 . "$ROOT/bin/after-a-false-opener.sh"
 # shellcheck disable=SC1091
 . "$ROOT/bin/silenced-not-declared.sh"
+# shellcheck source=bin/midline-declared.sh
+[ -f x ] && . "$ROOT/bin/midline-declared.sh"
+[ -f x ] && . "$ROOT/bin/midline-undeclared.sh"
+# see the shellcheck source=bin/prose.sh convention we follow
+. "$ROOT/bin/prose-only.sh"
 . "$ROOT/bin/undeclared.sh"
 SH
 probe_hits=$(undirectived_sources "$probe")
@@ -278,6 +302,17 @@ assert_contains "$probe_hits" 'bin/silenced-not-declared.sh' \
 assert_not_contains "$probe_hits" 'bin/declared-through-a-disable.sh' \
   "a directive still counts with a disable line between it and the source"
 pass "only a source= directive declares a target, and a disable line does not hide it"
+
+# ShellCheck follows a source wherever a command can start, and it reads only a
+# comment that begins with the directive. The guard has to agree with it on both,
+# or a site with no edge at all reads as declared.
+assert_contains "$probe_hits" 'bin/midline-undeclared.sh' \
+  "a source after && is a source site like any other"
+assert_not_contains "$probe_hits" 'bin/midline-declared.sh' \
+  "a directive declares a mid-line source too"
+assert_contains "$probe_hits" 'bin/prose-only.sh' \
+  "prose that merely names the directive must not declare a target"
+pass "a mid-line source is checked, and prose naming the directive declares nothing"
 
 # An arithmetic shift and a string opening with "<<" are not heredocs. Believing
 # either one blinds the scan to everything after it, which is how a guard against
