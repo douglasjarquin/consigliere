@@ -147,21 +147,29 @@ delivery_budget() {
   printf '%s' "$budget"
 }
 
-# Is a `running` record a stage that is genuinely still in flight? Two
-# independent proofs are required, because either one alone can lie: a recorded
-# pid can be reused by an unrelated process, and a worker killed with its process
-# group (which is what a truncated digest does) leaves the record behind
-# untouched. A record that outlives the stage's own aggregate bound is therefore
-# treated as abandoned no matter what its pid says, which keeps "in progress"
-# from becoming a permanent state.
+# Is a `running` record a stage that is genuinely still in flight? Liveness has
+# to be PROVEN, never assumed from a record's mere existence, because every way
+# this record can be wrong reads as "still running" by default:
+#   - The literal 0 that cmd_start writes to reserve a generation before the
+#     launch is not a worker. `kill -0 0` signals the caller's OWN process group
+#     and so always succeeds, which would turn a reservation torn between the
+#     two status writes into a phantom worker that every later session adopts.
+#   - A recorded pid can be reused by an unrelated process, and a worker killed
+#     with its process group (which is what a truncated digest does) leaves the
+#     record behind untouched. So a record that outlives the stage's own
+#     aggregate bound is abandoned no matter what its pid says.
+#   - A start time that cannot be read cannot be shown to be inside that bound,
+#     so it fails the bound rather than skipping it. Believing it instead would
+#     let one corrupt record hold "in progress" forever, which is precisely the
+#     permanent state the bound exists to prevent.
 worker_alive() {
   local pid started age
   pid=$(status_get pid)
-  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  case "$pid" in ''|0|*[!0-9]*) return 1 ;; esac
   kill -0 "$pid" 2>/dev/null || return 1
   started=$(status_get started)
   age=$(age_of "$started")
-  case "$age" in ''|*[!0-9]*) return 0 ;; esac
+  case "$age" in ''|*[!0-9]*) return 1 ;; esac
   [ "$age" -le "$(( $(stage_budget) + 30 ))" ]
 }
 

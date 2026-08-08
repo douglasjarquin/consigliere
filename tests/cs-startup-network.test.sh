@@ -14,10 +14,11 @@
 #     read-only probe rather than sweeping on someone else's authority;
 #   - while the checks are still running the digest names EXACTLY what is not
 #     yet confirmed and never prints anything that reads as passed.
-# The closing case drives the real bin/cs-session-start.sh against a slow
-# network dependency end to end: the digest completes with the stage still
-# running, keeps its truncation-safe section order, and the result that lands
-# afterwards still reaches the queue.
+# The two closing cases drive the real bin/cs-session-start.sh end to end
+# against a hanging network dependency, one concern each so neither has to win a
+# race: the digest completes with the stage still running and keeps its
+# truncation-safe section order, and the result that lands after the digest is
+# out still reaches the queue.
 #
 # Hermetic: gh, herdr, and the axi family are stubbed, and the one project
 # clone is deliberately not a git repo, so fleet sync reports it and returns
@@ -52,15 +53,22 @@ cs_git_identity
 # A worker detached by a case below outlives the command that launched it by
 # design, so the suite reaps its own strays instead of leaving them running.
 STRAY_HOMES=()
+# A detached worker is its own process group leader, so the group is what has to
+# be signalled: killing the worker alone would strand the network call it is
+# blocked on.
+stop_worker() {  # <home>
+  local home=$1 pid
+  pid=$(sed -n 's/^pid=//p' "$home/state/.startup-network.status" 2>/dev/null | tail -1)
+  case "$pid" in
+    ''|*[!0-9]*|0) return 0 ;;
+  esac
+  kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+}
 cleanup_workers() {
-  local home pid
+  local home
   for home in "${STRAY_HOMES[@]:-}"; do
     [ -n "$home" ] || continue
-    pid=$(sed -n 's/^pid=//p' "$home/state/.startup-network.status" 2>/dev/null | tail -1)
-    case "$pid" in
-      ''|*[!0-9]*|0) continue ;;
-    esac
-    kill "$pid" 2>/dev/null || true
+    stop_worker "$home"
   done
   cs_test_cleanup
 }
@@ -74,15 +82,21 @@ git init -q -b main "$FIX_ROOT"
 git -C "$FIX_ROOT" commit -q --allow-empty -m init
 : > "$FIX_ROOT/AGENTS.md"
 
-# fakebin <dir> [<gh-auth-sleep-seconds>] - gh must be PRESENT and
-# unauthenticated so the probe has a line to report; the optional sleep is the
-# deliberately slow network dependency.
+# fakebin <dir> [<gate-file>] - gh must be PRESENT and unauthenticated so the
+# probe has a line to report. The optional gate file is the deliberately slow
+# network dependency, and it is a GATE rather than a sleep on purpose: a case
+# that needs the worker still running while the digest is composed must not race
+# a timer it can lose on a loaded machine. `gh auth status` blocks until the case
+# creates that file, so "still running" and "finished" are both decided by the
+# test rather than by scheduling.
 fakebin() {
-  local fb=$1 slow=${2:-0} t
+  local fb=$1 gate=${2:-} t
   mkdir -p "$fb"
   cat > "$fb/gh" <<SH
 #!/usr/bin/env bash
-if [ "\${1:-}" = auth ] && [ "$slow" != 0 ]; then sleep $slow; fi
+if [ "\${1:-}" = auth ] && [ -n "$gate" ]; then
+  while [ ! -e "$gate" ]; do sleep 0.1; done
+fi
 exit 1
 SH
   cat > "$fb/herdr" <<'SH'
@@ -246,6 +260,46 @@ assert_grep 'g-inflight' "$HOME_DIR/state/.startup-network.claim" \
 kill "$LIVE_PID" 2>/dev/null || true
 pass "a live worker is adopted rather than raced by a second mutating pass"
 
+# --- a torn or unreadable running record is never believed to be live ---------
+# `start` reserves a generation with the placeholder `pid=0` before it launches
+# the worker, so a start that dies between the two status writes leaves a
+# `state=running pid=0` record behind. That placeholder must never read as a live
+# worker: `kill -0 0` signals the caller's own process group and always succeeds,
+# so believing it would make every later session adopt a worker that does not
+# exist and drop its own network checks along with the wake that would have
+# reported them.
+HOME_DIR=$(fresh_home torn)
+FB=$(fakebin "$TMP/fb-torn")
+printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
+write_status "$HOME_DIR" state=running pid=0 "started=$(date +%s)" \
+  locked=1 phases=probe,sweeps generation=g-torn lock_pid=999999
+out=$(snet "$HOME_DIR" "$FB" report)
+assert_contains "$out" 'NETWORK_CHECKS: the deferred check worker stopped before publishing' \
+  "a torn reservation's pid=0 placeholder was reported as a live worker"
+assert_not_contains "$out" 'IN PROGRESS' \
+  "a torn reservation read as a stage still in progress"
+snet "$HOME_DIR" "$FB" start --locked 1 --harvest-pid $$ \
+  || fail "start refused to replace a torn reservation"
+generation=$(sed -n 's/^generation=//p' "$HOME_DIR/state/.startup-network.status" | tail -1)
+[ "$generation" != g-torn ] \
+  || fail "start adopted the phantom pid=0 record instead of reserving a fresh generation"
+stop_worker "$HOME_DIR"
+
+# A start time that cannot be read cannot be shown to be inside the stage bound,
+# so the bound is applied rather than skipped - otherwise one corrupt record
+# holds "in progress" forever on the strength of a pid alone.
+HOME_DIR=$(fresh_home corrupt)
+FB=$(fakebin "$TMP/fb-corrupt")
+sleep 30 &
+LIVE_PID=$!
+write_status "$HOME_DIR" state=running "pid=$LIVE_PID" started=not-an-epoch \
+  locked=1 phases=probe,sweeps generation=g-corrupt lock_pid=999999
+out=$(snet "$HOME_DIR" "$FB" report)
+kill "$LIVE_PID" 2>/dev/null || true
+assert_contains "$out" 'NETWORK_CHECKS: the deferred check worker stopped before publishing' \
+  "a record whose start time cannot be read held 'in progress' on its pid alone"
+pass "a torn or unreadable running record is abandoned rather than adopted as live"
+
 # --- a live claimant that harvests in time suppresses the wake ----------------
 HOME_DIR=$(fresh_home claimed)
 FB=$(fakebin "$TMP/fb-claimed")
@@ -266,16 +320,23 @@ sleep 2
 pass "an inline harvest delivers the result and suppresses its wake"
 
 # --- end to end: a slow network never blocks the digest -----------------------
-# The one case that drives the real session-start digest. gh auth hangs, so the
-# deferred stage is guaranteed to still be running when the digest is composed.
-HOME_DIR=$(fresh_home digest)
-FB=$(fakebin "$TMP/fb-digest" 6)
+# The real session-start digest, driven against a network dependency that is
+# still hanging when the digest is composed. The hang is held open by a gate file
+# this case never creates, so "the worker is still running" is a fact rather than
+# a bet on the digest outrunning a timer.
+HOME_DIR=$(fresh_home digest-blocked)
+FB=$(fakebin "$TMP/fb-digest-blocked" "$TMP/gate-never")
 digest=$(PATH="$FB:$PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$FIX_ROOT" \
   "$SESSION_START" 2>/dev/null)
+# The hang has served its purpose the moment the digest is out, so the worker is
+# stopped rather than waited out and the open-ended block costs the suite nothing.
+stop_worker "$HOME_DIR"
 
 assert_contains "$digest" 'lock acquired' "the digest fixture did not acquire the fleet lock"
 assert_contains "$digest" 'IN PROGRESS - the deferred network checks have not finished yet' \
   "the digest waited for the network checks instead of naming them unconfirmed"
+assert_contains "$digest" 'NOT yet confirmed: GitHub authentication, and project clone refresh' \
+  "the digest did not name exactly which checks were still unconfirmed"
 assert_not_contains "$digest" 'NEEDS_GH_AUTH:' \
   "the digest blocked on the gh auth probe it is supposed to defer"
 assert_contains "$digest" 'CAPO_SYNC: skipped: malformed capo registry entry' \
@@ -293,8 +354,22 @@ fi
 # identity recovery depends on.
 [ "$fleet_line" -lt "$network_line" ] || fail "NETWORK CHECKS printed ahead of FLEET STATE"
 [ "$network_line" -lt "$context_line" ] || fail "NETWORK CHECKS printed after CONTEXT"
+pass "a hanging network dependency delays a reported check, never the digest"
 
-# And the result the digest could not wait for still reaches the queue.
+# --- end to end: the deferred result surfaces after the digest is out ---------
+# Same real digest, and the same gate holds the worker past the digest's inline
+# harvest so the claim is released rather than satisfied. Releasing the gate then
+# lets the worker finish promptly, and the only path left to the agent is the
+# durable wake.
+HOME_DIR=$(fresh_home digest-deferred)
+GATE="$TMP/gate-deferred"
+FB=$(fakebin "$TMP/fb-digest-deferred" "$GATE")
+digest=$(PATH="$FB:$PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$FIX_ROOT" \
+  "$SESSION_START" 2>/dev/null)
+assert_contains "$digest" 'IN PROGRESS - the deferred network checks have not finished yet' \
+  "the digest printed the result inline, so this case proves nothing about the wake path"
+: > "$GATE"
+
 snet "$HOME_DIR" "$FB" wait 90 || fail "the deferred stage never published after the digest"
 found=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -307,6 +382,6 @@ done
 [ "$found" -eq 1 ] || fail "the deferred result never surfaced after the digest was already out"
 assert_grep 'NEEDS_GH_AUTH:' "$HOME_DIR/state/.startup-network.report" \
   "the deferred stage published no gh auth verdict"
-pass "a slow network delays a reported check, never the digest"
+pass "a result the digest could not wait for still reaches the agent as a wake"
 
 pass "cs-startup-network deferred stage"
