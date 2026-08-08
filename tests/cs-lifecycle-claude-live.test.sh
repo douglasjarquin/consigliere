@@ -70,6 +70,7 @@ assert_present "$TMP/home/state/$ID.claude-settings.json" "claude settings file 
 pass "meta records harness=claude; settings file present"
 
 # native agent detection (claude boots within a bounded wait)
+# shellcheck source=bin/cs-herdr-lib.sh
 . "$ROOT/bin/cs-herdr-lib.sh"
 found=0
 for _ in $(seq 1 40); do

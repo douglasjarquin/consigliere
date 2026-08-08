@@ -60,7 +60,8 @@ git -C "$REPO" symbolic-ref HEAD refs/heads/main
 cp "$LINT" "$REPO/bin/cs-lint.sh"
 chmod +x "$REPO/bin/cs-lint.sh"
 for f in bin/kept.sh bin/edited.sh bin/removed.sh bin/lib-one.sh bin/lib-two.sh \
-  bin/shared-lib.sh tests/kept.test.sh tests/edited.test.sh tests/lib.sh; do
+  bin/shared-lib.sh bin/bare-consumer.sh tests/kept.test.sh tests/edited.test.sh \
+  tests/lib.sh; do
   printf '#!/usr/bin/env bash\ntrue\n' >"$REPO/$f"
 done
 printf 'notes\n' >"$REPO/docs/notes.md"
@@ -72,8 +73,9 @@ printf 'fixture\n' >"$REPO/README.md"
 # reports SC1091 against a line the full-set run resolves silently. The fixture
 # declares a two-deep chain, an indented directive carrying a trailing note, and
 # one out-of-set source, so the closure is exercised the way the repo actually
-# writes them. bin/shared-lib.sh is the reverse case: two canonical files source
-# it, and a finding caused by changing it would be reported in them, not in it.
+# writes them. bin/shared-lib.sh is the reverse case: several canonical files
+# source it, and a finding caused by changing it would be reported in them, not
+# in it.
 cat >>"$REPO/bin/edited.sh" <<'SH'
 # shellcheck source=bin/lib-one.sh
 . "$(dirname "$0")/lib-one.sh"
@@ -97,6 +99,12 @@ SH
 cat >>"$REPO/tests/kept.test.sh" <<'SH'
 # shellcheck source=bin/shared-lib.sh
 . "$(dirname "$0")/../bin/shared-lib.sh"
+SH
+# No directive here on purpose. ShellCheck resolves this one by itself - it drops
+# the expansion it cannot read and looks for the literal remainder - so the graph
+# has to see the edge, or narrowing reports what a full run never would.
+cat >>"$REPO/bin/bare-consumer.sh" <<'SH'
+. "$SOME_ROOT/bin/shared-lib.sh"
 SH
 git -C "$REPO" add -A
 git -C "$REPO" commit -qm initial
@@ -289,9 +297,10 @@ printf 'true\n' >>"$REPO/bin/shared-lib.sh"
 
 out=$(run_lint)
 got=$(linted)
-[ "$got" = 'bin/kept.sh bin/lib-one.sh bin/lib-two.sh bin/shared-lib.sh tests/kept.test.sh ' ] \
+[ "$got" = 'bin/bare-consumer.sh bin/kept.sh bin/lib-one.sh bin/lib-two.sh bin/shared-lib.sh tests/kept.test.sh ' ] \
   || fail "a changed library must lint its consumers and their own sourced libraries, got: $got"
-assert_contains "$out" 'linting 1 changed file(s) plus 4 source-linked file(s) since origin/main' \
+assert_contains "$out" 'linting 1 changed file(s) plus 5 source-linked file(s) since origin/main' \
   'the reverse closure is counted in the summary'
 pass 'a changed library pulls in every canonical file that sources it'
 pass 'a pulled-in consumer brings its own sourced libraries along'
+pass 'a source ShellCheck resolves without a directive is an edge like any other'

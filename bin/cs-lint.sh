@@ -180,19 +180,46 @@ fi
 #     sources it, not in the library, so editing a library out from under its
 #     consumers (dropping a variable they read, say) is invisible unless those
 #     consumers are inputs as well - green locally, red in CI one push later.
-# Every source in this repo declares its target with a `# shellcheck source=`
-# directive, so the directives are the graph. Sources outside the canonical set
-# (/dev/null, anything unshipped) are dropped: the full run does not have them as
-# input either, so keeping the parity means leaving them out.
+# The graph has to see every source ShellCheck itself can resolve, or narrowing
+# breaks parity in whichever direction the missing edge points. A
+# `# shellcheck source=` directive is one way to name a target, but ShellCheck
+# also resolves a plain `. "$ROOT/bin/lib.sh"` on its own - it drops what it
+# cannot expand and looks for the literal remainder (./bin/lib.sh) - so reading
+# directives alone would leave those edges out and make the graph a promise about
+# repo convention rather than a fact about ShellCheck. Both forms are read here,
+# with the same expansion-dropping rule, so a source with no directive is still
+# an edge. A path that expands to nothing (`. "$1"`) yields no edge because
+# ShellCheck cannot follow it either. Targets outside the canonical set
+# (/dev/null, anything unshipped) fall away at the intersection below: the full
+# run does not have them as input either, so parity means leaving them out.
+canonical_files=()
+while IFS= read -r file; do
+  [ -n "$file" ] && [ -f "$file" ] || continue
+  canonical_files+=("$file")
+done <<<"$canonical_sorted"
+
 edges=$(
-  printf '%s\n' "$canonical_sorted" | while IFS= read -r file; do
-    [ -f "$file" ] || continue
-    sed -n 's/^[[:space:]]*#[[:space:]]*shellcheck source=\([^[:space:]]*\).*/\1/p' "$file" |
-      while IFS= read -r target; do
-        [ -n "$target" ] || continue
-        printf '%s\t%s\n' "$file" "$target"
-      done
-  done
+  awk '
+    /^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=/ {
+      target = $0
+      sub(/^.*source=/, "", target)
+      sub(/[[:space:]].*$/, "", target)
+      if (target != "") print FILENAME "\t" target
+      next
+    }
+    /^[[:space:]]*(\.|source)[[:space:]]+/ {
+      target = $0
+      sub(/^[[:space:]]*(\.|source)[[:space:]]+/, "", target)
+      gsub(/\$\([^)]*\)/, "", target)
+      gsub(/`[^`]*`/, "", target)
+      gsub(/\$\{[^}]*\}/, "", target)
+      gsub(/\$[A-Za-z_][A-Za-z0-9_]*/, "", target)
+      gsub(/["'"'"']/, "", target)
+      sub(/[[:space:]].*$/, "", target)
+      sub(/^[.\/]+/, "", target)
+      if (target != "") print FILENAME "\t" target
+    }
+  ' "${canonical_files[@]}"
 )
 
 # cs_close <dependents|sources> <file list> - grow a newline-separated file list
