@@ -45,6 +45,18 @@ pass() {
   printf 'ok - %s\n' "$1"
 }
 
+cs_git_disable_commit_signing() {
+  local index=${GIT_CONFIG_COUNT:-0}
+  case "$index" in
+    ''|*[!0-9]*) fail "GIT_CONFIG_COUNT must be a non-negative integer" ;;
+  esac
+  export "GIT_CONFIG_KEY_$index=commit.gpgsign"
+  export "GIT_CONFIG_VALUE_$index=false"
+  export GIT_CONFIG_COUNT=$((index + 1))
+}
+
+cs_git_disable_commit_signing
+
 # --- self-cleaning temp root ------------------------------------------------
 #
 # cs_test_tmproot <prefix> echoes a fresh temp dir and registers it for removal

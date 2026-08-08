@@ -37,7 +37,8 @@ The supervision wait shape is the bounded foreground checkpoint ([`docs/supervis
 ## Authenticated checks
 
 The watcher executes a task's `state/<id>.check.sh` only from a hash-validated private snapshot bound by `bin/cs-check-register.sh`; everything else is rejected without execution.
-The PR merge poll is byte-static: `bin/cs-pr-check.sh` records canonical `pr=`/`pr_head=` and publishes a validated data sidecar that `bin/cs-pr-poll.sh` (a trusted repository script) revalidates on every dispatch.
+The PR merge poll is byte-static: `bin/cs-pr-check.sh` records a canonical PR identity and any available head, then publishes a validated data sidecar that `bin/cs-pr-poll.sh` (a trusted repository script) revalidates on every dispatch.
+For an eligible release, that hash-bound sidecar also carries the exact-head board-capacity attestation consumed by `bin/cs-board-capacity.sh`; it never changes merge-poll semantics.
 After a merged result is durably queued, the watcher retires that poll's runnable check and sidecars, while task metadata remains for teardown and a re-armed different PR stays protected by identity revalidation.
 GitHub only; GitLab URLs are refused loudly at arm time.
 

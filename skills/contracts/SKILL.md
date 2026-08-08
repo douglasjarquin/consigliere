@@ -1,6 +1,9 @@
 ---
 name: contracts
-description: Work a project's GitHub board - pull issues in the Ready column, dispatch soldiers to implement them, and land PRs that close each issue so the board's own workflow moves the card to Done. Use when the boss invokes /contracts, or asks to knock out / clear / work the ready issues on a project, take the open contracts, work the board, or fill lanes from a project board. The boss names a project; consigliere fills up to 3 lanes with independent Ready issues and keeps pulling as lanes free.
+description: >-
+  Work a project's GitHub board - pull issues in the Ready column, dispatch soldiers to implement them, and land PRs that close each issue so the board's own workflow moves the card to Done.
+  Use when the boss invokes /contracts, or asks to knock out / clear / work the ready issues on a project, take the open contracts, work the board, or fill lanes from a project board.
+  The boss names a project; consigliere fills three lanes by default or five under the boss-selected Nice Uptime policy and keeps pulling as lanes free.
 ---
 
 # Contracts
@@ -24,12 +27,14 @@ This is ordinary section-7 ship lifecycle with a board front door - the safety c
    This records the boss's standing intent to work that board and arms a poll that reports column depth on the ordinary watcher cadence.
    Without it the sweep exists only in this conversation, and a column that refills after step 2's one listing - a boss promotion into Ready, a lane that frees after this session ends - sits untouched until the boss asks again.
    Pass the boss's explicit lane number when they gave one, so the durable record carries the same cap this sweep runs at.
+   When the boss selects Nice Uptime, arm with `--lanes 5 --release-green-prs`; ordinary arms hold green PRs, and re-arming without either green-PR flag retains the recorded choice.
 2. List the ready work: `bin/cs-board.sh ready <project>` -> `<item-id>\t<number>\t<url>\t<title>` per open Ready issue. If empty, tell the boss the column is clear and stop.
 3. Read each issue (`gh-axi issue view <n>`) enough to write a real brief: scope, acceptance criteria, and whether it overlaps another issue's subsystem or depends on unlanded work.
 4. Order and gate:
    - **Concurrency cap: 3 lanes per project** by default. The boss can override per sweep ("knock out 5 at once"); honor an explicit number.
    - Before dispatching, run `bin/cs-board-capacity.sh <project> <lane-cap>` and use its `free=` value as the number of Ready issues to dispatch.
      This command is the single owner of live lane accounting; do not substitute the backlog's `## In flight` count.
+     It consumes the armed sweep's durable green-PR policy automatically, so later wakes do not depend on conversational memory.
    - Re-run the capacity command after each dispatch and continue while Ready work remains and `free` is positive.
    - **Serialize only true dependencies.** Same-file or same-subsystem overlap alone does not block concurrent work; queue an issue only for a true semantic dependency, shared mutable external state, incompatible concurrent migration, or another concrete condition that makes independent progress and reconciliation unsafe. Independent issues fill the remaining lanes freely.
 5. For each issue you dispatch (up to the reported free capacity):
@@ -50,12 +55,15 @@ A `check:` wake naming a board sweep carries the project's current Ready and Inb
 The poll reports depth only; it never dispatches, never moves a card, and never judges lane capacity.
 Run `bin/cs-board-capacity.sh <project> <lane-cap>` and resume from step 5 for each reported free lane, honoring the same cap and true-dependency rules.
 A merged task with no live endpoint can leave cleanup pending, including an orphaned directory that cleanup safely refuses; its released lane is still available, and the directory and landed-work records remain untouched for the normal cleanup follow-up.
+A qualifying reviewed-green PR can release scheduling capacity only when the armed sweep selected it; the live task, branch, PR monitor, In Progress card, and boss-only merge decision all remain in place.
 Lanes already full is a silent no-op: the sweep is working as intended, and an unchanged fleet is not boss-facing progress.
 The poll goes quiet on its own once both columns are clear, and stays quiet while consigliere's own dispatch is what shrank the column, so a wake means work arrived or work has been sitting.
 
 ## Landing
 
-- A soldier reports done per its delivery mode (`no-mistakes`: `done: PR <url> checks green`; `direct-PR`: `done: PR <url>`). Arm the merge poll with `bin/cs-pr-check.sh <task-id> <PR url>` and relay the full https URL to the boss.
+- A soldier reports done per its delivery mode (`no-mistakes`: `done: PR <url> checks green`; `direct-PR`: `done: PR <url>`).
+  Arm the merge poll with `bin/cs-pr-check.sh <task-id> <PR url>` and relay the full https URL to the boss.
+  For a no-mistakes board task under an armed `release-green-prs` sweep, that PR-ready entrypoint records the exact-head capacity attestation when GitHub supplies a valid head; otherwise capacity stays held.
 - On the boss's merge - the only merge authority, `yolo` or not - the PR's `Closes #<n>` closes the issue and the board workflow moves the card to Done. Consigliere does not touch the card.
 - After teardown, read-only verify the card is no longer stuck: `bin/cs-board.sh status <project> <item-id>`. If it still reads `In Progress` after the issue is closed, the board's closed->Done workflow is off - warn the boss (with the card and issue) and let them enable it; do not move the card yourself (Done is built-in-only by the boss's choice).
 - For a `local-only` project, after the approved local merge, close the issue yourself (`gh-axi issue close <n>`) so the board workflow can still move its card.

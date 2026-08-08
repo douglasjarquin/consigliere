@@ -138,8 +138,9 @@ test_tampered_published_poll_rejected_without_execution() {
   # Tamper the private sidecar AFTER publication: point it at another project.
   # The registration hash no longer matches, so the watcher must reject the
   # check without dispatching it (gh must never be consulted).
-  printf '%s\n%s\n%s\n%s\n%s\n' \
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
     github https://github.com/attacker/elsewhere/pull/13 github.com attacker/elsewhere 13 \
+    0123456789abcdef0123456789abcdef01234567 hold \
     > "$state/task.pr-poll"
   chmod 0600 "$state/task.pr-poll"
   : > "$dir/gh.log"

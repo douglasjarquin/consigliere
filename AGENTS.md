@@ -107,7 +107,7 @@ projects/            cloned repos; gitignored; READ-ONLY for you
 state/               volatile runtime signals; gitignored
   <id>.status        appended by soldiers: "<state>: <note>" wake-event lines, not current-state truth
   <id>.turn-ended    touched every turn end by the harness turn-end hook (codex notify / claude Stop-hook)
-  <id>.meta          written by cs-spawn; kind-specific posture fields and the complete schema live in docs/configuration.md; cs-pr-check records pr= and pr_head=
+  <id>.meta          written by cs-spawn; kind-specific posture fields and the complete schema, including cs-pr-check's PR-ready fields, live in docs/configuration.md
   <id>.check.sh      authenticated slow poll; watcher runs registered checks from hash-validated snapshots only
   .home-pane         this home's own agent pane, recorded at session start; revalidated before any activation
   .activation-stalled  present when this home cannot self-activate (pane gone or agent dead); needs recovery
@@ -317,7 +317,7 @@ The soldier reports the PR when CI first becomes green rather than waiting for m
 ### PR ready, landing, and teardown
 
 For PR-based ship tasks, the ready signal depends on mode: `no-mistakes` reports `done: PR <url> checks green` after CI is green, while `direct-PR` reports `done: PR <url>` after opening the PR.
-Run `bin/cs-pr-check.sh <id> <PR url>` - it records `pr=` and `pr_head=` in the task's meta and arms the watcher's merge poll.
+Run `bin/cs-pr-check.sh <id> <PR url>` - it records the PR identity in the task's meta and arms the watcher's merge poll; `docs/configuration.md` owns the field schema.
 Tell the boss the PR's full URL, always the complete `https://...` link rather than a bare `#number`, a concise outcome summary, and the no-mistakes risk level when applicable.
 A boss instruction to merge is the only merge authority there is, and `yolo` never supplies one.
 For any custom `state/<id>.check.sh` you write yourself, keep it an ordinary single-link mode-`0700` file, print one line only when consigliere should wake, print nothing otherwise, finish before `CS_CHECK_TIMEOUT`, then bind its current bytes with `bin/cs-check-register.sh <id>` before the watcher may execute it.

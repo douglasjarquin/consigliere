@@ -28,6 +28,7 @@ This is ordinary section-7 lifecycle with a board front door - the safety contra
 0. Arm the sweep first: `bin/cs-board-watch.sh arm <project> [--lanes <n>]`, exactly as the `contracts` sweep does.
    One armed sweep covers both columns, so arming here also makes the Ready column durable, and re-arming from the implementation sweep is harmless.
    Without it the factory runs only while this conversation lives: new ideas dropped into Inbox after step 1's listing, and boss promotions into Ready, both go unnoticed.
+   When the boss selects the five-lane Nice Uptime policy, use the contracts-owned `--lanes 5 --release-green-prs` arm form so later wakes retain it.
 1. List the raw work: `bin/cs-board.sh inbox <project>` -> `<item-id>\t<number>\t<url>\t<title>` per open Inbox issue.
    Draft cards are never listed; once per sweep, tell the boss which drafts need converting to issues before the factory can touch them.
 2. Skip any issue whose spec task is already recorded in the backlog (under way or done-but-unmoved); the card stays in Inbox while its spec is being written, so the durable record is the dedup guard.
