@@ -1,6 +1,7 @@
 # shellcheck shell=bash
-# cs-session-pid-lib.sh - the single owner of "which process IS this consigliere
-# session".
+# cs-session-pid-lib.sh - the single owner of process identity: which process IS
+# this consigliere session, and how a recorded pid proves it is still the SAME
+# process rather than a recycled number.
 #
 # A consigliere session is the harness (codex or claude) process that a shell
 # finds by walking its own ancestry. That process lives as long as the session,
@@ -11,11 +12,15 @@
 # or delete them.
 #
 # Pure function definitions with no side effects on source: sourcing this file
-# resolves no home, creates no directory, and takes no lock.
+# resolves no home, creates no directory, and takes no lock. That is why
+# bin/cs-telemetry-lib.sh can pull it into every instrumented caller, and why
+# cs_pid_identity lives here rather than in bin/cs-wake-lib.sh, which resolves a
+# home and creates state/ on source.
 #
 #   cs_session_harness_names_in <path-ish> [words]  does a component name it?
 #   cs_session_harness_process_is <comm> <args>     is that process the harness?
 #   cs_session_harness_pid                          print the ancestry's harness pid
+#   cs_pid_identity <pid>                           print a pid's reuse-proof identity
 #
 # Usage: . bin/cs-session-pid-lib.sh
 
@@ -98,4 +103,46 @@ cs_session_harness_pid() {
     [ -n "$pid" ] && [ "$pid" -gt 1 ] || return 1
   done
   return 1
+}
+
+# cs_pid_identity <pid> - print a stable, machine-readable string that changes
+# when the pid is reused by a different process. Callers persist it beside a
+# recorded pid and compare on re-read, so a recycled number reads as a mismatch:
+# bin/cs-wake-lib.sh's watcher-lock validation, bin/cs-procevent-lib.sh, and
+# bin/cs-telemetry-lib.sh's per-session breadcrumb key all rely on that.
+#
+# The exact output is a persisted contract, not an internal detail: a live
+# watcher's lock is rejected the moment this string renders differently than it
+# did when the lock was written.
+cs_pid_identity() {
+  local pid=$1 out proc_root stat_line starttime cmdline_hex
+  local -a stat_fields
+  case "$pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  proc_root=${CS_PROC_ROOT_OVERRIDE:-/proc}
+  # Prefer /proc on Linux: stat field 22 (starttime, clock ticks since boot) is
+  # immune to the wall-clock steps that re-render the ps lstart fallback's date
+  # (observed as WSL2 btime drift) and would evict a live watcher; combining the
+  # full NUL-separated cmdline keeps PID reuse a mismatch even on a tick collision.
+  if [ "$(uname)" = Linux ] && [ -r "$proc_root/$pid/stat" ] && [ -r "$proc_root/$pid/cmdline" ]; then
+    stat_line=$(cat "$proc_root/$pid/stat" 2>/dev/null) || return 1
+    # After the final comm delimiter, array index 19 is proc stat field 22.
+    read -r -a stat_fields <<< "${stat_line##*)}"
+    [ "${#stat_fields[@]}" -ge 20 ] || return 1
+    starttime=${stat_fields[19]}
+    case "$starttime" in
+      ''|*[!0-9]*) return 1 ;;
+    esac
+    cmdline_hex=$(od -An -v -tx1 "$proc_root/$pid/cmdline" 2>/dev/null | tr -d '[:space:]') || return 1
+    [ -n "$cmdline_hex" ] || return 1
+    printf 'linux-starttime=%s cmdline-hex=%s\n' "$starttime" "$cmdline_hex"
+    return 0
+  fi
+  # Pin LC_ALL=C so lstart's date format is locale-invariant: the identity is
+  # written under one locale but re-read under the machine's ambient locale, which
+  # would otherwise mismatch on a non-C locale (e.g. ko_KR) and reject a live watcher.
+  out=$(LC_ALL=C ps -p "$pid" -o lstart= -o command= 2>/dev/null) || return 1
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out" | sed 's/^[[:space:]]*//'
 }

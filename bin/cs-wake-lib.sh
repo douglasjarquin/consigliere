@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # Shared durable wake queue and portable lock helpers.
+#
+# cs_pid_identity, the reuse-proof process identity this file's watcher-lock
+# validation compares, is owned by bin/cs-session-pid-lib.sh alongside the pid
+# ancestry walk and is re-exported here by sourcing it.
 
 CS_WAKE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/cs-session-pid-lib.sh
+. "$CS_WAKE_LIB_DIR/cs-session-pid-lib.sh"
 CS_WAKE_DEFAULT_ROOT="$(cd "$CS_WAKE_LIB_DIR/.." && pwd)"
 CS_ROOT="${CS_ROOT_OVERRIDE:-${CS_ROOT:-$CS_WAKE_DEFAULT_ROOT}}"
 CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
@@ -21,39 +27,6 @@ cs_pid_alive() {
     ''|*[!0-9]*) return 1 ;;
   esac
   kill -0 "$pid" 2>/dev/null
-}
-
-cs_pid_identity() {
-  local pid=$1 out proc_root stat_line starttime cmdline_hex
-  local -a stat_fields
-  case "$pid" in
-    ''|*[!0-9]*) return 1 ;;
-  esac
-  proc_root=${CS_PROC_ROOT_OVERRIDE:-/proc}
-  # Prefer /proc on Linux: stat field 22 (starttime, clock ticks since boot) is
-  # immune to the wall-clock steps that re-render the ps lstart fallback's date
-  # (observed as WSL2 btime drift) and would evict a live watcher; combining the
-  # full NUL-separated cmdline keeps PID reuse a mismatch even on a tick collision.
-  if [ "$(uname)" = Linux ] && [ -r "$proc_root/$pid/stat" ] && [ -r "$proc_root/$pid/cmdline" ]; then
-    stat_line=$(cat "$proc_root/$pid/stat" 2>/dev/null) || return 1
-    # After the final comm delimiter, array index 19 is proc stat field 22.
-    read -r -a stat_fields <<< "${stat_line##*)}"
-    [ "${#stat_fields[@]}" -ge 20 ] || return 1
-    starttime=${stat_fields[19]}
-    case "$starttime" in
-      ''|*[!0-9]*) return 1 ;;
-    esac
-    cmdline_hex=$(od -An -v -tx1 "$proc_root/$pid/cmdline" 2>/dev/null | tr -d '[:space:]') || return 1
-    [ -n "$cmdline_hex" ] || return 1
-    printf 'linux-starttime=%s cmdline-hex=%s\n' "$starttime" "$cmdline_hex"
-    return 0
-  fi
-  # Pin LC_ALL=C so lstart's date format is locale-invariant: the identity is
-  # written under one locale but re-read under the machine's ambient locale, which
-  # would otherwise mismatch on a non-C locale (e.g. ko_KR) and reject a live watcher.
-  out=$(LC_ALL=C ps -p "$pid" -o lstart= -o command= 2>/dev/null) || return 1
-  [ -n "$out" ] || return 1
-  printf '%s\n' "$out" | sed 's/^[[:space:]]*//'
 }
 
 cs_path_mtime() {

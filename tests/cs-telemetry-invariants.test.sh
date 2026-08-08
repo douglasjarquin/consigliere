@@ -302,6 +302,32 @@ cs_harness_soldier_launch codex default default \"'/op'\" \"'/brief'\" \"'$dir/t
   pass "cs-telemetry: the worker turn-end signal cannot be delayed, gated, or lost by telemetry"
 }
 
+test_worker_emitter_terminates_on_every_argument_shape() {
+  local emit=$ROOT/bin/cs-telemetry-emit.sh rc args
+  # The worker emitter runs INSIDE a soldier's turn-end wiring, where a hang is
+  # strictly worse than an error: codex's notify program and claude's Stop hook
+  # never return, so the pane never ends its turn. Every argument shape must
+  # therefore terminate, including a trailing option whose value is missing.
+  for args in '--worker --task' '--task' '--worker --task t --stdin' \
+              '--worker --stdin --task' '--stdin' '--worker'; do
+    # shellcheck disable=SC2086 # each case is a deliberate argument vector
+    ( exec 3>&2 2>/dev/null; CS_TELEMETRY_DISABLE=1 "$emit" $args </dev/null >/dev/null 2>&3 ) &
+    local pid=$! waited=0
+    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 50 ]; do
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -9 "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      fail "cs-telemetry-emit.sh hung on arguments: $args"
+    fi
+    wait "$pid"; rc=$?
+    expect_code 0 "$rc" "cs-telemetry-emit.sh must exit 0 on arguments: $args"
+  done
+  pass "cs-telemetry: the worker emitter always terminates, so it can never wedge a turn-end hook"
+}
+
 test_launch_wiring_refuses_an_unsafe_telemetry_command() {
   local home safe cmd
   # The command is embedded inside a JSON string in both harnesses' wiring, so a
@@ -339,4 +365,5 @@ test_wake_drain_output_is_unchanged_by_telemetry
 test_checkpoint_behavior_is_unchanged_by_telemetry
 test_launch_wiring_is_byte_identical_with_telemetry_off
 test_worker_turn_end_signal_survives_a_failing_telemetry_command
+test_worker_emitter_terminates_on_every_argument_shape
 test_launch_wiring_refuses_an_unsafe_telemetry_command

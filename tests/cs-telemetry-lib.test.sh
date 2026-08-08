@@ -63,6 +63,7 @@ touch_days_ago() { # <path> <days>
   touch -t "$stamp" "$1"
 }
 
+
 # stop_payload <harness> <extra-json> - a Stop payload of that harness's verified
 # shape. `turn_id` versus `prompt_id` is the discriminator the emitter reads to
 # name the harness that produced the turn (docs/codex.md, docs/claude.md,
@@ -400,6 +401,62 @@ test_breadcrumbs_are_private_to_their_own_session() {
   pass "cs-telemetry: one session can neither fold nor delete another session's breadcrumbs"
 }
 
+test_breadcrumbs_survive_a_recycled_pid() {
+  local home key pid recycled
+  home=$(make_home crumbs-recycled-pid 'enabled true')
+  # shellcheck disable=SC2016 # CS_TELEMETRY_CRUMBS must expand in the child shell, not here
+  key=$(in_home "$home" 'cs_telemetry_crumbs_resolve; printf "%s\n" "${CS_TELEMETRY_CRUMBS##*/.telemetry-crumbs-}"')
+  pid=${key%%-*}
+  [ -n "$pid" ] && [ "$pid" != "$key" ] ||
+    fail "the session key must bind the harness pid to a reuse-proof identity, got '$key'"
+
+  # A DEAD session that once resolved this very pid. Its identity differed, so
+  # its file must read as another session's however the pid landed - otherwise a
+  # recycled pid folds a dead session's supervision into this turn's record. The
+  # bare-pid name is exactly what the key used to be, so it is the regression.
+  for recycled in "$home/state/.telemetry-crumbs-$pid" \
+                  "$home/state/.telemetry-crumbs-$pid-0000000000000000"; do
+    printf 'wake\tsignal\ncheckpoint\t\n' > "$recycled"
+  done
+  in_home "$home" 'cs_telemetry_turn_end root ""'
+  [ "$(records "$home" | jq -r '[.purpose, (.wake_kind // "-")] | join(" ")')" = 'boss -' ] ||
+    fail "a recycled pid must not fold a dead session's breadcrumbs:"$'\n'"$(records "$home")"
+  assert_present "$home/state/.telemetry-crumbs-$pid" \
+    "a bare-pid breadcrumb file belongs to no live session and must not be consumed"
+  assert_present "$home/state/.telemetry-crumbs-$pid-0000000000000000" \
+    "a same-pid different-identity breadcrumb file must not be consumed"
+  pass "cs-telemetry: the session key binds the pid to its identity, so a recycled pid cannot collide"
+}
+
+test_stale_breadcrumbs_are_discarded_not_folded() {
+  local home crumbs stamp t
+  home=$(make_home crumbs-stale 'enabled true')
+  t=$(( $(date +%s) - 7200 ))
+  stamp=$(date -r "$t" +%Y%m%d%H%M.%S 2>/dev/null || date -d "@$t" +%Y%m%d%H%M.%S)
+  # One process, so the breadcrumbs and the fold resolve the SAME session key -
+  # this is the session's own file, backdated to look like the leftovers of a
+  # session that died mid-turn and whose key something later resolved again.
+  # Folding it would credit this turn with supervision from another one.
+  # shellcheck disable=SC2016 # CS_TELEMETRY_CRUMBS must expand in the child shell, not here
+  crumbs=$(in_home "$home" '
+cs_telemetry_crumb wake signal
+cs_telemetry_crumb checkpoint
+cs_telemetry_crumbs_resolve
+touch -t '"$stamp"' "$CS_TELEMETRY_CRUMBS"
+cs_telemetry_turn_end root ""
+printf "%s\n" "$CS_TELEMETRY_CRUMBS"')
+  [ -n "$crumbs" ] || fail "the session must have resolved a breadcrumb path"
+  [ "$(records "$home" | jq -r '[.purpose, (.wake_kind // "-"), (.outcome // "-")] | join(" ")')" = 'boss - -' ] ||
+    fail "breadcrumbs older than one turn must not be folded:"$'\n'"$(records "$home")"
+  assert_absent "$crumbs" "stale breadcrumbs must be removed, not left for the retention sweep"
+
+  # The same guard must not truncate a real turn: a fresh file still folds.
+  in_home "$home" 'cs_telemetry_crumb wake signal; cs_telemetry_turn_end root ""'
+  [ "$(records "$home" | tail -1 | jq -r '.wake_kind')" = signal ] ||
+    fail "a fresh breadcrumb file must still fold:"$'\n'"$(records "$home" | tail -1)"
+  pass "cs-telemetry: breadcrumbs older than one plausible turn are discarded rather than folded"
+}
+
 # --- role attribution ---------------------------------------------------------
 
 test_role_root_and_capo() {
@@ -578,6 +635,26 @@ test_harness_comes_from_the_payload_not_the_dispatch_pin() {
   pass "cs-telemetry: the emitting harness is read from the Stop payload, never from the dispatch pin"
 }
 
+test_an_ambiguous_harness_does_not_consume_the_usage_window() {
+  local home tr payload ambiguous
+  home=$(make_home harness-ambiguous-cursor 'enabled true')
+  tr="$home/transcript.jsonl"
+  printf '%s\n' '{"type":"assistant","timestamp":"2026-08-08T12:00:00.000Z","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":7,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":3}}}' > "$tr"
+  # An ambiguous payload has no parser, so it must not advance the cursor either.
+  # Advancing it would forfeit this window's tokens permanently: the NEXT turn,
+  # even one whose payload is perfectly unambiguous, would start past them.
+  ambiguous=$(stop_payload none "$(jq -cn --arg t "$tr" '{session_id:"sess-amb",transcript_path:$t}')")
+  in_home "$home" "cs_telemetry_turn_end root '$ambiguous'"
+  assert_absent "$home/state/.telemetry-cursor-sess-amb" \
+    "an ambiguous harness must leave the usage cursor untouched"
+
+  payload=$(stop_payload claude "$(jq -cn --arg t "$tr" '{session_id:"sess-amb",transcript_path:$t,effort:{level:"high"}}')")
+  in_home "$home" "cs_telemetry_turn_end root '$payload'"
+  [ "$(records "$home" | tail -1 | jq -r '[.harness, .usage.total_tokens] | join(" ")')" = 'claude 10' ] ||
+    fail "the turn after an ambiguous one must still count the whole window:"$'\n'"$(records "$home" | tail -1)"
+  pass "cs-telemetry: an ambiguous harness skips usage extraction without forfeiting the window"
+}
+
 # --- retention ----------------------------------------------------------------
 
 test_retention_drops_records_past_retain_days() {
@@ -739,6 +816,8 @@ test_fold_unknown_is_preferred_over_a_guess
 test_breadcrumbs_are_cleared_per_turn
 test_breadcrumbs_are_bounded
 test_breadcrumbs_are_private_to_their_own_session
+test_breadcrumbs_survive_a_recycled_pid
+test_stale_breadcrumbs_are_discarded_not_folded
 test_role_root_and_capo
 test_role_ship_and_scout_come_from_meta
 test_worker_without_meta_records_nothing
@@ -747,6 +826,7 @@ test_claude_usage_dedupes_streaming_snapshots
 test_usage_cursor_bounds_the_next_turn
 test_usage_never_records_conversation_content
 test_harness_comes_from_the_payload_not_the_dispatch_pin
+test_an_ambiguous_harness_does_not_consume_the_usage_window
 test_retention_drops_records_past_retain_days
 test_retention_ages_out_session_cursors_and_crumbs
 test_retention_runs_at_most_once_per_interval

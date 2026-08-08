@@ -54,7 +54,8 @@ cs_resolve_root
 mkdir -p "$STATE"
 
 # Durable wake queue + portable lock helpers (cs_wake_append, cs_lock_try_acquire,
-# cs_lock_release, cs_path_age, cs_pid_identity).
+# cs_lock_release, cs_path_age), plus cs_pid_identity, which bin/cs-wake-lib.sh
+# re-exports from its owner bin/cs-session-pid-lib.sh.
 # shellcheck source=bin/cs-wake-lib.sh
 . "$SCRIPT_DIR/cs-wake-lib.sh"
 # Shared wake classifier (boss-relevant verbs + signal/stale/heartbeat

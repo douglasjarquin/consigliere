@@ -39,10 +39,14 @@ esac
 MODE=
 TASK=
 READ_STDIN=0
+# Every branch must consume at least one argument. `shift 2` with a single
+# positional left shifts NOTHING and returns non-zero, so a trailing `--task`
+# would spin this loop forever - and a hang here is worse than any error, because
+# this runs inside a soldier's turn-end wiring, which would then never return.
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --worker) MODE=worker; shift ;;
-    --task) TASK=${2:-}; shift 2 ;;
+    --task) TASK=${2:-}; shift 2 || shift ;;
     --stdin) READ_STDIN=1; shift ;;
     *) shift ;;
   esac

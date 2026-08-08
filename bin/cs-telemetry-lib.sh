@@ -65,6 +65,13 @@ CS_TELEMETRY_MAX_WINDOW_BYTES=${CS_TELEMETRY_MAX_WINDOW_BYTES:-4194304}
 # Retention runs at most this often per home, at the turn-end boundary.
 CS_TELEMETRY_PRUNE_INTERVAL=${CS_TELEMETRY_PRUNE_INTERVAL:-86400}
 CS_TELEMETRY_RETAIN_DAYS_DEFAULT=30
+# Breadcrumbs older than this cannot belong to the turn now ending, so the fold
+# discards them rather than folding a dead session's leftovers into a live turn.
+# It defers to CS_BUSY_TURN_MAX_SECS, the repo's existing "how long a pane may
+# run busy with no completed turn" bound (bin/cs-watch.sh, docs/configuration.md,
+# default 3600), because that is already the answer to "how long can one turn
+# legitimately last here" and a second number would drift from it.
+CS_TELEMETRY_MAX_CRUMB_AGE=${CS_BUSY_TURN_MAX_SECS:-3600}
 
 # Every variable this library sets is pre-declared empty at load. Callers run
 # under `set -u`, where reading an unset variable TERMINATES the shell - the one
@@ -136,21 +143,62 @@ cs_telemetry_paths() {
 # state/.lock already means by "this session" - because every breadcrumb site and
 # the turn-end emitter run as descendants of it and so resolve the same pid.
 #
+# A bare pid is NOT enough, because pids recycle: a session that dropped
+# breadcrumbs and then died without reaching a turn end leaves its file behind,
+# and a much later session that happens to resolve the same number would fold a
+# dead session's breadcrumbs into its own first turn - the same mis-attribution
+# per-session keying exists to prevent, displaced in time instead of across
+# concurrent sessions. So the key binds the pid to cs_pid_identity, the process
+# start time (plus cmdline on Linux) that bin/cs-session-pid-lib.sh already owns
+# precisely so a reused pid reads as a mismatch. That string carries spaces and
+# slashes, so the key is `<pid>-<hash>`: the pid stays legible on disk and the
+# hash makes a cross-session collision impossible in practice.
+#
+# An unresolvable identity yields NO key, so the breadcrumb is dropped. Falling
+# back to a bare pid would reintroduce exactly the collision this guards against,
+# and a dropped breadcrumb only costs one turn's classification.
+#
 # Resolved ONCE per process and cached: the walk costs up to sixteen `ps` calls,
 # which a per-breadcrumb resolution would pay on every drained wake.
 cs_telemetry_session_key() {
+  local pid identity hash
   if [ "$CS_TELEMETRY_SESSION_KEY_RESOLVED" -eq 0 ]; then
     CS_TELEMETRY_SESSION_KEY_RESOLVED=1
     CS_TELEMETRY_SESSION_KEY=
-    if command -v cs_session_harness_pid >/dev/null 2>&1; then
-      CS_TELEMETRY_SESSION_KEY=$(cs_session_harness_pid 2>/dev/null) || CS_TELEMETRY_SESSION_KEY=
-    fi
+    {
+      if command -v cs_session_harness_pid >/dev/null 2>&1 &&
+         command -v cs_pid_identity >/dev/null 2>&1; then
+        pid=$(cs_session_harness_pid 2>/dev/null) || pid=
+        case "$pid" in ''|*[!0-9]*) pid= ;; esac
+        if [ -n "$pid" ]; then
+          identity=$(cs_pid_identity "$pid" 2>/dev/null) || identity=
+          if [ -n "$identity" ]; then
+            hash=$(cs_telemetry_short_hash "$pid $identity") || hash=
+            [ -n "$hash" ] && CS_TELEMETRY_SESSION_KEY="$pid-$hash"
+          fi
+        fi
+      fi
+    } 2>/dev/null || true
     case "$CS_TELEMETRY_SESSION_KEY" in
-      ''|*[!0-9]*) CS_TELEMETRY_SESSION_KEY= ;;
+      *[!A-Za-z0-9-]*) CS_TELEMETRY_SESSION_KEY= ;;
     esac
   fi
   [ -n "$CS_TELEMETRY_SESSION_KEY" ] || return 1
   printf '%s\n' "$CS_TELEMETRY_SESSION_KEY"
+}
+
+# cs_telemetry_short_hash <string> - a short filesystem-safe digest, or nothing.
+# The repo's established shasum/sha256sum pair; neither present means no key and
+# therefore a dropped breadcrumb, never a guessable fallback.
+cs_telemetry_short_hash() {
+  local out=''
+  if command -v shasum >/dev/null 2>&1; then
+    out=$(printf '%s' "$1" | shasum -a 256 2>/dev/null | awk '{print substr($1,1,16)}')
+  elif command -v sha256sum >/dev/null 2>&1; then
+    out=$(printf '%s' "$1" | sha256sum 2>/dev/null | awk '{print substr($1,1,16)}')
+  fi
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
 }
 
 # cs_telemetry_crumbs_resolve - set CS_TELEMETRY_CRUMBS to THIS session's
@@ -304,6 +352,32 @@ cs_telemetry_on() {
 #   merge          a PR merge or an approved local landing ran
 #   teardown       a task was cleaned up
 #   promote        a scout was promoted to ship
+
+# cs_telemetry_discard_stale_crumbs - remove this session's breadcrumb file when
+# it is older than one plausible turn, so the fold that follows sees nothing.
+#
+# This is the second half of the reuse defence, and it fails differently from the
+# hashed session key: the key makes a collision impossible, this makes a dead
+# session's leftovers short-lived whatever the key says. It also covers the
+# ordinary case the retain_days sweep is far too slow for - a harness killed
+# mid-turn leaves breadcrumbs that would otherwise sit for up to a month.
+# Unreadable mtime means leave it alone; telemetry never destroys state it cannot
+# prove is stale. Always rc 0.
+cs_telemetry_discard_stale_crumbs() {
+  local mtime now
+  [ -n "$CS_TELEMETRY_CRUMBS" ] || return 0
+  [ -f "$CS_TELEMETRY_CRUMBS" ] || return 0
+  {
+    mtime=$(cs_telemetry_mtime "$CS_TELEMETRY_CRUMBS")
+    now=$(date -u +%s 2>/dev/null)
+    case "$mtime" in ''|*[!0-9]*) return 0 ;; esac
+    case "$now" in ''|*[!0-9]*) return 0 ;; esac
+    if [ "$((now - mtime))" -ge "$CS_TELEMETRY_MAX_CRUMB_AGE" ]; then
+      rm -f "$CS_TELEMETRY_CRUMBS" 2>/dev/null || true
+    fi
+  } 2>/dev/null || true
+  return 0
+}
 
 # cs_telemetry_crumb <kind> [detail] - record one breadcrumb in THIS session's
 # own breadcrumb file. A session whose identity cannot be resolved drops the
@@ -476,6 +550,7 @@ cs_telemetry_fold() {
   CS_TELEMETRY_WAKE_KIND=
   CS_TELEMETRY_WAKE_KINDS=
   cs_telemetry_crumbs_resolve || CS_TELEMETRY_CRUMBS=
+  cs_telemetry_discard_stale_crumbs
   if [ -n "$CS_TELEMETRY_CRUMBS" ] && [ -f "$CS_TELEMETRY_CRUMBS" ]; then
     while IFS="$(printf '\t')" read -r kind detail || [ -n "$kind" ]; do
       case "$kind" in
@@ -584,6 +659,12 @@ cs_telemetry_usage() {
     case "$harness" in
       claude) CS_TELEMETRY_EFFORT=$(printf '%s' "$payload" | jq -r '.effort.level // empty' 2>/dev/null) ;;
       codex) CS_TELEMETRY_MODEL=$(printf '%s' "$payload" | jq -r '.model // empty' 2>/dev/null) ;;
+      # An unnamed harness has no parser, so the whole read stops HERE, before
+      # the cursor is touched. Advancing the cursor and then failing to parse
+      # would silently forfeit that window's tokens for the next turn too, even
+      # one whose payload is perfectly unambiguous. The session id above is still
+      # authoritative and is kept.
+      *) return 0 ;;
     esac
 
     [ -n "$session" ] || return 0
@@ -618,8 +699,7 @@ cs_telemetry_usage() {
 
     case "$harness" in
       codex) result=$(printf '%s\n' "$window" | cs_telemetry_usage_codex) ;;
-      claude) result=$(printf '%s\n' "$window" | cs_telemetry_usage_claude) ;;
-      *) result='' ;;
+      *) result=$(printf '%s\n' "$window" | cs_telemetry_usage_claude) ;;
     esac
     [ -n "$result" ] || return 0
     CS_TELEMETRY_USAGE=$(printf '%s' "$result" | jq -c '.usage' 2>/dev/null)

@@ -225,12 +225,31 @@ assert_line "$out" 'WARN +telemetry +- +host/telemetry\.conf is enabled must be 
   'a malformed telemetry config is reported specifically'
 assert_contains "$out" 'docs/telemetry.md' 'the malformed telemetry warning names its owner doc'
 
-# A malformed OPTIONAL config must not change the verdict, so run it against an
-# otherwise healthy fixture and prove the required-problem count is untouched.
-before=$(cfg_doctor | grep -c 'required problem' || true)
+# A malformed OPTIONAL config must not change the verdict. The verdict is the
+# doctor's exit status plus its closing line, and that line CARRIES the count
+# ("1 required problem" / "N required problems" / "Ready:"), so comparing the
+# line text and the status detects a config that silently added a problem.
+verdict() { # -> "<exit-status> <closing verdict line>"
+  local out rc line
+  out=$(cfg_doctor); rc=$?
+  line=$(printf '%s\n' "$out" | grep -E 'required problem|^Ready:' | head -1)
+  printf '%s %s\n' "$rc" "$line"
+}
+
+malformed_verdict=$(verdict)
 rm -f "$CFG_HOME/host/telemetry.conf"
-after=$(cfg_doctor | grep -c 'required problem' || true)
-[ "$before" = "$after" ] || fail 'a malformed telemetry config must not change the doctor verdict'
+clean_verdict=$(verdict)
+[ "$malformed_verdict" = "$clean_verdict" ] ||
+  fail "a malformed telemetry config must not change the doctor verdict: '$malformed_verdict' vs '$clean_verdict'"
+
+# The guard must be able to FAIL, or it proves nothing. A genuine required
+# problem moves both the status and the count, so the same comparison rejects it.
+printf 'x\n' > "$CFG_HOME/data/boss.md"
+broken_verdict=$(verdict)
+rm -f "$CFG_HOME/data/boss.md"
+[ "$broken_verdict" != "$clean_verdict" ] ||
+  fail "the verdict guard cannot detect a real required problem, so it proves nothing: '$broken_verdict'"
+[ "$(verdict)" = "$clean_verdict" ] || fail 'removing the induced problem must restore the verdict'
 pass 'telemetry is reported as optional: disabled informs, enabled names its path, malformed warns'
 
 pass 'cs-doctor behaviors'

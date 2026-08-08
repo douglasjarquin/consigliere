@@ -149,10 +149,18 @@ Classification is derived mechanically from control flow: an instrumented script
 That keeps one owner of the rules and keeps the classification honest, because it describes what actually ran rather than what a turn said about itself.
 
 Breadcrumbs are turn-scoped, live in `state/.telemetry-crumbs-<session>`, and are cleared at each turn end.
-The `<session>` key is the harness process in the dropping shell's ancestry, which is exactly what `state/.lock` already means by "this session" and is owned by `bin/cs-session-pid-lib.sh`.
 Keying them per session is what stops a second window, a read-only helper, or a tooling session started in the repo root from folding and deleting the real supervisor's in-flight breadcrumbs and mis-attributing its supervision turn.
 A shell that cannot resolve its own session drops the breadcrumb silently, and a turn end that cannot resolve it folds nothing and still records the turn with a null wake kind.
-Stale per-session breadcrumb files age out under the same retention sweep as the transcript cursors.
+
+The `<session>` key is `<pid>-<hash>`, where the pid is the harness process in the dropping shell's ancestry - exactly what `state/.lock` already means by "this session" - and the hash covers that pid together with `cs_pid_identity`, the process start time that makes a recycled pid read as a mismatch.
+`bin/cs-session-pid-lib.sh` owns both the ancestry walk and that identity read; `bin/cs-telemetry-lib.sh` owns the derivation of the key from them.
+A bare pid would not do, because pids recycle: a session that dropped breadcrumbs and then died without reaching a turn end leaves its file behind, and a later session resolving the same number would fold a dead session's breadcrumbs into its own first turn.
+An unresolvable identity yields no key at all rather than a bare-pid fallback, which costs one turn's classification and nothing else.
+
+Two independent guards bound a leftover file, because they fail differently.
+The hashed key makes a cross-session collision impossible even while the file survives.
+The fold separately ignores and removes any breadcrumb file whose mtime is older than `CS_BUSY_TURN_MAX_SECS` (default 3600, `docs/configuration.md`), which is this repo's existing bound on how long one turn may legitimately run, so no second number can drift from it and no real turn can be truncated.
+Whatever still survives both ages out under the same retention sweep as the transcript cursors.
 
 | breadcrumb | dropped by | meaning |
 |---|---|---|

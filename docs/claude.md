@@ -162,7 +162,7 @@ lock acquired: harness pid 61190 DIGEST PRESENT
 
 A hook-run digest stacks four to five more shells between `cs-lock.sh` and the
 harness process than a directly invoked one, which is why its ancestry walk is
-sixteen hops (see `bin/cs-lock.sh`).
+sixteen hops (see `bin/cs-session-pid-lib.sh`, which owns the walk).
 A fresh clone WITHOUT `state/` stays silent by design (`cs_primary_scope_matches`
 requires it); the first session of a brand-new home runs `bin/cs-session-start.sh`
 by hand per AGENTS.md section 3.
