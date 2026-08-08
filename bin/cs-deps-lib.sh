@@ -15,14 +15,17 @@
 #                 session-start detection, so bootstrap's output does not change
 #                 when it grows.
 #
-# Version floors are NOT owned here. The pinned herdr version lives in
+# The axi-family version floors (gh-axi, tasks-axi, lavish-axi, quota-axi) and
+# their bump policy are owned HERE, beside the comparator, because both
+# consumers gate on them: bin/cs-bootstrap.sh as the in-session dispatch gate
+# and bin/cs-doctor.sh as the preflight report. One owner is what keeps doctor a
+# true superset of bootstrap's detection, so a build the preflight calls ready
+# can never be the build session start refuses.
+#
+# Every other pin keeps its own owner: the herdr version in
 # bin/cs-install-herdr.sh, the herdr protocol floor in bin/cs-herdr-lib.sh
-# (CS_HERDR_MIN_PROTOCOL), the ShellCheck pin in bin/cs-lint.sh
-# (--required-version), and the axi-family floors and their bump policy in
-# bin/cs-bootstrap.sh. This library names tools, states why consigliere needs
-# them, probes the installed version, offers the version comparison the floor
-# owners share, and suggests an install channel - it never holds a second copy
-# of a pin.
+# (CS_HERDR_MIN_PROTOCOL), and the ShellCheck pin in bin/cs-lint.sh
+# (--required-version). This library never holds a second copy of one of those.
 #
 # Install suggestions are suggestions only. Consigliere never installs a
 # dependency for the boss: the same tool legitimately arrives by brew, npm, a
@@ -36,7 +39,9 @@
 #   cs_deps_purpose <tool>                        # why consigliere needs it
 #   cs_deps_hint <tool>                           # install suggestion
 #   cs_deps_version <tool>                        # installed version, or nothing
+#   cs_deps_version_release <tool>                # the comparable release, or nothing
 #   cs_deps_version_at_least <tool> <floor>       # exit 0 iff installed >= floor
+#   cs_deps_axi_floor <tool>                      # the tool's axi floor, or nothing
 #
 # cs_deps_version runs the tool's own `--version`; it does not bound that call,
 # so it is only safe against the inventory's tools, never arbitrary input.
@@ -146,18 +151,32 @@ cs_deps_version() {
   printf '%s\n' "$raw" | grep -Eo '[0-9]+(\.[0-9]+)+' | head -1
 }
 
-# cs_deps_version_at_least <tool> <floor> - exit 0 when the installed version is
-# at or above <floor>, comparing dotted numeric fields. Exits nonzero when the
-# tool is absent, --version fails, or its complete output is not a clean dotted
-# release number, so an unparseable or prerelease build reads as below-floor
-# rather than silently passing. Floor values are owned by the calling script
-# (bin/cs-deps-lib.sh header lists the owners), never here.
-cs_deps_version_at_least() {
-  local tool=${1:-} floor=${2:-} have
-  [ -n "$tool" ] && [ -n "$floor" ] || return 1
+# cs_deps_version_release <tool> - print the tool's COMPLETE --version output
+# when that output is a clean dotted release number and the tool exited 0;
+# exit nonzero for an absent tool, a --version that fails, decorated or
+# malformed text, or a prerelease such as 0.1.29-rc.1.
+#
+# This is the single acceptance test for "comparable version". The comparator
+# below asks it, and so does every diagnostic that displays a version, so a
+# build one of them classifies as below-floor can never be displayed by the
+# other as a number above that floor.
+cs_deps_version_release() {
+  local tool=${1:-} have
+  [ -n "$tool" ] || return 1
   command -v "$tool" >/dev/null 2>&1 || return 1
   have=$("$tool" --version 2>/dev/null) || return 1
   [[ "$have" =~ ^[0-9]+(\.[0-9]+)+$ ]] || return 1
+  printf '%s\n' "$have"
+}
+
+# cs_deps_version_at_least <tool> <floor> - exit 0 when the installed version is
+# at or above <floor>, comparing dotted numeric fields. Exits nonzero whenever
+# cs_deps_version_release rejects the build, so an absent, failing, unparseable,
+# or prerelease build reads as below-floor rather than silently passing.
+cs_deps_version_at_least() {
+  local tool=${1:-} floor=${2:-} have
+  [ -n "$floor" ] || return 1
+  have=$(cs_deps_version_release "$tool") || return 1
   [[ "$floor" =~ ^[0-9]+(\.[0-9]+)+$ ]] || return 1
   awk -v have="$have" -v floor="$floor" 'BEGIN {
     n = split(have, H, "."); m = split(floor, F, ".")
@@ -169,4 +188,36 @@ cs_deps_version_at_least() {
     }
     exit 0
   }'
+}
+
+# AXI-FAMILY FLOOR POLICY. Every floor below is the CURRENT LATEST published
+# version of its tool at the time it was set, bumped deliberately and
+# periodically to move the whole fleet onto the newest axi tools. A floor is
+# NOT the minimum version that happens to introduce some behavior consigliere
+# depends on: never argue a floor down to the earliest release that satisfies
+# one feature, and never justify one with a feature citation - verify the
+# tool's current published latest and bump. cs-tasks-lib.sh's tasks-axi feature
+# probes are a separate defense-in-depth concern, not part of its floor.
+# Each floor: the tool's published latest, verified 2026-08-06.
+CS_GH_AXI_MIN=0.1.29
+CS_TASKS_AXI_MIN=0.2.4
+CS_LAVISH_AXI_MIN=0.1.45
+CS_QUOTA_AXI_MIN=0.1.17
+
+# cs_deps_axi_floor <tool> - the tool's floor, or nonzero for a tool the policy
+# above does not gate.
+#
+# The gated set is exactly gh-axi, tasks-axi, lavish-axi, and quota-axi.
+# chrome-devtools-axi is in the optional inventory but deliberately carries no
+# floor: it is presence-checked only, because consigliere drives a browser
+# through whatever that tool's current help advertises rather than depending on
+# version-specific machine behavior.
+cs_deps_axi_floor() {
+  case "${1:-}" in
+    gh-axi) printf '%s\n' "$CS_GH_AXI_MIN" ;;
+    tasks-axi) printf '%s\n' "$CS_TASKS_AXI_MIN" ;;
+    lavish-axi) printf '%s\n' "$CS_LAVISH_AXI_MIN" ;;
+    quota-axi) printf '%s\n' "$CS_QUOTA_AXI_MIN" ;;
+    *) return 1 ;;
+  esac
 }

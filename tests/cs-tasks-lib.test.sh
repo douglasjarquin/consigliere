@@ -59,7 +59,7 @@ test_compat_probe() {
     || fail "0.1.1 with --archive-body and multi-id mv must be compatible"
 
   d="$TMP_ROOT/compat-022"; fb=$(cs_fakebin "$d")
-  write_fake_tasks_axi "$fb" "tasks-axi 0.2.2" "$UPDATE_OK" "$MV_OK"
+  write_fake_tasks_axi "$fb" "0.2.2" "$UPDATE_OK" "$MV_OK"
   run_probe "$fb" cs_tasks_axi_compatible \
     || fail "0.2.2 with both capabilities must be compatible"
 
@@ -80,20 +80,26 @@ test_compat_probe() {
 
   set +e; run_probe "" cs_tasks_axi_compatible; rc=$?; set -e
   [ "$rc" -ne 0 ] || fail "absent tasks-axi must be incompatible"
-  set +e; run_probe "" cs_tasks_axi_version_parts; rc=$?; set -e
-  [ "$rc" -ne 0 ] || fail "absent tasks-axi must fail the version probe"
 
   pass "compat probe requires >=0.1.1, --archive-body, and multi-id mv"
 }
 
-test_version_parts_parsing() {
-  local d fb parts
-  d="$TMP_ROOT/version-parse"; fb=$(cs_fakebin "$d")
-  write_fake_tasks_axi "$fb" "tasks-axi version 1.12.3 (release)" "$UPDATE_OK" "$MV_OK"
-  parts=$(run_probe "$fb" cs_tasks_axi_version_parts) || fail "version probe failed"
-  [ "$parts" = "1 12 3" ] || fail "version parts wrong: '$parts'"
+# The probe reads the version through the shared comparator, so it accepts only
+# a clean dotted release - the same acceptance test the session-start floor
+# uses. A build whose --version answers with decorated text is not comparable
+# and must not be treated as compatible.
+test_version_acceptance() {
+  local d fb rc
+  d="$TMP_ROOT/version-plain"; fb=$(cs_fakebin "$d")
+  write_fake_tasks_axi "$fb" "1.12.3" "$UPDATE_OK" "$MV_OK"
   run_probe "$fb" cs_tasks_axi_compatible || fail "1.12.3 must be compatible"
-  pass "version parsing extracts major/minor/patch from decorated output"
+
+  d="$TMP_ROOT/version-decorated"; fb=$(cs_fakebin "$d")
+  write_fake_tasks_axi "$fb" "tasks-axi version 1.12.3 (release)" "$UPDATE_OK" "$MV_OK"
+  set +e; run_probe "$fb" cs_tasks_axi_compatible; rc=$?; set -e
+  [ "$rc" -ne 0 ] || fail "decorated --version output must not read as comparable"
+
+  pass "compatibility reads only clean dotted release versions"
 }
 
 test_backlog_backend_value() {
@@ -152,6 +158,6 @@ test_manual_predicate_and_availability() {
 }
 
 test_compat_probe
-test_version_parts_parsing
+test_version_acceptance
 test_backlog_backend_value
 test_manual_predicate_and_availability

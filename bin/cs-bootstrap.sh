@@ -8,17 +8,18 @@
 #                              BOOTSTRAP_INFO instead. Both lists come from
 #                              cs-deps-lib.sh, their single owner, which
 #                              bin/cs-doctor.sh reports from as well.
-#                              The axi-family tools are also version-gated here:
-#                              an installed build below its floor reports through
+#                              Four of those tools are also version-gated:
+#                              gh-axi, tasks-axi, lavish-axi, and quota-axi. An
+#                              installed build below its floor reports through
 #                              the same MISSING / BOOTSTRAP_INFO line as an
 #                              absent tool, so the operator is asked to upgrade
 #                              before anything is dispatched instead of silently
-#                              running an older build. This script owns the
-#                              floors and their policy: every floor is the
-#                              CURRENT LATEST published version of its tool,
-#                              bumped deliberately and periodically - never the
-#                              minimum version that introduces some depended-on
-#                              behavior (see the constants below).
+#                              running an older build. chrome-devtools-axi is
+#                              deliberately not gated; cs-deps-lib.sh states why
+#                              beside cs_deps_axi_floor. The floors and their
+#                              bump policy live there too, next to the shared
+#                              comparator, so bin/cs-doctor.sh's preflight gates
+#                              the same builds this dispatch gate does.
 #   HERDR_DOWN / HERDR_PROTOCOL:  the herdr server is unreachable or below the
 #                              minimum protocol (docs/herdr.md).
 #   NEEDS_GH_AUTH              gh is present but not authenticated.
@@ -52,46 +53,19 @@ DETECT_ONLY=${CS_BOOTSTRAP_DETECT_ONLY:-0}
 # shellcheck source=bin/cs-deps-lib.sh
 . "$SCRIPT_DIR/cs-deps-lib.sh"
 
-# AXI-FAMILY FLOOR POLICY. Every floor below is the CURRENT LATEST published
-# version of its tool at the time it was set, bumped deliberately and
-# periodically to move the whole fleet onto the newest axi tools. A floor is
-# NOT the minimum version that happens to introduce some behavior consigliere
-# depends on: never argue a floor down to the earliest release that satisfies
-# one feature, and never justify one with a feature citation - verify the
-# tool's current published latest and bump. cs-tasks-lib.sh's tasks-axi feature
-# probes are a separate defense-in-depth concern, not part of its floor.
-# Each floor: the tool's published latest, verified 2026-08-06.
-CS_GH_AXI_MIN=0.1.29
-CS_TASKS_AXI_MIN=0.2.4
-CS_LAVISH_AXI_MIN=0.1.45
-CS_QUOTA_AXI_MIN=0.1.17
-
-# cs_bootstrap_axi_floor <tool> - the tool's floor, or nonzero for a tool the
-# policy above does not gate.
-cs_bootstrap_axi_floor() {
-  case "$1" in
-    gh-axi) printf '%s\n' "$CS_GH_AXI_MIN" ;;
-    tasks-axi) printf '%s\n' "$CS_TASKS_AXI_MIN" ;;
-    lavish-axi) printf '%s\n' "$CS_LAVISH_AXI_MIN" ;;
-    quota-axi) printf '%s\n' "$CS_QUOTA_AXI_MIN" ;;
-    *) return 1 ;;
-  esac
-}
-
 # cs_bootstrap_axi_gap <tool> - when the installed tool is below its floor,
 # print "<installed-or-unparseable> below floor <floor> - upgrade: <hint>" and
 # exit 0; silent exit 1 when the tool is ungated, absent, or at/above its floor.
-# The displayed version keeps the comparator's classification: output the
-# comparator rejected as not a clean dotted release (malformed, prerelease)
-# reports as unparseable rather than re-extracting a dotted token that would
-# contradict the rejection.
+# The displayed version keeps the comparator's classification because it comes
+# from the same acceptance test: a build cs_deps_version_release rejects -
+# malformed text, a prerelease, or a --version that exits nonzero - reports as
+# unparseable rather than as a number that would contradict the rejection.
 cs_bootstrap_axi_gap() {
   local tool=$1 floor installed
-  floor=$(cs_bootstrap_axi_floor "$tool") || return 1
+  floor=$(cs_deps_axi_floor "$tool") || return 1
   command -v "$tool" >/dev/null 2>&1 || return 1
   cs_deps_version_at_least "$tool" "$floor" && return 1
-  installed=$("$tool" --version 2>/dev/null || true)
-  [[ "$installed" =~ ^[0-9]+(\.[0-9]+)+$ ]] || installed=""
+  installed=$(cs_deps_version_release "$tool" || true)
   printf '%s below floor %s - upgrade: %s\n' \
     "${installed:-unparseable version}" "$floor" "$(cs_deps_hint "$tool")"
 }

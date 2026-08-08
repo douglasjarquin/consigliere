@@ -7,7 +7,8 @@
 #
 # Provides ok/not-ok reporters, a self-cleaning temp root, fakebin/PATH-shim
 # helpers, deterministic git identity and fixture builders, state/<id>.meta
-# writers, and the common string/exit-code/file assertions. It deliberately
+# writers, the common string/line/exit-code/file assertions, and the version
+# fixture derivation floor-gated suites share. It deliberately
 # does NOT bundle behavior-specific fake herdr/codex/no-mistakes mocks: those
 # encode terminal and lifecycle assumptions that differ per suite and belong
 # with the tests that own them.
@@ -175,6 +176,39 @@ assert_not_contains() {
 expect_code() {
   local expected=$1 actual=$2 label=$3
   [ "$actual" = "$expected" ] || fail "$label: expected exit $expected, got $actual"
+}
+
+# assert_line <output> <extended-regex> <label> - the anchored form of
+# assert_contains: one LINE of <output> must match (or, for assert_no_line, must
+# not match) the regex, so a suite can pin a report column layout or an
+# output-line prefix rather than a substring found anywhere.
+assert_line() {
+  printf '%s\n' "$1" | grep -Eq -- "$2" ||
+    fail "$3 (no line matching /$2/)"$'\n'"--- output ---"$'\n'"$1"
+}
+
+assert_no_line() {
+  printf '%s\n' "$1" | grep -Eq -- "$2" &&
+    fail "$3 (unexpected line matching /$2/)"$'\n'"--- output ---"$'\n'"$1"
+  return 0
+}
+
+# cs_test_version_below <version> - the highest dotted version that still orders
+# below <version>, for suites that derive a below-floor fixture from a floor the
+# implementation owns instead of hardcoding a number that drifts on the next
+# bump. A zero field has nothing to decrement, so the borrow moves to the
+# next-higher field and the fields below it saturate: 0.2.0 -> 0.1.9999. An
+# all-zero version has nothing below it and exits nonzero, which callers must
+# turn into a loud failure rather than an empty fixture.
+cs_test_version_below() {
+  printf '%s\n' "$1" | awk -F. -v OFS=. '{
+    i = NF
+    while (i > 1 && $i == 0) i--
+    if ($i == 0) exit 1
+    $i = $i - 1
+    for (j = i + 1; j <= NF; j++) $j = 9999
+    print
+  }'
 }
 
 assert_grep() {

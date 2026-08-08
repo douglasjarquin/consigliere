@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Behavior (portable): bin/cs-bootstrap.sh's axi-family version floors.
 #
-# Bootstrap owns the axi-family floors and their bump policy (see its header).
-# These tests pin the enforcement behavior, not the floor values: each floor is
-# read from the script itself, and the below-floor fixture is derived as the
-# patch immediately below it, so the boundary stays genuine across deliberate
-# floor bumps without this file naming a version that drifts.
+# bin/cs-deps-lib.sh owns the axi-family floors and their bump policy; bootstrap
+# is the session-start gate that enforces them. These tests pin the enforcement
+# behavior, not the floor values: each floor is asked of its owner through
+# cs_deps_axi_floor, and the below-floor fixture is derived from it, so the
+# boundary stays genuine across deliberate floor bumps without this file naming
+# a version that drifts.
 #
 # Pinned behavior, per gated tool:
 #   - an installed build one patch below the floor fires the same diagnostic
@@ -21,6 +22,9 @@ set -u
 TMP=$(cs_test_tmproot cs-bootstrap)
 mkdir -p "$TMP"
 BOOTSTRAP="$ROOT/bin/cs-bootstrap.sh"
+# The floors are asked of their owner, never parsed out of a script's source.
+# shellcheck source=bin/cs-deps-lib.sh
+. "$ROOT/bin/cs-deps-lib.sh"
 
 HOME_DIR="$TMP/home"
 mkdir -p "$HOME_DIR/config" "$HOME_DIR/state" "$HOME_DIR/data"
@@ -43,49 +47,16 @@ for util in bash env awk sed grep head cat tr uname dirname basename readlink mk
 done
 BASE_PATH="$FAKEBIN:$TOOLS"
 
-# floor_of <CONSTANT-STEM> - the floor value the script itself declares.
-floor_of() {
-  sed -n "s/^CS_${1}_MIN=\([0-9.]*\).*/\1/p" "$BOOTSTRAP"
-}
-
-# below <version> - the highest version the comparator still orders below
-# <version>, so the boundary test is genuine rather than merely "some old
-# version". A zero field has nothing to decrement, so the borrow moves to the
-# next-higher field and the fields below it saturate: 0.2.0 -> 0.1.9999. An
-# all-zero version has nothing below it at all and exits nonzero, which every
-# caller turns into a loud failure rather than an empty fixture.
-below() {
-  printf '%s\n' "$1" | awk -F. -v OFS=. '{
-    i = NF
-    while (i > 1 && $i == 0) i--
-    if ($i == 0) exit 1
-    $i = $i - 1
-    for (j = i + 1; j <= NF; j++) $j = 9999
-    print
-  }'
-}
-
 run_bootstrap() {
   PATH="$BASE_PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$ROOT" \
     CS_BOOTSTRAP_DETECT_ONLY=1 "$BOOTSTRAP" 2>&1
 }
 
-assert_line() {
-  printf '%s\n' "$1" | grep -Eq -- "$2" ||
-    fail "$3 (no line matching /$2/)"$'\n'"--- output ---"$'\n'"$1"
-}
-
-assert_no_line() {
-  printf '%s\n' "$1" | grep -Eq -- "$2" &&
-    fail "$3 (unexpected line matching /$2/)"$'\n'"--- output ---"$'\n'"$1"
-  return 0
-}
-
 # --- gh-axi (required): below fires MISSING, at-floor is silent ----------------
 
-floor=$(floor_of GH_AXI)
+floor=$(cs_deps_axi_floor gh-axi)
 export CS_TEST_GH_AXI_VERSION
-CS_TEST_GH_AXI_VERSION=$(below "$floor") ||
+CS_TEST_GH_AXI_VERSION=$(cs_test_version_below "$floor") ||
   fail "no below-floor fixture is derivable from the gh-axi floor $floor"
 out=$(run_bootstrap)
 assert_line "$out" "^MISSING: gh-axi .*below floor $floor" 'a below-floor gh-axi reports MISSING like an absent tool'
@@ -100,9 +71,9 @@ pass 'gh-axi floor: below fires, at-floor is silent'
 # --- optional axi tools: below fires BOOTSTRAP_INFO, at-floor is silent --------
 
 check_optional_floor() {
-  local tool=$1 var=$2 stem=$3 floor under out
-  floor=$(floor_of "$stem")
-  under=$(below "$floor") ||
+  local tool=$1 var=$2 floor under out
+  floor=$(cs_deps_axi_floor "$tool")
+  under=$(cs_test_version_below "$floor") ||
     fail "no below-floor fixture is derivable from the $tool floor $floor"
   export "$var=$under"
   out=$(run_bootstrap)
@@ -117,9 +88,9 @@ check_optional_floor() {
   pass "$tool floor: below fires, at-floor is silent"
 }
 
-check_optional_floor tasks-axi CS_TEST_TASKS_AXI_VERSION TASKS_AXI
-check_optional_floor lavish-axi CS_TEST_LAVISH_AXI_VERSION LAVISH_AXI
-check_optional_floor quota-axi CS_TEST_QUOTA_AXI_VERSION QUOTA_AXI
+check_optional_floor tasks-axi CS_TEST_TASKS_AXI_VERSION
+check_optional_floor lavish-axi CS_TEST_LAVISH_AXI_VERSION
+check_optional_floor quota-axi CS_TEST_QUOTA_AXI_VERSION
 
 check_unparseable() {
   local tool=$1 var=$2 diagnostic_prefix=$3 out
@@ -136,7 +107,7 @@ check_unparseable tasks-axi CS_TEST_TASKS_AXI_VERSION 'BOOTSTRAP_INFO: optional 
 check_unparseable lavish-axi CS_TEST_LAVISH_AXI_VERSION 'BOOTSTRAP_INFO: optional tool '
 check_unparseable quota-axi CS_TEST_QUOTA_AXI_VERSION 'BOOTSTRAP_INFO: optional tool '
 
-floor=$(floor_of GH_AXI)
+floor=$(cs_deps_axi_floor gh-axi)
 export CS_TEST_GH_AXI_VERSION
 CS_TEST_GH_AXI_VERSION='requires Node 99.0'
 out=$(run_bootstrap)
@@ -151,6 +122,23 @@ assert_no_line "$out" "^MISSING: gh-axi $floor below floor $floor" \
   'the diagnostic never re-extracts a dotted token the comparator rejected'
 unset CS_TEST_GH_AXI_VERSION
 pass 'only complete dotted release versions are comparable'
+
+# A tool that prints a clean above-floor number but exits nonzero is rejected by
+# the comparator; the diagnostic must say so instead of naming that number.
+
+cat > "$FAKEBIN/gh-axi" <<'SH'
+#!/usr/bin/env bash
+printf '99.9.9\n'
+exit 3
+SH
+chmod +x "$FAKEBIN/gh-axi"
+out=$(run_bootstrap)
+assert_line "$out" "^MISSING: gh-axi unparseable version below floor $floor" \
+  'a --version that exits nonzero is reported as unparseable'
+assert_no_line "$out" '^MISSING: gh-axi 99\.9\.9 below floor' \
+  'the diagnostic never names a version above the floor it says the build is below'
+cs_fake_version_tool "$FAKEBIN" gh-axi CS_TEST_GH_AXI_VERSION 9.9.9
+pass 'a failing --version never reports as an above-floor number'
 
 # --- an absent gated tool is absent, never "out of date" -----------------------
 

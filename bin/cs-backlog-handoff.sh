@@ -282,7 +282,7 @@ if [ "$FAILED" -ne 0 ]; then
 fi
 
 if ! cs_tasks_axi_compatible; then
-  echo "error: a compatible tasks-axi (atomic multi-ID mv) is required to move backlog items; bin/cs-bootstrap.sh owns its version floor" >&2
+  echo "error: a compatible tasks-axi (atomic multi-ID mv) is required to move backlog items; bin/cs-deps-lib.sh owns its version floor" >&2
   exit 1
 fi
 
