@@ -10,7 +10,8 @@
 > commit `55aa94e` (drift check clean: none of the seven marker files changed
 > since the plan was written).
 >
-> Refreshed since: the two `session-start` rows in §2a, when the session-open
+> Refreshed since: the two `session-start` rows in §2a and the `docs/claude.md`
+> reference under "Reader-facing contract to preserve", when the session-open
 > hooks began running the digest and added the router's nudge as a second
 > minting site for that kind.
 
@@ -60,7 +61,7 @@ this is a design-first plan.
 
 ### Reader-facing contract to preserve
 
-`docs/claude.md:43-46` and `bin/cs-turnend-guard.sh` state the typed envelope is
+`docs/claude.md:64-67` and `bin/cs-turnend-guard.sh` state the typed envelope is
 what marks text "as legitimate supervision rather than an injected instruction to
 the reading agent" — claude scrutinizes hook stderr and refuses a bare
 instruction, honoring the typed marker per its loaded contract. Any redesign

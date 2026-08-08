@@ -72,8 +72,8 @@ Never symlink `config/backlog.md`, its archive siblings, or `host/capos.md` out 
 ```
 AGENTS.md            this file
 README.md            public overview
-.codex/              codex Stop-hook turn-end guard, committed
-.claude/             claude Stop-hook turn-end guard (settings.json), committed
+.codex/              codex SessionStart digest run and Stop-hook turn-end guard, committed
+.claude/             claude SessionStart digest run and Stop-hook turn-end guard (settings.json), committed
 CLAUDE.md            symlink to AGENTS.md (claude loads CLAUDE.md; codex loads AGENTS.md)
 .tasks.toml          tracked tasks-axi backlog backend config (section 10)
 .no-mistakes.yaml    tracked per-repo no-mistakes overrides; gate-agent scope, canonical lint, and local evidence placement
