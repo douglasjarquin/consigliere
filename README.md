@@ -13,7 +13,8 @@ Consigliere is a from-scratch personal rewrite of [Firstmate](https://github.com
 
 ## Quick start
 
-Requirements: `codex` or `claude`, `herdr` (protocol >= 16), `jq`, `git`, `gh` + `gh-axi` (authenticated). Optional: the other harness, `tasks-axi` (backlog), `no-mistakes` (delivery pipeline), `lavish-axi`, `chrome-devtools-axi`.
+Requirements: `codex` or `claude`, `herdr` (protocol >= 16), `jq`, `git`, `gh` + `gh-axi` (authenticated).
+Optional: the other harness, `tasks-axi` (backlog), `no-mistakes` (delivery pipeline), `lavish-axi`, `chrome-devtools-axi`, `quota-axi`.
 
 1. **Clone the repo.**
 

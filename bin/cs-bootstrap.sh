@@ -88,6 +88,7 @@ cs_bootstrap_axi_floor() {
 cs_bootstrap_axi_gap() {
   local tool=$1 floor installed
   floor=$(cs_bootstrap_axi_floor "$tool") || return 1
+  command -v "$tool" >/dev/null 2>&1 || return 1
   cs_deps_version_at_least "$tool" "$floor" && return 1
   installed=$("$tool" --version 2>/dev/null || true)
   [[ "$installed" =~ ^[0-9]+(\.[0-9]+)+$ ]] || installed=""

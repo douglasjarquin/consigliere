@@ -31,23 +31,42 @@ cs_fake_version_tool "$FAKEBIN" tasks-axi CS_TEST_TASKS_AXI_VERSION 9.9.9
 cs_fake_version_tool "$FAKEBIN" lavish-axi CS_TEST_LAVISH_AXI_VERSION 9.9.9
 cs_fake_version_tool "$FAKEBIN" quota-axi CS_TEST_QUOTA_AXI_VERSION 9.9.9
 
+# A hermetic PATH. Only the four gated axi stubs and the ordinary utilities
+# bootstrap itself needs are reachable, so the fixture never executes the
+# developer's real gh, herdr, jq, or git - no network call, no live herdr
+# server, and no dependence on what happens to be installed.
+TOOLS="$TMP/tools"
+mkdir -p "$TOOLS"
+for util in bash env awk sed grep head cat tr uname dirname basename readlink mkdir; do
+  src=$(command -v "$util") || fail "test fixture needs $util on PATH"
+  ln -s "$src" "$TOOLS/$util"
+done
+BASE_PATH="$FAKEBIN:$TOOLS"
+
 # floor_of <CONSTANT-STEM> - the floor value the script itself declares.
 floor_of() {
   sed -n "s/^CS_${1}_MIN=\([0-9.]*\).*/\1/p" "$BOOTSTRAP"
 }
 
-# below <version> - the patch immediately below <version>, so the boundary test
-# is genuine rather than merely "some old version".
+# below <version> - the highest version the comparator still orders below
+# <version>, so the boundary test is genuine rather than merely "some old
+# version". A zero field has nothing to decrement, so the borrow moves to the
+# next-higher field and the fields below it saturate: 0.2.0 -> 0.1.9999. An
+# all-zero version has nothing below it at all and exits nonzero, which every
+# caller turns into a loud failure rather than an empty fixture.
 below() {
   printf '%s\n' "$1" | awk -F. -v OFS=. '{
-    if ($NF == 0) exit 1
-    $NF = $NF - 1
+    i = NF
+    while (i > 1 && $i == 0) i--
+    if ($i == 0) exit 1
+    $i = $i - 1
+    for (j = i + 1; j <= NF; j++) $j = 9999
     print
   }'
 }
 
 run_bootstrap() {
-  PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$ROOT" \
+  PATH="$BASE_PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$ROOT" \
     CS_BOOTSTRAP_DETECT_ONLY=1 "$BOOTSTRAP" 2>&1
 }
 
@@ -66,7 +85,8 @@ assert_no_line() {
 
 floor=$(floor_of GH_AXI)
 export CS_TEST_GH_AXI_VERSION
-CS_TEST_GH_AXI_VERSION=$(below "$floor")
+CS_TEST_GH_AXI_VERSION=$(below "$floor") ||
+  fail "no below-floor fixture is derivable from the gh-axi floor $floor"
 out=$(run_bootstrap)
 assert_line "$out" "^MISSING: gh-axi .*below floor $floor" 'a below-floor gh-axi reports MISSING like an absent tool'
 assert_line "$out" '^MISSING: gh-axi .*upgrade' 'the gh-axi diagnostic asks for an upgrade'
@@ -80,9 +100,11 @@ pass 'gh-axi floor: below fires, at-floor is silent'
 # --- optional axi tools: below fires BOOTSTRAP_INFO, at-floor is silent --------
 
 check_optional_floor() {
-  local tool=$1 var=$2 stem=$3 floor out
+  local tool=$1 var=$2 stem=$3 floor under out
   floor=$(floor_of "$stem")
-  export "$var=$(below "$floor")"
+  under=$(below "$floor") ||
+    fail "no below-floor fixture is derivable from the $tool floor $floor"
+  export "$var=$under"
   out=$(run_bootstrap)
   assert_line "$out" "^BOOTSTRAP_INFO: optional tool $tool .*below floor $floor" \
     "a below-floor $tool reports through the optional-tool line"
@@ -129,6 +151,21 @@ assert_no_line "$out" "^MISSING: gh-axi $floor below floor $floor" \
   'the diagnostic never re-extracts a dotted token the comparator rejected'
 unset CS_TEST_GH_AXI_VERSION
 pass 'only complete dotted release versions are comparable'
+
+# --- an absent gated tool is absent, never "out of date" -----------------------
+
+check_absent() {
+  local tool=$1 var=$2 pattern=$3 out
+  rm -f "$FAKEBIN/$tool"
+  out=$(run_bootstrap)
+  assert_line "$out" "$pattern" "an absent $tool is reported as absent"
+  assert_no_line "$out" "$tool .*below floor" "an absent $tool never reports a version gap"
+  cs_fake_version_tool "$FAKEBIN" "$tool" "$var" 9.9.9
+  pass "$tool absent: reported as absent, not as an out-of-date build"
+}
+
+check_absent gh-axi CS_TEST_GH_AXI_VERSION '^MISSING:.* gh-axi'
+check_absent quota-axi CS_TEST_QUOTA_AXI_VERSION '^BOOTSTRAP_INFO: optional tool quota-axi not installed'
 
 # --- a healthy fleet of fake tools keeps bootstrap silent about floors ---------
 
