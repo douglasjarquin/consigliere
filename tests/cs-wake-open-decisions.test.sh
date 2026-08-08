@@ -183,7 +183,44 @@ test_fold_guards_symlink_and_unreadable() {
   pass "status_open_decisions skips symlinked and unreadable files silently"
 }
 
+# The per-item cut comes from bin/cs-line-cap-lib.sh, shared with the
+# session-start digest's status tails so one truncation marker means the same
+# thing wherever an agent meets it. This pins the drain's own end of that
+# contract: the lede survives, the marker appears, and the item stays inside
+# the shared 220-character cap.
+test_over_long_decision_note_is_capped_with_a_marker() {
+  local dir state out err line item longest
+  dir=$(make_case long-note); state="$dir/state"
+  out="$dir/out"; err="$dir/err"
+  {
+    printf 'needs-decision [key=api-shape]: pick REST or RPC'
+    awk 'BEGIN { while (i++ < 200) printf " and-then-some" }'
+    printf '\n'
+  } > "$state/task-long.status"
+
+  run_drain "$state" "$out" "$err" || fail "drain failed on an over-long decision note"
+
+  line=$(grep -F 'task-long' "$out")
+  case "$line" in
+    *'task-long [key=api-shape] needs-decision: pick REST or RPC'*' [truncated]') : ;;
+    *) fail "an over-long decision note was not capped with its lede intact: $line" ;;
+  esac
+  item=${line#"${line%%[![:space:]]*}"}
+  longest=${#item}
+  [ "$longest" -le 220 ] || fail "a capped decision item ran $longest characters past the 220-character cap"
+
+  printf 'needs-decision [key=short]: brief enough to keep whole\n' > "$state/task-short.status"
+  run_drain "$state" "$out" "$err" || fail "drain failed on a short decision note"
+  assert_grep 'task-short [key=short] needs-decision: brief enough to keep whole' "$out" \
+    "a decision note already under the cap was altered"
+  assert_no_grep 'brief enough to keep whole [truncated]' "$out" \
+    "a decision note already under the cap was marked truncated"
+
+  pass "an over-long open decision is cut to the shared cap with the shared truncation marker"
+}
+
 test_buried_decision_surfaces_on_empty_drain
+test_over_long_decision_note_is_capped_with_a_marker
 test_resolved_decision_absent
 test_nonempty_drain_preserves_raw_and_annotations
 test_unreadable_and_symlink_skipped_without_noise

@@ -15,27 +15,92 @@
 #   4. supervision   - the ONE foreground-checkpoint operating block, inlined
 #                      here (the protocol is identical across harnesses and
 #                      one wait shape; there is no protocol renderer).
-#   5. context       - config/projects.md, host/capos.md, config/boss.md,
+#   5. read-once     - the do-not-re-read contract covering every source
+#                      represented by the two digests below, stated once,
+#                      ahead of the payload it governs.
+#   6. fleet state   - every state/*.meta with a cheap endpoint liveness read
+#                      and bounded status tails (wake-EVENT history, not current
+#                      state), orphan status logs, then the compact backlog
+#                      listing, the standing board sweeps, and the afk flag. The
+#                      live-task inventory leads the section for the same reason
+#                      the section leads CONTEXT (see ORDERING below): it is
+#                      what recovery depends on, so nothing else in the digest
+#                      may sit between it and the top. The board sweep block
+#                      also converges polls to records when locked
+#                      (cs-board-watch.sh sync), so a sweep the boss started in
+#                      an earlier session survives a wiped state/ or an
+#                      interrupted arm instead of going quiet.
+#   7. context       - config/projects.md, host/capos.md, config/boss.md,
 #                      config/boss-shared.md, config/learnings.md, each with an
 #                      explicit ABSENT marker when missing (absence is
 #                      meaningful and never confused with empty-but-present).
 #                      The three curated startup-memory files also report when
 #                      they exceed CS_STARTUP_MEMORY_MAX_BYTES, since every
 #                      session of the home pays their cost; /vault consolidates.
-#   6. fleet state   - compact backlog listing, standing board sweeps, every
-#                      state/*.meta with a cheap endpoint liveness read,
-#                      bounded status tails (wake-EVENT history, not current
-#                      state), orphan status logs, and the afk flag. The board
-#                      sweep block also converges polls to records when locked
-#                      (cs-board-watch.sh sync), so a sweep the boss started in
-#                      an earlier session survives a wiped state/ or an
-#                      interrupted arm instead of going quiet.
-#   7. next step     - points back at the supervision block; this script never
+#   8. next step     - points back at the supervision block; this script never
 #                      starts supervision itself.
+#
+# ORDERING, and why FLEET STATE runs before CONTEXT: this digest is delivered
+# through a harness that truncates an oversized payload from the TAIL, and it
+# has really been truncated upstream - a 70KB digest arrived as lines 1-435 of
+# 578, cutting off eight lines before the live-task inventory. What a truncated
+# tail drops must therefore be the CHEAPEST thing to lose. Curated memory is
+# stable session to session, already reported against CS_STARTUP_MEMORY_MAX_BYTES,
+# and recoverable with one targeted read; live fleet identity - which tasks
+# exist, their worktrees, panes, and endpoint liveness - changes every session
+# and is exactly what recovery depends on. So fleet state goes first and the
+# memory files absorb the truncation. The read-once contract moves ahead of
+# both for the same reason: a contract that only arrives after the payload it
+# governs is the first thing a truncated digest loses, and it names the
+# never-emitted-stage condition that voids it for sources that never printed.
+# The LOCK/BOOTSTRAP/WAKE-QUEUE safety preamble keeps its order: it establishes
+# mutation authority and this turn's work queue before anything else is read.
 #
 # COMPOSITION, NOT DUPLICATION: this script calls cs-lock.sh, cs-bootstrap.sh,
 # and cs-wake-drain.sh as real subprocesses and prints their real output; all
 # sequencing/formatting logic added here stays local to this file.
+#
+# BACKLOG DIGEST: the startup listing is a RECOVERY input, not a reporting
+# surface, so it carries what this turn can act on and nothing else.
+#   - Done rows are never listed. Retained completion history belongs to the
+#     reporting surfaces (bin/cs-fleet-view.sh, /the-books); at startup it is
+#     pure weight.
+#   - Every in-flight, held, and blocked row is listed IN FULL, with its
+#     hold_kind/hold_reason and blocked_by, up to CS_SESSION_START_ACTIVE_LIMIT
+#     rows per group, default 40. Those are the rows AGENTS.md sections 7 and 10
+#     make actionable at startup, so they are shown whole rather than summarized
+#     - but a pathological fleet may not spend the whole digest on them either,
+#     because this section shares the payload with the live-task inventory above
+#     it.
+#   - Queued public-followup rows are the one group NO bound may touch, on
+#     EITHER backend. They are delivery obligations the boss is already owed, so
+#     a startup that hides one behind a row limit is worse than a long digest.
+#     They print in full however many there are, and the manual path counts them
+#     separately so its accounting stays exact.
+#   - The plain queued (dispatchable-now) listing is bounded separately, by
+#     CS_SESSION_START_QUEUED_LIMIT, default 20, so a deep queue costs a counter
+#     rather than kilobytes.
+#   - No bound ever drops rows silently: every group that hits its limit prints
+#     an exact remainder count and the targeted follow-up that shows the rest,
+#     which is also what the READ-ONCE CONTRACT sanctions going back to.
+# When the tasks-axi backend is selected and available, the groups are the
+# tool's own filters (`--state in_flight`, `--state held`, `--state queued
+# --blocked`, `--state queued --kind public-followup`, and `tasks-axi ready`),
+# so this script never reimplements task state; the groups can overlap, because
+# an in-flight item that is also held appears under both. The obligations filter
+# is its own group because no other one reaches them: `tasks-axi ready` counts
+# only DELIVERY-ready obligations, so an obligation still in `intent` is absent
+# from both ready[ and ready_public_followups, and a blocked one would otherwise
+# appear only inside the bounded blocked group. When manual mode is selected, or
+# tasks-axi is unavailable, only backlog section headings and item title lines
+# print, and the groups are recognized from the title line's own
+# hold/blocked-by/kind markers.
+#
+# STATUS TAILS: CS_SESSION_START_STATUS_TAIL bounds how many lines each task's
+# tail prints, and bin/cs-line-cap-lib.sh bounds how long each of those lines
+# may be. Both bounds are safe because the section prints every task's full
+# status log path, and AGENTS.md section 8 treats a status line as a wake EVENT
+# rather than current state - bin/cs-crew-state.sh owns current state.
 #
 # Usage: cs-session-start.sh
 #   Prints the full ordered digest to stdout and always exits 0: this is a
@@ -60,11 +125,17 @@ CS_LAYOUT_GATE_SKIP=
 . "$SCRIPT_DIR/cs-meta-lib.sh"
 # shellcheck source=bin/cs-operational-input.sh
 . "$SCRIPT_DIR/cs-operational-input.sh"
+# shellcheck source=bin/cs-line-cap-lib.sh
+. "$SCRIPT_DIR/cs-line-cap-lib.sh"
 
 STATUS_TAIL=${CS_SESSION_START_STATUS_TAIL:-5}
 case "$STATUS_TAIL" in ''|*[!0-9]*) STATUS_TAIL=5 ;; esac
-BACKLOG_LIMIT=${CS_SESSION_START_BACKLOG_LIMIT:-80}
-case "$BACKLOG_LIMIT" in ''|*[!0-9]*|0) BACKLOG_LIMIT=80 ;; esac
+QUEUED_LIMIT=${CS_SESSION_START_QUEUED_LIMIT:-20}
+case "$QUEUED_LIMIT" in ''|*[!0-9]*|0) QUEUED_LIMIT=20 ;; esac
+ACTIVE_LIMIT=${CS_SESSION_START_ACTIVE_LIMIT:-40}
+case "$ACTIVE_LIMIT" in ''|*[!0-9]*|0) ACTIVE_LIMIT=40 ;; esac
+BACKLOG_FIELDS=blocked_by,hold_kind,hold_reason
+FOLLOWUP_FIELDS=delivery_state,$BACKLOG_FIELDS
 
 RULE='================================================================================'
 SUBRULE='--------------------------------------------------------------------------------'
@@ -122,10 +193,23 @@ backlog_backend() {
   esac
 }
 
+# The two markers a queued title line carries in its own text, kept apart
+# because they earn different treatment: a held or blocked row joins the bounded
+# actionable group, while a public-followup row is an obligation no bound may
+# hide. The manual renderer has no task model, so the title line is the only
+# signal it gets, and these are the markers tasks-axi's markdown backend writes:
+# "(hold: ...)", "(hold-kind: ...)", "blocked-by: ...", and
+# "(kind: public-followup)". Bracket expressions rather than backslashes,
+# because awk's -v applies escape processing before the regex is ever compiled.
+MANUAL_HELD_RE='[(]hold|blocked-by:'
+MANUAL_FOLLOWUP_RE='[(]kind:[[:space:]]*public-followup[)]'
+
 print_backlog_manual_compact() {
   local path=$1 reason=$2
-  printf 'compact backlog listing (%s; max %s item(s); indented task bodies omitted)\n' "$reason" "$BACKLOG_LIMIT"
-  awk -v max="$BACKLOG_LIMIT" '
+  printf 'compact backlog listing (%s; done rows omitted; in-flight, held, and blocked title lines bounded to %s per group; public-followup rows never bounded; other queued bounded to %s; indented task bodies omitted)\n' \
+    "$reason" "$ACTIVE_LIMIT" "$QUEUED_LIMIT"
+  awk -v max="$QUEUED_LIMIT" -v active_max="$ACTIVE_LIMIT" \
+    -v held_re="$MANUAL_HELD_RE" -v followup_re="$MANUAL_FOLLOWUP_RE" '
     function state_for_heading(line, heading) {
       heading = line
       sub(/^##[[:space:]]+/, "", heading)
@@ -137,46 +221,133 @@ print_backlog_manual_compact() {
     }
     /^##[[:space:]]+/ {
       state = state_for_heading($0)
-      if (state != "") print $0
+      # The Done heading is recognized so its items are skipped, never printed.
+      if (state != "" && state != "done") print $0
       next
     }
-    state != "" && /^[-*][[:space:]]+/ {
-      total++
-      if (shown < max) {
-        print $0
-        shown++
+    state == "in_flight" && /^[-*][[:space:]]+/ {
+      in_flight++
+      if (in_flight_shown < active_max) { in_flight_shown++; print $0 }
+      next
+    }
+    state == "done" && /^[-*][[:space:]]+/ { done_total++; next }
+    state == "queued" && /^[-*][[:space:]]+/ {
+      queued_total++
+      # A delivery obligation first, whatever else its title line also says: no
+      # bound below may cost the boss one.
+      if ($0 ~ followup_re) { followup++; print $0; next }
+      if ($0 ~ held_re) {
+        held++
+        if (held_shown < active_max) { held_shown++; print $0 }
+        next
       }
+      if (plain_shown < max) { plain_shown++; print $0 }
       next
     }
     END {
-      if (total == 0) {
+      plain_total = queued_total - held - followup
+      if (in_flight + queued_total + done_total == 0) {
         print "(no backlog item title lines found)"
       } else {
-        printf "(shown %d of %d backlog item title line(s))\n", shown, total
-        if (total > shown) {
-          printf "(truncated %d item(s); increase CS_SESSION_START_BACKLOG_LIMIT for a larger startup listing)\n", total - shown
+        printf "(shown %d of %d in-flight, %d of %d held or blocked queued, all %d public-followup queued, %d of %d other queued title line(s); %d done row(s) omitted)\n", \
+          in_flight_shown, in_flight, held_shown, held, followup, plain_shown, plain_total, done_total
+        if (in_flight > in_flight_shown) {
+          printf "(%d more in-flight - raise CS_SESSION_START_ACTIVE_LIMIT, or read the In flight section of config/backlog.md for those rows)\n", in_flight - in_flight_shown
+        }
+        if (held > held_shown) {
+          printf "(%d more held or blocked queued - raise CS_SESSION_START_ACTIVE_LIMIT, or read the Queued section of config/backlog.md for those rows)\n", held - held_shown
+        }
+        if (plain_total > plain_shown) {
+          printf "(%d more queued - raise CS_SESSION_START_QUEUED_LIMIT, or read the Queued section of config/backlog.md for those rows)\n", plain_total - plain_shown
         }
       }
     }
   ' "$path"
 }
 
+# Bound one composed group without rewriting the tool's own rendering: a
+# tasks-axi listing is a TOON header line followed by its indented rows, so the
+# rows under that header are the only lines this touches and every other line
+# passes through untouched (`tasks-axi ready` prints its public-followup group
+# under a header of its own, which therefore stays whole). Whatever is cut is
+# disclosed with an exact remainder count and the command that prints the rest.
+#
+# tasks-axi also closes every listing with its own help block. This section
+# composes five listings, so keeping them would repeat the same pointers five
+# times, once per group; the section prints one equivalent pointer of its own
+# instead, so each group stops at its `help[` header.
+print_axi_group_bounded() {  # <text> <header-prefix> <max> <label> <full-command>
+  local text=$1 header=$2 max=$3 label=$4 command=$5
+  printf '%s\n' "$text" | awk -v header="$header" -v max="$max" -v label="$label" -v command="$command" '
+    /^help\[/ { exit }
+    index($0, header) == 1 { rows = 1; print; next }
+    rows && /^[[:space:]]/ {
+      total++
+      if (shown < max) { print; shown++ }
+      next
+    }
+    { rows = 0; print }
+    END {
+      if (total > 0) {
+        printf "(shown %d of %d %s item(s))\n", shown, total, label
+        if (total > shown) {
+          printf "(%d more %s - %s)\n", total - shown, label, command
+        }
+      }
+    }
+  '
+}
+
+# The obligations group takes no bound at all, so it needs no counters either:
+# the tool's own count header already says how many there are, and every row
+# under it prints.
+print_axi_group_unbounded() {  # <text>
+  printf '%s\n' "$1" | awk '/^help\[/ { exit } { print }'
+}
+
+print_backlog_tasks_axi_compact() {
+  local path=$1 in_flight held blocked followups ready err
+  if ! in_flight=$(tasks-axi list --file "$path" --state in_flight --fields "$BACKLOG_FIELDS" 2>&1); then
+    err=$in_flight
+  elif ! held=$(tasks-axi list --file "$path" --state held --fields "$BACKLOG_FIELDS" 2>&1); then
+    err=$held
+  elif ! blocked=$(tasks-axi list --file "$path" --state queued --blocked --fields "$BACKLOG_FIELDS" 2>&1); then
+    err=$blocked
+  elif ! followups=$(tasks-axi list --file "$path" --state queued --kind public-followup --fields "$FOLLOWUP_FIELDS" 2>&1); then
+    err=$followups
+  elif ! ready=$(tasks-axi ready --file "$path" 2>&1); then
+    err=$ready
+  else
+    printf 'compact backlog listing (tasks-axi; done rows omitted; in-flight, held, and blocked rows shown in full up to %s per group; queued public-followup obligations always shown in full; ready queued bounded to %s; task bodies omitted)\n' \
+      "$ACTIVE_LIMIT" "$QUEUED_LIMIT"
+    printf '\nin flight:\n'
+    print_axi_group_bounded "$in_flight" 'tasks[' "$ACTIVE_LIMIT" 'in-flight' \
+      "tasks-axi list --file $path --state in_flight --fields $BACKLOG_FIELDS"
+    printf '\nheld (boss- or time-gated; an in-flight item that is also held appears in both groups):\n'
+    print_axi_group_bounded "$held" 'tasks[' "$ACTIVE_LIMIT" 'held' \
+      "tasks-axi list --file $path --state held --fields $BACKLOG_FIELDS"
+    printf '\nblocked queued:\n'
+    print_axi_group_bounded "$blocked" 'tasks[' "$ACTIVE_LIMIT" 'blocked queued' \
+      "tasks-axi list --file $path --state queued --blocked --fields $BACKLOG_FIELDS"
+    printf '\nqueued public-followup obligations (never bounded; delivery the boss is already owed):\n'
+    print_axi_group_unbounded "$followups"
+    printf '\nready queued (dispatchable now):\n'
+    print_axi_group_bounded "$ready" 'ready[' "$QUEUED_LIMIT" 'ready queued' \
+      "tasks-axi ready --file $path"
+    return 0
+  fi
+  printf 'tasks-axi compact listing failed; falling back to title-line rendering.\n'
+  printf '%s\n' "$err"
+  print_backlog_manual_compact "$path" "fallback"
+}
+
 print_backlog_compact() {
-  local path=$1 label=$2 out rc
+  local path=$1 label=$2
   subsection "$label"
   if [ -f "$path" ]; then
     if [ -s "$path" ]; then
       if [ "$(backlog_backend)" = tasks-axi ] && command -v tasks-axi >/dev/null 2>&1; then
-        printf 'compact backlog listing (tasks-axi; max %s item(s); task bodies omitted)\n' "$BACKLOG_LIMIT"
-        out=$(tasks-axi list --file "$path" --limit "$BACKLOG_LIMIT" --fields blocked_by,hold_kind,hold_reason 2>&1)
-        rc=$?
-        if [ "$rc" -eq 0 ]; then
-          printf '%s\n' "$out"
-        else
-          printf 'tasks-axi compact listing failed; falling back to title-line rendering.\n'
-          printf '%s\n' "$out"
-          print_backlog_manual_compact "$path" "fallback"
-        fi
+        print_backlog_tasks_axi_compact "$path"
       else
         print_backlog_manual_compact "$path" "$(backlog_backend) backend"
       fi
@@ -190,9 +361,16 @@ print_backlog_compact() {
 }
 
 print_status_tail() {
-  local status=$1
-  printf 'status tail (last %s line(s), wake-EVENT history, not current state; full log: %s):\n' "$STATUS_TAIL" "$status"
-  tail -n "$STATUS_TAIL" "$status"
+  local status=$1 line
+  printf 'status tail (last %s line(s), each capped at %s characters, wake-EVENT history, not current state; full log: %s):\n' \
+    "$STATUS_TAIL" "$CS_LINE_CAP_DEFAULT" "$status"
+  # A soldier writes its own status lines, so their length is unbounded: one
+  # observed line ran roughly 200 characters. Cap each one the way the wake
+  # digest's OPEN DECISIONS section does; the lede carries the state word and
+  # the key, and the full log path above reaches the rest.
+  while IFS= read -r line || [ -n "$line" ]; do
+    cs_cap_line "$line"
+  done < <(tail -n "$STATUS_TAIL" "$status")
 }
 
 # Prefix the complete digest with its structural type. section starts with a
@@ -311,7 +489,6 @@ No turn ends blind while work is under way; the Stop-hook guard
 EOF
 fi
 
-# --- 5. context digest -----------------------------------------------------
 # Record THIS home's own agent pane, durably. bin/cs-activate.sh needs a target
 # to prompt when the queue sits, and session start is the one place that runs
 # inside the home's own pane, where HERDR_PANE_ID proves which pane that is.
@@ -322,27 +499,48 @@ if [ -n "${HERDR_PANE_ID:-}" ]; then
   printf '%s\n' "$HERDR_PANE_ID" > "$STATE/.home-pane" 2>/dev/null || true
 fi
 
-section "CONTEXT"
-print_file_or_absent "$CONFIG/projects.md" "config/projects.md"
-print_file_or_absent "$CONFIG/boards.md" "config/boards.md (GitHub board mapping for the contracts and casino skills)"
-print_file_or_absent "$HOST_DIR/capos.md" "host/capos.md (host-local; ABSENT = no capos provisioned here)"
-print_startup_memory "$CONFIG/boss.md" "config/boss.md"
-print_startup_memory "$CONFIG/boss-shared.md" "config/boss-shared.md (shared, main-authoritative, read-only in capo homes)"
-print_startup_memory "$CONFIG/learnings.md" "config/learnings.md"
+# --- 5. read-once contract -------------------------------------------------
+# Ahead of the two digests it governs, not after them: a truncated tail is
+# exactly what drops a closing reminder, and this contract is what stops the
+# next turn from re-reading everything the digest just printed. Because it
+# arrives BEFORE its subject, it also names the one condition that voids it -
+# a stage this digest reports as never emitted.
+section "READ-ONCE CONTRACT"
+cat <<'EOF'
+Everything below is printed in full for this session start: every state/*.meta,
+a compact config/backlog.md listing, a bounded tail of every state/*.status,
+the standing board sweeps, config/projects.md, config/boards.md, host/capos.md,
+config/boss.md, config/boss-shared.md, and config/learnings.md.
+Do NOT re-read any of them after reading this digest, and do NOT bulk-read
+config/backlog.md or state/*.status: re-reading everything defeats the entire
+point of this command.
+
+Go to a source directly only when:
+  - this digest flagged it ABSENT (then rebuild or create it per AGENTS.md),
+  - its contents looked unparseable or corrupt,
+  - an individual full status log is needed for older wake-event history, or a
+    status line was capped and its tail matters (each task's full log path is
+    printed with its tail),
+  - a full task body is needed (tasks-axi show <id> --full, or config/backlog.md),
+  - the backlog listing disclosed omitted rows in any of its groups - in-flight,
+    held or blocked, or queued - and this turn needs them, in which case take the
+    targeted follow-up that disclosure names (the group's own tasks-axi listing,
+    or that one section of config/backlog.md) rather than a bulk read,
+  - or this digest reports a stage as never emitted (a truncated startup names
+    the stages that never ran), in which case that stage's sources were never
+    printed and must be reconciled.
+EOF
 
 # --- 6. fleet-state digest ---------------------------------------------
+# Before CONTEXT: see this file's ORDERING note. Live fleet identity is what a
+# truncated tail must never take.
 section "FLEET STATE"
-print_backlog_compact "$CONFIG/backlog.md" "config/backlog.md"
 
-subsection "Board sweeps (data/sweeps.md)"
-if [ "$READ_ONLY" -eq 1 ]; then
-  printf 'read-only session: reporting sweeps without converging their polls.\n'
-else
-  SWEEP_SYNC=$("$SCRIPT_DIR/cs-board-watch.sh" sync 2>&1) || true
-  [ -n "$SWEEP_SYNC" ] && printf '%s\n' "$SWEEP_SYNC"
-fi
-"$SCRIPT_DIR/cs-board-watch.sh" list 2>&1 || true
-
+# The live-task inventory opens the section, ahead of the backlog listing and
+# the sweeps: which tasks exist, where they run, and whether their endpoints are
+# alive is the record recovery depends on, and every bound below it is a bound
+# on something the fleet can grow without limit. Nothing that scales with fleet
+# size may sit between the top of the digest's payload and this block.
 subsection "Work under way (state/*.meta)"
 META_FOUND=0
 for meta in "$STATE"/*.meta; do
@@ -388,6 +586,17 @@ for status in "$STATE"/*.status; do
 done
 [ "$ORPHAN_STATUS_FOUND" -eq 1 ] || printf '(none)\n'
 
+print_backlog_compact "$CONFIG/backlog.md" "config/backlog.md"
+
+subsection "Board sweeps (data/sweeps.md)"
+if [ "$READ_ONLY" -eq 1 ]; then
+  printf 'read-only session: reporting sweeps without converging their polls.\n'
+else
+  SWEEP_SYNC=$("$SCRIPT_DIR/cs-board-watch.sh" sync 2>&1) || true
+  [ -n "$SWEEP_SYNC" ] && printf '%s\n' "$SWEEP_SYNC"
+fi
+"$SCRIPT_DIR/cs-board-watch.sh" list 2>&1 || true
+
 subsection "AFK"
 if [ -e "$STATE/.afk" ]; then
   printf 'present - away-mode supervision is active; the daemon owns the watcher.\n'
@@ -395,7 +604,20 @@ else
   printf 'absent\n'
 fi
 
-# --- 7. closing reminder -----------------------------------------------
+# --- 7. context digest -----------------------------------------------------
+# Last of the bulk sections deliberately: curated memory is stable session to
+# session, already reported against CS_STARTUP_MEMORY_MAX_BYTES, and
+# recoverable with one targeted read, so it is the cheapest thing for a
+# truncated tail to take (see this file's ORDERING note).
+section "CONTEXT"
+print_file_or_absent "$CONFIG/projects.md" "config/projects.md"
+print_file_or_absent "$CONFIG/boards.md" "config/boards.md (GitHub board mapping for the contracts and casino skills)"
+print_file_or_absent "$HOST_DIR/capos.md" "host/capos.md (host-local; ABSENT = no capos provisioned here)"
+print_startup_memory "$CONFIG/boss.md" "config/boss.md"
+print_startup_memory "$CONFIG/boss-shared.md" "config/boss-shared.md (shared, main-authoritative, read-only in capo homes)"
+print_startup_memory "$CONFIG/learnings.md" "config/learnings.md"
+
+# --- 8. closing reminder -----------------------------------------------
 section "NEXT STEP"
 if [ "$READ_ONLY" -eq 1 ]; then
   cat <<'EOF'
@@ -418,18 +640,8 @@ This script never starts supervision itself.
 EOF
 fi
 cat <<'EOF'
-The digest above is complete for this session start. Do NOT re-read
-config/projects.md, config/boards.md, data/sweeps.md, host/capos.md, config/boss.md,
-config/boss-shared.md, config/learnings.md, or state/*.meta now - they were just
-printed in full.
-Do NOT bulk-read config/backlog.md now either: the compact listing was just
-printed with a pointer for targeted full-body follow-up.
-Do NOT bulk-read state/*.status now either: their bounded tails were just
-printed with full log paths for targeted follow-up when older wake-event
-history is actually needed. Re-reading everything defeats the entire point
-of this command. Re-read a file only if this digest flagged it ABSENT, its
-contents looked unparseable/corrupt, or an individual full status log is
-needed for older wake-event history.
+The digest above is complete for this session start. The READ-ONCE CONTRACT
+section near the top of it governs what may still be read from disk.
 EOF
 
 exit 0

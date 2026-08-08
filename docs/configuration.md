@@ -199,6 +199,9 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_STALE_ESCALATE_SECS` | cs-watch, cs-daemon | wedge escalation threshold |
 | `CS_BUSY_TURN_MAX_SECS` | cs-watch | how long a pane may run busy with no completed turn before it enters the wedge timer; default 3600 |
 | `CS_STARTUP_MEMORY_MAX_BYTES` | cs-session-start | per-file budget for `config/boss.md`, `config/boss-shared.md`, and `config/learnings.md`; over budget is reported in the digest, never truncated. Default 8192 |
+| `CS_SESSION_START_STATUS_TAIL` | cs-session-start | `state/*.status` lines printed per task in the session-start digest; default 5; each line is capped by `bin/cs-line-cap-lib.sh` |
+| `CS_SESSION_START_QUEUED_LIMIT` | cs-session-start | plain queued backlog rows in the session-start digest; default 20; done rows are never listed |
+| `CS_SESSION_START_ACTIVE_LIMIT` | cs-session-start | in-flight, held, and blocked backlog rows per group in the session-start digest; default 40; each row is shown in full and any remainder is disclosed with the targeted follow-up that prints the rest; queued public-followup rows are outside this bound and always print in full |
 | `CS_PAUSE_RESURFACE_SECS` | cs-watch, cs-daemon | declared external-wait recheck cadence |
 | `CS_BOARD_SWEEP_LANES` | cs-board-watch | default lane cap baked into a new sweep record; default 3, matching the `contracts` skill |
 | `CS_BOARD_SWEEP_RESURFACE` | cs-board-watch | default seconds before a still-full column is reported again; default 1800. Only a default for `arm`; each record stores its own value |

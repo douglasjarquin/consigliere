@@ -72,7 +72,7 @@ the reader-facing marker is an LLM, which cannot compute a cryptographic check
 | Kind | Site | Body source | Crosses an agent-writable channel? |
 |---|---|---|---|
 | `launch-brief` | bin/cs-harness-lib.sh:233,238,260,274 (via `cs-operational-input.sh encode launch-brief`) | `data/<id>/brief.md`, consigliere-authored | No — boss/consigliere-authored brief |
-| `session-start` | bin/cs-session-start.sh:162 | generated digest of local state | No — consigliere-generated |
+| `session-start` | bin/cs-session-start.sh:378 | generated digest of local state | No — consigliere-generated |
 | `watcher` | bin/cs-send.sh:129 | `cs-send` argv (consigliere steer) | No — consigliere-authored argv |
 | `turn-end-guard` | bin/cs-turnend-guard.sh:123 | static continuation banner | No — fixed consigliere text |
 | `away-supervisor` | bin/cs-daemon.sh:771 | `_collapse_newlines "$msg"`, where `msg` is the escalation digest | **YES — the digest is distilled from soldier-appended status lines (§3)** |
