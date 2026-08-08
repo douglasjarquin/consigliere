@@ -118,7 +118,10 @@
 # progress in CS_SESSION_START_STAGE_FILE, which is also the flag that tells a
 # child it is the child - the parent never recurses. Bounded execution routes
 # through bin/cs-timeout-lib.sh, so hosts without timeout, gtimeout, or perl
-# still get the same hard bound from the pure-Bash watchdog.
+# still get the same hard bound from the pure-Bash watchdog. A host where that
+# library cannot even establish the bound reports itself separately
+# (CS_TIMEOUT_UNAVAILABLE), because a digest that never started must not be
+# announced as a digest that stalled.
 #
 # Usage: cs-session-start.sh [--reemit]
 #   Prints the full ordered digest to stdout and always exits 0: this is a
@@ -190,7 +193,22 @@ if [ -z "${CS_SESSION_START_STAGE_FILE:-}" ]; then
     env CS_SESSION_START_STAGE_FILE="$SESSION_START_STAGE_FILE" \
     "$SCRIPT_DIR/cs-session-start.sh" "$@"
   SESSION_START_RC=$?
-  if [ "$SESSION_START_RC" -eq 124 ]; then
+  BAR='●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+  if [ "$SESSION_START_RC" -eq "$CS_TIMEOUT_UNAVAILABLE" ]; then
+    # The bound could not be established, so the digest never started. Saying
+    # "it stalled" here would name a stage that never ran; the honest report is
+    # that nothing above came from this session at all.
+    printf '\n%s\n' "$BAR"
+    printf '●  STARTUP DID NOT RUN - THE RUNTIME BOUND COULD NOT BE ESTABLISHED\n'
+    printf '●  The bounded runner could not create its temporary state (check TMPDIR),\n'
+    printf '●  so the digest was never started and NONE of these stages ran:\n'
+    printf '●    %s\n' "$SESSION_START_STAGES"
+    printf '●  The READ-ONCE CONTRACT covers nothing from this session: no source was\n'
+    printf '●  printed, so nothing here has been reconciled.\n'
+    printf '●  Fix the temp directory and rerun bin/cs-session-start.sh before acting on\n'
+    printf '●  fleet state - a home this session never read is a home it cannot steer.\n'
+    printf '%s\n' "$BAR"
+  elif [ "$SESSION_START_RC" -eq 124 ]; then
     SESSION_START_LAST_STAGE=$(cat "$SESSION_START_STAGE_FILE" 2>/dev/null) || SESSION_START_LAST_STAGE=
     [ -n "$SESSION_START_LAST_STAGE" ] || SESSION_START_LAST_STAGE=unknown
     SESSION_START_PENDING=$(
@@ -198,7 +216,6 @@ if [ -z "${CS_SESSION_START_STAGE_FILE:-}" ]; then
         awk -v from="$SESSION_START_LAST_STAGE" '$0 == from {seen = 1; next} seen' | tr '\n' ' '
     )
     [ -n "${SESSION_START_PENDING% }" ] || SESSION_START_PENDING='(unknown - the digest may be incomplete anywhere)'
-    BAR='●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
     printf '\n%s\n' "$BAR"
     printf '●  STARTUP TRUNCATED - SESSION START HIT ITS %ss RUNTIME BOUND\n' "$SESSION_START_BUDGET"
     printf '●  It STALLED during the "%s" stage, so everything above is complete only\n' "$SESSION_START_LAST_STAGE"

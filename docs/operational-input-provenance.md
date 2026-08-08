@@ -9,6 +9,10 @@
 > Line references below were verified against the live tree at branch point
 > commit `55aa94e` (drift check clean: none of the seven marker files changed
 > since the plan was written).
+>
+> Refreshed since: the two `session-start` rows in §2a, when the session-open
+> hooks began running the digest and added the router's nudge as a second
+> minting site for that kind.
 
 ## 1. Threat model
 
@@ -72,7 +76,8 @@ the reader-facing marker is an LLM, which cannot compute a cryptographic check
 | Kind | Site | Body source | Crosses an agent-writable channel? |
 |---|---|---|---|
 | `launch-brief` | bin/cs-harness-lib.sh:233,238,260,274 (via `cs-operational-input.sh encode launch-brief`) | `data/<id>/brief.md`, consigliere-authored | No — boss/consigliere-authored brief |
-| `session-start` | bin/cs-session-start.sh:378 | generated digest of local state | No — consigliere-generated |
+| `session-start` | bin/cs-session-start.sh:507 | generated digest of local state | No — consigliere-generated |
+| `session-start` | bin/cs-sessionstart-run.sh:137 | static resume/reload/fork nudge line | No — fixed consigliere text |
 | `watcher` | bin/cs-send.sh:129 | `cs-send` argv (consigliere steer) | No — consigliere-authored argv |
 | `turn-end-guard` | bin/cs-turnend-guard.sh:123 | static continuation banner | No — fixed consigliere text |
 | `away-supervisor` | bin/cs-daemon.sh:771 | `_collapse_newlines "$msg"`, where `msg` is the escalation digest | **YES — the digest is distilled from soldier-appended status lines (§3)** |

@@ -16,12 +16,16 @@
 # survives, the truncation banner names the stalled stage and every stage that
 # never ran, no completion proof is recorded, and the command still exits 0 so
 # the session can open.
+# A bound that cannot be established at all is proven to report itself as a
+# digest that NEVER RAN rather than as a stall, because naming a stalled stage
+# for a command that never started tells the reader the opposite of the truth.
 # The --reemit cases prove the two things a re-emit must NOT skip (lock
 # re-verification and the wake-queue drain) and the two things it must skip
 # (bootstrap's mutating sweeps, with repair ownership kept via
 # CS_BOOTSTRAP_LOCKED).
-# The hook-inertness cases run the exact tracked hook command strings from a
-# checkout that is not this repo and require silent exit 0.
+# The hook cases execute the exact tracked hook command strings twice: from a
+# checkout that is not a consigliere home, where they must be silent and exit
+# 0, and from a checkout that is one, where they must produce the digest.
 set -u
 
 # Run the whole suite beneath one long-lived harness-named fixture shell,
@@ -271,20 +275,60 @@ assert_contains "$tangle_locked" 'restore the primary with' \
   "a locked detect-only bootstrap must keep tangle repair ownership"
 pass "CS_BOOTSTRAP_LOCKED decides tangle repair ownership under detect-only"
 
-# --- hook inertness: the tracked hook commands are no-ops outside this repo ----
+# --- hook entries: they fire at home and stay inert in a foreign checkout ------
 FOREIGN="$TMP/foreign"
 cs_git_init_commit "$FOREIGN"
+
+# A plain checkout shaped like a consigliere primary home, so the tracked hook
+# commands can be executed for real: this repo's own checkout under test is
+# often a linked worktree, which the primary-scope guard correctly excludes.
+HOOK_ROOT="$TMP/hook-home/root"
+HOOK_HOME="$TMP/hook-home/home"
+mkdir -p "$HOOK_ROOT" "$HOOK_HOME/state" "$HOOK_HOME/data" "$HOOK_HOME/config"
+git init -q -b main "$HOOK_ROOT"
+git -C "$HOOK_ROOT" commit -q --allow-empty -m init
+: > "$HOOK_ROOT/AGENTS.md"
+: > "$HOOK_ROOT/CLAUDE.md"
+ln -s "$ROOT/bin" "$HOOK_ROOT/bin"
+mkdir -p "$HOOK_ROOT/.claude" "$HOOK_ROOT/.codex"
+cp "$ROOT/.claude/settings.json" "$HOOK_ROOT/.claude/settings.json"
+cp "$ROOT/.codex/hooks.json" "$HOOK_ROOT/.codex/hooks.json"
+
 for hooks_file in "$ROOT/.claude/settings.json" "$ROOT/.codex/hooks.json"; do
   cmd=$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$hooks_file")
-  case "$cmd" in
-    *cs-sessionstart-run.sh*) : ;;
-    *) fail "$hooks_file SessionStart does not reference cs-sessionstart-run.sh" ;;
-  esac
   status=0
   out=$(cd "$FOREIGN" && printf '%s' '{"source":"startup"}' | eval "$cmd" 2>&1) || status=$?
   expect_code 0 "$status" "the SessionStart hook from $hooks_file must exit 0 outside this repo"
   [ -z "$out" ] || fail "the SessionStart hook from $hooks_file must be silent outside this repo, got: $out"
+
+  rm -f "$HOOK_HOME/state/.lock" "$HOOK_HOME/state/.session-start-complete"
+  status=0
+  out=$(
+    cd "$HOOK_ROOT" \
+      && export CS_ROOT_OVERRIDE="$HOOK_ROOT" CS_HOME="$HOOK_HOME" \
+      && printf '%s' '{"source":"startup"}' | eval "$cmd" 2>/dev/null
+  ) || status=$?
+  expect_code 0 "$status" "the SessionStart hook from $hooks_file must exit 0 in a consigliere home"
+  assert_contains "$out" "SESSION START - $HOOK_HOME" \
+    "the SessionStart hook from $hooks_file did not run the digest in a consigliere home"
 done
-pass "the tracked session-open hook entries stay inert in a foreign checkout"
+pass "the tracked session-open hook entries run the digest at home and stay inert elsewhere"
+
+# --- the bound reports an unavailable mechanism as never-ran, not as a stall ---
+IFS='|' read -r ROOT_DIR HOME_DIR <<<"$(new_world unbounded)"
+# A temp dir that does not exist is the portable way to make every mktemp in
+# the bounded runner fail, whatever uid the suite runs as.
+NOTMP="$TMP/no-such-temp-dir/nested"
+status=0
+out=$(TMPDIR="$NOTMP" CS_TIMEOUT_MECHANISM_OVERRIDE=bash \
+  CS_ROOT_OVERRIDE="$ROOT_DIR" CS_HOME="$HOME_DIR" "$SESSION_START") || status=$?
+expect_code 0 "$status" "an unestablished bound must still exit 0 so the session can open"
+assert_contains "$out" 'STARTUP DID NOT RUN' \
+  "a digest that could not be bounded did not say it never ran"
+assert_not_contains "$out" 'STALLED during' \
+  "a digest that never ran was reported as a stall"
+assert_absent "$HOME_DIR/state/.session-start-complete" \
+  "a digest that never ran recorded itself as complete"
+pass "a bound that cannot be established is reported as never-ran, never as a stall"
 
 printf 'all cs-sessionstart-run tests passed\n'
