@@ -337,3 +337,24 @@ got=$(linted)
 assert_contains "$out" 'linting 2 changed file(s) plus 3 source-linked file(s) since origin/main' \
   'the path renamed away from is counted through its consumers'
 pass 'a renamed library pulls in the consumer whose directive was never updated'
+
+# --- a deleted path written back unstaged is still linted ---------------------
+#
+# git reports such a path as deleted (it is gone from the index) while the file
+# sits on disk with brand-new content, so the deletion seed must not double as
+# permission to drop it: a full run lints whatever the canonical globs find on
+# disk, and this file is exactly what a branch changed.
+
+git -C "$REPO" reset -q --hard
+git -C "$REPO" checkout -q -b recreate-shared-lib
+git -C "$REPO" rm -q "$REPO/bin/shared-lib.sh"
+git -C "$REPO" commit -qm 'remove the shared library'
+printf '#!/usr/bin/env bash\ntrue\n' >"$REPO/bin/shared-lib.sh"
+
+out=$(run_lint)
+got=$(linted)
+[ "$got" = 'bin/kept.sh bin/lib-one.sh bin/lib-two.sh bin/shared-lib.sh tests/kept.test.sh ' ] \
+  || fail "a deleted path recreated on disk must still be linted, got: $got"
+assert_contains "$out" 'linting 1 changed file(s) plus 4 source-linked file(s) since origin/main' \
+  'a path that is both deleted and present counts once, as changed'
+pass 'a canonical path removed from the index but present on disk is linted'

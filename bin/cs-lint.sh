@@ -280,20 +280,29 @@ cs_close() {
 # in its own unrelated consumers. Sourcing is transitive, so a dependent's
 # dependent sees the change too and the reverse pass runs to a fixpoint; the
 # forward pass then keeps every input SC1091-clean. Deleted paths seed the reverse
-# pass alongside the surviving changes, then come back out: a consumer left
-# sourcing a library this branch removed is exactly what a full run fails on, and
-# cs_close intersects only what it discovers with the canonical set, never the
-# seed, so the seed has to be subtracted by hand before ShellCheck is handed a
-# file that is no longer there.
+# pass alongside the surviving changes: a consumer left sourcing a library this
+# branch removed is exactly what a full run fails on, and cs_close intersects only
+# what it discovers with the canonical set, never the seed, so what the seed added
+# has to be taken back out by hand. What comes out is only what is really gone,
+# tested against the working tree rather than against the delete query: a path can
+# be reported deleted and still sit on disk (removed from the index, then written
+# back unstaged), and such a file is both changed and lintable, so dropping it on
+# the delete query's word alone would hide brand-new content from the gate.
 seed=$(
   {
     if [ "${#selected[@]}" -gt 0 ]; then printf '%s\n' "${selected[@]}"; fi
     printf '%s\n' "$deleted_canonical"
   } | LC_ALL=C sort -u
 )
+gone=$(
+  printf '%s\n' "$deleted_canonical" | while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if [ ! -f "$path" ]; then printf '%s\n' "$path"; fi
+  done | LC_ALL=C sort -u
+)
 inputs=$(cs_close dependents "$seed")
 inputs=$(cs_close sources "$inputs")
-inputs=$(printf '%s\n' "$inputs" | LC_ALL=C comm -23 - <(printf '%s\n' "$deleted_canonical"))
+inputs=$(printf '%s\n' "$inputs" | LC_ALL=C comm -23 - <(printf '%s\n' "$gone"))
 
 lint_set=()
 while IFS= read -r path; do

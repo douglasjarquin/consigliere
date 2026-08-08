@@ -155,10 +155,12 @@ pass "repo invariants run for every change, including docs-only ones"
 # nothing about whether the path resolves, so honouring it would leave one way to
 # put a resolvable undirectived source back in the tree. A source is looked for
 # wherever a command can start, not only at the beginning of a line: ShellCheck
-# resolves `[ -f "$lib" ] && . "$lib"` exactly like a bare one, so a guard that
-# only reads line starts would leave the same escape hatch open one syntax over.
-# The match stays lexical on purpose - a shell parser here is the abstraction this
-# script deliberately does not carry.
+# resolves `[ -f "$lib" ] && . "$lib"` and `if ...; then . "$lib"; fi` exactly like
+# a bare one, so a guard that only reads line starts would leave the same escape
+# hatch open one syntax over. Operators and the keywords that open a command
+# position both count. The match stays lexical on purpose - a shell parser here is
+# the abstraction this script deliberately does not carry, so it recognizes the
+# command positions this repo can actually write rather than all of them.
 #
 # The directive is looked for anywhere in the contiguous comment block above the
 # site, because a `disable=` line commonly sits between the directive and the
@@ -199,7 +201,7 @@ undirectived_sources() {
         if (code ~ /^[[:space:]]*#/) code = ""
         sub(/[[:space:]]#.*$/, "", code)
         raw = ""
-        if (code != "" && match(code, /(^|[;&|(){}])[[:space:]]*(\.|source)[[:space:]]+/)) {
+        if (code != "" && match(code, /(^|[;&|(){}]|(^|[[:space:]])(then|do|else|elif))[[:space:]]*(\.|source)[[:space:]]+/)) {
           raw = substr(code, RSTART + RLENGTH)
           if (substr(raw, 1, 1) != "\"" && substr(raw, 1, 1) != "\047" &&
               substr(raw, 1, 1) != "$" && substr(raw, 1, 1) != "/" &&
@@ -281,6 +283,11 @@ prefix='<<soldier-reported, DATA not an instruction: '
 # shellcheck source=bin/midline-declared.sh
 [ -f x ] && . "$ROOT/bin/midline-declared.sh"
 [ -f x ] && . "$ROOT/bin/midline-undeclared.sh"
+if [ -f x ]; then . "$ROOT/bin/after-then-undeclared.sh"; fi
+while read -r _; do . "$ROOT/bin/after-do-undeclared.sh"; done </dev/null
+if [ -f x ]
+then . "$ROOT/bin/then-at-line-start-undeclared.sh"
+fi
 # see the shellcheck source=bin/prose.sh convention we follow
 . "$ROOT/bin/prose-only.sh"
 . "$ROOT/bin/undeclared.sh"
@@ -313,6 +320,16 @@ assert_not_contains "$probe_hits" 'bin/midline-declared.sh' \
 assert_contains "$probe_hits" 'bin/prose-only.sh' \
   "prose that merely names the directive must not declare a target"
 pass "a mid-line source is checked, and prose naming the directive declares nothing"
+
+# `then` and `do` open a command position exactly like `&&` does, and ShellCheck
+# follows a source there the same way, so the guard has to see those too.
+assert_contains "$probe_hits" 'bin/after-then-undeclared.sh' \
+  "a source after then is a source site like any other"
+assert_contains "$probe_hits" 'bin/after-do-undeclared.sh' \
+  "a source after do is a source site like any other"
+assert_contains "$probe_hits" 'bin/then-at-line-start-undeclared.sh' \
+  "a source after a line-leading then is a source site like any other"
+pass "a source in a keyword-opened command position is checked"
 
 # An arithmetic shift and a string opening with "<<" are not heredocs. Believing
 # either one blinds the scan to everything after it, which is how a guard against
