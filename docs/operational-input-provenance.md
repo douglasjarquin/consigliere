@@ -14,6 +14,8 @@
 > reference under "Reader-facing contract to preserve", when the session-open
 > hooks began running the digest and added the router's nudge as a second
 > minting site for that kind.
+> Refreshed again for the `bin/cs-session-start.sh` row when the digest's external-network checks moved off the blocking path into `bin/cs-startup-network.sh`, which moved the mint site and added that worker's published result to the digest body.
+> That result is written by a consigliere-owned detached process and never by an agent, so the row's answer is unchanged.
 
 ## 1. Threat model
 
@@ -77,7 +79,7 @@ the reader-facing marker is an LLM, which cannot compute a cryptographic check
 | Kind | Site | Body source | Crosses an agent-writable channel? |
 |---|---|---|---|
 | `launch-brief` | bin/cs-harness-lib.sh:233,238,260,274 (via `cs-operational-input.sh encode launch-brief`) | `data/<id>/brief.md`, consigliere-authored | No — boss/consigliere-authored brief |
-| `session-start` | bin/cs-session-start.sh:507 | generated digest of local state | No — consigliere-generated |
+| `session-start` | bin/cs-session-start.sh:538 | generated digest of local state, plus the deferred network stage's own published result | No — consigliere-generated |
 | `session-start` | bin/cs-sessionstart-run.sh:137 | static resume/reload/fork nudge line | No — fixed consigliere text |
 | `watcher` | bin/cs-send.sh:129 | `cs-send` argv (consigliere steer) | No — consigliere-authored argv |
 | `turn-end-guard` | bin/cs-turnend-guard.sh:123 | static continuation banner | No — fixed consigliere text |
