@@ -34,6 +34,14 @@
 #   CAPO_SYNC: / CAPO_LIVENESS: fast-forward and respawn registered capos
 #                              (bin/cs-home-seed.sh sweep modes).
 #
+# Set CS_BOOTSTRAP_LOCKED=1 alongside CS_BOOTSTRAP_DETECT_ONLY=1 when the
+# sweeps are skipped because THIS session already ran them while holding the
+# fleet lock (a cs-session-start.sh --reemit), rather than because it has no
+# lock at all. The two cases differ in exactly one place: repair ownership.
+# A locked session is told to restore a tangled primary checkout itself, while
+# an unlocked one is told to leave that work to the lock holder. Unset/0 (the
+# default) keeps detect-only meaning unlocked, exactly as before.
+#
 # Silent output means all good. Any printed actionable line names its owner.
 set -u
 
@@ -115,12 +123,15 @@ if command -v gh >/dev/null 2>&1; then
 fi
 
 # --- worktree tangle -------------------------------------------------------------
-if [ -x "$SCRIPT_DIR/cs-tangle-lib.sh" ] || [ -f "$SCRIPT_DIR/cs-tangle-lib.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$SCRIPT_DIR/cs-tangle-lib.sh" 2>/dev/null || true
-  if command -v cs_tangle_check >/dev/null 2>&1; then
-    tangle=$(cs_tangle_check "$CS_ROOT" 2>/dev/null || true)
-    [ -z "$tangle" ] || printf 'TANGLE: %s\n' "$tangle"
+# shellcheck source=bin/cs-tangle-lib.sh
+. "$SCRIPT_DIR/cs-tangle-lib.sh"
+tangle_branch=$(cs_primary_tangle_branch "$CS_ROOT" 2>/dev/null || true)
+if [ -n "$tangle_branch" ]; then
+  tangle_default=$(cs_default_branch "$CS_ROOT" 2>/dev/null || echo main)
+  if [ "$DETECT_ONLY" = 1 ] && [ "${CS_BOOTSTRAP_LOCKED:-0}" != 1 ]; then
+    printf "TANGLE: primary checkout on feature branch '%s' (expected '%s'); the work is safe on that ref - read-only session must leave restore work to the session holding the fleet lock\n" "$tangle_branch" "$tangle_default"
+  else
+    printf "TANGLE: primary checkout on feature branch '%s' (expected '%s'); the work is safe on that ref - restore the primary with: git -C %s checkout %s, then re-validate the branch in a proper worktree\n" "$tangle_branch" "$tangle_default" "$CS_ROOT" "$tangle_default"
   fi
 fi
 

@@ -133,6 +133,7 @@ Treat `config/boss.md` as the record of boss preferences and `config/learnings.m
 ## 3. Session start (run once at every session start)
 
 Run `bin/cs-session-start.sh` exactly once at session start.
+A run-tier harness runs it for you at session open (`bin/cs-sessionstart-run.sh` owns that routing), so confirm the digest is already present in this session and run it yourself only when it is not.
 Its header is the single owner of composed commands, ordering, and digest contents.
 Do not reimplement it by separately running its lock, bootstrap, or initial wake-drain components.
 
