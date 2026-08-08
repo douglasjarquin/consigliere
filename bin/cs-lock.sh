@@ -6,8 +6,15 @@
 # written. bin/cs-session-pid-lib.sh owns that walk and the harness identity test
 # it rests on, because bin/cs-telemetry-lib.sh needs the same "which process IS
 # this session" answer and must not duplicate it.
-# Usage: cs-lock.sh           acquire; exit 1 if another live session holds it
-#        cs-lock.sh status    print holder and liveness; always exits 0
+# Usage: cs-lock.sh              acquire; exit 1 if another live session holds it
+#        cs-lock.sh status       print holder and liveness; always exits 0
+#        cs-lock.sh harness-pid  print the harness pid THIS process would lock
+#                                as, or exit 1 when the ancestry has none.
+#                                It answers "is the recorded holder me?" for a
+#                                caller that must prove self-ownership rather
+#                                than take the lock (bin/cs-startup-network.sh),
+#                                using this file's own ancestry walk so no
+#                                second copy of harness identity can drift.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,6 +44,11 @@ holder_alive() {  # true if $1 is a live process that looks like the harness
 # tests drive directly against crafted strings.
 if [ "${BASH_SOURCE[0]}" != "$0" ]; then
   return 0
+fi
+
+if [ "${1:-}" = "harness-pid" ]; then
+  cs_session_harness_pid || exit 1
+  exit 0
 fi
 
 if [ "${1:-}" = "status" ]; then

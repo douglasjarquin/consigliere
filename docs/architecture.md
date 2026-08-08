@@ -65,6 +65,7 @@ Input classified `boss` means the boss returned; `bin/cs-afk-return.sh` owns ord
 
 Durable state and live herdr inventory, not conversation memory, are authoritative: `bin/cs-session-start.sh` reproduces the whole operating picture in one digest, and a restart is a non-event.
 The harness session-open hook runs that digest itself (`bin/cs-sessionstart-run.sh` owns what each open source means), so starting up is not the agent's discretion, and the digest is bounded as one child that reports a stalled stage loudly instead of silently.
+Because that hook blocks session initialization, the digest is composed from local reads alone: the external-network checks (the `gh auth` probe and the fleet-sync fetch) run concurrently in a bounded detached worker (`bin/cs-startup-network.sh`) whose result is harvested inline when it finishes in time and arrives as a `check: startup-network` wake when it does not, so a slow network delays a reported check rather than the work queue.
 Self-updates are fast-forward-only git pulls of this repo (`bin/cs-update.sh`), which never touch the gitignored operational home or anything under `projects/`; `bin/cs-fleet-sync.sh` separately keeps project clones fresh.
 
 ## Development notes

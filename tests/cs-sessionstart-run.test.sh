@@ -194,7 +194,7 @@ assert_contains "$out" 'lock acquired' "the truncated digest lost a stage that h
 assert_contains "$out" 'STARTUP TRUNCATED' "a truncated session start did not say so"
 assert_contains "$out" 'RUNTIME BOUND' "the truncation banner did not name the bound it hit"
 assert_contains "$out" 'STALLED during the "bootstrap" stage' "the truncation banner did not name the stalled stage"
-assert_contains "$out" 'wake-queue supervision read-once fleet-state context next-step' \
+assert_contains "$out" 'wake-queue supervision read-once fleet-state network-checks context next-step' \
   "the truncation banner did not list every stage that never ran"
 assert_contains "$out" 'READ-ONCE CONTRACT does not cover' \
   "the truncation banner did not void the read-once trust for the missing stages"
@@ -241,19 +241,33 @@ git -C "$HOME_DIR/projects/stuckproj" checkout -q -b sidetrack
 printf 'more\n' >> "$STUCK_ORIGIN/README.md"
 git -C "$STUCK_ORIGIN" -c user.name=t -c user.email=t@example.invalid commit -qam advance
 
+STARTUP_NETWORK="$ROOT/bin/cs-startup-network.sh"
+network_report() {
+  CS_ROOT_OVERRIDE="$ROOT_DIR" CS_HOME="$HOME_DIR" "$STARTUP_NETWORK" wait 120 >/dev/null 2>&1 || true
+  CS_ROOT_OVERRIDE="$ROOT_DIR" CS_HOME="$HOME_DIR" "$STARTUP_NETWORK" report 2>&1
+}
+
 full=$(CS_ROOT_OVERRIDE="$ROOT_DIR" CS_HOME="$HOME_DIR" "$SESSION_START")
-assert_contains "$full" 'FLEET_SYNC:' "the full startup did not run the fleet-sync sweep"
-assert_contains "$full" 'STUCK' "the stuck clone fixture did not trip fleet sync"
 assert_present "$HOME_DIR/state/.session-start-complete" "the full startup did not record completion"
+assert_contains "$full" 'NETWORK CHECKS' "the full startup lost its network-checks section"
+# Fleet sync now runs in the deferred network stage (bin/cs-startup-network.sh),
+# off the blocking session-open path, so its result is asserted where it lands
+# rather than inline in the digest, which never waits for it.
+full_network=$(network_report)
+assert_contains "$full_network" 'FLEET_SYNC:' "the full startup did not run the fleet-sync sweep"
+assert_contains "$full_network" 'STUCK' "the stuck clone fixture did not trip fleet sync"
 
 printf '1723000000\t1\tsignal\treemit-task\tqueued after startup\n' > "$HOME_DIR/state/.wake-queue"
 reemit=$(CS_ROOT_OVERRIDE="$ROOT_DIR" CS_HOME="$HOME_DIR" "$SESSION_START" --reemit)
 assert_contains "$reemit" "SESSION START (CONTEXT RE-EMIT) - $HOME_DIR" "--reemit did not label itself"
 assert_contains "$reemit" 'lock acquired' "--reemit did not re-verify lock ownership"
-assert_not_contains "$reemit" 'FLEET_SYNC:' "--reemit repeated a mutating sweep startup already ran"
 assert_contains "$reemit" 'reemit-task' "--reemit did not drain the queued wake"
-[ ! -s "$HOME_DIR/state/.wake-queue" ] || \
-  fail "--reemit left queued wakes behind: $(cat "$HOME_DIR/state/.wake-queue")"
+grep -q 'reemit-task' "$HOME_DIR/state/.wake-queue" 2>/dev/null && \
+  fail "--reemit left the drained wake behind: $(cat "$HOME_DIR/state/.wake-queue")"
+# The re-emit's deferred stage is the read-only probe alone, so the sweep the
+# startup already ran must not appear in its report either.
+reemit_network=$(network_report)
+assert_not_contains "$reemit_network" 'FLEET_SYNC:' "--reemit repeated a mutating sweep startup already ran"
 assert_contains "$reemit" 'restore the primary with' \
   "--reemit deferred tangle repair to a lock holder that is itself"
 assert_not_contains "$reemit" 'leave restore work to the session holding the fleet lock' \
