@@ -86,7 +86,22 @@ CS_TELEMETRY_MODEL=
 CS_TELEMETRY_EFFORT=
 CS_TELEMETRY_DURATION_MS=
 CS_TELEMETRY_SESSION_ID=
+CS_TELEMETRY_WAKE_KINDS=
+CS_TELEMETRY_SESSION_KEY=
+CS_TELEMETRY_SESSION_KEY_RESOLVED=0
 CS_TELEMETRY_RETAIN_DAYS=$CS_TELEMETRY_RETAIN_DAYS_DEFAULT
+
+# The ancestry walk that names this session is bin/cs-session-pid-lib.sh's, not a
+# second copy: breadcrumbs are keyed by exactly the identity the home lock
+# already means by "this session". Sourcing it resolves no home, creates no
+# directory, and takes no lock, so it is safe to pull into every telemetry
+# caller. A checkout that somehow lacks it leaves the session key unresolvable,
+# which drops breadcrumbs rather than failing anyone.
+CS_TELEMETRY_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd) || CS_TELEMETRY_LIB_DIR=
+if [ -n "$CS_TELEMETRY_LIB_DIR" ] && [ -r "$CS_TELEMETRY_LIB_DIR/cs-session-pid-lib.sh" ]; then
+  # shellcheck source=bin/cs-session-pid-lib.sh
+  . "$CS_TELEMETRY_LIB_DIR/cs-session-pid-lib.sh"
+fi
 
 # --- path resolution ---------------------------------------------------------
 #
@@ -104,8 +119,49 @@ cs_telemetry_paths() {
   CS_TELEMETRY_CONF="$CS_TELEMETRY_HOST_DIR/telemetry.conf"
   CS_TELEMETRY_DIR="$CS_TELEMETRY_DATA_DIR/telemetry"
   CS_TELEMETRY_FILE="$CS_TELEMETRY_DIR/turns.jsonl"
-  CS_TELEMETRY_CRUMBS="$CS_TELEMETRY_STATE_DIR/.telemetry-crumbs"
   CS_TELEMETRY_HOME=$home
+  return 0
+}
+
+# cs_telemetry_session_key - print the identity of THIS consigliere session, or
+# fail when it cannot be resolved.
+#
+# Breadcrumbs are turn-scoped state, and a home can hold more than one session at
+# once: a second window, a read-only helper, or a tooling session started in the
+# repo root all share the home. Keying the breadcrumb file by session is what
+# stops one of them from reading, folding, or deleting another's in-flight
+# breadcrumbs and mis-attributing a supervision turn.
+#
+# The identity is the harness process in this process's ancestry - the same one
+# state/.lock already means by "this session" - because every breadcrumb site and
+# the turn-end emitter run as descendants of it and so resolve the same pid.
+#
+# Resolved ONCE per process and cached: the walk costs up to sixteen `ps` calls,
+# which a per-breadcrumb resolution would pay on every drained wake.
+cs_telemetry_session_key() {
+  if [ "$CS_TELEMETRY_SESSION_KEY_RESOLVED" -eq 0 ]; then
+    CS_TELEMETRY_SESSION_KEY_RESOLVED=1
+    CS_TELEMETRY_SESSION_KEY=
+    if command -v cs_session_harness_pid >/dev/null 2>&1; then
+      CS_TELEMETRY_SESSION_KEY=$(cs_session_harness_pid 2>/dev/null) || CS_TELEMETRY_SESSION_KEY=
+    fi
+    case "$CS_TELEMETRY_SESSION_KEY" in
+      ''|*[!0-9]*) CS_TELEMETRY_SESSION_KEY= ;;
+    esac
+  fi
+  [ -n "$CS_TELEMETRY_SESSION_KEY" ] || return 1
+  printf '%s\n' "$CS_TELEMETRY_SESSION_KEY"
+}
+
+# cs_telemetry_crumbs_resolve - set CS_TELEMETRY_CRUMBS to THIS session's
+# breadcrumb file, or clear it and fail. Telemetry is best-effort: a caller that
+# cannot name its own session drops its breadcrumb rather than writing into a
+# file another session would fold.
+cs_telemetry_crumbs_resolve() {
+  CS_TELEMETRY_CRUMBS=
+  cs_telemetry_paths || return 1
+  cs_telemetry_session_key >/dev/null || return 1
+  CS_TELEMETRY_CRUMBS="$CS_TELEMETRY_STATE_DIR/.telemetry-crumbs-$CS_TELEMETRY_SESSION_KEY"
   return 0
 }
 
@@ -129,7 +185,7 @@ cs_telemetry_paths() {
 # Prints exactly one line: "disabled", "enabled <retain_days>", or
 # "malformed <reason>". Never fails, never reads anything else.
 cs_telemetry_config_status() {
-  local key value extra enabled='' retain='' seen_enabled=0 seen_retain=0
+  local key value extra normalized enabled='' retain='' seen_enabled=0 seen_retain=0
   if ! cs_telemetry_paths; then
     printf 'disabled\n'
     return 0
@@ -175,11 +231,19 @@ cs_telemetry_config_status() {
             return 0
             ;;
         esac
-        if [ "$value" -lt 1 ] || [ "$value" -gt 3650 ]; then
+        # Normalize to one canonical base-10 integer HERE, the single place that
+        # reads the config, so every consumer sees the same number. Left as
+        # written, a leading zero means two different things downstream: bash
+        # arithmetic reads "012" as octal 10 (and aborts outright on "09"), while
+        # `find -mtime` reads it as 12. The record rewrite and the cursor sweep
+        # must never disagree about the retention window.
+        normalized=${value#"${value%%[!0]*}"}
+        [ -n "$normalized" ] || normalized=0
+        if [ "${#normalized}" -gt 4 ] || [ "$normalized" -lt 1 ] || [ "$normalized" -gt 3650 ]; then
           printf 'malformed retain_days must be between 1 and 3650, got "%s"\n' "$value"
           return 0
         fi
-        retain=$value
+        retain=$normalized
         ;;
       *)
         printf 'malformed unknown key "%s"\n' "$key"
@@ -241,11 +305,15 @@ cs_telemetry_on() {
 #   teardown       a task was cleaned up
 #   promote        a scout was promoted to ship
 
-# cs_telemetry_crumb <kind> [detail] - record one breadcrumb. Always rc 0.
+# cs_telemetry_crumb <kind> [detail] - record one breadcrumb in THIS session's
+# own breadcrumb file. A session whose identity cannot be resolved drops the
+# breadcrumb silently rather than writing where another session would fold it.
+# Always rc 0.
 cs_telemetry_crumb() {
   local kind=${1:-} detail=${2:-} lines
   [ -n "$kind" ] || return 0
   cs_telemetry_on || return 0
+  cs_telemetry_crumbs_resolve || return 0
   {
     kind=$(printf '%s' "$kind" | LC_ALL=C tr -d '\t\r\n')
     detail=$(printf '%s' "$detail" | LC_ALL=C tr -d '\t\r\n')
@@ -279,9 +347,10 @@ cs_telemetry_event_id() {
 # cs_telemetry_emit <key=value>... - append exactly one record. Always rc 0.
 #
 # Recognized keys: role kind home project task_id harness model effort purpose
-# wake_kind outcome duration_ms session_id usage. An omitted or empty key is
-# recorded as null; `usage` takes a raw JSON object. Unknown keys are ignored, so
-# a caller can never invent a field outside the schema.
+# wake_kind wake_kinds outcome duration_ms session_id usage. An omitted or empty
+# key is recorded as null; `usage` takes a raw JSON object and `wake_kinds` a
+# comma-separated list that is recorded as a JSON array. Unknown keys are
+# ignored, so a caller can never invent a field outside the schema.
 #
 # The append is one printf of one line below CS_TELEMETRY_MAX_RECORD_BYTES to a
 # file opened O_APPEND, which is what keeps concurrent emitters in the same home
@@ -329,6 +398,7 @@ cs_telemetry_emit() {
             effort: s($f; "effort"),
             purpose: s($f; "purpose"),
             wake_kind: s($f; "wake_kind"),
+            wake_kinds: (($f["wake_kinds"] // "") | if . == "" then null else split(",") end),
             outcome: s($f; "outcome"),
             duration_ms: n($f; "duration_ms"),
             session_id: s($f; "session_id"),
@@ -392,17 +462,21 @@ cs_telemetry_emit() {
 # nothing. A capo turn with the same emptiness stays `unknown`, because a capo is
 # idle by default and its turns arrive as work routed from the main home.
 #
-# Sets CS_TELEMETRY_PURPOSE, CS_TELEMETRY_OUTCOME, CS_TELEMETRY_WAKE_KIND and
-# clears the breadcrumbs. Always rc 0.
+# Sets CS_TELEMETRY_PURPOSE, CS_TELEMETRY_OUTCOME, CS_TELEMETRY_WAKE_KIND,
+# CS_TELEMETRY_WAKE_KINDS and clears THIS session's breadcrumbs - never another
+# session's. A session whose identity cannot be resolved folds nothing and still
+# records the turn, with a null wake kind: telemetry is best-effort and must
+# never guess. Always rc 0.
 cs_telemetry_fold() {
-  local role=${1:-} kind detail seen='|'
+  local role=${1:-} kind detail seen='|' kinds=''
   local wake_count=0 first_wake='' checkpoint=0 stale=0
   local has_spawn=0 has_steer=0 has_close=0
   CS_TELEMETRY_PURPOSE=unknown
   CS_TELEMETRY_OUTCOME=
   CS_TELEMETRY_WAKE_KIND=
-  cs_telemetry_paths || return 0
-  if [ -f "$CS_TELEMETRY_CRUMBS" ]; then
+  CS_TELEMETRY_WAKE_KINDS=
+  cs_telemetry_crumbs_resolve || CS_TELEMETRY_CRUMBS=
+  if [ -n "$CS_TELEMETRY_CRUMBS" ] && [ -f "$CS_TELEMETRY_CRUMBS" ]; then
     while IFS="$(printf '\t')" read -r kind detail || [ -n "$kind" ]; do
       case "$kind" in
         wake)
@@ -414,6 +488,9 @@ cs_telemetry_fold() {
               wake_count=$((wake_count + 1))
               if [ "$wake_count" -eq 1 ]; then
                 first_wake=$detail
+                kinds=$detail
+              else
+                kinds="$kinds,$detail"
               fi
               ;;
           esac
@@ -430,12 +507,14 @@ cs_telemetry_fold() {
     rm -f "$CS_TELEMETRY_CRUMBS" 2>/dev/null || true
   fi
 
-  # wake_kind: the single drained kind when the turn saw exactly one, `mixed`
-  # when it saw several, `checkpoint` when only a checkpoint ran, else null.
-  if [ "$wake_count" -eq 1 ]; then
+  # wake_kind stays inside the queue's own vocabulary and names the FIRST kind
+  # this turn drained, or `checkpoint` when the turn's only supervision was a
+  # bounded foreground checkpoint, else null. wake_kinds is the additive record
+  # of every distinct kind the turn drained, in drain order, so a multi-wake turn
+  # stays fully recoverable without wake_kind leaving the vocabulary.
+  if [ "$wake_count" -gt 0 ]; then
     CS_TELEMETRY_WAKE_KIND=$first_wake
-  elif [ "$wake_count" -gt 1 ]; then
-    CS_TELEMETRY_WAKE_KIND=mixed
+    CS_TELEMETRY_WAKE_KINDS=$kinds
   elif [ "$checkpoint" -eq 1 ]; then
     CS_TELEMETRY_WAKE_KIND=checkpoint
   fi
@@ -636,19 +715,48 @@ cs_telemetry_usage_claude() {
 
 # --- turn end ----------------------------------------------------------------
 
+# cs_telemetry_payload_harness [payload] - print the harness that actually
+# produced this turn, derived from the Stop payload's own shape, or nothing.
+#
+# The payload is the authority here. host/harness.conf pins what consigliere
+# DISPATCHES with and is no evidence about the harness that ran the turn being
+# measured, so a home pinned to one harness while the boss runs the other would
+# otherwise record a wrong harness identity AND feed the transcript to the wrong
+# parser, yielding null usage under a confident wrong label.
+#
+# The two payloads distinguish themselves and both shapes are recorded as
+# verified facts: a codex Stop payload carries `turn_id` (docs/codex.md), a
+# claude Stop payload carries `prompt_id` (docs/claude.md). A payload that
+# carries both, neither, or nothing at all is genuinely ambiguous, and an
+# ambiguous harness is recorded as null rather than guessed - which also skips
+# usage extraction, because a null is honest and a wrong harness is not.
+cs_telemetry_payload_harness() {
+  local payload=${1:-} harness
+  [ -n "$payload" ] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  harness=$(printf '%s' "$payload" | jq -r '
+    if type != "object" then empty
+    elif (has("turn_id") and (has("prompt_id") | not)) then "codex"
+    elif (has("prompt_id") and (has("turn_id") | not)) then "claude"
+    else empty end' 2>/dev/null) || harness=
+  case "$harness" in
+    codex|claude) printf '%s\n' "$harness" ;;
+  esac
+  return 0
+}
+
 # cs_telemetry_turn_end <role> [payload] - the supervisor turn-end emitter.
 # <role> is root or capo; <payload> is the harness Stop payload (may be empty).
-# Folds this turn's breadcrumbs, extracts whatever usage the harness makes
-# authoritatively available, appends one record, and runs bounded retention.
+# Folds this session's breadcrumbs, names the emitting harness from the payload
+# shape, extracts whatever usage that harness makes authoritatively available,
+# appends one record, and runs bounded retention.
 # Always rc 0 and completely silent.
 cs_telemetry_turn_end() {
   local role=${1:-} payload=${2:-} harness='' capo_id='' kind=''
   cs_telemetry_on || return 0
   {
     cs_telemetry_paths || return 0
-    if command -v cs_harness_detect_root >/dev/null 2>&1; then
-      harness=$(cs_harness_detect_root 2>/dev/null)
-    fi
+    harness=$(cs_telemetry_payload_harness "$payload")
     cs_telemetry_fold "$role"
     cs_telemetry_usage "$harness" "$payload"
     # A capo home names itself in its own marker, so a capo turn carries its own
@@ -670,6 +778,7 @@ cs_telemetry_turn_end() {
       "effort=$CS_TELEMETRY_EFFORT" \
       "purpose=$CS_TELEMETRY_PURPOSE" \
       "wake_kind=$CS_TELEMETRY_WAKE_KIND" \
+      "wake_kinds=$CS_TELEMETRY_WAKE_KINDS" \
       "outcome=$CS_TELEMETRY_OUTCOME" \
       "duration_ms=$CS_TELEMETRY_DURATION_MS" \
       "session_id=$CS_TELEMETRY_SESSION_ID" \
@@ -781,8 +890,27 @@ cs_telemetry_quote() {
 # non-blocking lock. It can never block, delay, or interfere with supervision: a
 # held lock, a missing jq, an unwritable directory, or any other obstacle skips
 # silently and the next turn end tries again.
+#
+# The lock is released two ways, because retention that stops running is
+# retention that does not exist. An EXIT trap inside the locked SUBSHELL releases
+# it on any ordinary abnormal exit without ever touching the caller's own traps,
+# and a lock directory older than one prune interval is reclaimed on the next
+# attempt, which covers a hard kill (a Stop-hook timeout) that no trap can catch.
+# A genuinely held FRESH lock is still skipped silently.
+
+# Portable mtime in epoch seconds. A deliberate local copy rather than a
+# dependency on bin/cs-lock-lib.sh, for the same reason cs_telemetry_quote is:
+# this library is sourced by callers with no reason to load the git-lock layer.
+cs_telemetry_mtime() {
+  if [ "$(uname 2>/dev/null)" = Darwin ]; then
+    stat -f %m "$1" 2>/dev/null
+  else
+    stat -c %Y "$1" 2>/dev/null
+  fi
+}
+
 cs_telemetry_prune() {
-  local stamp lock cutoff tmp now last size_before size_after
+  local stamp lock now last age
   cs_telemetry_on || return 0
   {
     cs_telemetry_paths || return 0
@@ -796,44 +924,70 @@ cs_telemetry_prune() {
       case "$last" in ''|*[!0-9]*) last=0 ;; esac
       [ "$((now - last))" -ge "$CS_TELEMETRY_PRUNE_INTERVAL" ] || return 0
     fi
+    # Reclaim a leaked lock before trying to take one. A lock older than a whole
+    # prune interval cannot belong to a live prune: this function's own work is
+    # bounded by one jq pass and one find.
+    if [ -d "$lock" ]; then
+      age=$(cs_telemetry_mtime "$lock")
+      case "$age" in
+        ''|*[!0-9]*) ;;
+        *)
+          if [ "$((now - age))" -ge "$CS_TELEMETRY_PRUNE_INTERVAL" ]; then
+            rmdir "$lock" 2>/dev/null || true
+          fi
+          ;;
+      esac
+    fi
     mkdir "$lock" 2>/dev/null || return 0
     printf '%s\n' "$now" > "$stamp" 2>/dev/null || true
+    (
+      trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+      cs_telemetry_prune_locked "$now"
+    ) 2>/dev/null || true
+  } 2>/dev/null || true
+  return 0
+}
 
-    if [ -f "$CS_TELEMETRY_FILE" ]; then
-      cutoff=$((now - CS_TELEMETRY_RETAIN_DAYS * 86400))
-      tmp="$CS_TELEMETRY_FILE.prune.$$"
-      size_before=$(wc -c < "$CS_TELEMETRY_FILE" 2>/dev/null | tr -d ' ')
-      if jq -R -c --argjson cutoff "$cutoff" '
-            fromjson? // empty
-            | select(type == "object")
-            | select(((.timestamp // "") | try fromdateiso8601 catch 0) >= $cutoff)
-          ' < "$CS_TELEMETRY_FILE" > "$tmp" 2>/dev/null; then
-        # Compare and swap on size. Emitters append without taking this lock, by
-        # design: an append must never wait on retention. So the rewrite is only
-        # allowed to replace a file that nobody appended to while it was being
-        # filtered - otherwise this rename would silently drop those records. A
-        # detected append abandons the rewrite and the next interval retries.
-        size_after=$(wc -c < "$CS_TELEMETRY_FILE" 2>/dev/null | tr -d ' ')
-        if [ -n "$size_before" ] && [ "$size_before" = "$size_after" ]; then
-          mv "$tmp" "$CS_TELEMETRY_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
-        else
-          rm -f "$tmp" 2>/dev/null || true
-        fi
+# cs_telemetry_prune_locked <now-epoch> - the retention work itself, run only
+# while this process holds the prune lock. Split out so the lock release is one
+# trap on one subshell rather than a release that every early exit must remember.
+cs_telemetry_prune_locked() {
+  local now=$1 cutoff tmp size_before size_after
+  if [ -f "$CS_TELEMETRY_FILE" ]; then
+    cutoff=$((now - CS_TELEMETRY_RETAIN_DAYS * 86400))
+    tmp="$CS_TELEMETRY_FILE.prune.$$"
+    size_before=$(wc -c < "$CS_TELEMETRY_FILE" 2>/dev/null | tr -d ' ')
+    if jq -R -c --argjson cutoff "$cutoff" '
+          fromjson? // empty
+          | select(type == "object")
+          | select(((.timestamp // "") | try fromdateiso8601 catch 0) >= $cutoff)
+        ' < "$CS_TELEMETRY_FILE" > "$tmp" 2>/dev/null; then
+      # Compare and swap on size. Emitters append without taking this lock, by
+      # design: an append must never wait on retention. So the rewrite is only
+      # allowed to replace a file that nobody appended to while it was being
+      # filtered - otherwise this rename would silently drop those records. A
+      # detected append abandons the rewrite and the next interval retries.
+      size_after=$(wc -c < "$CS_TELEMETRY_FILE" 2>/dev/null | tr -d ' ')
+      if [ -n "$size_before" ] && [ "$size_before" = "$size_after" ]; then
+        mv "$tmp" "$CS_TELEMETRY_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
       else
         rm -f "$tmp" 2>/dev/null || true
       fi
+    else
+      rm -f "$tmp" 2>/dev/null || true
     fi
+  fi
 
-    # The per-session transcript cursors age out on the same schedule. Each one
-    # is tiny, but a home accumulates one per harness session forever otherwise,
-    # and a cursor older than the retention window can no longer bound anything
-    # that is still recorded.
-    if [ -d "$CS_TELEMETRY_STATE_DIR" ]; then
-      find "$CS_TELEMETRY_STATE_DIR" -maxdepth 1 -type f -name '.telemetry-cursor-*' \
-        -mtime "+$CS_TELEMETRY_RETAIN_DAYS" -exec rm -f {} + 2>/dev/null || true
-    fi
-
-    rmdir "$lock" 2>/dev/null || true
-  } 2>/dev/null || true
+  # The per-session transcript cursors and breadcrumb files age out on the same
+  # schedule. Each one is tiny, but a home accumulates one of each per harness
+  # session forever otherwise, and neither can bound anything that is still
+  # recorded once it is older than the retention window. CS_TELEMETRY_RETAIN_DAYS
+  # is normalized to base 10 at parse time, so this sweep and the record rewrite
+  # above always mean the same number of days.
+  if [ -d "$CS_TELEMETRY_STATE_DIR" ]; then
+    find "$CS_TELEMETRY_STATE_DIR" -maxdepth 1 -type f \
+      \( -name '.telemetry-cursor-*' -o -name '.telemetry-crumbs-*' \) \
+      -mtime "+$CS_TELEMETRY_RETAIN_DAYS" -exec rm -f {} + 2>/dev/null || true
+  fi
   return 0
 }

@@ -26,22 +26,54 @@ make_home() {
   printf '%s\n' "$dir"
 }
 
-# in_home <home> <script> - run <script> with the libraries sourced exactly as
-# bin/cs-turnend-guard.sh sources them, under the strictest shell options a
-# caller uses, so an unbound variable or a stray non-zero return in the library
-# fails the test loudly. CS_TEST_HARNESS selects the harness the turn-end
-# emitter resolves; tests/lib.sh pins codex by default.
+# in_home <home> <script> - run <script> with the library sourced exactly as
+# bin/cs-turnend-guard.sh sources it, under the strictest shell options a caller
+# uses, so an unbound variable or a stray non-zero return in the library fails
+# the test loudly.
+#
+# CS_LOCK_HARNESS_RE widens the session-identity walk to match this test's own
+# shell, which is what a real session's codex or claude process is: without it
+# nothing in a CI process tree names a harness, breadcrumbs would be dropped as
+# unattributable, and the fold cases below would prove nothing.
 in_home() {
   local home=$1 script=$2
-  CS_HOME="$home" CS_HARNESS_OVERRIDE="${CS_TEST_HARNESS:-codex}" CS_TELEMETRY_DISABLE='' bash -c "
+  CS_HOME="$home" CS_LOCK_HARNESS_RE='bash|zsh|codex|claude' CS_TELEMETRY_DISABLE='' bash -c "
 set -eu
-. '$ROOT/bin/cs-harness-lib.sh'
 . '$ROOT/bin/cs-telemetry-lib.sh'
 $script"
 }
 
 records() { # <home> - the recorded JSONL
   cat "$1/data/telemetry/turns.jsonl" 2>/dev/null || true
+}
+
+crumb_files() { # <home> - every per-session breadcrumb file in the home
+  find "$1/state" -maxdepth 1 -name '.telemetry-crumbs-*' 2>/dev/null | sort
+}
+
+# Portable "<n> days before now", for aging fixtures past a retention boundary.
+iso_days_ago() { # <days>
+  local t=$(( $(date -u +%s) - $1 * 86400 ))
+  date -u -r "$t" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$t" +%Y-%m-%dT%H:%M:%SZ
+}
+
+touch_days_ago() { # <path> <days>
+  local t=$(( $(date +%s) - $2 * 86400 )) stamp
+  stamp=$(date -r "$t" +%Y%m%d%H%M 2>/dev/null || date -d "@$t" +%Y%m%d%H%M)
+  touch -t "$stamp" "$1"
+}
+
+# stop_payload <harness> <extra-json> - a Stop payload of that harness's verified
+# shape. `turn_id` versus `prompt_id` is the discriminator the emitter reads to
+# name the harness that produced the turn (docs/codex.md, docs/claude.md,
+# docs/telemetry.md); `ambiguous` carries neither.
+stop_payload() {
+  local harness=$1 extra=${2:-'{}'}
+  case "$harness" in
+    codex) jq -cn --argjson x "$extra" '{turn_id:"turn-1"} + $x' ;;
+    claude) jq -cn --argjson x "$extra" '{prompt_id:"prompt-1"} + $x' ;;
+    *) jq -cn --argjson x "$extra" '$x' ;;
+  esac
 }
 
 # --- configuration ------------------------------------------------------------
@@ -116,7 +148,7 @@ test_record_is_valid_jsonl_with_the_full_schema() {
   [ "$(printf '%s\n' "$rec" | wc -l | tr -d ' ')" = 1 ] || fail "one turn must append exactly one line"
   printf '%s' "$rec" | jq -e . >/dev/null || fail "the record must be valid JSON:"$'\n'"$rec"
   for field in schema timestamp event_id role kind home project task_id harness \
-    model effort purpose wake_kind outcome duration_ms session_id usage; do
+    model effort purpose wake_kind wake_kinds outcome duration_ms session_id usage; do
     printf '%s' "$rec" | jq -e "has(\"$field\")" >/dev/null ||
       fail "the record must carry the '$field' field:"$'\n'"$rec"
   done
@@ -263,13 +295,35 @@ test_fold_supervision_actions() {
 }
 
 test_fold_wake_kind_provenance() {
-  local got
+  local got home
   got=$(fold_case single root 'wake capo')
   [ "${got##* }" = capo ] || fail "one drained kind must be recorded verbatim, got '$got'"
-  got=$(fold_case several root 'wake signal' 'wake stale' 'wake signal')
-  [ "${got##* }" = mixed ] || fail "several distinct kinds must record 'mixed', got '$got'"
   got=$(fold_case ckpt root checkpoint)
   [ "${got##* }" = checkpoint ] || fail "a checkpoint-only turn records 'checkpoint', got '$got'"
+
+  # A multi-wake turn must stay inside the queue's vocabulary: wake_kind names
+  # the FIRST kind drained so supervision-by-wake still sums to the supervision
+  # turn count, and the additive wake_kinds keeps the whole set recoverable.
+  home=$(make_home fold-several 'enabled true')
+  in_home "$home" '
+cs_telemetry_crumb wake signal
+cs_telemetry_crumb wake stale
+cs_telemetry_crumb wake signal
+cs_telemetry_turn_end root ""'
+  [ "$(records "$home" | jq -r '.wake_kind')" = signal ] ||
+    fail "wake_kind must name the first drained kind:"$'\n'"$(records "$home")"
+  [ "$(records "$home" | jq -rc '.wake_kinds')" = '["signal","stale"]' ] ||
+    fail "wake_kinds must carry every distinct kind in drain order:"$'\n'"$(records "$home")"
+
+  home=$(make_home fold-one-kind 'enabled true')
+  in_home "$home" 'cs_telemetry_crumb wake capo; cs_telemetry_turn_end root ""'
+  [ "$(records "$home" | jq -rc '.wake_kinds')" = '["capo"]' ] ||
+    fail "a single-wake turn must still carry wake_kinds:"$'\n'"$(records "$home")"
+
+  home=$(make_home fold-no-wake 'enabled true')
+  in_home "$home" 'cs_telemetry_crumb checkpoint; cs_telemetry_turn_end root ""'
+  [ "$(records "$home" | jq -r '.wake_kinds')" = null ] ||
+    fail "a turn that drained no wake must carry a null wake_kinds:"$'\n'"$(records "$home")"
   pass "cs-telemetry: wake provenance uses the queue's own vocabulary"
 }
 
@@ -297,7 +351,7 @@ test_breadcrumbs_are_cleared_per_turn() {
   local home
   home=$(make_home crumbs-cleared 'enabled true')
   in_home "$home" 'cs_telemetry_crumb wake stale; cs_telemetry_turn_end root ""'
-  assert_absent "$home/state/.telemetry-crumbs" "the fold must clear the turn's breadcrumbs"
+  [ -z "$(crumb_files "$home")" ] || fail "the fold must clear the turn's breadcrumbs"
   in_home "$home" 'cs_telemetry_turn_end root ""'
   [ "$(records "$home" | jq -r '.wake_kind' | tr '\n' ' ')" = 'stale null ' ] ||
     fail "a later turn must not inherit the previous turn's wakes:"$'\n'"$(records "$home")"
@@ -305,15 +359,45 @@ test_breadcrumbs_are_cleared_per_turn() {
 }
 
 test_breadcrumbs_are_bounded() {
-  local home count
+  local home count file
   home=$(make_home crumbs-bounded 'enabled true')
-  CS_HOME="$home" CS_TELEMETRY_MAX_CRUMBS=10 CS_TELEMETRY_DISABLE='' bash -c "
+  CS_HOME="$home" CS_LOCK_HARNESS_RE='bash|zsh|codex|claude' \
+    CS_TELEMETRY_MAX_CRUMBS=10 CS_TELEMETRY_DISABLE='' bash -c "
 set -eu
 . '$ROOT/bin/cs-telemetry-lib.sh'
 for i in \$(seq 1 40); do cs_telemetry_crumb wake signal; done"
-  count=$(wc -l < "$home/state/.telemetry-crumbs" | tr -d ' ')
+  file=$(crumb_files "$home")
+  [ -n "$file" ] || fail "the breadcrumbs must have been written somewhere"
+  count=$(wc -l < "$file" | tr -d ' ')
   [ "$count" -le 10 ] || fail "breadcrumbs must stay bounded, found $count lines"
   pass "cs-telemetry: a home whose turn end never runs cannot grow breadcrumbs unbounded"
+}
+
+test_breadcrumbs_are_private_to_their_own_session() {
+  local home foreign mine
+  home=$(make_home crumbs-per-session 'enabled true')
+  # A foreign session's in-flight breadcrumbs: a real supervision turn that has
+  # drained a signal wake and is holding a checkpoint, but has not ended its turn.
+  foreign="$home/state/.telemetry-crumbs-999999"
+  printf 'wake\tsignal\ncheckpoint\t\n' > "$foreign"
+  # A second session in the same home ends ITS turn. It must fold only its own
+  # breadcrumbs; consuming the foreign ones would attribute another session's
+  # supervision to this turn AND leave the real supervisor's turn folding empty.
+  in_home "$home" 'cs_telemetry_turn_end root ""'
+  assert_present "$foreign" "another session's in-flight breadcrumbs must survive a foreign turn end"
+  [ "$(cat "$foreign")" = "$(printf 'wake\tsignal\ncheckpoint\t')" ] ||
+    fail "another session's breadcrumbs must be untouched, got:"$'\n'"$(cat "$foreign")"
+  [ "$(records "$home" | jq -r '[.purpose, (.wake_kind // "-")] | join(" ")')" = 'boss -' ] ||
+    fail "a turn must never be attributed another session's supervision:"$'\n'"$(records "$home")"
+
+  # And the same session's own breadcrumbs are still folded normally.
+  # shellcheck disable=SC2016 # CS_TELEMETRY_CRUMBS must expand in the child shell, not here
+  mine=$(in_home "$home" 'cs_telemetry_crumbs_resolve; printf "%s\n" "$CS_TELEMETRY_CRUMBS"')
+  [ "$mine" != "$foreign" ] || fail "the session key must differ from the seeded foreign one"
+  in_home "$home" 'cs_telemetry_crumb wake stale; cs_telemetry_turn_end root ""'
+  [ "$(records "$home" | tail -1 | jq -r '.wake_kind')" = stale ] ||
+    fail "a session must still fold its own breadcrumbs:"$'\n'"$(records "$home" | tail -1)"
+  pass "cs-telemetry: one session can neither fold nor delete another session's breadcrumbs"
 }
 
 # --- role attribution ---------------------------------------------------------
@@ -376,12 +460,13 @@ test_codex_usage_is_summed_from_the_rollout() {
     printf '%s\n' '{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"cached_input_tokens":60,"output_tokens":13,"reasoning_output_tokens":5,"total_tokens":213}}}}'
     printf '%s\n' '{"type":"event_msg","payload":{"type":"task_complete","turn_id":"t1","duration_ms":4321}}'
   } > "$roll"
-  payload=$(jq -cn --arg t "$roll" '{session_id:"sess-codex",transcript_path:$t,model:"gpt-5.6-sol"}')
+  payload=$(stop_payload codex "$(jq -cn --arg t "$roll" \
+    '{session_id:"sess-codex",transcript_path:$t,model:"gpt-5.6-sol"}')")
   in_home "$home" "cs_telemetry_turn_end root '$payload'"
-  [ "$(records "$home" | jq -r '[.usage.input_tokens, .usage.cached_input_tokens,
+  [ "$(records "$home" | jq -r '[.harness, .usage.input_tokens, .usage.cached_input_tokens,
       .usage.output_tokens, .usage.reasoning_tokens, .usage.total_tokens,
       .duration_ms, .model, .effort, .session_id] | join(" ")')" \
-    = '300 100 20 8 320 4321 gpt-5.6-sol xhigh sess-codex' ] ||
+    = 'codex 300 100 20 8 320 4321 gpt-5.6-sol xhigh sess-codex' ] ||
     fail "codex usage must sum every token_count in the turn window:"$'\n'"$(records "$home")"
   pass "cs-telemetry: codex usage, duration, model, and effort come from the rollout"
 }
@@ -398,13 +483,14 @@ test_claude_usage_dedupes_streaming_snapshots() {
     printf '%s\n' '{"type":"assistant","timestamp":"2026-08-08T12:00:02.000Z","effort":"xhigh","message":{"id":"msg_a","model":"claude-opus-5","usage":{"input_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":900,"output_tokens":50}}}'
     printf '%s\n' '{"type":"assistant","timestamp":"2026-08-08T12:00:04.500Z","effort":"xhigh","message":{"id":"msg_b","model":"claude-opus-5","usage":{"input_tokens":2,"cache_creation_input_tokens":10,"cache_read_input_tokens":90,"output_tokens":8}}}'
   } > "$tr"
-  payload=$(jq -cn --arg t "$tr" '{session_id:"sess-claude",transcript_path:$t,effort:{level:"xhigh"}}')
-  CS_TEST_HARNESS=claude in_home "$home" "cs_telemetry_turn_end root '$payload'"
+  payload=$(stop_payload claude "$(jq -cn --arg t "$tr" \
+    '{session_id:"sess-claude",transcript_path:$t,effort:{level:"xhigh"}}')")
+  in_home "$home" "cs_telemetry_turn_end root '$payload'"
   # input = (5+100+900) + (2+10+90) = 1107; cached = 900 + 90 = 990; output = 58.
-  [ "$(records "$home" | jq -r '[.usage.input_tokens, .usage.cached_input_tokens,
+  [ "$(records "$home" | jq -r '[.harness, .usage.input_tokens, .usage.cached_input_tokens,
       .usage.output_tokens, (.usage.reasoning_tokens // "null"), .usage.total_tokens,
       .duration_ms, .model, .effort, .session_id] | join(" ")')" \
-    = '1107 990 58 null 1165 4500 claude-opus-5 xhigh sess-claude' ] ||
+    = 'claude 1107 990 58 null 1165 4500 claude-opus-5 xhigh sess-claude' ] ||
     fail "claude usage must dedupe by message id and fold cache tokens into input:"$'\n'"$(records "$home")"
   pass "cs-telemetry: claude usage dedupes streaming snapshots and normalizes cache tokens"
 }
@@ -414,10 +500,11 @@ test_usage_cursor_bounds_the_next_turn() {
   home=$(make_home usage-cursor 'enabled true')
   tr="$home/transcript.jsonl"
   printf '%s\n' '{"type":"assistant","timestamp":"2026-08-08T12:00:00.000Z","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}' > "$tr"
-  payload=$(jq -cn --arg t "$tr" '{session_id:"sess-cursor",transcript_path:$t,effort:{level:"high"}}')
-  CS_TEST_HARNESS=claude in_home "$home" "cs_telemetry_turn_end root '$payload'"
+  payload=$(stop_payload claude "$(jq -cn --arg t "$tr" \
+    '{session_id:"sess-cursor",transcript_path:$t,effort:{level:"high"}}')")
+  in_home "$home" "cs_telemetry_turn_end root '$payload'"
   printf '%s\n' '{"type":"assistant","timestamp":"2026-08-08T12:01:00.000Z","message":{"id":"m2","model":"claude-opus-5","usage":{"input_tokens":30,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":2}}}' >> "$tr"
-  CS_TEST_HARNESS=claude in_home "$home" "cs_telemetry_turn_end root '$payload'"
+  in_home "$home" "cs_telemetry_turn_end root '$payload'"
   [ "$(records "$home" | jq -r '.usage.input_tokens' | tr '\n' ' ')" = '10 30 ' ] ||
     fail "the second turn must count only the bytes appended since the first:"$'\n'"$(records "$home")"
   assert_present "$home/state/.telemetry-cursor-sess-cursor" "the per-session cursor must persist"
@@ -425,7 +512,7 @@ test_usage_cursor_bounds_the_next_turn() {
   # A third turn adds no new transcript bytes at all. Its usage is genuinely
   # unknown and must be null, but the model and effort this session already
   # stated authoritatively are carried forward by the cursor rather than lost.
-  CS_TEST_HARNESS=claude in_home "$home" "cs_telemetry_turn_end root '$payload'"
+  in_home "$home" "cs_telemetry_turn_end root '$payload'"
   [ "$(records "$home" | tail -1 | jq -r '[(.usage.total_tokens // "null"), .model, .effort] | join(" ")')" \
     = 'null claude-opus-5 high' ] ||
     fail "an empty window must carry the session's known model and effort with null usage:"$'\n'"$(records "$home" | tail -1)"
@@ -437,12 +524,58 @@ test_usage_never_records_conversation_content() {
   home=$(make_home privacy 'enabled true')
   tr="$home/transcript.jsonl"
   printf '%s\n' '{"type":"assistant","timestamp":"2026-08-08T12:00:00.000Z","message":{"id":"m1","model":"claude-opus-5","content":[{"type":"text","text":"SECRET-TRANSCRIPT-TEXT"}],"usage":{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}' > "$tr"
-  payload=$(jq -cn --arg t "$tr" '{session_id:"sess-priv",transcript_path:$t,last_assistant_message:"SECRET-PAYLOAD-TEXT",cwd:"/tmp"}')
-  CS_TEST_HARNESS=claude in_home "$home" "cs_telemetry_turn_end root '$payload'"
+  payload=$(stop_payload claude "$(jq -cn --arg t "$tr" \
+    '{session_id:"sess-priv",transcript_path:$t,last_assistant_message:"SECRET-PAYLOAD-TEXT",cwd:"/tmp"}')")
+  in_home "$home" "cs_telemetry_turn_end root '$payload'"
   rec=$(records "$home")
   assert_not_contains "$rec" SECRET-TRANSCRIPT-TEXT "a record must never reproduce transcript content"
   assert_not_contains "$rec" SECRET-PAYLOAD-TEXT "a record must never reproduce the Stop payload's message"
   pass "cs-telemetry: only numbers, model, and effort leave the transcript read"
+}
+
+test_harness_comes_from_the_payload_not_the_dispatch_pin() {
+  local home tr payload
+  home=$(make_home harness-shape 'enabled true')
+  # host/harness.conf pins what this home DISPATCHES with. It is no evidence
+  # about the harness that produced the turn being measured, so a payload that
+  # contradicts it must win - otherwise the record names the wrong harness and
+  # the transcript goes to the wrong parser.
+  printf 'claude\n' > "$home/host/harness.conf"
+  tr="$home/rollout.jsonl"
+  printf '%s\n' '{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":11,"cached_input_tokens":1,"output_tokens":2,"reasoning_output_tokens":0,"total_tokens":13}}}}' > "$tr"
+  payload=$(stop_payload codex "$(jq -cn --arg t "$tr" '{session_id:"sess-a",transcript_path:$t,model:"gpt-5.6-sol"}')")
+  in_home "$home" "cs_telemetry_turn_end root '$payload'"
+  [ "$(records "$home" | jq -r '[.harness, .usage.total_tokens] | join(" ")')" = 'codex 13' ] ||
+    fail "a codex-shaped payload must record harness=codex and parse the rollout:"$'\n'"$(records "$home")"
+
+  home=$(make_home harness-shape-claude 'enabled true')
+  printf 'codex\n' > "$home/host/harness.conf"
+  tr="$home/transcript.jsonl"
+  printf '%s\n' '{"type":"assistant","timestamp":"2026-08-08T12:00:00.000Z","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":7,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":3}}}' > "$tr"
+  payload=$(stop_payload claude "$(jq -cn --arg t "$tr" '{session_id:"sess-b",transcript_path:$t,effort:{level:"high"}}')")
+  in_home "$home" "cs_telemetry_turn_end root '$payload'"
+  [ "$(records "$home" | jq -r '[.harness, .usage.total_tokens] | join(" ")')" = 'claude 10' ] ||
+    fail "a claude-shaped payload must record harness=claude and parse the transcript:"$'\n'"$(records "$home")"
+
+  # Ambiguous: neither discriminating field. A null harness is honest; a guessed
+  # one plus null usage is not, so usage extraction is skipped entirely.
+  home=$(make_home harness-shape-ambiguous 'enabled true')
+  printf 'codex\n' > "$home/host/harness.conf"
+  tr="$home/transcript.jsonl"
+  printf '%s\n' '{"type":"assistant","timestamp":"2026-08-08T12:00:00.000Z","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":7,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":3}}}' > "$tr"
+  payload=$(stop_payload none "$(jq -cn --arg t "$tr" '{session_id:"sess-c",transcript_path:$t}')")
+  in_home "$home" "cs_telemetry_turn_end root '$payload'"
+  [ "$(records "$home" | jq -r '[(.harness // "null"), (.usage.total_tokens // "null"), .session_id] | join(" ")')" \
+    = 'null null sess-c' ] ||
+    fail "an ambiguous payload must record a null harness and no usage:"$'\n'"$(records "$home")"
+
+  # Both fields present is equally ambiguous, and must not pick a side.
+  home=$(make_home harness-shape-both 'enabled true')
+  payload=$(jq -cn '{session_id:"sess-d",turn_id:"t",prompt_id:"p"}')
+  in_home "$home" "cs_telemetry_turn_end root '$payload'"
+  [ "$(records "$home" | jq -r '.harness // "null"')" = null ] ||
+    fail "a payload carrying both discriminators must record a null harness:"$'\n'"$(records "$home")"
+  pass "cs-telemetry: the emitting harness is read from the Stop payload, never from the dispatch pin"
 }
 
 # --- retention ----------------------------------------------------------------
@@ -463,21 +596,28 @@ test_retention_drops_records_past_retain_days() {
   pass "cs-telemetry: retention drops aged records and keeps recent ones"
 }
 
-test_retention_ages_out_session_cursors() {
-  local home old new
+test_retention_ages_out_session_cursors_and_crumbs() {
+  local home old new old_crumbs new_crumbs
   home=$(make_home retention-cursors 'enabled true' 'retain_days 1')
   mkdir -p "$home/data/telemetry"
   old="$home/state/.telemetry-cursor-ancient"
   new="$home/state/.telemetry-cursor-current"
+  old_crumbs="$home/state/.telemetry-crumbs-11111"
+  new_crumbs="$home/state/.telemetry-crumbs-22222"
   printf '0\t\t\n' > "$old"
   printf '0\t\t\n' > "$new"
-  # A cursor older than the retention window can no longer bound anything that is
-  # still recorded, so it is dropped with the records it belonged to.
-  touch -t 202001010000 "$old"
+  printf 'checkpoint\t\n' > "$old_crumbs"
+  printf 'checkpoint\t\n' > "$new_crumbs"
+  # Per-session state older than the retention window can no longer bound
+  # anything that is still recorded, so it is dropped with the records it
+  # belonged to. A dead session's breadcrumbs are nobody's to fold.
+  touch -t 202001010000 "$old" "$old_crumbs"
   in_home "$home" 'cs_telemetry_prune'
   assert_absent "$old" "an aged-out session cursor must be removed with the records it bounded"
   assert_present "$new" "a current session cursor must survive retention"
-  pass "cs-telemetry: retention ages out session cursors on the same schedule as records"
+  assert_absent "$old_crumbs" "an aged-out session's breadcrumbs must not accumulate forever"
+  assert_present "$new_crumbs" "a current session's breadcrumbs must survive retention"
+  pass "cs-telemetry: retention ages out per-session cursors and breadcrumbs with the records"
 }
 
 test_retention_runs_at_most_once_per_interval() {
@@ -505,7 +645,80 @@ test_retention_skips_when_its_lock_is_held() {
   in_home "$home" 'cs_telemetry_prune'
   [ "$(records "$home")" = "$before" ] ||
     fail "retention must skip silently while another prune holds the lock"
+  assert_present "$home/data/telemetry/.prune.lock" "a fresh lock must be left for its live holder"
   pass "cs-telemetry: retention never blocks on a held lock; it skips and retries next turn"
+}
+
+test_retention_reclaims_a_leaked_lock_instead_of_wedging() {
+  local home lock
+  home=$(make_home retention-leaked-lock 'enabled true' 'retain_days 1')
+  mkdir -p "$home/data/telemetry"
+  lock="$home/data/telemetry/.prune.lock"
+  printf '{"schema":1,"timestamp":"1970-01-01T00:00:00Z","event_id":"old","role":"root","usage":{}}\n' \
+    > "$home/data/telemetry/turns.jsonl"
+  # A prune that was hard-killed between mkdir and rmdir - a Stop-hook timeout
+  # is enough. Left alone this wedges retention forever and telemetry then grows
+  # without bound with no diagnostic anywhere.
+  mkdir "$lock"
+  touch_days_ago "$lock" 3
+  in_home "$home" 'cs_telemetry_prune'
+  [ -z "$(records "$home")" ] ||
+    fail "a lock older than one prune interval must be reclaimed, not wedge retention:"$'\n'"$(records "$home")"
+  assert_absent "$lock" "a completed prune must leave no lock behind"
+  pass "cs-telemetry: a leaked prune lock is reclaimed rather than wedging retention forever"
+}
+
+test_retention_releases_its_lock_when_the_work_aborts() {
+  local home out
+  home=$(make_home retention-abort 'enabled true' 'retain_days 1')
+  mkdir -p "$home/data/telemetry"
+  printf '{"schema":1,"timestamp":"1970-01-01T00:00:00Z","event_id":"old","role":"root","usage":{}}\n' \
+    > "$home/data/telemetry/turns.jsonl"
+  # The locked section dies mid-flight. The lock must still come back, or the
+  # very next turn end sees a held lock and retention stops running.
+  out=$(in_home "$home" 'cs_telemetry_prune_locked() { exit 9; }; cs_telemetry_prune; printf "caller survived\n"')
+  [ "$out" = 'caller survived' ] ||
+    fail "an aborted prune must not take its caller down with it, got:"$'\n'"$out"
+  assert_absent "$home/data/telemetry/.prune.lock" \
+    "an aborted prune must release its lock rather than leave retention wedged"
+  pass "cs-telemetry: an abnormal exit inside the prune releases its lock"
+}
+
+test_retain_days_is_one_base_ten_number_for_every_sweep() {
+  local home old_cursor new_cursor
+  # A leading zero used to mean two different things downstream: bash arithmetic
+  # reads "09" as an invalid octal literal and aborts the prune mid-lock, while
+  # `find -mtime +09` reads base 10. Both sweeps must agree on one number.
+  [ "$(in_home "$(make_home retain-octal-9 'enabled true' 'retain_days 09')" 'cs_telemetry_config_status')" \
+    = 'enabled 9' ] || fail "retain_days 09 must normalize to 9"
+  [ "$(in_home "$(make_home retain-octal-12 'enabled true' 'retain_days 012')" 'cs_telemetry_config_status')" \
+    = 'enabled 12' ] || fail "retain_days 012 must normalize to 12, never to octal 10"
+  [ "$(in_home "$(make_home retain-padded 'enabled true' 'retain_days 0030')" 'cs_telemetry_config_status')" \
+    = 'enabled 30' ] || fail "a zero-padded retain_days must normalize to its base-10 value"
+  case "$(in_home "$(make_home retain-all-zero 'enabled true' 'retain_days 000')" 'cs_telemetry_config_status')" in
+    malformed\ *) ;;
+    *) fail "retain_days 000 is zero days and must be malformed" ;;
+  esac
+
+  home=$(make_home retain-octal-sweeps 'enabled true' 'retain_days 09')
+  mkdir -p "$home/data/telemetry"
+  {
+    printf '{"schema":1,"timestamp":"%s","event_id":"old","role":"root","usage":{}}\n' "$(iso_days_ago 10)"
+    printf '{"schema":1,"timestamp":"%s","event_id":"new","role":"root","usage":{}}\n' "$(iso_days_ago 5)"
+  } > "$home/data/telemetry/turns.jsonl"
+  old_cursor="$home/state/.telemetry-cursor-old"
+  new_cursor="$home/state/.telemetry-cursor-new"
+  printf '0\t\t\n' > "$old_cursor"
+  printf '0\t\t\n' > "$new_cursor"
+  touch_days_ago "$old_cursor" 10
+  touch_days_ago "$new_cursor" 5
+  in_home "$home" 'cs_telemetry_prune'
+  [ "$(records "$home" | jq -r .event_id | tr '\n' ' ')" = 'new ' ] ||
+    fail "the record sweep must use 9 days, not an octal reading:"$'\n'"$(records "$home")"
+  assert_absent "$old_cursor" "the cursor sweep must drop the same 10-day-old state the record sweep dropped"
+  assert_present "$new_cursor" "the cursor sweep must keep 5-day-old state, exactly as the record sweep did"
+  assert_absent "$home/data/telemetry/.prune.lock" "a leading-zero retain_days must not abort the prune mid-lock"
+  pass "cs-telemetry: retain_days is normalized once, so the record and cursor sweeps never disagree"
 }
 
 test_config_absent_is_disabled
@@ -525,6 +738,7 @@ test_fold_non_supervision_purposes
 test_fold_unknown_is_preferred_over_a_guess
 test_breadcrumbs_are_cleared_per_turn
 test_breadcrumbs_are_bounded
+test_breadcrumbs_are_private_to_their_own_session
 test_role_root_and_capo
 test_role_ship_and_scout_come_from_meta
 test_worker_without_meta_records_nothing
@@ -532,7 +746,11 @@ test_codex_usage_is_summed_from_the_rollout
 test_claude_usage_dedupes_streaming_snapshots
 test_usage_cursor_bounds_the_next_turn
 test_usage_never_records_conversation_content
+test_harness_comes_from_the_payload_not_the_dispatch_pin
 test_retention_drops_records_past_retain_days
-test_retention_ages_out_session_cursors
+test_retention_ages_out_session_cursors_and_crumbs
 test_retention_runs_at_most_once_per_interval
 test_retention_skips_when_its_lock_is_held
+test_retention_reclaims_a_leaked_lock_instead_of_wedging
+test_retention_releases_its_lock_when_the_work_aborts
+test_retain_days_is_one_base_ten_number_for_every_sweep

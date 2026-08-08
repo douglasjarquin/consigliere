@@ -87,6 +87,7 @@ Measured in a throwaway scratch directory whose `--settings` file registered a S
 ```
 
 - `effort.level` is on the payload; the model is not.
+- The payload carries `prompt_id` and no `turn_id`, the inverse of codex's Stop payload; `docs/telemetry.md` owns the rule that uses that pair to name the harness that produced a turn.
 - Every hook command registered under one Stop matcher receives this same payload on stdin, so a second command can read it without touching the first.
 - `transcript_path` points at the session JSONL, which is the only per-turn usage source.
 

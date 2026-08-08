@@ -38,12 +38,10 @@ WATCH="$SCRIPT_DIR/cs-watch.sh"
 . "$SCRIPT_DIR/cs-primary-scope-lib.sh"
 # shellcheck source=bin/cs-operational-input.sh
 . "$SCRIPT_DIR/cs-operational-input.sh"
-# Optional turn telemetry (off unless host/telemetry.conf enables it). Both libs
-# are pure function definitions with no side effects on source, and every
-# telemetry entry point swallows its own failures, so sourcing them cannot change
+# Optional turn telemetry (off unless host/telemetry.conf enables it). The
+# library is pure function definitions with no side effects on source, and every
+# telemetry entry point swallows its own failures, so sourcing it cannot change
 # what this guard decides or what it prints.
-# shellcheck source=bin/cs-harness-lib.sh
-. "$SCRIPT_DIR/cs-harness-lib.sh"
 # shellcheck source=bin/cs-telemetry-lib.sh
 . "$SCRIPT_DIR/cs-telemetry-lib.sh"
 

@@ -59,25 +59,25 @@ pass "cs-lock acquire/refuse/adopt/status behaviors"
 (
   # shellcheck disable=SC2030,SC2031 # subshell-local by design: each block pins its own harness set
   export CS_LOCK_HARNESS_RE='codex|claude'
-  # shellcheck source=bin/cs-lock.sh
-  . "$ROOT/bin/cs-lock.sh"
+  # shellcheck source=bin/cs-session-pid-lib.sh
+  . "$ROOT/bin/cs-session-pid-lib.sh"
 
   VERSIONED=/Users/d/.local/share/claude/versions/2.1.220
-  harness_process_is claude claude || fail "a plainly named harness must match"
-  harness_process_is codex codex || fail "codex must match"
-  harness_process_is "$VERSIONED" "$VERSIONED" \
+  cs_session_harness_process_is claude claude || fail "a plainly named harness must match"
+  cs_session_harness_process_is codex codex || fail "codex must match"
+  cs_session_harness_process_is "$VERSIONED" "$VERSIONED" \
     || fail "a version-named executable path must be recognized by its claude component"
-  harness_process_is 2.1.220 "$VERSIONED --resume" \
+  cs_session_harness_process_is 2.1.220 "$VERSIONED --resume" \
     || fail "a version-named comm must be recognized through argv[0]"
-  harness_process_is node "node /opt/x/claude/cli.js" \
+  cs_session_harness_process_is node "node /opt/x/claude/cli.js" \
     || fail "a bare interpreter must be recognized by its script path"
 
   # False positives the widening must not introduce.
-  harness_process_is bash "bash /Users/d/.claude/hooks/foo.sh" \
+  cs_session_harness_process_is bash "bash /Users/d/.claude/hooks/foo.sh" \
     && fail "a ~/.claude hook path has no 'claude' component and must not match"
-  harness_process_is bash "bash /Users/d/github/consigliere/bin/cs-claude-guard.sh" \
+  cs_session_harness_process_is bash "bash /Users/d/github/consigliere/bin/cs-claude-guard.sh" \
     && fail "a cs-claude-* script name must not read as the harness"
-  harness_process_is bash "bash /Users/d/claude-tools/bin/wrapper.sh" \
+  cs_session_harness_process_is bash "bash /Users/d/claude-tools/bin/wrapper.sh" \
     && fail "a claude-tools directory must not read as the harness"
   : # the && fail guards above leave a nonzero status behind on success
 ) || exit 1
@@ -87,10 +87,10 @@ pass "harness identity reads whole path components, not a basename"
 (
   # shellcheck disable=SC2030,SC2031 # subshell-local by design: each block pins its own harness set
   export CS_LOCK_HARNESS_RE='bash|zsh|codex'
-  # shellcheck source=bin/cs-lock.sh
-  . "$ROOT/bin/cs-lock.sh"
-  harness_process_is -zsh -zsh || fail "a login shell's leading dash must be stripped"
-  harness_process_is sleep sleep && fail "an unrelated process must not match"
+  # shellcheck source=bin/cs-session-pid-lib.sh
+  . "$ROOT/bin/cs-session-pid-lib.sh"
+  cs_session_harness_process_is -zsh -zsh || fail "a login shell's leading dash must be stripped"
+  cs_session_harness_process_is sleep sleep && fail "an unrelated process must not match"
   :
 ) || exit 1
 pass "a login shell's leading dash is not part of the harness name"

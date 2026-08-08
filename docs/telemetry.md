@@ -33,7 +33,7 @@ bin/cs-telemetry-report.sh --json
 Delete everything ever collected:
 
 ```
-rm -rf data/telemetry state/.telemetry-crumbs state/.telemetry-cursor-*
+rm -rf data/telemetry state/.telemetry-crumbs-* state/.telemetry-cursor-*
 ```
 
 `bin/cs-doctor.sh` reports telemetry in its CONFIG + HOST section.
@@ -56,6 +56,7 @@ retain_days 30
 
 `enabled` is `true` or `false` and is REQUIRED.
 `retain_days` is optional, is an integer between 1 and 3650, and defaults to 30.
+It is normalized to base 10 as it is parsed, so a value written with a leading zero cannot mean one number to the record sweep and another to the cursor sweep.
 
 The parse is strict on purpose.
 An unknown key, a missing or extra field, a duplicate record, a bad value, or a file with no `enabled` record is MALFORMED, which means disabled plus a doctor diagnostic.
@@ -65,7 +66,7 @@ There is no partial enable, and a malformed config is never a runtime failure.
 
 Telemetry describes the event; it never reproduces the conversation.
 
-Collected: a timestamp, a unique event id, the emitting home, the role (root, capo, ship, scout), the task kind, the project name, the task or capo id, the harness, the model, the effort, the derived purpose, the causing wake kind, the derived supervision outcome, the turn duration, the harness session identifier, and normalized token counts.
+Collected: a timestamp, a unique event id, the emitting home, the role (root, capo, ship, scout), the task kind, the project name, the task or capo id, the harness, the model, the effort, the derived purpose, the causing wake kind and the full set of kinds the turn drained, the derived supervision outcome, the turn duration, the harness session identifier, and normalized token counts.
 
 Never collected: boss prompts, worker transcripts, tool output, file contents, environment variables, secrets, credentials, terminal scrollback, branch or PR content, or any free-text summary of a turn.
 The usage extraction reads a session transcript but only ever takes numbers, the model name, and the effort level out of it.
@@ -106,6 +107,7 @@ Every field except `schema`, `timestamp`, and `event_id` is nullable, so a later
   "effort": "xhigh",
   "purpose": "supervision",
   "wake_kind": "stale",
+  "wake_kinds": ["stale", "signal"],
   "outcome": "wait",
   "duration_ms": 1234,
   "session_id": "019fe1ea-df85-7a02-932b-d0ed71bdff54",
@@ -135,7 +137,10 @@ Purpose: `boss`, `dispatch`, `supervision`, `status`, `decision`, `review`, `rec
 Supervision outcome, recorded for every turn whose purpose is `supervision`: `wait`, `no_action`, `message_worker`, `dispatch_more`, `technical_intervention`, `recovery_action`, `escalate_up`, `completed`, `unknown`.
 `wait` and `no_action` matter most: together they estimate the ceiling of what a cheaper supervision tier could absorb.
 
-Wake provenance: the queue's own `signal`, `stale`, `check`, `capo`, `heartbeat`, plus `checkpoint` for a turn whose only supervision was a bounded foreground checkpoint and `mixed` for a turn that drained more than one distinct kind.
+Wake provenance: `wake_kind` stays inside the queue's own vocabulary of `signal`, `stale`, `check`, `capo`, and `heartbeat`, plus `checkpoint` for a turn whose only supervision was a bounded foreground checkpoint.
+It carries the FIRST kind the turn drained, so supervision counted by wake kind still sums to the supervision turn count.
+`wake_kinds` is the additive companion: every distinct kind the turn drained, in drain order, so a turn that drained several stays fully recoverable.
+It is null for a turn that drained none.
 
 ## Classification is deterministic and free
 
@@ -143,7 +148,11 @@ There is no model call anywhere in this subsystem.
 Classification is derived mechanically from control flow: an instrumented script drops a small structured breadcrumb for the current turn, and the turn-end emitter folds those breadcrumbs into one purpose and one outcome, then clears them.
 That keeps one owner of the rules and keeps the classification honest, because it describes what actually ran rather than what a turn said about itself.
 
-Breadcrumbs are turn-scoped, live in `state/.telemetry-crumbs`, and are cleared at each turn end.
+Breadcrumbs are turn-scoped, live in `state/.telemetry-crumbs-<session>`, and are cleared at each turn end.
+The `<session>` key is the harness process in the dropping shell's ancestry, which is exactly what `state/.lock` already means by "this session" and is owned by `bin/cs-session-pid-lib.sh`.
+Keying them per session is what stops a second window, a read-only helper, or a tooling session started in the repo root from folding and deleting the real supervisor's in-flight breadcrumbs and mis-attributing its supervision turn.
+A shell that cannot resolve its own session drops the breadcrumb silently, and a turn end that cannot resolve it folds nothing and still records the turn with a null wake kind.
+Stale per-session breadcrumb files age out under the same retention sweep as the transcript cursors.
 
 | breadcrumb | dropped by | meaning |
 |---|---|---|
@@ -156,6 +165,10 @@ Breadcrumbs are turn-scoped, live in `state/.telemetry-crumbs`, and are cleared 
 | `promote` | `bin/cs-promote.sh` | a scout was promoted to ship |
 
 ### The folding rules
+
+These rules are the ROOT and CAPO turn-end path.
+A worker turn does not fold at all: a soldier records no breadcrumbs and supervises nothing, so its purpose follows directly from the task kind in `state/<id>.meta` - `kind=ship` is `implementation`, `kind=scout` is `research`, and anything else is `unknown` - and it carries no supervision outcome.
+That is what makes the implementation-versus-supervision comparison readable straight off the `purpose` column.
 
 Let `W` be the set of drained wake kinds, `C` whether a checkpoint ran, and `A` the set of action breadcrumbs (`spawn`, `steer`, `merge`, `teardown`, `promote`).
 
@@ -209,6 +222,11 @@ On claude it is a SEPARATE second Stop hook command, so the touch keeps its own 
 Verified live on 2026-08-08 against codex-cli 0.147.0 and claude 2.1.226; `docs/codex.md` and `docs/claude.md` record the exact payloads.
 Both harnesses hand the Stop hook a `transcript_path`, and neither reports a per-turn total directly, so the emitter reads the window between this turn end and the previous one from a per-session byte cursor (`state/.telemetry-cursor-<session>`) and sums the usage inside it.
 
+The recorded `harness` for a root or capo turn is derived from the Stop payload's own shape, because the payload is the only authority on what actually ran the turn being measured: a codex payload carries `turn_id`, a claude payload carries `prompt_id`, and that pair is the discriminator.
+`host/harness.conf` is deliberately NOT consulted here - it pins what consigliere dispatches with, not what produced this turn, so a home whose pin disagrees with the running session would otherwise record a confident wrong harness and then feed the transcript to the wrong parser.
+A payload carrying both fields, neither, or nothing at all is ambiguous, and an ambiguous harness is recorded as `null` with usage extraction skipped.
+A worker turn is different: its harness comes from the authoritative `state/<id>.meta` that `bin/cs-spawn.sh` wrote.
+
 Codex, from the rollout under `~/.codex/sessions/`:
 
 - `input_tokens`, `cached_input_tokens`, `output_tokens`, `reasoning_tokens` (its `reasoning_output_tokens`), and `total_tokens`, summed from every `event_msg`/`token_count` record's `info.last_token_usage` in the window.
@@ -234,9 +252,10 @@ Claude, from the transcript under `~/.claude/projects/`:
 
 ## Retention
 
-`retain_days` bounds the file: records older than that are dropped, and the per-session transcript cursors age out on the same schedule.
+`retain_days` bounds the file: records older than that are dropped, and the per-session transcript cursors and breadcrumb files age out on the same schedule.
 Retention runs at the turn-end boundary that already exists, at most once per 24 hours per home, behind a non-blocking lock.
 It can never block, delay, or interfere with supervision: a held lock, a missing `jq`, or an unwritable directory skips silently and the next turn end tries again.
+The lock is released by a trap on the subshell that holds it, and a lock directory older than one prune interval is reclaimed on the next attempt, so a hard kill mid-prune cannot wedge retention permanently while a genuinely held fresh lock is still skipped.
 The rewrite is a compare-and-swap on file size, so a record another emitter appended while the file was being filtered is never silently dropped; a detected append abandons that rewrite and the next interval retries.
 
 ## Failure policy

@@ -250,8 +250,11 @@ pass "a launch line the shell swallowed fails loudly instead of reporting a spaw
 # docs/telemetry.md owns the contract; this proves it end to end from cs-spawn.
 assert_not_contains "$(cat "$TMP/launch-t-codex")" 'cs-telemetry-emit.sh' \
   "telemetry off must add nothing to a codex soldier launch"
-assert_no_grep 'cs-telemetry-emit.sh' "$HOME_DIR/state/t-claude.claude-settings.json" \
-  "telemetry off must add nothing to a claude soldier's settings file"
+[ "$(jq -r '.hooks.Stop[0].hooks | length' "$HOME_DIR/state/t-claude.claude-settings.json")" = 1 ] ||
+  fail "telemetry off must leave the claude soldier's Stop hook list at exactly the turn-end touch"
+[ "$(jq -r '.hooks.Stop[0].hooks[0].command' "$HOME_DIR/state/t-claude.claude-settings.json")" \
+  = "touch $HOME_DIR/state/t-claude.turn-ended" ] ||
+  fail "telemetry off must leave the claude soldier's single Stop hook command as the bare turn-end touch"
 
 mkdir -p "$HOME_DIR/host"
 printf 'enabled true\n' > "$HOME_DIR/host/telemetry.conf"

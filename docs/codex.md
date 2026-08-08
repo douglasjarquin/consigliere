@@ -74,6 +74,7 @@ Measured in a throwaway scratch directory whose `.codex/hooks.json` registered a
 
 - The Stop hook fired exactly ONCE per turn: a second run with an APPENDING recorder captured one payload for one turn, so the turn-end path is not a double-fire.
 - `model` is on the payload; `effort` is not.
+- The payload carries `turn_id` and no `prompt_id`, the inverse of claude's Stop payload; `docs/telemetry.md` owns the rule that uses that pair to name the harness that produced a turn.
 - `transcript_path` points at the session rollout, which is the only per-turn usage source.
 
 The rollout carries usage and turn identity as ordinary records:

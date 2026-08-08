@@ -43,6 +43,15 @@ make_home() {
 
 records() { cat "$1/data/telemetry/turns.jsonl" 2>/dev/null || true; }
 
+# Breadcrumbs are keyed per session, so a test reads them by shape rather than by
+# one fixed name. bin/cs-telemetry-lib.sh owns the path.
+crumbs() { # <home> - every breadcrumb line this home holds, from any session
+  cat "$1"/state/.telemetry-crumbs-* 2>/dev/null || true
+}
+crumb_files() { # <home>
+  find "$1/state" -maxdepth 1 -name '.telemetry-crumbs-*' 2>/dev/null | sort
+}
+
 # run_guard <home> <stop_hook_active> - feed the Stop payload and run the guard.
 # Echoes combined stdout+stderr; the caller reads $? for the exit code.
 run_guard() {
@@ -129,6 +138,35 @@ test_guard_measures_every_primary_turn_including_the_quiet_ones() {
   pass "cs-telemetry: every primary turn is measured, including forced continuations"
 }
 
+test_guard_never_consumes_another_sessions_breadcrumbs() {
+  local home foreign holder out rc
+  home=$(make_home guard-foreign-crumbs on)
+  # The real supervisor session holds this home's lock and has a turn in flight:
+  # it drained a signal wake and is holding a checkpoint, and has not ended its
+  # turn yet, so its breadcrumbs are still on disk under its own session key.
+  sleep 300 &
+  holder=$!
+  printf '%s\n' "$holder" > "$home/state/.lock"
+  foreign="$home/state/.telemetry-crumbs-$holder"
+  printf 'wake\tsignal\ncheckpoint\t\n' > "$foreign"
+  # A SECOND session in the same home - a second window, a read-only helper, a
+  # tooling session in the repo root - ends a turn. It shares the primary scope,
+  # so the emitter runs, but the supervisor holds the lock so the guard defers.
+  out=$(run_guard "$home"); rc=$?
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+
+  expect_code 0 "$rc" "the guard must still defer to the live lock holder"
+  [ -z "$out" ] || fail "a deferring guard must print nothing, got:"$'\n'"$out"
+  assert_present "$foreign" "the supervisor's in-flight breadcrumbs must survive a foreign turn end"
+  [ "$(cat "$foreign")" = "$(printf 'wake\tsignal\ncheckpoint\t')" ] ||
+    fail "the supervisor's breadcrumbs must be untouched, got:"$'\n'"$(cat "$foreign")"
+  [ "$(records "$home" | jq -r '[.purpose, (.outcome // "-"), (.wake_kind // "-")] | join(" ")')" \
+    = 'unknown - -' ] ||
+    fail "a foreign turn must not be credited another session's supervision:"$'\n'"$(records "$home")"
+  pass "cs-telemetry: a second session in one home can neither steal nor destroy the supervisor's breadcrumbs"
+}
+
 test_guard_is_exempt_in_a_soldier_worktree() {
   local home
   home=$(make_home guard-soldier on)
@@ -173,9 +211,9 @@ test_wake_drain_output_is_unchanged_by_telemetry() {
   [ ! -s "$on/state/.wake-queue" ] || fail "the drain must still empty the queue"
   # The breadcrumbs the drain recorded are what let the turn-end emitter name the
   # provenance of this supervision turn.
-  assert_grep 'wake	signal' "$on/state/.telemetry-crumbs" "the drained signal wake must be recorded"
-  assert_grep 'wake	stale' "$on/state/.telemetry-crumbs" "the drained stale wake must be recorded"
-  assert_absent "$off/state/.telemetry-crumbs" "telemetry off must record no breadcrumbs"
+  assert_contains "$(crumbs "$on")" 'wake	signal' "the drained signal wake must be recorded"
+  assert_contains "$(crumbs "$on")" 'wake	stale' "the drained stale wake must be recorded"
+  [ -z "$(crumb_files "$off")" ] || fail "telemetry off must record no breadcrumbs"
   pass "cs-telemetry: the wake drain's output, exit status, and queue handling are unchanged"
 }
 
@@ -201,8 +239,8 @@ test_checkpoint_behavior_is_unchanged_by_telemetry() {
   [ "$out_off" = "$out_on" ] ||
     fail "telemetry changed the checkpoint's output"$'\n'"--- off ---"$'\n'"$out_off"$'\n'"--- on ---"$'\n'"$out_on"
   [ -s "$on/state/.wake-queue" ] || fail "the checkpoint must still leave the queue for the drain"
-  assert_grep 'checkpoint' "$on/state/.telemetry-crumbs" "a checkpoint turn must record its breadcrumb"
-  assert_absent "$off/state/.telemetry-crumbs" "telemetry off must record no breadcrumbs"
+  assert_contains "$(crumbs "$on")" 'checkpoint' "a checkpoint turn must record its breadcrumb"
+  [ -z "$(crumb_files "$off")" ] || fail "telemetry off must record no breadcrumbs"
   pass "cs-telemetry: the bounded checkpoint's output, exit status, and queue handling are unchanged"
 }
 
@@ -295,6 +333,7 @@ cs_telemetry_worker_hook_command task '$ROOT/bin' stdin")
 test_guard_decisions_are_identical_with_telemetry_on
 test_guard_still_blocks_when_telemetry_itself_is_broken
 test_guard_measures_every_primary_turn_including_the_quiet_ones
+test_guard_never_consumes_another_sessions_breadcrumbs
 test_guard_is_exempt_in_a_soldier_worktree
 test_wake_drain_output_is_unchanged_by_telemetry
 test_checkpoint_behavior_is_unchanged_by_telemetry
