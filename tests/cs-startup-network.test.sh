@@ -355,6 +355,62 @@ assert_contains "$out" 'NEEDS_GH_AUTH:' \
 snet "$HOME_DIR" "$FB" harvest --pid $$ >/dev/null
 pass "a later narrower run preserves a finished result nothing has read yet"
 
+# --- an abandoned reservation still protects the unread report under it -------
+# A pass reserved over an unread report and was then killed before it could
+# publish, so the record is left `running` while the report file still holds the
+# earlier run's findings. The next reservation has to protect that report exactly
+# as it would protect a cleanly finished one: how the record that produced it
+# ended says nothing about whether anything has read it.
+HOME_DIR=$(fresh_home abandoned)
+FB=$(fakebin "$TMP/fb-abandoned")
+printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
+snet "$HOME_DIR" "$FB" run --locked 1 || fail "the owning session's run must publish"
+assert_grep 'FLEET_SYNC: plainproj: skipped: not a git repo' \
+  "$HOME_DIR/state/.startup-network.report" "the locked run published no fleet-sync finding"
+bash -c 'exit 0' &
+DEAD_PID=$!
+wait "$DEAD_PID" 2>/dev/null || true
+write_status "$HOME_DIR" state=running "pid=$DEAD_PID" "started=$(date +%s)" \
+  locked=0 phases=probe requested=probe carried=1 generation=g-abandoned lock_pid=999999
+
+snet "$HOME_DIR" "$FB" run --locked 0 || fail "a probe-only pass must publish over an abandoned record"
+assert_grep 'FLEET_SYNC: plainproj: skipped: not a git repo' \
+  "$HOME_DIR/state/.startup-network.report" \
+  "reserving over an abandoned record destroyed the unread finding beneath it"
+pass "an abandoned reservation does not expose the unread report beneath it"
+
+# --- repeated runs that nothing harvests hold the report at a fixed shape ------
+# The degraded cycle this stage exists for: a digest truncated between starting
+# the stage and harvesting it never acknowledges the result, and the truncation
+# banner tells the operator to rerun, so the cycle repeats. A hand-run
+# `cs-startup-network.sh run` does the same. Each pass therefore reserves over an
+# unread report and folds it forward, and the fold has to converge - this report
+# is cat'd straight into the NETWORK CHECKS section, so a report that grew every
+# cycle would start costing the digest the sections its ordering protects.
+HOME_DIR=$(fresh_home carry-bound)
+FB=$(fakebin "$TMP/fb-carry-bound")
+REPORT="$HOME_DIR/state/.startup-network.report"
+CARRY_HEADER='Carried forward from the previous deferred run, which finished before anything read it:'
+printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
+snet "$HOME_DIR" "$FB" run --locked 1 || fail "the owning session's run must publish"
+
+sizes=()
+for _ in 1 2 3 4; do
+  snet "$HOME_DIR" "$FB" run --locked 0 || fail "a hand-run probe pass must publish"
+  sizes+=("$(wc -c < "$REPORT" | tr -d ' ')")
+done
+assert_absent "$HOME_DIR/state/.startup-network.delivered" \
+  "nothing harvested these passes, yet a delivery was recorded"
+[ "${sizes[1]}" = "${sizes[3]}" ] \
+  || fail "the report kept growing across unharvested cycles (${sizes[0]} ${sizes[1]} ${sizes[2]} ${sizes[3]} bytes)"
+blocks=$(grep -Fxc "$CARRY_HEADER" "$REPORT" || true)
+[ "$blocks" = 1 ] || fail "the report carries $blocks carried blocks, not exactly one"
+assert_grep 'FLEET_SYNC: plainproj: skipped: not a git repo' "$REPORT" \
+  "the folds dropped the locked run's finding no later pass can re-derive"
+assert_grep 'NEEDS_GH_AUTH:' "$REPORT" \
+  "the report lost the latest pass's own result"
+pass "repeated unharvested folds keep exactly one carried block and stop growing"
+
 # --- adoption names the check the adopted run does not cover ------------------
 # Single flight is liveness-only, so a lock-owning session that arrives while a
 # probe-only pass is in flight adopts it rather than starting a second pass over

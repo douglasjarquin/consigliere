@@ -81,8 +81,9 @@
 #                             NETWORK_CHECKS: line whenever the stage itself
 #                             could not complete or had to downgrade, and, when
 #                             the record that named it is `carried`, a previous
-#                             run's unread result ahead of it under a line that
-#                             says so.
+#                             run's unread result ahead of it inside one
+#                             delimited block. At most one such block ever
+#                             exists, which is what bounds the carry.
 #   .startup-network.claim    the generation and pid of a session start that
 #                             intends to print the result inline; a matching
 #                             live claimant gives harvest a bounded chance to
@@ -219,24 +220,66 @@ uncovered_label() {  # <covered> <requested>
   case "$2" in *sweeps*) printf 'project clone refresh with its drift reporting' ;; esac
 }
 
-# Would reserving a new generation destroy a finished result nothing has read?
+# Would reserving a new generation destroy a report nothing has read?
+#
+# The predicate is exactly: publication was not recorded as failed, no delivery
+# was acknowledged, and the report file has content. The record's STATE is
+# deliberately NOT part of it, and must not be added back. The question is about
+# the REPORT FILE, not about how the record that produced it ended: a record left
+# `running` because its worker was killed before publishing still has the PREVIOUS
+# run's unread report sitting in that file, and gating on a terminal state would
+# hand exactly that case to the overwrite this guard exists to prevent. Nothing is
+# lost by dropping the gate either, because a `running` record that published
+# nothing has either an empty report or a delivery still on record, and both are
+# already rejected above.
 #
 # This is the ONLY thing that stands between a `--reemit` and the findings an
 # already-queued `check: startup-network` wake announced: the re-emit reserves a
 # narrower probe-only pass, and without this its publish would overwrite the
 # report that wake points at. Preserving the prior result is chosen over refusing
-# the reservation because it converges on its own - the next publish folds the
-# carried result in and clears the flag, and a harvest that prints it clears it
-# too - whereas refusing would let one session that died before harvesting
-# disable the stage for good.
+# the reservation because it converges on its own, whereas refusing would let one
+# session that died before harvesting disable the stage for good.
 carry_undelivered() {
-  case "$(status_get state)" in done|timeout|failed) ;; *) return 1 ;; esac
   [ "$(status_get report_published)" != 0 ] || return 1
   [ ! -f "$DELIVERED_FILE" ] || return 1
   [ -s "$REPORT_FILE" ]
 }
 
+# The carried result is a DELIMITED block, so the report's own structure - not a
+# counter some later edit can forget to keep - is what bounds the carry.
 CARRIED_HEADER='Carried forward from the previous deferred run, which finished before anything read it:'
+CARRIED_FOOTER='End of the carried result; the lines below are this run.'
+
+# What a fold carries forward: the existing carried block when the report already
+# has one, and otherwise the whole report.
+#
+# This is what makes the carry converge instead of growing. A report is always at
+# most `header + carried + footer + this run's own output`, so folding it again
+# reuses the SAME carried block and replaces only the tail. Re-derived output is
+# safe to drop from that tail because these sweeps are idempotent detectors and
+# the run doing the folding just produced its own copy; what cannot be
+# re-derived - a wider earlier run's findings - stays in the block until a
+# delivery is recorded. Exactly one block therefore ever exists, and its content
+# never repeats.
+carried_payload() {  # <report-file>
+  local f=$1
+  if grep -Fxq "$CARRIED_HEADER" "$f" 2>/dev/null \
+    && grep -Fxq "$CARRIED_FOOTER" "$f" 2>/dev/null; then
+    awk -v head="$CARRIED_HEADER" -v foot="$CARRIED_FOOTER" '
+      $0 == foot { inblock = 0; next }
+      inblock { print }
+      $0 == head { inblock = 1 }
+    ' "$f"
+  else
+    cat "$f"
+  fi
+}
+
+emit_carried_block() {  # <report-file>
+  printf '%s\n' "$CARRIED_HEADER"
+  carried_payload "$1"
+  printf '%s\n' "$CARRIED_FOOTER"
+}
 
 # Does state/.lock still name <expected-pid>?
 #
@@ -445,16 +488,17 @@ publish() {  # <generation> <state> <phases> <locked> <started> <rc> <output-fil
   fi
   requested=$(phases_union "$(status_get requested)" "$phases")
   # The report file still holds the carried result at this point, so folding it
-  # in here - ahead of this run's own output, under a line that says whose it is
-  # - is what keeps the wake that announced it pointing at something that still
-  # contains it. Folding it in also CONSUMES it: the record written below carries
-  # nothing, so this converges rather than accumulating a run's worth of repeats
-  # every time nothing reads the result.
+  # in here - ahead of this run's own output, inside the delimited block - is what
+  # keeps the wake that announced it pointing at something that still contains it.
+  # The fold takes carried_payload, not the whole file, so a report that already
+  # carries a block contributes that block rather than itself: the result is
+  # always one block plus this run's output, whatever the file it replaced looked
+  # like. Repeated folds with nothing ever harvesting therefore hold the report at
+  # a fixed shape instead of doubling it into the digest.
   if [ "$(status_get carried)" = 1 ] && [ -s "$REPORT_FILE" ]; then
     if merged=$(mktemp "${TMPDIR:-/tmp}/cs-startup-network-carry.XXXXXX" 2>/dev/null); then
       {
-        printf '%s\n' "$CARRIED_HEADER"
-        cat "$REPORT_FILE"
+        emit_carried_block "$REPORT_FILE"
         cat "$out"
       } > "$merged" 2>/dev/null && out=$merged
     fi
@@ -604,8 +648,7 @@ print_uncovered() {
 # record that replaced it was reserved before anything read it.
 print_carried() {
   [ "$(status_get carried)" = 1 ] && [ -s "$REPORT_FILE" ] || return 0
-  printf '%s\n' "$CARRIED_HEADER"
-  cat "$REPORT_FILE"
+  emit_carried_block "$REPORT_FILE"
 }
 
 print_finished() {  # <state>

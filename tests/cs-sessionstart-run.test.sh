@@ -242,9 +242,14 @@ printf 'more\n' >> "$STUCK_ORIGIN/README.md"
 git -C "$STUCK_ORIGIN" -c user.name=t -c user.email=t@example.invalid commit -qam advance
 
 STARTUP_NETWORK="$ROOT/bin/cs-startup-network.sh"
+# Harvest, not report: harvesting is what the digest itself does at step 7, and
+# it is the only reader that records the delivery. Reading with `report` would
+# leave the result unacknowledged, so whether the next startup's report carries
+# this one forward would depend on which of the digest and its worker finished
+# first - a race neither assertion below is about.
 network_report() {
   CS_ROOT_OVERRIDE="$ROOT_DIR" CS_HOME="$HOME_DIR" "$STARTUP_NETWORK" wait 120 >/dev/null 2>&1 || true
-  CS_ROOT_OVERRIDE="$ROOT_DIR" CS_HOME="$HOME_DIR" "$STARTUP_NETWORK" report 2>&1
+  CS_ROOT_OVERRIDE="$ROOT_DIR" CS_HOME="$HOME_DIR" "$STARTUP_NETWORK" harvest 2>&1
 }
 
 full=$(CS_ROOT_OVERRIDE="$ROOT_DIR" CS_HOME="$HOME_DIR" "$SESSION_START")
