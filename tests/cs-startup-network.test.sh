@@ -92,10 +92,15 @@ git -C "$FIX_ROOT" commit -q --allow-empty -m init
 fakebin() {
   local fb=$1 gate=${2:-} t
   mkdir -p "$fb"
+  # The wait also ends when the fixture root disappears. cs_run_timed gives the
+  # bounded command its OWN process group in every tier, so this stub is never in
+  # the worker's group and a case that stops its worker cannot signal it; without
+  # a second exit condition tied to cleanup, a stub whose gate is never created
+  # would outlive the suite forever.
   cat > "$fb/gh" <<SH
 #!/usr/bin/env bash
 if [ "\${1:-}" = auth ] && [ -n "$gate" ]; then
-  while [ ! -e "$gate" ]; do sleep 0.1; done
+  while [ ! -e "$gate" ] && [ -d "$TMP" ]; do sleep 0.1; done
 fi
 exit 1
 SH
@@ -319,6 +324,65 @@ sleep 2
   || fail "a result already printed inline was queued as a wake as well"
 pass "an inline harvest delivers the result and suppresses its wake"
 
+# --- a later, narrower run never destroys a finished result nothing has read ---
+# The re-emit sequence: a full startup's worker finishes after the digest is out,
+# so its findings surface only as a queued wake that names
+# `cs-startup-network.sh report`. Before that wake is drained the harness
+# re-emits, which reserves a probe-only pass over the same state. That pass must
+# not leave the wake pointing at a report that no longer contains what it
+# announced.
+HOME_DIR=$(fresh_home carry)
+FB=$(fakebin "$TMP/fb-carry")
+printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
+snet "$HOME_DIR" "$FB" run --locked 1 || fail "the owning session's run must publish"
+assert_grep 'FLEET_SYNC: plainproj: skipped: not a git repo' \
+  "$HOME_DIR/state/.startup-network.report" "the locked run published no fleet-sync finding"
+assert_grep 'startup-network' "$HOME_DIR/state/.wake-queue" \
+  "a finished result with no live claimant did not queue its wake"
+assert_absent "$HOME_DIR/state/.startup-network.delivered" \
+  "nothing harvested the result, yet it was recorded as delivered"
+
+snet "$HOME_DIR" "$FB" start --locked 0 --harvest-pid $$ \
+  || fail "the re-emit could not start its probe-only pass"
+snet "$HOME_DIR" "$FB" wait 60 || fail "the probe-only pass never published"
+out=$(snet "$HOME_DIR" "$FB" report)
+assert_contains "$out" 'FLEET_SYNC: plainproj: skipped: not a git repo' \
+  "the probe-only pass destroyed the unread finding its queued wake announced"
+assert_contains "$out" 'Carried forward from the previous deferred run' \
+  "the preserved finding was reprinted without saying which run it came from"
+assert_contains "$out" 'NEEDS_GH_AUTH:' \
+  "the probe-only pass did not publish its own result alongside the carried one"
+snet "$HOME_DIR" "$FB" harvest --pid $$ >/dev/null
+pass "a later narrower run preserves a finished result nothing has read yet"
+
+# --- adoption names the check the adopted run does not cover ------------------
+# Single flight is liveness-only, so a lock-owning session that arrives while a
+# probe-only pass is in flight adopts it rather than starting a second pass over
+# the same clones. The fleet sync it asked for therefore does not run, and the
+# section has to say so rather than leaving the reader to notice that the phase
+# label never mentions it.
+HOME_DIR=$(fresh_home narrow)
+FB=$(fakebin "$TMP/fb-narrow")
+printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
+sleep 30 &
+LIVE_PID=$!
+write_status "$HOME_DIR" state=running "pid=$LIVE_PID" "started=$(date +%s)" \
+  locked=0 phases=probe requested=probe carried=0 generation=g-narrow lock_pid=999999
+snet "$HOME_DIR" "$FB" start --locked 1 --harvest-pid $$ \
+  || fail "start refused to adopt the live probe-only pass"
+generation=$(sed -n 's/^generation=//p' "$HOME_DIR/state/.startup-network.status" | tail -1)
+[ "$generation" = g-narrow ] \
+  || fail "start raced a second pass beside the live one (generation is now '$generation')"
+out=$(snet "$HOME_DIR" "$FB" harvest --pid $$)
+kill "$LIVE_PID" 2>/dev/null || true
+assert_contains "$out" 'NOT covered by this run: project clone refresh with its drift reporting' \
+  "adopting a probe-only pass dropped the fleet sync without naming it"
+assert_contains "$out" 'NOT yet confirmed: GitHub authentication' \
+  "the adopted pass stopped naming the check it does cover"
+assert_not_contains "$out" 'completed off the startup path' \
+  "an adopted in-flight pass reported itself as completed"
+pass "adopting a narrower pass names the check that pass does not cover"
+
 # --- end to end: a slow network never blocks the digest -----------------------
 # The real session-start digest, driven against a network dependency that is
 # still hanging when the digest is composed. The hang is held open by a gate file
@@ -330,7 +394,10 @@ digest=$(PATH="$FB:$PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$FIX_ROOT" \
   "$SESSION_START" 2>/dev/null)
 # The hang has served its purpose the moment the digest is out, so the worker is
 # stopped rather than waited out and the open-ended block costs the suite nothing.
+# Releasing the gate afterwards is what lets the stub the worker left behind in
+# its own process group finish and exit instead of spinning past the suite.
 stop_worker "$HOME_DIR"
+: > "$TMP/gate-never"
 
 assert_contains "$digest" 'lock acquired' "the digest fixture did not acquire the fleet lock"
 assert_contains "$digest" 'IN PROGRESS - the deferred network checks have not finished yet' \
