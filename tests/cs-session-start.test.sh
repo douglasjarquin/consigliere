@@ -152,7 +152,13 @@ pass "digest sections are ordered safety-preamble first, live fleet state before
 
 HOME_DIR=$(fresh_home ordering-migration)
 printf 'Legacy project registry.\n' > "$HOME_DIR/data/projects.md"
-migration_out=$(CS_HOME="$HOME_DIR" "$BIN" 2>/dev/null)
+# The migration runs only in the session that holds the lock, and the lock is
+# granted by walking the process ancestry for a harness. That ancestry is
+# environment-dependent - a developer shell under Claude Code has one, a CI
+# runner does not - so this fixture widens the harness pattern to the test's own
+# shell. Without it the case silently degrades to the read-only path, where no
+# LAYOUT MIGRATION section exists to order.
+migration_out=$(CS_LOCK_HARNESS_RE='bash|zsh|codex|claude' CS_HOME="$HOME_DIR" "$BIN" 2>/dev/null)
 
 migration_lock_line=$(section_line "$migration_out" 'LOCK')
 migration_line=$(section_line "$migration_out" 'LAYOUT MIGRATION')
