@@ -8,6 +8,18 @@
 #                              BOOTSTRAP_INFO instead. Both lists come from
 #                              cs-deps-lib.sh, their single owner, which
 #                              bin/cs-doctor.sh reports from as well.
+#                              Four of those tools are also version-gated:
+#                              gh-axi, tasks-axi, lavish-axi, and quota-axi. An
+#                              installed build below its floor reports through
+#                              the same MISSING / BOOTSTRAP_INFO line as an
+#                              absent tool, so the operator is asked to upgrade
+#                              before anything is dispatched instead of silently
+#                              running an older build. chrome-devtools-axi is
+#                              deliberately not gated; cs-deps-lib.sh states why
+#                              beside cs_deps_axi_floor. The floors and their
+#                              bump policy live there too, next to the shared
+#                              comparator, so bin/cs-doctor.sh's preflight gates
+#                              the same builds this dispatch gate does.
 #   HERDR_DOWN / HERDR_PROTOCOL:  the herdr server is unreachable or below the
 #                              minimum protocol (docs/herdr.md).
 #   NEEDS_GH_AUTH              gh is present but not authenticated.
@@ -41,18 +53,40 @@ DETECT_ONLY=${CS_BOOTSTRAP_DETECT_ONLY:-0}
 # shellcheck source=bin/cs-deps-lib.sh
 . "$SCRIPT_DIR/cs-deps-lib.sh"
 
+# cs_bootstrap_axi_gap <tool> - the session-start wording for the below-floor
+# classification cs-deps-lib.sh owns: print "<version> below floor <floor> -
+# upgrade: <hint>" and exit 0, or exit 1 silently when the tool is ungated,
+# absent, or at/above its floor.
+cs_bootstrap_axi_gap() {
+  local tool=$1 gap installed floor
+  gap=$(cs_deps_axi_gap "$tool") || return 1
+  IFS=$'\t' read -r installed floor <<< "$gap"
+  printf '%s below floor %s - upgrade: %s\n' \
+    "$installed" "$floor" "$(cs_deps_hint "$tool")"
+}
+
 missing=""
+outdated=""
 while IFS= read -r tool; do
   [ -n "$tool" ] || continue
-  command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    missing="$missing $tool"
+  elif gap=$(cs_bootstrap_axi_gap "$tool"); then
+    outdated="$outdated$tool $gap"$'\n'
+  fi
 done <<EOF
 $(cs_deps_tools required)
 EOF
 [ -z "$missing" ] || printf 'MISSING:%s - install before dispatching; consigliere cannot operate without these. bin/cs-doctor.sh reports versions and install suggestions.\n' "$missing"
+[ -z "$outdated" ] || printf '%s' "$outdated" | sed 's/^/MISSING: /'
 
 while IFS= read -r tool; do
   [ -n "$tool" ] || continue
-  command -v "$tool" >/dev/null 2>&1 || printf 'BOOTSTRAP_INFO: optional tool %s not installed.\n' "$tool"
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    printf 'BOOTSTRAP_INFO: optional tool %s not installed.\n' "$tool"
+  elif gap=$(cs_bootstrap_axi_gap "$tool"); then
+    printf 'BOOTSTRAP_INFO: optional tool %s %s\n' "$tool" "$gap"
+  fi
 done <<EOF
 $(cs_deps_tools optional)
 EOF

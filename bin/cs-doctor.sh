@@ -12,7 +12,10 @@
 # dispatch gate. cs-doctor.sh is the human-readable superset run BEFORE that -
 # versions, the herdr server, gh auth, and the contributor tools bootstrap stays
 # silent about. Both read one inventory (bin/cs-deps-lib.sh), so they cannot
-# disagree about what consigliere depends on.
+# disagree about what consigliere depends on. That library also owns the
+# axi-family version floors and their bump policy, and this report gates on them
+# through it rather than restating a number: a build session start would refuse
+# is never reported ready here.
 #
 # Usage:
 #   cs-doctor.sh            print the report
@@ -77,6 +80,18 @@ problem() {
   PROBLEMS=$((PROBLEMS + 1))
 }
 
+# below_floor <tool> - true when the below-floor classification cs-deps-lib.sh
+# owns applies to <tool>. Sets FLOOR and FLOOR_VERSION for the caller's report
+# line, so this report and the session-start gate describe the same build with
+# the same version and the same floor.
+FLOOR=
+FLOOR_VERSION=
+below_floor() {
+  local gap
+  gap=$(cs_deps_axi_gap "$1") || return 1
+  IFS=$'\t' read -r FLOOR_VERSION FLOOR <<< "$gap"
+}
+
 # --- header -------------------------------------------------------------------
 
 say 'consigliere doctor - dependency preflight (checks only; installs nothing)'
@@ -95,7 +110,13 @@ heading 'REQUIRED - consigliere must not dispatch without these'
 while IFS= read -r tool; do
   [ -n "$tool" ] || continue
   if version=$(cs_deps_version "$tool"); then
-    report ok "$tool" "$version" "$(cs_deps_purpose "$tool")"
+    if below_floor "$tool"; then
+      report MISSING "$tool" "$FLOOR_VERSION" "below the $FLOOR floor; session start refuses to dispatch until it is upgraded"
+      suggest "$(cs_deps_hint "$tool")"
+      problem
+    else
+      report ok "$tool" "$version" "$(cs_deps_purpose "$tool")"
+    fi
   else
     report MISSING "$tool" - "$(cs_deps_purpose "$tool")"
     suggest "$(cs_deps_hint "$tool")"
@@ -254,7 +275,12 @@ heading 'OPTIONAL - absent means one capability is unavailable, nothing more'
 while IFS= read -r tool; do
   [ -n "$tool" ] || continue
   if version=$(cs_deps_version "$tool"); then
-    report ok "$tool" "$version" "$(cs_deps_purpose "$tool")"
+    if below_floor "$tool"; then
+      report WARN "$tool" "$FLOOR_VERSION" "below the $FLOOR floor; session start asks for an upgrade"
+      suggest "$(cs_deps_hint "$tool")"
+    else
+      report ok "$tool" "$version" "$(cs_deps_purpose "$tool")"
+    fi
   else
     report absent "$tool" - "$(cs_deps_purpose "$tool")"
     suggest "$(cs_deps_hint "$tool")"

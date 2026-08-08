@@ -25,12 +25,6 @@ for util in bash env awk sed grep head cat tr uname dirname basename readlink mk
 done
 BASE_PATH="$FAKEBIN:$TOOLS"
 
-# assert_line <output> <extended-regex> <label>
-assert_line() {
-  printf '%s\n' "$1" | grep -Eq -- "$2" ||
-    fail "$3 (no line matching /$2/)"$'\n'"--- output ---"$'\n'"$1"
-}
-
 # --- --help never runs a check and never mutates ------------------------------
 
 help_out=$(PATH="$BASE_PATH" "$DOCTOR" --help 2>&1)
@@ -118,6 +112,36 @@ pass 'every inventory tool has a purpose and an install suggestion'
 assert_contains "$(cs_deps_hint no-mistakes)" \
   'https://github.com/kunchenguid/no-mistakes' \
   'the no-mistakes install suggestion names its repository'
+
+# --- the axi floors: doctor gates the builds session start would refuse -------
+#
+# cs-deps-lib.sh owns the floors, so the preflight and the session-start gate
+# cannot disagree about which installed build is out of date. Both boundaries
+# are derived from the owner, never hardcoded here.
+
+axi_floor=$(cs_deps_axi_floor gh-axi)
+axi_under=$(cs_test_version_below "$axi_floor") ||
+  fail "no below-floor fixture is derivable from the gh-axi floor $axi_floor"
+cs_fake_version_tool "$FAKEBIN" gh-axi CS_TEST_GH_AXI_VERSION "$axi_under"
+floor_out=$(PATH="$BASE_PATH" "$DOCTOR" 2>&1)
+expect_code 1 "$?" 'a below-floor required axi build keeps the preflight failing'
+assert_line "$floor_out" "^  MISSING +gh-axi +${axi_under//./\\.} +below the ${axi_floor//./\\.} floor" \
+  'doctor reports a below-floor gh-axi as a required gap, not as ok'
+assert_contains "$floor_out" 'npm i -g gh-axi' 'the floor gap carries the upgrade suggestion'
+
+cs_fake_version_tool "$FAKEBIN" gh-axi CS_TEST_GH_AXI_VERSION "$axi_floor"
+floor_out=$(PATH="$BASE_PATH" "$DOCTOR" 2>&1)
+assert_line "$floor_out" "^  ok +gh-axi +${axi_floor//./\\.}" 'an at-floor gh-axi is reported ok'
+
+quota_floor=$(cs_deps_axi_floor quota-axi)
+quota_under=$(cs_test_version_below "$quota_floor") ||
+  fail "no below-floor fixture is derivable from the quota-axi floor $quota_floor"
+cs_fake_version_tool "$FAKEBIN" quota-axi CS_TEST_QUOTA_AXI_VERSION "$quota_under"
+floor_out=$(PATH="$BASE_PATH" "$DOCTOR" 2>&1)
+assert_line "$floor_out" "^  WARN +quota-axi +${quota_under//./\\.} +below the ${quota_floor//./\\.} floor" \
+  'a below-floor optional axi build warns rather than failing the run'
+rm -f "$FAKEBIN/gh-axi" "$FAKEBIN/quota-axi"
+pass 'doctor gates the axi floors it shares with bootstrap'
 
 # --- config section: the user-owned tree ---------------------------------------
 # Migration state, symlink-target visibility, and the two loss tripwires

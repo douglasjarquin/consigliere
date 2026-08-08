@@ -5,38 +5,26 @@
 # Compatible means tasks-axi --version reports 0.1.1 or newer,
 # `tasks-axi update --help` exposes --archive-body for recoverable note rewrites,
 # and `tasks-axi mv --help` exposes [<id>...] for atomic multi-ID moves required
-# by capo handoffs (introduced in tasks-axi 0.2.2).
+# by capo handoffs. These probes are defense in depth behind the tasks-axi
+# version floor owned by bin/cs-deps-lib.sh; they are not that floor's
+# rationale, and the floor is not theirs. The 0.1.1 pin here is the oldest
+# release these call paths were ever written against and is compared with the
+# same shared helper, so there is one comparator in the repo, not two.
 # `config/backlog-backend.conf=manual` opts out of tasks-axi for routine consigliere
 # backlog mutations, but validated capo handoffs always use `tasks-axi mv`.
 # Absent or any other value keeps the default tasks-axi backend path, falling
 # back to manual mutation when the tool is not compatible.
 # .tasks.toml at the home root owns the markdown backend schema.
 
-cs_tasks_axi_version_parts() {
-  local output
-  command -v tasks-axi >/dev/null 2>&1 || return 1
-  output=$(tasks-axi --version 2>/dev/null) || return 1
-  printf '%s\n' "$output" |
-    sed -n 's/.*\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2 \3/p' |
-    head -1
-}
+CS_TASKS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/cs-deps-lib.sh
+. "$CS_TASKS_LIB_DIR/cs-deps-lib.sh"
+
+CS_TASKS_AXI_CALL_PATH_MIN=0.1.1
 
 cs_tasks_axi_compatible() {
-  local parts major minor patch rest
-  parts=$(cs_tasks_axi_version_parts) || return 1
-  [ -n "$parts" ] || return 1
-  major=${parts%% *}
-  rest=${parts#* }
-  minor=${rest%% *}
-  patch=${rest##* }
-
-  if [ "$major" -gt 0 ] ||
-    { [ "$major" -eq 0 ] && [ "$minor" -gt 1 ]; } ||
-    { [ "$major" -eq 0 ] && [ "$minor" -eq 1 ] && [ "$patch" -ge 1 ]; }; then
-    cs_tasks_axi_update_has_archive_body && cs_tasks_axi_mv_has_multi_id
-    return $?
-  fi
-  return 1
+  cs_deps_version_at_least tasks-axi "$CS_TASKS_AXI_CALL_PATH_MIN" || return 1
+  cs_tasks_axi_update_has_archive_body && cs_tasks_axi_mv_has_multi_id
 }
 
 cs_tasks_axi_update_has_archive_body() {
