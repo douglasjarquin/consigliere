@@ -19,6 +19,9 @@ cs_resolve_root
 
 # shellcheck source=bin/cs-pr-lib.sh
 . "$SCRIPT_DIR/cs-pr-lib.sh"
+# Optional turn telemetry (off unless host/telemetry.conf enables it).
+# shellcheck source=bin/cs-telemetry-lib.sh
+. "$SCRIPT_DIR/cs-telemetry-lib.sh"
 
 if [ "$#" -lt 2 ]; then
   echo "error: invalid PR merge request" >&2
@@ -86,3 +89,6 @@ if ! caller_has_merge_method "$@"; then
 fi
 
 gh-axi pr merge "$PR_NUMBER" --repo "$PR_OWNER/$PR_REPO" "${merge_args[@]+"${merge_args[@]}"}" "$@"
+# TELEMETRY, measurement only, and only on a merge that actually succeeded: this
+# script runs under `set -e`, so a failed merge never reaches this line.
+cs_telemetry_crumb merge pr || true

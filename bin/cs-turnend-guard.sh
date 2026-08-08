@@ -38,6 +38,14 @@ WATCH="$SCRIPT_DIR/cs-watch.sh"
 . "$SCRIPT_DIR/cs-primary-scope-lib.sh"
 # shellcheck source=bin/cs-operational-input.sh
 . "$SCRIPT_DIR/cs-operational-input.sh"
+# Optional turn telemetry (off unless host/telemetry.conf enables it). Both libs
+# are pure function definitions with no side effects on source, and every
+# telemetry entry point swallows its own failures, so sourcing them cannot change
+# what this guard decides or what it prints.
+# shellcheck source=bin/cs-harness-lib.sh
+. "$SCRIPT_DIR/cs-harness-lib.sh"
+# shellcheck source=bin/cs-telemetry-lib.sh
+. "$SCRIPT_DIR/cs-telemetry-lib.sh"
 
 # Read the whole turn-end hook payload once; never block on unreadable/absent
 # stdin.
@@ -49,11 +57,34 @@ PAYLOAD=$(cat 2>/dev/null || true)
 command -v jq >/dev/null 2>&1 || exit 0
 
 STOP_HOOK_ACTIVE=$(printf '%s' "$PAYLOAD" | jq -r '.stop_hook_active // false' 2>/dev/null) || exit 0
-[ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
 
 # Scope precisely to a PRIMARY checkout: a genuinely marked capo home is
 # force-included; an unmarked linked task worktree is exempt.
+#
+# This scope test moved ABOVE the stop_hook_active loop guard so the telemetry
+# emitter below sees every primary turn, including a forced continuation's own
+# second stop. Both tests are side-effect-free reads that exit 0 when they do not
+# match, so the reordering is observationally identical: the same inputs still
+# produce the same exit status, the same stdout, and the same stderr.
 cs_primary_scope_matches "$CS_ROOT" "$STATE" || exit 0
+
+# TELEMETRY, measurement only. This is the per-turn emitter for role=root and
+# role=capo: the Stop hook fires here on every turn of the main home and of every
+# capo home, and it is where each harness exposes its usage data. It runs BEFORE
+# every remaining early exit so a quiet, fully supervised turn - the most common
+# supervision turn there is - is counted rather than invisible.
+#
+# It must never delay, suppress, duplicate, or corrupt the turn-end signal or the
+# exit-2 block below. cs_telemetry_turn_end is silent, swallows every failure,
+# and always returns 0; the `|| true` is belt and braces under this script's
+# `set -u`. Disabled telemetry short-circuits on the absent host/telemetry.conf.
+if cs_root_is_capo_home "$CS_ROOT"; then
+  cs_telemetry_turn_end capo "$PAYLOAD" || true
+else
+  cs_telemetry_turn_end root "$PAYLOAD" || true
+fi
+
+[ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
 
 # Defer when ANOTHER live consigliere session holds this home's lock. The guard
 # scopes to a primary checkout but that says nothing about whether THIS session

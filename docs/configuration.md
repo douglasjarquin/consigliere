@@ -46,6 +46,7 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 | `host/harness.conf` | host | pins the root harness (`codex` or `claude`) regardless of environment |
 | `host/upstream.conf` | host | path of the firstmate checkout for `/upstream-review`; absent = `../firstmate` |
 | `host/activation.conf` | host | per-home activation scope: `always`, `afk-only`, or `off`; absent = `afk-only`; `bin/cs-activate.sh` owns the policy, and `bin/cs-home-seed.sh --help` owns capo seed and bootstrap convergence |
+| `host/telemetry.conf` | host | optional per-home turn telemetry switch: `enabled true\|false` plus an optional `retain_days <1..3650>`; absent = disabled, malformed = disabled with a doctor diagnostic. `docs/telemetry.md` owns the whole contract. Never propagated into a capo home, which enables its own |
 
 Symlink policy, established empirically (2026-08-06, tasks-axi 0.2.x):
 
@@ -141,6 +142,7 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
 - `state/<id>.status` - appended by soldiers; wake events, never current state. `bin/cs-classify-lib.sh` owns the verb vocabulary.
 - `state/.decision-cursor-<task>` - per-status-file byte cursor plus folded open-decision set, written only by `bin/cs-classify-lib.sh`'s `status_open_decisions_incremental` so the wake drain's fleet-wide open-decision scan folds only newly appended status bytes. Removed by teardown with the other watcher markers, along with any `.read.*` / `.tmp.*` staging temps a killed drain left beside it; always safe to delete by hand, which only costs one full re-fold of that task's status log.
   If `state/` is unwritable so no cursor can be staged at all, the drain falls back to the unbounded whole-file fold for that call rather than reporting nothing open.
+- `data/telemetry/turns.jsonl` - append-only JSON Lines turn telemetry for this home, written only while `host/telemetry.conf` enables it, with `state/.telemetry-crumbs` (turn-scoped breadcrumbs) and `state/.telemetry-cursor-<session>` (per-session transcript byte offset) as its disposable working state. `docs/telemetry.md` owns the schema, the folding rules, retention, and the privacy contract; `bin/cs-telemetry-lib.sh` implements them.
 - `state/.wake-queue` - `epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload`; `bin/cs-wake-lib.sh` owns it.
 - `state/.session-start-complete` - the lock owner's pid, written atomically by `bin/cs-session-start.sh` only when a full locked startup reached its final stage, and cleared when the next full locked startup begins. `bin/cs-sessionstart-run.sh` re-emits on a clear or compact only when this record matches the current lock owner in its own ancestry, so a startup killed mid-sweep is finished before any re-emit. Safe to delete by hand, which only costs one full startup on the next clear or compact.
 - `state/.home-pane` - the pane id of THIS home's own agent, written by `bin/cs-session-start.sh` from `HERDR_PANE_ID` (the one place that runs inside the home's own pane). A durable HINT, never an identity: herdr recycles pane ids, so `bin/cs-activate.sh` revalidates that the pane still exists, still runs an agent, and is still rooted in this home before it will prompt anything.
@@ -224,6 +226,7 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_PROCEVENT_MAX_OUTPUT_BYTES` | cs-procevent | cap on one captured result; default 1048576. Over the cap the result is truncated and still captured |
 | `CS_LOCK_HARNESS_RE` | cs-lock | test-only harness ancestry override |
 | `CS_HARNESS_OVERRIDE` | cs-harness-lib | force the root harness (codex\|claude); highest precedence, test/escape seam |
+| `CS_TELEMETRY_DISABLE` | cs-telemetry-lib | test/escape seam, unset in production: `1` forces turn telemetry off whatever `host/telemetry.conf` says. `tests/lib.sh` pins it for every suite, because most suites resolve `DATA` to the real repo checkout and would otherwise append synthetic test turns to a developer's own dataset |
 | `CS_ROOT_OVERRIDE` `CS_STATE_OVERRIDE` | single scripts | test-only resolution overrides |
 
 Root harness resolution (`cs_harness_detect_root`): `CS_HARNESS_OVERRIDE` → `host/harness.conf` file → `CLAUDECODE=1` ⇒ claude → default codex. A soldier inherits the resolved value (persisted as `harness=` in meta).
@@ -232,3 +235,4 @@ Root harness resolution (`cs_harness_detect_root`): `CS_HARNESS_OVERRIDE` → `h
 Per-harness launch flags and hook facts: `docs/codex.md`, `docs/claude.md`.
 Verified `lavish-axi` facts: `docs/lavish.md`.
 Supervision protocol: `docs/supervision.md`.
+Optional turn telemetry: `docs/telemetry.md`.

@@ -41,6 +41,8 @@ CS_LAYOUT_GATE_SKIP=
 . "$SCRIPT_DIR/cs-deps-lib.sh"
 # shellcheck source=bin/cs-herdr-lib.sh
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
+# shellcheck source=bin/cs-telemetry-lib.sh
+. "$SCRIPT_DIR/cs-telemetry-lib.sh"
 
 case "${1:-}" in
   -h|--help)
@@ -221,7 +223,7 @@ resolve_link_target() {
 
 # 2-5. Known names, symlink visibility, host-tier tripwire, sever tripwire.
 CONFIG_KNOWN=' boss.md boss-shared.md learnings.md projects.md boards.md backlog.md done-archive.md note-archive.md charter.md backlog-backend.conf dispatch-policy.conf permission-mode.conf wedge-alarm.conf '
-HOST_KNOWN=' capos.md harness.conf upstream.conf activation.conf '
+HOST_KNOWN=' capos.md harness.conf upstream.conf activation.conf telemetry.conf '
 NEVER_SYMLINK=' backlog.md done-archive.md note-archive.md capos.md '
 
 check_config_entry() {  # <path> <tier: flat|host>
@@ -268,6 +270,31 @@ if [ -d "$HOST_DIR" ]; then
     check_config_entry "$entry" host
   done
 fi
+
+# 6. Telemetry, an OPTIONAL machine-local capability. Off is the normal state and
+# is reported as information, never as a warning or an error: a home that never
+# enables it is fully healthy. A malformed explicit config names the exact
+# problem and warns without failing the run, because telemetry can only ever stop
+# recording - it can never stop a session (docs/telemetry.md).
+TELEMETRY_STATUS=$(cs_telemetry_config_status)
+case "$TELEMETRY_STATUS" in
+  'enabled '*)
+    if command -v jq >/dev/null 2>&1; then
+      cs_telemetry_paths
+      report ok telemetry "${TELEMETRY_STATUS#enabled }d" "recording to $CS_TELEMETRY_FILE"
+    else
+      report WARN telemetry - 'enabled but jq is missing, so nothing is recorded'
+      suggest "$(cs_deps_hint jq)"
+    fi
+    ;;
+  malformed*)
+    report WARN telemetry - "host/telemetry.conf is ${TELEMETRY_STATUS#malformed }; telemetry stays off"
+    suggest 'a telemetry.conf carries exactly "enabled true|false" and an optional "retain_days <n>" (docs/telemetry.md)'
+    ;;
+  *)
+    report ok telemetry - 'disabled (optional; no host/telemetry.conf)'
+    ;;
+esac
 
 # --- optional -----------------------------------------------------------------
 

@@ -99,8 +99,10 @@ host/                MACHINE-LOCAL; LOCAL, gitignored; not backed up, re-created
   harness.conf       pins the root harness (codex or claude); absent = auto-detect
   upstream.conf      path of the firstmate checkout used by /upstream-review; absent = ../firstmate
   activation.conf    per-home activation scope (section 8); absent = afk-only
+  telemetry.conf     optional per-home turn telemetry switch; absent = off; docs/telemetry.md
 data/                generated and task-scoped output; LOCAL, gitignored, DISPOSABLE as a tree
   sweeps.md          standing board sweeps that outlive the session that started one; armed, converged, and retired only by bin/cs-board-watch.sh
+  telemetry/turns.jsonl  append-only turn telemetry, written only while enabled; docs/telemetry.md
   <id>/brief.md      per-task soldier brief, or per-capo charter brief when kind=capo
   <id>/report.md     scout task deliverable, written by the soldier; survives teardown
 projects/            cloned repos; gitignored; READ-ONLY for you

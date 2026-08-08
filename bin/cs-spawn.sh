@@ -95,6 +95,10 @@ esac
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
+# Optional turn telemetry (off unless host/telemetry.conf enables it). Sourced
+# after cs_resolve_root so it sees this home's resolved DATA/STATE/HOST_DIR.
+# shellcheck source=bin/cs-telemetry-lib.sh
+. "$SCRIPT_DIR/cs-telemetry-lib.sh"
 mkdir -p "$STATE"
 
 # A soldier/capo always inherits the ROOT session's harness. Resolved once here;
@@ -403,6 +407,11 @@ if [ "$KIND" = capo ]; then
     echo "error: capo $ID launched into $PANE but no agent appeared within ${LAUNCH_WAIT}s; the launch line was likely swallowed by a shell that was not ready. The home and its workspace are left intact - retry the spawn." >&2
     exit 1
   fi
+  # TELEMETRY, measurement only: attribute this turn to dispatch. A capo is a
+  # supervisor, not a supervised turn-taker, so its launch carries no turn-end
+  # wiring here; the capo's OWN home emits its turns through its own Stop hook
+  # once that home enables telemetry itself (host/ never propagates).
+  cs_telemetry_crumb spawn capo || true
   echo "spawned $ID kind=capo home=$HOME_ABS workspace=$WS pane=$PANE"
   exit 0
 fi
@@ -492,6 +501,21 @@ sq_brief=$(shell_quote "$BRIEF")
 sq_turnend=$(shell_quote "$TURNEND")
 MODEL_ARG=${MODEL:-default}
 EFFORT_ARG=${EFFORT:-default}
+# TELEMETRY, measurement only. Resolved HERE, at spawn, so a soldier launched
+# while telemetry is off carries a byte-identical launch line and settings file:
+# with no command to add, every builder below produces exactly what it produced
+# before this instrumentation existed. A headless scout gets none - its turn end
+# is process exit, and the launch line's terminal status append is the signal
+# that must not be complicated. The stdin mode differs per harness: claude feeds
+# the Stop payload to every hook command, while codex's notify program is called
+# with an argument and no piped payload, so reading stdin there would block.
+TELEMETRY_HOOK=
+if [ "$HEADLESS" -eq 0 ]; then
+  case "$HARNESS" in
+    claude) TELEMETRY_HOOK=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" stdin) ;;
+    codex) TELEMETRY_HOOK=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" nostdin) ;;
+  esac
+fi
 if [ "$HEADLESS" -eq 1 ]; then
   # Fire-and-forget scout: the harness runs the brief non-interactively (codex
   # exec / claude -p); the launch line appends the terminal status event, so
@@ -507,13 +531,13 @@ else
   sq_settings=''
   if [ "$HARNESS" = claude ]; then
     SETTINGS_FILE="$STATE/$ID.claude-settings.json"
-    cs_harness_claude_settings_json "$TURNEND" > "$SETTINGS_FILE"
+    cs_harness_claude_settings_json "$TURNEND" "$TELEMETRY_HOOK" > "$SETTINGS_FILE"
     sq_settings=$(shell_quote "$SETTINGS_FILE")
     # Interactive claude blocks at the folder-trust dialog for a fresh worktree;
     # pre-trust it so the unattended soldier can take its first turn.
     cs_harness_claude_trust_dir "$WT_REAL" || abort_task "could not pre-trust claude worktree $WT_REAL"
   fi
-  LAUNCH=$(cs_harness_soldier_launch "$HARNESS" "$MODEL_ARG" "$EFFORT_ARG" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings")
+  LAUNCH=$(cs_harness_soldier_launch "$HARNESS" "$MODEL_ARG" "$EFFORT_ARG" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings" "$TELEMETRY_HOOK")
 fi
 cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
 
@@ -535,6 +559,11 @@ cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
 if [ "$HEADLESS" -eq 0 ] && ! cs_herdr_agent_wait_present "$PANE" "$LAUNCH_WAIT"; then
   abort_task "launched $ID into $PANE but no agent appeared within ${LAUNCH_WAIT}s; the launch line was likely swallowed by a shell that was not ready"
 fi
+
+# TELEMETRY, measurement only: attribute the CONSIGLIERE turn that ran this
+# spawn to dispatch. The soldier's own turns are recorded separately by the
+# turn-end wiring above, in this same home.
+cs_telemetry_crumb spawn "$KIND" || true
 
 HEADLESS_NOTE=""
 [ "$HEADLESS" -eq 1 ] && HEADLESS_NOTE=" headless=1"

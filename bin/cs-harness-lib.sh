@@ -192,17 +192,30 @@ cs_harness_autonomy_flag() {
   esac
 }
 
-# cs_harness_claude_settings_json <turnend> - the launch-scoped settings JSON for
-# a claude soldier. Its Stop hook touches the turn-end signal every turn - the
-# exact analog of the codex soldier's `-c notify=[touch turnend]`, and NOTHING
-# more. The exit-2 continuation guard is a ROOT/capo concern (registered by the
-# tracked `.codex/hooks.json` / `.claude/settings.json`, self-gated to the
-# consigliere tree); a child soldier worktree is exempt from it, on both
-# harnesses. cs-spawn writes this to a per-soldier file and passes it via
+# cs_harness_claude_settings_json <turnend> [telemetry-cmd] - the launch-scoped
+# settings JSON for a claude soldier. Its Stop hook touches the turn-end signal
+# every turn - the exact analog of the codex soldier's `-c notify=[touch
+# turnend]`, and NOTHING more. The exit-2 continuation guard is a ROOT/capo
+# concern (registered by the tracked `.codex/hooks.json` / `.claude/settings.json`,
+# self-gated to the consigliere tree); a child soldier worktree is exempt from it,
+# on both harnesses. cs-spawn writes this to a per-soldier file and passes it via
 # `--settings <file>` so nothing lands in the boss's project tree (claude
 # resolves a repo `.claude/settings.json` to the main checkout, not the worktree).
+#
+# An optional <telemetry-cmd> is appended as a SEPARATE second hook command, never
+# folded into the first: the touch keeps its own command, its own process, and its
+# own exit status, so optional measurement cannot delay, suppress, duplicate, or
+# corrupt the turn-end signal supervision depends on. Claude feeds the payload to
+# every hook command, so the telemetry command reads the same Stop payload the
+# touch ignores. With no telemetry command the output is byte identical to an
+# uninstrumented soldier's.
 cs_harness_claude_settings_json() {
-  local turnend=$1
+  local turnend=$1 telemetry=${2:-}
+  if [ -n "$telemetry" ]; then
+    printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"touch %s"},{"type":"command","command":"%s"}]}]}}\n' \
+      "$turnend" "$telemetry"
+    return 0
+  fi
   printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"touch %s"}]}]}}\n' \
     "$turnend"
 }
@@ -327,23 +340,35 @@ cs_harness_launch_env() {
   esac
 }
 
-# cs_harness_soldier_launch <h> <model> <effort> <sq_op> <sq_brief> <sq_turnend> <sq_settings>
+# cs_harness_soldier_launch <h> <model> <effort> <sq_op> <sq_brief> <sq_turnend> <sq_settings> [telemetry-cmd]
 # Full launch string for an interactive supervised soldier (or interactive scout).
 # codex wires turn-end inline via `-c notify=`; claude via the --settings Stop hook.
+#
+# An optional <telemetry-cmd> records the worker's own turn (measurement only).
+# On codex it is appended to the notify command after `; ` - never `&& ` - so the
+# turn-end `touch` runs first, unconditionally, and its result is not gated on
+# anything telemetry does. On claude the telemetry command rides the settings file
+# instead (see cs_harness_claude_settings_json), so this builder ignores it there.
+# With no telemetry command both launch strings are byte identical to an
+# uninstrumented soldier's.
 cs_harness_soldier_launch() {
-  local h=$1 model=$2 effort=$3 sq_op=$4 sq_brief=$5 sq_turnend=$6 sq_settings=$7
-  local mf ef auto env
+  local h=$1 model=$2 effort=$3 sq_op=$4 sq_brief=$5 sq_turnend=$6 sq_settings=$7 telemetry=${8:-}
+  local mf ef auto env notify
   mf=$(cs_harness_model_flag "$h" "$model")
   ef=$(cs_harness_effort_flag "$h" "$effort")
   auto=$(cs_harness_autonomy_flag "$h") || return 1
   env=$(cs_harness_launch_env "$h")
+  notify="touch $sq_turnend"
+  if [ -n "$telemetry" ]; then
+    notify="$notify; $telemetry"
+  fi
   # The launch STRING is data run later in the pane; its $(...), $?, and \" are
   # literal and must not expand here. SC2016 disabled deliberately.
   case "$h" in
     codex)
       # shellcheck disable=SC2016
-      printf '%scodex %s%s%s -c "notify=[\\"bash\\",\\"-c\\",\\"touch %s\\"]" "$(%s encode launch-brief < %s)"' \
-        "$env" "$mf" "$ef" "$auto" "$sq_turnend" "$sq_op" "$sq_brief"
+      printf '%scodex %s%s%s -c "notify=[\\"bash\\",\\"-c\\",\\"%s\\"]" "$(%s encode launch-brief < %s)"' \
+        "$env" "$mf" "$ef" "$auto" "$notify" "$sq_op" "$sq_brief"
       ;;
     claude)
       # shellcheck disable=SC2016

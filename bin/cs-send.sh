@@ -63,6 +63,11 @@ STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 . "$SCRIPT_DIR/cs-pending-reply-lib.sh"
 # shellcheck source=bin/cs-harness-lib.sh
 . "$SCRIPT_DIR/cs-harness-lib.sh"
+# Optional turn telemetry (off unless host/telemetry.conf enables it). It reads
+# the CS_HOME this script already resolved above and never touches the layout
+# gate, so a steer keeps behaving exactly as it does with telemetry disabled.
+# shellcheck source=bin/cs-telemetry-lib.sh
+. "$SCRIPT_DIR/cs-telemetry-lib.sh"
 
 RAW=${1:?usage: cs-send.sh <target> <text...>}
 shift
@@ -166,6 +171,9 @@ if [ "$pre_status" = busy ]; then
   # Mid-turn steer: the harness queues the input for after the turn; native state
   # cannot distinguish queued from swallowed, so report queued and succeed.
   pending_confirm_delivery
+  # TELEMETRY, measurement only: a delivered steer is what turns a supervision
+  # turn's outcome from "reviewed, nothing to do" into "messaged the worker".
+  cs_telemetry_crumb steer "$KIND" || true
   echo "queued (target was mid-turn)"
   [ "$SETTLE" = 0 ] || sleep "$SETTLE"
   exit 0
@@ -175,6 +183,7 @@ attempt=0
 while [ "$attempt" -le "$RETRIES" ]; do
   if cs_herdr_submit_confirm "$PANE" 4000; then
     pending_confirm_delivery
+    cs_telemetry_crumb steer "$KIND" || true
     echo "submitted"
     [ "$SETTLE" = 0 ] || sleep "$SETTLE"
     exit 0

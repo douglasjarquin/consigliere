@@ -54,6 +54,47 @@ DIGEST PRESENT
 
 The TUI run's rollout recorded `lock acquired: harness pid 84353` followed by the model's `DIGEST PRESENT` reply.
 
+## Stop payload and per-turn usage (verified 2026-08-08, codex-cli 0.147.0)
+
+Measured in a throwaway scratch directory whose `.codex/hooks.json` registered a Stop hook that appended its stdin payload to a file, run under `codex exec --skip-git-repo-check --dangerously-bypass-hook-trust 'Reply with exactly: OK'`.
+
+```json
+{
+  "session_id": "019fe1ea-df85-7a02-932b-d0ed71bdff54",
+  "turn_id": "019fe1ea-e03b-7bb1-abc1-54fecaeb5cca",
+  "transcript_path": "/Users/…/.codex/sessions/2026/08/08/rollout-2026-08-08T11-08-14-019fe1ea-df85-7a02-932b-d0ed71bdff54.jsonl",
+  "cwd": "…",
+  "hook_event_name": "Stop",
+  "model": "gpt-5.6-sol",
+  "permission_mode": "bypassPermissions",
+  "stop_hook_active": false,
+  "last_assistant_message": "OK"
+}
+```
+
+- The Stop hook fired exactly ONCE per turn: a second run with an APPENDING recorder captured one payload for one turn, so the turn-end path is not a double-fire.
+- `model` is on the payload; `effort` is not.
+- `transcript_path` points at the session rollout, which is the only per-turn usage source.
+
+The rollout carries usage and turn identity as ordinary records:
+
+```
+$ jq -c 'select(.payload.type=="token_count") | .payload.info.last_token_usage' rollout-….jsonl
+{"input_tokens":28820,"cached_input_tokens":6912,"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0,"total_tokens":28825}
+$ jq -c 'select(.type=="turn_context") | {model:.payload.model, effort:.payload.effort, turn:.payload.turn_id}' rollout-….jsonl
+{"model":"gpt-5.6-sol","effort":"ultra","turn":"019fe1ea-e03b-7bb1-abc1-54fecaeb5cca"}
+$ jq -c 'select(.payload.type=="task_complete") | {turn_id:.payload.turn_id, duration_ms:.payload.duration_ms}' rollout-….jsonl
+{"turn_id":"019fe1ea-e03b-7bb1-abc1-54fecaeb5cca","duration_ms":5417}
+```
+
+- `event_msg`/`token_count` records `info.last_token_usage` per model request and `info.total_token_usage` cumulatively; `cached_input_tokens` is a SUBSET of `input_tokens`, not an addition to it.
+- `turn_context.turn_id` and `task_complete.turn_id` both match the Stop payload's `turn_id`.
+- `event_msg`/`token_count` also carries a `rate_limits` block (percent used, window, reset epoch, plan type); consigliere does not read it.
+- `bin/cs-telemetry-lib.sh` consumes exactly these fields; `docs/telemetry.md` owns what is done with them.
+
+A codex SOLDIER's turn end is the `notify` program, which is invoked with the notification JSON as an ARGUMENT and no piped payload, and that notification carries no usage.
+So a codex worker turn is measurable in count, role, and task identity, but not in tokens.
+
 ## Interaction facts
 
 - Skill invocation is `$<skill>` (codex rejects claude's `/<skill>` form); sends of `$...` need a pre-Enter settle so the completion popup does not swallow the Enter (cs-send owns this).

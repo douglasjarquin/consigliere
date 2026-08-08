@@ -34,6 +34,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${CS_HARNESS_OVERRIDE:=codex}"
 export CS_HARNESS_OVERRIDE
 
+# Pin the OPTIONAL turn telemetry off for every suite. Most tests override only
+# CS_STATE_OVERRIDE, so their DATA still resolves to the real repo checkout: on a
+# machine whose home has telemetry enabled, an uninstrumented suite would append
+# synthetic test turns to the developer's own measurement dataset. The telemetry
+# suites unset this deliberately for the cases that need it on.
+: "${CS_TELEMETRY_DISABLE:=1}"
+export CS_TELEMETRY_DISABLE
+
 # --- reporters --------------------------------------------------------------
 
 fail() {

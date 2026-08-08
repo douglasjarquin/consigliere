@@ -16,6 +16,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
+# Optional turn telemetry (off unless host/telemetry.conf enables it).
+# shellcheck source=bin/cs-telemetry-lib.sh
+. "$SCRIPT_DIR/cs-telemetry-lib.sh"
 ID=${1:?usage: cs-merge-local.sh <task-id>}
 META="$STATE/$ID.meta"
 [ -f "$META" ] || { echo "error: no meta for task $ID at $META" >&2; exit 1; }
@@ -66,4 +69,6 @@ fi
 before=$(git -C "$PROJ" rev-parse --short "$DEFAULT")
 git -C "$PROJ" merge --ff-only "$BRANCH" >/dev/null
 after=$(git -C "$PROJ" rev-parse --short "$DEFAULT")
+# TELEMETRY, measurement only, and only after the fast-forward actually landed.
+cs_telemetry_crumb merge local || true
 echo "merged $BRANCH into local $DEFAULT ($before -> $after) in $PROJ"

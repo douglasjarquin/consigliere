@@ -66,6 +66,44 @@ version. The launch template and per-harness facts live in `bin/cs-harness-lib.s
   so the typed marker (honored per the loaded CLAUDE.md contract) is what makes it
   legitimate supervision.
 
+## Stop payload and per-turn usage (verified 2026-08-08, claude 2.1.226)
+
+Measured in a throwaway scratch directory whose `--settings` file registered a Stop hook that wrote its stdin payload to a file, run under `claude --settings <file> -p 'Reply with exactly: OK'`.
+
+```json
+{
+  "session_id": "c2601700-cee9-4a2a-ab8f-0d6889785833",
+  "transcript_path": "/Users/…/.claude/projects/<munged-cwd>/c2601700-….jsonl",
+  "cwd": "…",
+  "prompt_id": "81415d4e-d9ac-4379-8dac-72a24b27b22b",
+  "permission_mode": "auto",
+  "effort": {"level": "high"},
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "OK",
+  "background_tasks": [],
+  "session_crons": []
+}
+```
+
+- `effort.level` is on the payload; the model is not.
+- Every hook command registered under one Stop matcher receives this same payload on stdin, so a second command can read it without touching the first.
+- `transcript_path` points at the session JSONL, which is the only per-turn usage source.
+
+Each `type:"assistant"` transcript record carries `message.model`, a top-level `effort`, and `message.usage`:
+
+```
+$ jq -c 'select(.type=="assistant") | {model:.message.model, effort, id:.message.id, u:.message.usage}' <session>.jsonl | tail -1
+{"model":"claude-opus-5","effort":"xhigh","id":"msg_011CdqVHPXtsMYBAHdfiN8jk","u":{"input_tokens":1,"cache_creation_input_tokens":13327,"cache_read_input_tokens":156412,"output_tokens":11255,…}}
+```
+
+- Usage fields are `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `output_tokens`; `input_tokens` EXCLUDES both cache figures, the opposite of codex's subset convention.
+- There is no separate reasoning-token field: thinking tokens are inside `output_tokens`.
+- One assistant message appears as SEVERAL streaming snapshot records sharing one `message.id` and one final usage object. In one measured session 38 assistant rows carried only 12 distinct ids, so summing rows without deduplicating by `message.id` would roughly triple a turn's tokens.
+- `bin/cs-telemetry-lib.sh` consumes exactly these fields; `docs/telemetry.md` owns the normalization and where it is approximate.
+
+A claude SOLDIER's turn end is its launch-scoped `--settings` Stop hook, which does receive this payload, so a claude worker turn is measurable in tokens as well as in count.
+
 ## Interaction facts
 
 - Skill invocation is `/<skill>` (claude's slash form; codex uses `$<skill>`).
