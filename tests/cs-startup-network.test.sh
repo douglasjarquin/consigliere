@@ -81,16 +81,24 @@ mkdir -p "$FIX_ROOT"
 git init -q -b main "$FIX_ROOT"
 git -C "$FIX_ROOT" commit -q --allow-empty -m init
 : > "$FIX_ROOT/AGENTS.md"
+# bin/cs-fleet-sync.sh runs this one script out of CS_ROOT before it touches a
+# clone, so the fixture root carries a no-op copy. Without it the sweep's own
+# "No such file or directory" lands in every locked result, which would make a
+# genuinely clean run indistinguishable from a noisy one.
+mkdir -p "$FIX_ROOT/bin"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$FIX_ROOT/bin/cs-guard.sh"
+chmod +x "$FIX_ROOT/bin/cs-guard.sh"
 
-# fakebin <dir> [<gate-file>] - gh must be PRESENT and unauthenticated so the
-# probe has a line to report. The optional gate file is the deliberately slow
-# network dependency, and it is a GATE rather than a sleep on purpose: a case
-# that needs the worker still running while the digest is composed must not race
-# a timer it can lose on a loaded machine. `gh auth status` blocks until the case
-# creates that file, so "still running" and "finished" are both decided by the
-# test rather than by scheduling.
+# fakebin <dir> [<gate-file>] [<gh-auth-rc>] - gh must be PRESENT; it is
+# unauthenticated by default so the probe has a line to report, and <gh-auth-rc>
+# 0 makes it authenticated so a case can exercise the clean, silent result. The
+# optional gate file is the deliberately slow network dependency, and it is a
+# GATE rather than a sleep on purpose: a case that needs the worker still running
+# while the digest is composed must not race a timer it can lose on a loaded
+# machine. `gh auth status` blocks until the case creates that file, so "still
+# running" and "finished" are both decided by the test rather than by scheduling.
 fakebin() {
-  local fb=$1 gate=${2:-} t
+  local fb=$1 gate=${2:-} auth_rc=${3:-1} t
   mkdir -p "$fb"
   # The wait also ends when the fixture root disappears. cs_run_timed gives the
   # bounded command its OWN process group in every tier, so this stub is never in
@@ -99,8 +107,11 @@ fakebin() {
   # would outlive the suite forever.
   cat > "$fb/gh" <<SH
 #!/usr/bin/env bash
-if [ "\${1:-}" = auth ] && [ -n "$gate" ]; then
-  while [ ! -e "$gate" ] && [ -d "$TMP" ]; do sleep 0.1; done
+if [ "\${1:-}" = auth ]; then
+  if [ -n "$gate" ]; then
+    while [ ! -e "$gate" ] && [ -d "$TMP" ]; do sleep 0.1; done
+  fi
+  exit $auth_rc
 fi
 exit 1
 SH
@@ -113,6 +124,20 @@ SH
     cs_fake_version_tool "$fb" "$t" "CS_TEST_UNUSED_VERSION" 9.9.9
   done
   printf '%s\n' "$fb"
+}
+
+# Make the next atomic write of the result file fail, and nothing else. The stage
+# replaces that file with `mv`, so shadowing mv for that one destination is a
+# precise, portable stand-in for a state/ that has gone unwritable - the only
+# thing that drives publish's could-not-land branch.
+block_report_write() {  # <fakebin>
+  cat > "$1/mv" <<'SH'
+#!/usr/bin/env bash
+for dest; do :; done
+case "$dest" in *.startup-network.report) exit 1 ;; esac
+exec /bin/mv "$@"
+SH
+  chmod +x "$1/mv"
 }
 
 # fresh_home <name> - an isolated CS_HOME carrying the two deterministic
@@ -154,7 +179,7 @@ assert_no_grep 'FLEET_SYNC:' "$HOME_DIR/state/.startup-network.report" \
 # agent is the durable queue. That is the whole no-loss argument.
 assert_grep 'check	startup-network' "$HOME_DIR/state/.wake-queue" \
   "a finished result with no live claimant did not surface as a wake"
-assert_grep 'cs-startup-network.sh report' "$HOME_DIR/state/.wake-queue" \
+assert_grep 'cs-startup-network.sh read' "$HOME_DIR/state/.wake-queue" \
   "the wake did not name the command that prints the result"
 pass "a finished deferred result is durable and surfaces as a check wake"
 
@@ -336,6 +361,99 @@ pending_count() {  # <home>
   done
   printf '%s\n' "$n"
 }
+
+# --- the reader the wake names ends the result's life as an unread one --------
+# The wake tells the agent how to read the result. Whatever it names has to
+# acknowledge what it printed, or the result stays unread for ever: the next
+# publish pends it, and a later digest re-presents findings the agent has already
+# seen under a label saying nothing has seen them.
+HOME_DIR=$(fresh_home wake-reader)
+FB=$(fakebin "$TMP/fb-wake-reader")
+printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
+snet "$HOME_DIR" "$FB" run --locked 1 || fail "the owning session's run must publish"
+assert_absent "$HOME_DIR/state/.startup-network.delivered" \
+  "nothing read the result yet, but a delivery was already recorded"
+wake=$(grep 'startup-network' "$HOME_DIR/state/.wake-queue" 2>/dev/null || true)
+[ -n "$wake" ] || fail "a finished result with no live claimant queued no wake"
+
+# The pure reader stays pure: it prints the same result and records nothing.
+out=$(snet "$HOME_DIR" "$FB" report)
+assert_contains "$out" 'FLEET_SYNC: plainproj: skipped: not a git repo' \
+  "the pure read printed no result"
+assert_absent "$HOME_DIR/state/.startup-network.delivered" \
+  "the pure read recorded a delivery, so an operator looking consumed the result"
+
+# Follow the wake with exactly the reader it names.
+reader=$(printf '%s\n' "$wake" | sed -n 's/.*cs-startup-network\.sh \([a-z]*\).*/\1/p')
+[ -n "$reader" ] || fail "the wake named no reader: $wake"
+out=$(snet "$HOME_DIR" "$FB" "$reader")
+assert_contains "$out" 'FLEET_SYNC: plainproj: skipped: not a git repo' \
+  "the reader the wake names printed no result"
+assert_present "$HOME_DIR/state/.startup-network.delivered" \
+  "the reader the wake names did not acknowledge what it printed"
+
+snet "$HOME_DIR" "$FB" run --locked 0 || fail "a later probe-only pass must publish"
+[ "$(pending_count "$HOME_DIR")" = 0 ] \
+  || fail "a result the agent already read was pended as unread"
+out=$(snet "$HOME_DIR" "$FB" report)
+assert_not_contains "$out" 'never read' \
+  "a result the agent read through the wake was re-presented as never read"
+pass "the wake names a reader that acknowledges, so a read result stays read"
+
+# --- a clean run delivers its silent result and queues no wake ----------------
+# The healthy and commonest path: gh is authenticated and there are no clones to
+# report on, so the result has no body at all. '(silent - no problems found)' IS
+# that result being delivered, so a harvest that printed it must acknowledge it -
+# otherwise every clean startup costs the next session a turn chasing a wake for
+# a result it already saw.
+HOME_DIR=$(fresh_home silent)
+rm -rf "$HOME_DIR/projects/plainproj"
+: > "$HOME_DIR/host/capos.md"
+FB=$(fakebin "$TMP/fb-silent" '' 0)
+printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
+snet "$HOME_DIR" "$FB" start --locked 1 --harvest-pid $$ \
+  || fail "the owning session could not start the deferred stage"
+snet "$HOME_DIR" "$FB" wait 60 || fail "the detached worker never published"
+out=$(snet "$HOME_DIR" "$FB" harvest --pid $$)
+assert_contains "$out" 'completed off the startup path' "harvest did not report the finished stage"
+assert_contains "$out" 'silent - no problems found' \
+  "a clean run did not report itself as having found nothing"
+assert_present "$HOME_DIR/state/.startup-network.delivered" \
+  "harvest printed the silent result without acknowledging it"
+# The worker is still in its delivery window; give it room to observe the
+# acknowledgement and exit without queueing a wake for a result already printed.
+sleep 2
+! grep -q 'startup-network' "$HOME_DIR/state/.wake-queue" 2>/dev/null \
+  || fail "a clean run queued a wake for a result the digest had already printed"
+pass "a clean run's silent result is delivered inline and queues no wake"
+
+# --- a publish that cannot land leaves the delivery it did not replace --------
+# An acknowledgement names the result it was written for. A publish whose write
+# fails replaces nothing, so that result is still the current one and still read;
+# clearing its acknowledgement would resurrect it as unread and pend it.
+HOME_DIR=$(fresh_home publish-fail)
+FB=$(fakebin "$TMP/fb-publish-fail")
+printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
+snet "$HOME_DIR" "$FB" run --locked 1 || fail "the owning session's run must publish"
+snet "$HOME_DIR" "$FB" harvest --pid $$ >/dev/null
+assert_present "$HOME_DIR/state/.startup-network.delivered" \
+  "the harvest did not record the delivery this case builds on"
+
+block_report_write "$FB"
+snet "$HOME_DIR" "$FB" run --locked 0 || fail "a pass whose write fails must still report"
+assert_present "$HOME_DIR/state/.startup-network.delivered" \
+  "a publish that landed nothing cleared the acknowledgement of the result it left in place"
+out=$(snet "$HOME_DIR" "$FB" report)
+assert_contains "$out" 'could not publish the deferred check report' \
+  "a publish that landed nothing did not say so"
+assert_not_contains "$out" 'never read' \
+  "an already-read result was re-presented as one nothing has read"
+[ "$(pending_count "$HOME_DIR")" = 0 ] \
+  || fail "an already-read result was pended into the store"
+assert_grep 'FLEET_SYNC: plainproj: skipped: not a git repo' \
+  "$HOME_DIR/state/.startup-network.report" \
+  "the failed publish destroyed the result it could not replace"
+pass "a publish that cannot land keeps the acknowledgement it did not supersede"
 
 # --- a narrower run never destroys an unread WIDER result ---------------------
 # The re-emit sequence: a full startup's worker finishes after the digest is out,

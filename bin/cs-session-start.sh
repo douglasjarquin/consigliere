@@ -739,7 +739,7 @@ Go to a source directly only when:
     targeted follow-up that disclosure names (the group's own tasks-axi listing,
     or that one section of config/backlog.md) rather than a bulk read,
   - the NETWORK CHECKS section reported its checks still IN PROGRESS and this
-    turn needs their verdict (bin/cs-startup-network.sh report),
+    turn needs their verdict (bin/cs-startup-network.sh read),
   - or this digest reports a stage as never emitted (a truncated startup names
     the stages that never ran), in which case that stage's sources were never
     printed and must be reconciled.

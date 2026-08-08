@@ -30,13 +30,14 @@
 #     worker, truncated digest, crashed session) loses no finding: the next run
 #     re-derives the same broken auth and the same stuck clone. There is no
 #     once-only signal to miss.
-#   - The result is durable and always surfaces. It lands in
-#     state/.startup-network.report and reaches the agent either inline in the
-#     digest or as a `check: startup-network` wake. Only a durable
-#     acknowledgement written after a harvest prints the finished result
+#   - The result is durable and always surfaces. It reaches the agent either
+#     inline in the digest or as a `check: startup-network` wake, and only a
+#     durable acknowledgement written by a reader that actually PRINTED it
 #     suppresses that wake, so a claimant that exits first cannot lose the
-#     result. While the worker is still running the digest states by name what
-#     is not yet confirmed, and never reports an unconfirmed check as passed.
+#     result. Both surfacing paths therefore end in an acknowledging read; see
+#     the usage block below for which mode acknowledges what. While the worker
+#     is still running the digest states by name what is not yet confirmed, and
+#     never reports an unconfirmed check as passed.
 #   - Mutation authority is re-verified. The worker outlives the command that
 #     launched it, so it re-checks that state/.lock still names the session that
 #     asked before it runs a mutating sweep, and downgrades to the read-only
@@ -56,11 +57,23 @@
 #          A hand-run `--locked 1` proves ownership the same way a new session
 #          would - state/.lock must name THIS session's own harness - and
 #          downgrades to the probe when it cannot.
+#
+# THE THREE READERS differ only in what they do to delivery state, and every
+# result that gets printed has to be acknowledged by whoever printed it - an
+# unacknowledged result is by definition still unread, so it would be queued as a
+# wake again and re-presented later as one nothing has seen:
 #        cs-startup-network.sh harvest [--pid <pid>]
-#          Print the digest's NETWORK CHECKS section and release the
-#          inline-print claim. Called by bin/cs-session-start.sh, not by hand.
+#          Print the digest's NETWORK CHECKS section, release the matching
+#          inline-print claim, and acknowledge exactly what it printed. Called by
+#          bin/cs-session-start.sh, not by hand.
+#        cs-startup-network.sh read
+#          Print the same thing and acknowledge exactly what it printed, leaving
+#          any claim alone because this reader is not the claimant. This is the
+#          mode the `check: startup-network` wake names, so following that wake
+#          ends the result's life as an unread one.
 #        cs-startup-network.sh report
-#          Print the current state and report without changing anything.
+#          Print the current state and change nothing at all - no acknowledgement
+#          and no drain. For an operator who wants to look without consuming.
 #        cs-startup-network.sh wait [<seconds>]
 #          Block until the report is published, up to <seconds> (default 120).
 #          For operators and tests only; a session start never waits.
@@ -105,9 +118,12 @@
 #                             live claimant gives harvest a bounded chance to
 #                             finish before a wake is queued.
 #   .startup-network.delivered
-#                             a durable acknowledgement that a harvest printed
-#                             the current result; only this suppresses its wake,
-#                             and only its absence makes that result pendable.
+#                             a durable acknowledgement that an acknowledging
+#                             reader printed the current result; only this
+#                             suppresses its wake, and only its absence makes
+#                             that result pendable. A publish clears it only when
+#                             a new result actually replaced the one it
+#                             acknowledged.
 #   .startup-network.lock     serializes publication, harvest acknowledgement,
 #                             and the wake decision.
 #
@@ -444,7 +460,7 @@ EOF
 # --- run ---------------------------------------------------------------------
 
 wake_payload() {  # <state>
-  printf 'check: startup-network: deferred startup network checks finished (%s); read them with %s/bin/cs-startup-network.sh report' \
+  printf 'check: startup-network: deferred startup network checks finished (%s); read them with %s/bin/cs-startup-network.sh read' \
     "$1" "$CS_ROOT"
 }
 
@@ -515,8 +531,13 @@ publish() {  # <generation> <state> <phases> <locked> <started> <rc> <output-fil
     state=failed
     rc=1
     report_published=0
+  else
+    # Only here, where a new result actually landed: an acknowledgement names the
+    # result it was written for, so a publish that could not replace that result
+    # must leave its acknowledgement standing. Clearing it unconditionally would
+    # resurrect an already-read result as unread and pend it into the store.
+    rm -f "$DELIVERED_FILE" 2>/dev/null || true
   fi
-  rm -f "$DELIVERED_FILE" 2>/dev/null || true
   write_atomic "$STATUS_FILE" <<EOF || true
 state=$state
 pid=$$
@@ -635,16 +656,15 @@ EOF
 
 # --- harvest / report --------------------------------------------------------
 
-# A run reached through single-flight adoption can be narrower than what this
-# session asked for. The reader is told which check that leaves uncovered, in the
-# same plain way the read-only branch of bin/cs-session-start.sh names the checks
-# it skipped, rather than being left to notice that a phase label never mentions
-# it.
-# Only the FACT: which check this run leaves uncovered and how to cover it. The
-# reason is deliberately left to the NETWORK_CHECKS line in the result body,
-# which already states the accurate one for each path that gets here - adoption
-# of a narrower live pass, and a mutating pass downgraded when the fleet lock
-# changed hands - and a single sentence cannot be true of both.
+# Which check this run leaves uncovered and how to cover it, named the same plain
+# way the read-only branch of bin/cs-session-start.sh names the checks it skipped
+# rather than left for the reader to notice that a phase label never mentions it.
+#
+# The line states only that FACT. Two different paths reach here - adopting a
+# narrower live pass, and a detached worker downgraded when the fleet lock
+# changed hands - and no single sentence is true of both, so the reason stays
+# with the NETWORK_CHECKS line in the result body, which states the accurate one
+# for whichever path this was.
 print_uncovered() {
   local uncovered
   uncovered=$(uncovered_label "$(status_get phases)" "$(status_get requested)")
@@ -675,7 +695,7 @@ print_pending_store() {
 
 # The current result when it is one nothing has read yet and no other branch is
 # about to print it: a record left running or a publish that could not land keeps
-# the previous result in place, and it stays reachable through the same `report`
+# the previous result in place, and it stays reachable through the same reader
 # the wake that announced it names.
 print_outstanding() {
   result_unread || return 0
@@ -720,7 +740,7 @@ print_pending() {
   [ -z "$age" ] || printf 'Started %ss ago, bounded at %ss.\n' "$age" "$(stage_budget)"
   # shellcheck disable=SC2016  # The backticked wake name is literal digest text.
   printf 'The result is durable in state/.startup-network.report and arrives as a `check: startup-network` wake.\n'
-  printf 'Read it now with %s/bin/cs-startup-network.sh report; until it lands, treat none of it as confirmed.\n' "$CS_ROOT"
+  printf 'Read it now with %s/bin/cs-startup-network.sh read; until it lands, treat none of it as confirmed.\n' "$CS_ROOT"
   print_outstanding
 }
 
@@ -741,22 +761,39 @@ print_state() {
   esac
 }
 
-# Did print_state print the body of the CURRENT result? True when a terminal
-# record published one, and otherwise exactly when print_outstanding showed the
-# unread result still sitting in place.
+# Did print_state print the CURRENT result? A terminal record that published one
+# always prints it, INCLUDING the empty-bodied result of a clean run, whose
+# "(silent - no problems found)" line is that result being delivered rather than
+# a reason to withhold the acknowledgement - withholding it there would queue a
+# redundant wake on the healthiest and commonest path there is. Otherwise the
+# current result is shown exactly when print_outstanding showed the unread one
+# still sitting in place.
 current_result_shown() {
   case "$(status_get state)" in
     done|timeout|failed)
-      if [ "$(status_get report_published)" != 0 ] && result_has_body "$REPORT_FILE"; then
-        return 0
-      fi
+      [ "$(status_get report_published)" = 0 ] || return 0
       ;;
   esac
   result_unread
 }
 
+# Print, then acknowledge exactly what was printed, both under the publish lock.
+# Deciding BEFORE printing is what keeps the two in step: the acknowledgement can
+# never claim more than print_state actually showed. Draining the store is the
+# other half of that same act, and it is what leaves the next publish with
+# nothing to pend, so a result already read cannot come back as an unread one.
+print_and_acknowledge() {
+  local deliver=0
+  ! current_result_shown || deliver=1
+  print_state
+  rm -rf "$PENDING_DIR" 2>/dev/null || true
+  [ "$deliver" -eq 0 ] || write_atomic "$DELIVERED_FILE" <<EOF || true
+delivered
+EOF
+}
+
 cmd_harvest() {  # <pid>
-  local pid=$1 generation deliver=0 claim_record claim_generation claim_pid
+  local pid=$1 generation claim_record claim_generation claim_pid
   cs_lock_acquire_wait "$PUBLISH_LOCK"
   generation=$(status_get generation)
   # Another session's live claim is left alone; the worker reaps a dead one.
@@ -770,16 +807,17 @@ EOF
       rm -f "$CLAIM_FILE" 2>/dev/null || true
     fi
   fi
-  ! current_result_shown || deliver=1
-  print_state
-  # Everything print_state just showed is acknowledged here, in one act under the
-  # publish lock: the store it drained, and the current result when that was
-  # printed too. Draining is what leaves the next publish with nothing to pend,
-  # so the store cannot carry a read result forward into a later digest.
-  rm -rf "$PENDING_DIR" 2>/dev/null || true
-  [ "$deliver" -eq 0 ] || write_atomic "$DELIVERED_FILE" <<EOF || true
-delivered
-EOF
+  print_and_acknowledge
+  cs_lock_release "$PUBLISH_LOCK"
+}
+
+# The reader the wake names. It differs from harvest in one thing: it touches no
+# claim, because an agent following a wake is not the session start that
+# registered one, and reaping a live claimant's claim would cost that session its
+# inline print.
+cmd_read() {
+  cs_lock_acquire_wait "$PUBLISH_LOCK"
+  print_and_acknowledge
   cs_lock_release "$PUBLISH_LOCK"
 }
 
@@ -820,19 +858,20 @@ case "$LOCKED" in 0|1) ;; *) LOCKED=0 ;; esac
 # `start` and `run` report their own refusals through the exit status, because
 # bin/cs-session-start.sh has to tell "the stage is running" from "the stage was
 # never started" - printing an unstarted stage as merely unfinished would name a
-# check as pending that nothing is going to run. `harvest` and `report` are
-# reporting commands and always exit 0.
+# check as pending that nothing is going to run. The three readers are reporting
+# commands and always exit 0.
 RC=0
 case "$MODE" in
   start) cmd_start "$LOCKED" "${HARVEST_PID:-0}" || RC=$? ;;
   run) cmd_run "$LOCKED" "$LOCK_PID" "$GENERATION" || RC=$? ;;
   harvest) cmd_harvest "${HARVEST_PID:-}" ;;
+  read) cmd_read ;;
   report) print_state ;;
   wait) cmd_wait "${1:-120}" || RC=$? ;;
   -h|--help) usage ;;
   *)
     printf 'cs-startup-network: unknown mode: %s\n' "${MODE:-<none>}" >&2
-    printf 'usage: cs-startup-network.sh start|run|harvest|report|wait\n' >&2
+    printf 'usage: cs-startup-network.sh start|run|harvest|read|report|wait\n' >&2
     exit 2
     ;;
 esac
