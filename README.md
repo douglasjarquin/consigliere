@@ -34,7 +34,7 @@ Optional: the other harness, `tasks-axi` (backlog), `no-mistakes` (delivery pipe
    gh auth login
    ```
 
-4. **Check the machine.** `bin/cs-doctor.sh` reports every dependency, its version, the herdr server, and GitHub auth, and suggests an install channel for each gap. It only checks - it never installs anything, since the same tool arrives by brew, npm, or a native installer depending on the machine:
+4. **Check the machine.** `bin/cs-doctor.sh` reports every dependency, its version, the herdr server, and GitHub auth, and suggests an install channel for each gap. An installed axi tool below its version floor counts as a gap here, exactly as it does at session start. It only checks - it never installs anything, since the same tool arrives by brew, npm, or a native installer depending on the machine:
 
    ```
    bin/cs-doctor.sh
@@ -55,7 +55,7 @@ Optional: the other harness, `tasks-axi` (backlog), `no-mistakes` (delivery pipe
    codex     # or: claude
    ```
 
-7. **Let the first session settle.** It runs `bin/cs-session-start.sh` and reports anything still missing or unauthenticated (the same required/optional inventory `cs-doctor.sh` reads). It detects only - it asks before installing anything.
+7. **Let the first session settle.** It runs `bin/cs-session-start.sh` and reports anything still missing, out of date, or unauthenticated (the same required/optional inventory and version floors `cs-doctor.sh` reads). It detects only - it asks before installing anything.
 
 8. **Give it a project.** Consigliere never works a repo it does not know about; tell it to add or create one (it owns the clone into `projects/`, the registry entry, and the project's standing delivery posture - each task's actual delivery mode is decided when the work is dispatched).
 
@@ -116,6 +116,7 @@ set (force-push, first push, shallow clone) fails open and runs everything.
 Pinned-tool owners: ShellCheck version in `bin/cs-lint.sh`; herdr version in
 `bin/cs-install-herdr.sh` (documented in `docs/herdr.md`); herdr protocol floor
 in `bin/cs-herdr-lib.sh` (`CS_HERDR_MIN_PROTOCOL`), which the installer reads.
+The axi-family version floors (`gh-axi`, `tasks-axi`, `lavish-axi`, `quota-axi`) and their bump policy live in `bin/cs-deps-lib.sh`, which both `bin/cs-doctor.sh` and session start gate on.
 Every `tests/*.test.sh` belongs to one lane - `portable`, `real-herdr`, or the
 opt-in `live-codex` (`CS_TEST_CODEX_LIVE=1`, never run in hosted CI and reported
 as visibly excluded by the coverage guard). The workflow contract is protected
