@@ -207,10 +207,11 @@ cs_deps_version_at_least() {
 # one feature, and never justify one with a feature citation - verify the
 # tool's current published latest and bump. cs-tasks-lib.sh's tasks-axi feature
 # probes are a separate defense-in-depth concern, not part of its floor.
-# Each floor: the tool's published latest, verified 2026-08-06.
+# Each floor: the tool's published latest, verified 2026-08-06, except
+# lavish-axi, re-verified 2026-08-08 (`npm view lavish-axi version` -> 0.1.46).
 CS_GH_AXI_MIN=0.1.29
 CS_TASKS_AXI_MIN=0.2.4
-CS_LAVISH_AXI_MIN=0.1.45
+CS_LAVISH_AXI_MIN=0.1.46
 CS_QUOTA_AXI_MIN=0.1.17
 
 # cs_deps_axi_floor <tool> - the tool's floor, or nonzero for a tool the policy
