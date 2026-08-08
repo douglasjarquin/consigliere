@@ -18,11 +18,15 @@
 #   5. read-once     - the do-not-re-read contract covering every source
 #                      represented by the two digests below, stated once,
 #                      ahead of the payload it governs.
-#   6. fleet state   - compact backlog listing, standing board sweeps, every
-#                      state/*.meta with a cheap endpoint liveness read,
-#                      bounded status tails (wake-EVENT history, not current
-#                      state), orphan status logs, and the afk flag. The board
-#                      sweep block also converges polls to records when locked
+#   6. fleet state   - every state/*.meta with a cheap endpoint liveness read
+#                      and bounded status tails (wake-EVENT history, not current
+#                      state), orphan status logs, then the compact backlog
+#                      listing, the standing board sweeps, and the afk flag. The
+#                      live-task inventory leads the section for the same reason
+#                      the section leads CONTEXT (see ORDERING below): it is
+#                      what recovery depends on, so nothing else in the digest
+#                      may sit between it and the top. The board sweep block
+#                      also converges polls to records when locked
 #                      (cs-board-watch.sh sync), so a sweep the boss started in
 #                      an earlier session survives a wiped state/ or an
 #                      interrupted arm instead of going quiet.
@@ -62,13 +66,17 @@
 #     reporting surfaces (bin/cs-fleet-view.sh, /the-books); at startup it is
 #     pure weight.
 #   - Every in-flight, held, blocked, and public-followup row is listed IN FULL,
-#     with its hold_kind/hold_reason and blocked_by. Those are the rows AGENTS.md
-#     sections 7 and 10 make actionable at startup, so they are never bounded
-#     away.
-#   - Only the plain queued (dispatchable-now) listing is bounded, by
-#     CS_SESSION_START_QUEUED_LIMIT, default 20. Anything it omits is disclosed
-#     with an exact remainder count and the command that shows the rest, so a
-#     deep queue costs a counter rather than kilobytes.
+#     with its hold_kind/hold_reason and blocked_by, up to
+#     CS_SESSION_START_ACTIVE_LIMIT rows per group, default 40. Those are the
+#     rows AGENTS.md sections 7 and 10 make actionable at startup, so they are
+#     shown whole rather than summarized - but a pathological fleet may not
+#     spend the whole digest on them either, because this section shares the
+#     payload with the live-task inventory above it.
+#   - The plain queued (dispatchable-now) listing is bounded separately, by
+#     CS_SESSION_START_QUEUED_LIMIT, default 20, so a deep queue costs a counter
+#     rather than kilobytes.
+#   - No bound ever drops rows silently: every group that hits its limit prints
+#     an exact remainder count and the command that shows the rest.
 # When the tasks-axi backend is selected and available, the groups are the
 # tool's own filters (`--state in_flight`, `--state held`, `--state queued
 # --blocked`, and `tasks-axi ready`), so this script never reimplements task
@@ -114,6 +122,8 @@ STATUS_TAIL=${CS_SESSION_START_STATUS_TAIL:-5}
 case "$STATUS_TAIL" in ''|*[!0-9]*) STATUS_TAIL=5 ;; esac
 QUEUED_LIMIT=${CS_SESSION_START_QUEUED_LIMIT:-20}
 case "$QUEUED_LIMIT" in ''|*[!0-9]*|0) QUEUED_LIMIT=20 ;; esac
+ACTIVE_LIMIT=${CS_SESSION_START_ACTIVE_LIMIT:-40}
+case "$ACTIVE_LIMIT" in ''|*[!0-9]*|0) ACTIVE_LIMIT=40 ;; esac
 BACKLOG_FIELDS=blocked_by,hold_kind,hold_reason
 
 RULE='================================================================================'
@@ -182,9 +192,9 @@ MANUAL_KEEP_RE='[(]hold|blocked-by:|[(]kind:[[:space:]]*public-followup[)]'
 
 print_backlog_manual_compact() {
   local path=$1 reason=$2
-  printf 'compact backlog listing (%s; done rows omitted; every in-flight, held, blocked, and public-followup title line kept; other queued bounded to %s; indented task bodies omitted)\n' \
-    "$reason" "$QUEUED_LIMIT"
-  awk -v max="$QUEUED_LIMIT" -v keep_re="$MANUAL_KEEP_RE" '
+  printf 'compact backlog listing (%s; done rows omitted; in-flight, held, blocked, and public-followup title lines bounded to %s per group; other queued bounded to %s; indented task bodies omitted)\n' \
+    "$reason" "$ACTIVE_LIMIT" "$QUEUED_LIMIT"
+  awk -v max="$QUEUED_LIMIT" -v active_max="$ACTIVE_LIMIT" -v keep_re="$MANUAL_KEEP_RE" '
     function state_for_heading(line, heading) {
       heading = line
       sub(/^##[[:space:]]+/, "", heading)
@@ -200,11 +210,19 @@ print_backlog_manual_compact() {
       if (state != "" && state != "done") print $0
       next
     }
-    state == "in_flight" && /^[-*][[:space:]]+/ { in_flight++; print $0; next }
+    state == "in_flight" && /^[-*][[:space:]]+/ {
+      in_flight++
+      if (in_flight_shown < active_max) { in_flight_shown++; print $0 }
+      next
+    }
     state == "done" && /^[-*][[:space:]]+/ { done_total++; next }
     state == "queued" && /^[-*][[:space:]]+/ {
       queued_total++
-      if ($0 ~ keep_re) { protected++; print $0; next }
+      if ($0 ~ keep_re) {
+        protected++
+        if (protected_shown < active_max) { protected_shown++; print $0 }
+        next
+      }
       if (plain_shown < max) { plain_shown++; print $0 }
       next
     }
@@ -213,8 +231,14 @@ print_backlog_manual_compact() {
       if (in_flight + queued_total + done_total == 0) {
         print "(no backlog item title lines found)"
       } else {
-        printf "(shown %d in-flight, %d held, blocked, or public-followup queued, %d of %d other queued title line(s); %d done row(s) omitted)\n", \
-          in_flight, protected, plain_shown, plain_total, done_total
+        printf "(shown %d of %d in-flight, %d of %d held, blocked, or public-followup queued, %d of %d other queued title line(s); %d done row(s) omitted)\n", \
+          in_flight_shown, in_flight, protected_shown, protected, plain_shown, plain_total, done_total
+        if (in_flight > in_flight_shown) {
+          printf "(%d more in-flight - raise CS_SESSION_START_ACTIVE_LIMIT or read config/backlog.md for the rest)\n", in_flight - in_flight_shown
+        }
+        if (protected > protected_shown) {
+          printf "(%d more held, blocked, or public-followup queued - raise CS_SESSION_START_ACTIVE_LIMIT or read config/backlog.md for the rest)\n", protected - protected_shown
+        }
         if (plain_total > plain_shown) {
           printf "(%d more queued - raise CS_SESSION_START_QUEUED_LIMIT or read config/backlog.md for the rest)\n", plain_total - plain_shown
         }
@@ -223,23 +247,22 @@ print_backlog_manual_compact() {
   ' "$path"
 }
 
-# tasks-axi closes every listing with its own help block. This section composes
-# four listings, so keeping them would repeat the same pointers four times, once
-# per group. The section prints one equivalent pointer of its own instead, so
-# the per-group help blocks stop at their `help[` header.
-strip_axi_help() {
-  awk '/^help\[/ { exit } { print }'
-}
-
-# Bound the dispatchable-now listing without rewriting the tool's own rendering:
-# `tasks-axi ready` rows are the indented lines under its ready[N]{...} header,
-# and every other line it prints passes through untouched. Whatever is cut is
-# disclosed exactly.
-print_ready_queued_bounded() {
-  local ready=$1 path=$2
-  printf '%s\n' "$ready" | awk -v max="$QUEUED_LIMIT" -v path="$path" '
+# Bound one composed group without rewriting the tool's own rendering: a
+# tasks-axi listing is a TOON header line followed by its indented rows, so the
+# rows under that header are the only lines this touches and every other line
+# passes through untouched (`tasks-axi ready` prints its public-followup group
+# under a header of its own, which therefore stays whole). Whatever is cut is
+# disclosed with an exact remainder count and the command that prints the rest.
+#
+# tasks-axi also closes every listing with its own help block. This section
+# composes four listings, so keeping them would repeat the same pointers four
+# times, once per group; the section prints one equivalent pointer of its own
+# instead, so each group stops at its `help[` header.
+print_axi_group_bounded() {  # <text> <header-prefix> <max> <label> <full-command>
+  local text=$1 header=$2 max=$3 label=$4 command=$5
+  printf '%s\n' "$text" | awk -v header="$header" -v max="$max" -v label="$label" -v command="$command" '
     /^help\[/ { exit }
-    /^ready\[/ { rows = 1; print; next }
+    index($0, header) == 1 { rows = 1; print; next }
     rows && /^[[:space:]]/ {
       total++
       if (shown < max) { print; shown++ }
@@ -248,9 +271,9 @@ print_ready_queued_bounded() {
     { rows = 0; print }
     END {
       if (total > 0) {
-        printf "(shown %d of %d ready queued item(s))\n", shown, total
+        printf "(shown %d of %d %s item(s))\n", shown, total, label
         if (total > shown) {
-          printf "(%d more queued - tasks-axi ready --file %s)\n", total - shown, path
+          printf "(%d more %s - %s)\n", total - shown, label, command
         }
       }
     }
@@ -268,16 +291,20 @@ print_backlog_tasks_axi_compact() {
   elif ! ready=$(tasks-axi ready --file "$path" 2>&1); then
     err=$ready
   else
-    printf 'compact backlog listing (tasks-axi; done rows omitted; every in-flight, held, and blocked row shown in full; ready queued bounded to %s; task bodies omitted)\n' \
-      "$QUEUED_LIMIT"
+    printf 'compact backlog listing (tasks-axi; done rows omitted; in-flight, held, and blocked rows shown in full up to %s per group; ready queued bounded to %s; task bodies omitted)\n' \
+      "$ACTIVE_LIMIT" "$QUEUED_LIMIT"
     printf '\nin flight:\n'
-    printf '%s\n' "$in_flight" | strip_axi_help
+    print_axi_group_bounded "$in_flight" 'tasks[' "$ACTIVE_LIMIT" 'in-flight' \
+      "tasks-axi list --file $path --state in_flight --fields $BACKLOG_FIELDS"
     printf '\nheld (boss- or time-gated; an in-flight item that is also held appears in both groups):\n'
-    printf '%s\n' "$held" | strip_axi_help
+    print_axi_group_bounded "$held" 'tasks[' "$ACTIVE_LIMIT" 'held' \
+      "tasks-axi list --file $path --state held --fields $BACKLOG_FIELDS"
     printf '\nblocked queued:\n'
-    printf '%s\n' "$blocked" | strip_axi_help
+    print_axi_group_bounded "$blocked" 'tasks[' "$ACTIVE_LIMIT" 'blocked queued' \
+      "tasks-axi list --file $path --state queued --blocked --fields $BACKLOG_FIELDS"
     printf '\nready queued (dispatchable now):\n'
-    print_ready_queued_bounded "$ready" "$path"
+    print_axi_group_bounded "$ready" 'ready[' "$QUEUED_LIMIT" 'ready queued' \
+      "tasks-axi ready --file $path"
     return 0
   fi
   printf 'tasks-axi compact listing failed; falling back to title-line rendering.\n'
@@ -476,17 +503,12 @@ EOF
 # Before CONTEXT: see this file's ORDERING note. Live fleet identity is what a
 # truncated tail must never take.
 section "FLEET STATE"
-print_backlog_compact "$CONFIG/backlog.md" "config/backlog.md"
 
-subsection "Board sweeps (data/sweeps.md)"
-if [ "$READ_ONLY" -eq 1 ]; then
-  printf 'read-only session: reporting sweeps without converging their polls.\n'
-else
-  SWEEP_SYNC=$("$SCRIPT_DIR/cs-board-watch.sh" sync 2>&1) || true
-  [ -n "$SWEEP_SYNC" ] && printf '%s\n' "$SWEEP_SYNC"
-fi
-"$SCRIPT_DIR/cs-board-watch.sh" list 2>&1 || true
-
+# The live-task inventory opens the section, ahead of the backlog listing and
+# the sweeps: which tasks exist, where they run, and whether their endpoints are
+# alive is the record recovery depends on, and every bound below it is a bound
+# on something the fleet can grow without limit. Nothing that scales with fleet
+# size may sit between the top of the digest's payload and this block.
 subsection "Work under way (state/*.meta)"
 META_FOUND=0
 for meta in "$STATE"/*.meta; do
@@ -531,6 +553,17 @@ for status in "$STATE"/*.status; do
   print_status_tail "$status"
 done
 [ "$ORPHAN_STATUS_FOUND" -eq 1 ] || printf '(none)\n'
+
+print_backlog_compact "$CONFIG/backlog.md" "config/backlog.md"
+
+subsection "Board sweeps (data/sweeps.md)"
+if [ "$READ_ONLY" -eq 1 ]; then
+  printf 'read-only session: reporting sweeps without converging their polls.\n'
+else
+  SWEEP_SYNC=$("$SCRIPT_DIR/cs-board-watch.sh" sync 2>&1) || true
+  [ -n "$SWEEP_SYNC" ] && printf '%s\n' "$SWEEP_SYNC"
+fi
+"$SCRIPT_DIR/cs-board-watch.sh" list 2>&1 || true
 
 subsection "AFK"
 if [ -e "$STATE/.afk" ]; then

@@ -116,11 +116,12 @@ fleet_line=$(section_line "$out" 'FLEET STATE')
 context_line=$(section_line "$out" 'CONTEXT')
 next_line=$(section_line "$out" 'NEXT STEP')
 inventory_line=$(section_line "$out" '--- task-a ---')
+backlog_line=$(section_line "$out" 'config/backlog.md')
 
 if [ -z "$lock_line" ] || [ -z "$boot_line" ] || [ -z "$wake_line" ] \
   || [ -z "$supervision_line" ] \
   || [ -z "$read_once_line" ] || [ -z "$fleet_line" ] || [ -z "$context_line" ] \
-  || [ -z "$next_line" ] || [ -z "$inventory_line" ]; then
+  || [ -z "$next_line" ] || [ -z "$inventory_line" ] || [ -z "$backlog_line" ]; then
   fail "one or more section headers missing from digest: $out"
 fi
 
@@ -136,9 +137,15 @@ fi
 [ "$context_line" -lt "$next_line" ] || fail "CONTEXT did not precede NEXT STEP"
 
 # The live-task inventory - the record recovery actually depends on - must sit
-# ahead of the curated memory a truncated tail is allowed to take.
+# ahead of the curated memory a truncated tail is allowed to take, and ahead of
+# the backlog listing inside FLEET STATE too: the backlog scales with fleet
+# size, so anything printed after it is what a deep fleet pushes off the end.
 [ "$inventory_line" -lt "$context_line" ] \
   || fail "the live-task inventory was buried behind the curated memory files"
+[ "$fleet_line" -lt "$inventory_line" ] \
+  || fail "the live-task inventory printed outside the FLEET STATE section"
+[ "$inventory_line" -lt "$backlog_line" ] \
+  || fail "the backlog listing was printed ahead of the live-task inventory"
 assert_contains "$out" 'Boss memory that may be truncated away safely.' \
   "the ordering fixture did not actually print a memory file"
 pass "digest sections are ordered safety-preamble first, live fleet state before curated memory"
@@ -270,8 +277,8 @@ EOF
 # group filters the startup listing composes (in-flight, held, blocked queued,
 # and the dispatchable ready set) and REFUSES anything the recovery listing must
 # never ask for: a body field, an unfiltered whole-backlog listing, or done
-# rows. CS_FAKE_TASKS_AXI_READY sizes the ready set so the queued bound can be
-# driven past its limit.
+# rows. CS_FAKE_TASKS_AXI_READY sizes the ready set and CS_FAKE_TASKS_AXI_ACTIVE
+# sizes each actionable group, so either bound can be driven past its limit.
 make_fake_tasks_axi() {
   local fakebin=$1
   cat > "$fakebin/tasks-axi" <<'SH'
@@ -280,6 +287,15 @@ set -u
 log=${CS_FAKE_TASKS_AXI_LOG:-}
 [ -n "$log" ] && printf '%s\n' "$*" >> "$log"
 ready_count=${CS_FAKE_TASKS_AXI_READY:-2}
+active_count=${CS_FAKE_TASKS_AXI_ACTIVE:-1}
+pad_rows() {  # <prefix> <state> - the filler rows after the canonical first one
+  i=2
+  while [ "$i" -le "$active_count" ]; do
+    printf '  %s-%s,%s,ship,consigliere,Filler %s item %s,none,"-","-"\n' \
+      "$1" "$i" "$2" "$1" "$i"
+    i=$((i + 1))
+  done
+}
 require_file() {
   case "$*" in *'--file '*) return 0 ;; esac
   printf '%s\n' 'missing explicit backlog file' >&2
@@ -326,16 +342,19 @@ case "${1:-}" in
         exit 9
         ;;
       *'--state in_flight'*)
-        task_header 1
+        task_header "$active_count"
         printf '%s\n' '  compact-startup,in_flight,ship,consigliere,Compact startup digest,none,captain,boss choice pending'
+        pad_rows in-flight in_flight
         ;;
       *'--state held'*)
-        task_header 1
+        task_header "$active_count"
         printf '%s\n' '  held-queued,queued,ship,consigliere,Held queued work,none,captain,boss choice pending'
+        pad_rows held queued
         ;;
       *'--state queued'*'--blocked'*)
-        task_header 1
+        task_header "$active_count"
         printf '%s\n' '  blocked-followup,queued,scout,consigliere,Follow compact startup,compact-startup,"-","-"'
+        pad_rows blocked queued
         ;;
       *)
         printf '%s\n' 'startup recovery must not request an unfiltered whole-backlog listing' >&2
@@ -362,7 +381,7 @@ AXI_LOG="$TMP/axi-compose.log"
 out=$(CS_HOME="$HOME_DIR" CS_FAKE_TASKS_AXI_LOG="$AXI_LOG" CS_FAKE_TASKS_AXI_READY=3 \
   PATH="$FAKEBIN:$PATH" "$BIN" 2>/dev/null)
 
-assert_contains "$out" 'compact backlog listing (tasks-axi; done rows omitted; every in-flight, held, and blocked row shown in full; ready queued bounded to 20; task bodies omitted)' \
+assert_contains "$out" 'compact backlog listing (tasks-axi; done rows omitted; in-flight, held, and blocked rows shown in full up to 40 per group; ready queued bounded to 20; task bodies omitted)' \
   "tasks-axi backend did not render the composed recovery listing"
 assert_contains "$out" 'compact-startup,in_flight,ship,consigliere,Compact startup digest,none,captain,boss choice pending' \
   "tasks-axi listing omitted in-flight identity, state, or hold metadata"
@@ -380,6 +399,11 @@ assert_not_contains "$out" 'help[1]:' \
   "the composed listing repeated tasks-axi's per-group help block"
 assert_contains "$out" 'Full task bodies remain available on demand: tasks-axi show <id> --full' \
   "the composed listing omitted the full-body lookup pointer"
+# A group inside its bound reports what it showed and claims no remainder.
+assert_contains "$out" '(shown 1 of 1 in-flight item(s))' \
+  "an actionable group did not account for the rows it showed"
+assert_not_contains "$out" 'more in-flight - tasks-axi list' \
+  "a complete in-flight group claimed an omitted remainder"
 
 # The fake refuses a body field, an unfiltered listing, and a done listing, so
 # a clean render already proves those were never asked for; pin the group
@@ -408,7 +432,7 @@ assert_contains "$out" 'ready-3,queued,ship,consigliere,Ready item 3' \
 assert_not_contains "$out" 'ready-4,queued' "the queued bound did not actually bound the ready listing"
 assert_contains "$out" '(shown 3 of 7 ready queued item(s))' \
   "the bounded queued listing did not report what it showed"
-assert_contains "$out" "(4 more queued - tasks-axi ready --file $HOME_DIR/config/backlog.md)" \
+assert_contains "$out" "(4 more ready queued - tasks-axi ready --file $HOME_DIR/config/backlog.md)" \
   "the bounded queued listing did not disclose an exact remainder and how to see it"
 
 # The bound is for dispatchable work only: held and blocked rows stay whole.
@@ -420,6 +444,42 @@ assert_contains "$out" 'compact-startup,in_flight,ship,consigliere,Compact start
   "the queued bound swallowed an in-flight row"
 pass "the startup backlog bound cuts only dispatchable queued rows and discloses the remainder exactly"
 
+# --- backlog: the actionable groups are bounded too, and disclose the cut ------
+# The backlog listing shares the digest with the live-task inventory above it,
+# so a pathological fleet may not spend the whole payload on actionable rows
+# either. Each group keeps its rows whole up to the bound and then says exactly
+# how many it withheld and which command prints them.
+HOME_DIR=$(fresh_home axi-active-bound)
+FAKEBIN=$(cs_fakebin "$TMP/axi-active-bound-tools")
+make_fake_tasks_axi "$FAKEBIN"
+write_long_body_backlog "$HOME_DIR/config/backlog.md"
+FIELDS='blocked_by,hold_kind,hold_reason'
+
+out=$(CS_HOME="$HOME_DIR" CS_FAKE_TASKS_AXI_ACTIVE=5 CS_SESSION_START_ACTIVE_LIMIT=2 \
+  PATH="$FAKEBIN:$PATH" "$BIN" 2>/dev/null)
+
+assert_contains "$out" 'compact-startup,in_flight,ship,consigliere,Compact startup digest,none,captain,boss choice pending' \
+  "the actionable bound dropped a row inside its own limit"
+assert_contains "$out" 'in-flight-2,in_flight,ship,consigliere,Filler in-flight item 2' \
+  "the actionable bound dropped the second row inside its own limit"
+assert_not_contains "$out" 'in-flight-3,in_flight' "the in-flight group was not actually bounded"
+assert_not_contains "$out" 'held-3,queued' "the held group was not actually bounded"
+assert_not_contains "$out" 'blocked-3,queued' "the blocked queued group was not actually bounded"
+
+assert_contains "$out" '(shown 2 of 5 in-flight item(s))' \
+  "the bounded in-flight group did not report what it showed"
+assert_contains "$out" "(3 more in-flight - tasks-axi list --file $HOME_DIR/config/backlog.md --state in_flight --fields $FIELDS)" \
+  "the bounded in-flight group did not disclose an exact remainder and how to see it"
+assert_contains "$out" '(shown 2 of 5 held item(s))' \
+  "the bounded held group did not report what it showed"
+assert_contains "$out" "(3 more held - tasks-axi list --file $HOME_DIR/config/backlog.md --state held --fields $FIELDS)" \
+  "the bounded held group did not disclose an exact remainder and how to see it"
+assert_contains "$out" '(shown 2 of 5 blocked queued item(s))' \
+  "the bounded blocked queued group did not report what it showed"
+assert_contains "$out" "(3 more blocked queued - tasks-axi list --file $HOME_DIR/config/backlog.md --state queued --blocked --fields $FIELDS)" \
+  "the bounded blocked queued group did not disclose an exact remainder and how to see it"
+pass "tasks-axi actionable groups are bounded per group with an exact disclosed remainder"
+
 # --- backlog: manual backend composition ----------------------------------------
 HOME_DIR=$(fresh_home manual-compose)
 printf 'manual\n' > "$HOME_DIR/config/backlog-backend.conf"
@@ -427,7 +487,7 @@ write_long_body_backlog "$HOME_DIR/config/backlog.md"
 
 out=$(CS_HOME="$HOME_DIR" CS_SESSION_START_QUEUED_LIMIT=4 "$BIN" 2>/dev/null)
 
-assert_contains "$out" 'compact backlog listing (manual backend; done rows omitted; every in-flight, held, blocked, and public-followup title line kept; other queued bounded to 4; indented task bodies omitted)' \
+assert_contains "$out" 'compact backlog listing (manual backend; done rows omitted; in-flight, held, blocked, and public-followup title lines bounded to 40 per group; other queued bounded to 4; indented task bodies omitted)' \
   "manual backend did not use the composed title-line rendering"
 assert_contains "$out" '## In flight' "manual rendering omitted the in-flight section heading"
 assert_contains "$out" '- [ ] compact-startup - Compact startup digest' \
@@ -447,11 +507,52 @@ assert_contains "$out" '- [ ] plain-4 - Plain queued item 4' \
   "manual rendering dropped a queued title line inside its bound"
 assert_not_contains "$out" '- [ ] plain-5 - Plain queued item 5' \
   "manual rendering did not bound its plain queued listing"
-assert_contains "$out" '(shown 1 in-flight, 3 held, blocked, or public-followup queued, 4 of 25 other queued title line(s); 1 done row(s) omitted)' \
+assert_contains "$out" '(shown 1 of 1 in-flight, 3 of 3 held, blocked, or public-followup queued, 4 of 25 other queued title line(s); 1 done row(s) omitted)' \
   "manual rendering did not report its bound accounting"
 assert_contains "$out" '(21 more queued - raise CS_SESSION_START_QUEUED_LIMIT or read config/backlog.md for the rest)' \
   "manual rendering did not disclose an exact queued remainder"
+assert_not_contains "$out" 'more in-flight - raise CS_SESSION_START_ACTIVE_LIMIT' \
+  "manual rendering claimed a remainder for a complete in-flight group"
 assert_contains "$out" 'or config/backlog.md' "manual digest omitted the config/backlog.md full-body pointer"
 pass "manual backlog rendering keeps held, blocked, and public-followup rows while bounding the rest"
+
+# --- backlog: the manual actionable groups are bounded the same way ------------
+write_active_bound_backlog() {
+  local path=$1 i=1
+  printf '# Backlog\n\n## In flight\n' > "$path"
+  while [ "$i" -le 3 ]; do
+    printf -- '- [ ] flight-%s - In flight item %s (repo: consigliere) (kind: ship)\n' "$i" "$i" >> "$path"
+    i=$((i + 1))
+  done
+  cat >> "$path" <<'EOF'
+
+## Queued
+- [ ] held-one - First held item (repo: consigliere) (kind: ship) (hold: boss choice pending)
+- [ ] held-two - Second held item (repo: consigliere) (kind: ship) (hold: boss choice pending)
+- [ ] blocked-one - Blocked item blocked-by: flight-1 (repo: consigliere) (kind: scout)
+EOF
+}
+
+HOME_DIR=$(fresh_home manual-active-bound)
+printf 'manual\n' > "$HOME_DIR/config/backlog-backend.conf"
+write_active_bound_backlog "$HOME_DIR/config/backlog.md"
+
+out=$(CS_HOME="$HOME_DIR" CS_SESSION_START_ACTIVE_LIMIT=2 "$BIN" 2>/dev/null)
+
+assert_contains "$out" '- [ ] flight-2 - In flight item 2' \
+  "the manual actionable bound dropped a row inside its own limit"
+assert_not_contains "$out" '- [ ] flight-3 - In flight item 3' \
+  "the manual in-flight group was not actually bounded"
+assert_contains "$out" '- [ ] held-two - Second held item' \
+  "the manual actionable bound dropped a held row inside its own limit"
+assert_not_contains "$out" '- [ ] blocked-one - Blocked item' \
+  "the manual held, blocked, and public-followup group was not actually bounded"
+assert_contains "$out" '(shown 2 of 3 in-flight, 2 of 3 held, blocked, or public-followup queued, 0 of 0 other queued title line(s); 0 done row(s) omitted)' \
+  "manual rendering did not account for its bounded actionable groups"
+assert_contains "$out" '(1 more in-flight - raise CS_SESSION_START_ACTIVE_LIMIT or read config/backlog.md for the rest)' \
+  "manual rendering did not disclose the in-flight remainder it withheld"
+assert_contains "$out" '(1 more held, blocked, or public-followup queued - raise CS_SESSION_START_ACTIVE_LIMIT or read config/backlog.md for the rest)' \
+  "manual rendering did not disclose the actionable queued remainder it withheld"
+pass "manual actionable groups are bounded per group with an exact disclosed remainder"
 
 pass "cs-session-start digest composition"

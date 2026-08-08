@@ -32,12 +32,23 @@ CS_LINE_CAP_SUFFIX=' [truncated]'
 # This is the rule itself. It assigns rather than prints so a caller composing
 # a larger section never pays a command substitution per item on a path that
 # runs at the top of every wake-handling turn.
+#
+# <max> is a hard ceiling, never an approximation: a cut line is never longer
+# than <max> characters even when <max> is smaller than the marker itself. At
+# that size no content can survive alongside a disclosure, so the marker is what
+# is kept, cut to <max> in turn - the result still reads as truncated rather
+# than passing a fragment of content off as a whole line. A <max> of zero or
+# less yields the empty string.
 cs_cap_line_var() {
   local LC_ALL=C
-  local line=$1 max=${2:-$CS_LINE_CAP_DEFAULT} keep bytes
+  local line=$1 max=${2:-$CS_LINE_CAP_DEFAULT} keep bytes suffix=$CS_LINE_CAP_SUFFIX
   local offset=0 characters=0 keep_bytes=0 byte width next1 next2 next3
-  keep=$((max - ${#CS_LINE_CAP_SUFFIX}))
-  [ "$keep" -ge 0 ] || keep=0
+  [ "$max" -ge 0 ] || max=0
+  keep=$((max - ${#suffix}))
+  if [ "$keep" -lt 0 ]; then
+    suffix=${suffix:0:max}
+    keep=0
+  fi
   bytes=${#line}
   while [ "$offset" -lt "$bytes" ]; do
     printf -v byte '%d' "'${line:$offset:1}"
@@ -84,7 +95,7 @@ cs_cap_line_var() {
     characters=$((characters + 1))
     [ "$characters" -ne "$keep" ] || keep_bytes=$offset
     if [ "$characters" -gt "$max" ]; then
-      CS_LINE_CAP_LINE="${line:0:$keep_bytes}$CS_LINE_CAP_SUFFIX"
+      CS_LINE_CAP_LINE="${line:0:$keep_bytes}$suffix"
       return 0
     fi
   done
