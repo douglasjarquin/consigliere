@@ -66,7 +66,7 @@ cd consigliere
 codex                 # or: claude
 ```
 
-`AGENTS.md` is the always-loaded operating contract (claude loads it via the `CLAUDE.md` symlink). The session starts with `bin/cs-session-start.sh` (one digest: lock, bootstrap, wake queue, context, fleet state, supervision block). The root harness is auto-detected (`CLAUDECODE=1` ⇒ claude, else codex; `host/harness.conf` overrides).
+`AGENTS.md` is the always-loaded operating contract (claude loads it via the `CLAUDE.md` symlink). The session starts with `bin/cs-session-start.sh`, which prints one ordered digest of the whole operating picture; its header owns the section order and contents. The root harness is auto-detected (`CLAUDECODE=1` ⇒ claude, else codex; `host/harness.conf` overrides).
 
 Then talk to it in plain language: describe the work, name the project when it is ambiguous, and it dispatches, supervises, and brings back PRs for your word. It never merges without you - `yolo` lets it answer routine review decisions on its own, but landing is always your call - never writes to a project itself, and never tears down unlanded work.
 
