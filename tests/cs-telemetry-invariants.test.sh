@@ -19,6 +19,13 @@ set -u
 TMP_ROOT=$(cs_test_tmproot cs-telemetry-invariants)
 BLOCK_BANNER='TURN WOULD END BLIND - SUPERVISION IS OFF'
 GUARD_HARNESS_RE='sleep|bash|zsh|codex|claude'
+# Breadcrumbs are keyed by the session identity, which is the harness process in
+# this process's ancestry. A test runs under its own shell, not under codex or
+# claude, so every breadcrumb-asserting invocation must widen that walk to match
+# it - otherwise the identity is unresolvable, the breadcrumb is dropped by
+# design, and the assertion passes only on a machine that happens to run the
+# suite from inside a harness session.
+SHELL_HARNESS_RE='bash|zsh|codex|claude'
 
 # make_home <name> <telemetry: on|off|broken> - a genuine primary-scoped home
 # with one in-flight task and no live watcher, exactly the fixture
@@ -184,6 +191,7 @@ test_guard_is_exempt_in_a_soldier_worktree() {
 
 drain() { # <home>
   CS_HOME="$1" CS_ROOT_OVERRIDE="$ROOT" CS_STATE_OVERRIDE="$1/state" \
+    CS_LOCK_HARNESS_RE="$SHELL_HARNESS_RE" \
     CS_TELEMETRY_DISABLE='' "$ROOT/bin/cs-wake-drain.sh" 2>&1
 }
 
@@ -224,6 +232,7 @@ checkpoint() { # <home>
   # watched, so it goes straight to the queue wait and returns the queued rows.
   touch "$1/state/.last-monitor-beat"
   CS_HOME="$1" CS_ROOT_OVERRIDE="$ROOT" CS_STATE_OVERRIDE="$1/state" \
+    CS_LOCK_HARNESS_RE="$SHELL_HARNESS_RE" \
     CS_TELEMETRY_DISABLE='' "$ROOT/bin/cs-watch-checkpoint.sh" --seconds 3 2>&1
 }
 
