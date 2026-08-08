@@ -110,6 +110,7 @@ state/               volatile runtime signals; gitignored
   <id>.meta          written by cs-spawn; kind-specific posture fields and the complete schema live in docs/configuration.md; cs-pr-check records pr= and pr_head=
   <id>.check.sh      authenticated slow poll; watcher runs registered checks from hash-validated snapshots only
   .home-pane         this home's own agent pane, recorded at session start; revalidated before any activation
+  .session-start-complete  completion proof gating the session-open re-emit; bin/cs-sessionstart-run.sh
   .activation-stalled  present when this home cannot self-activate (pane gone or agent dead); needs recovery
   <id>.check-trust   content binding created by cs-check-register.sh
   <id>.pr-poll       validated data sidecar for the byte-static PR merge poll

@@ -2,8 +2,10 @@
 
 Verified live against claude 2.1.218 on 2026-07-24 (launch-scoped Stop hook fires
 and blocks; `--settings` accepts a file or JSON string; no trust prompt under
-`--dangerously-skip-permissions`), and against claude 2.1.220 on 2026-07-28
-(`--permission-mode auto` keeps the launch-scoped Stop hook firing).
+`--dangerously-skip-permissions`), against claude 2.1.220 on 2026-07-28
+(`--permission-mode auto` keeps the launch-scoped Stop hook firing), and against
+claude 2.1.226 on 2026-08-08 (SessionStart source vocabulary and hook-stdout
+context injection; see the session-open section below).
 Re-verify after claude upgrades; `bin/cs-bootstrap.sh` checks presence only, not
 version. The launch template and per-harness facts live in `bin/cs-harness-lib.sh`.
 
@@ -53,6 +55,10 @@ version. The launch template and per-harness facts live in `bin/cs-harness-lib.s
   self-verifying `Stop` hook that runs `bin/cs-turnend-guard.sh`. It fires only
   when the checkout's own `.claude/settings.json` still registers the guard, so a
   copied settings file cannot fire against a foreign tree (mirrors `.codex/hooks.json`).
+- The same file registers an unmatched, self-verifying `SessionStart` hook that
+  pipes the payload into `bin/cs-sessionstart-run.sh` with a 180s timeout, above
+  the digest's own 120s `CS_SESSION_START_TIMEOUT` bound so the harness never
+  preempts the truncation banner.
 - Stop payloads carry `stop_hook_active` (same loop-guard field codex uses); a Stop
   hook that exits 2 blocks the stop and forces one continuation.
 - The blocked message is a TYPED `turn-end-guard` operational input, not raw text —
@@ -73,6 +79,54 @@ version. The launch template and per-harness facts live in `bin/cs-harness-lib.s
   codex and claude read the same operating contract.
 - Root-session detection: a Claude Code session exports `CLAUDECODE=1`;
   `cs_harness_detect_root` reads it (after `host/harness.conf` and `CS_HARNESS_OVERRIDE`).
+
+## Session-open hook (verified 2026-08-08, claude 2.1.226)
+
+Measured in a throwaway lab whose `.claude/settings.json` registered a recorder
+that logs the payload `source` field and prints a source-stamped token, so
+producing hook stdout can never be mistaken for delivering it into context.
+
+Observed source vocabulary and delivery:
+
+```
+$ claude -p 'Reply with exactly the HOOK_TOKEN line you were given at session start...'
+HOOK_TOKEN_startup_54208            # recorder logged source=startup
+$ claude --continue -p 'Reply with exactly the LAST HOOK_TOKEN line you were given...'
+HOOK_TOKEN_resume_60677             # recorder logged source=resume
+```
+
+- A scripted interactive TUI open also logged `source=startup` and the model
+  quoted the fresh token back, so cold-open delivery holds in both `-p` and the TUI.
+- `/clear` in the TUI logged `source=clear`, injected a fresh token, and the model
+  quoted `HOOK_TOKEN_clear_21204` back.
+- `/compact` is NOT verified live: repeated scripted TUI attempts (including after a
+  900-word generated turn) produced no `source=compact` event and no `Compacted`
+  marker in the transcript, so only claude's documented vocabulary names it.
+  `bin/cs-sessionstart-run.sh` routes `clear` and `compact` identically, so routing
+  does not depend on the unverified name.
+- Delivery truncates from the TAIL: a ~55KB recorder payload (1000 filler lines
+  between BIGTOKEN_FIRST/BIGTOKEN_LAST markers) reached the model with the first
+  marker visible and the last MISSING. The digest's fleet-state-before-context
+  ordering (PR #42) exists for exactly this failure mode.
+- `-p` runs the project `SessionStart` hook without folder trust, but the
+  interactive TUI shows the one-time "Quick safety check: Is this a project you
+  created or one you trust?" dialog first and runs project hooks only after it is
+  accepted.
+
+End to end against this repo's real tracked hooks, in a plain clone with `state/`
+present:
+
+```
+$ claude -p 'Do not run any tools. If a SESSION START digest is already present in your context ... reply with its LOCK section first line and DIGEST PRESENT ...'
+lock acquired: harness pid 61190 DIGEST PRESENT
+```
+
+A hook-run digest stacks four to five more shells between `cs-lock.sh` and the
+harness process than a directly invoked one, which is why its ancestry walk is
+sixteen hops (see `bin/cs-lock.sh`).
+A fresh clone WITHOUT `state/` stays silent by design (`cs_primary_scope_matches`
+requires it); the first session of a brand-new home runs `bin/cs-session-start.sh`
+by hand per AGENTS.md section 3.
 
 ## Away-mode composer
 

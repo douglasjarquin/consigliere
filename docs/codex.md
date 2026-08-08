@@ -2,6 +2,7 @@
 
 Verified against codex-cli 0.139-0.144 (upstream firstmate evidence) and re-verified live on 2026-07-27 with `codex --version` returning `codex-cli 0.145.0`.
 `codex debug models` reported `low,medium,high,xhigh,max,ultra` for both `gpt-5.6-sol` and `gpt-5.6-terra`.
+Session-open hook facts below were verified live on 2026-08-08 against codex-cli 0.146.0 and, after codex self-updated mid-verification, re-verified against codex-cli 0.147.0.
 Re-verify after codex upgrades; `bin/cs-bootstrap.sh` checks presence only, not version.
 
 ## Launch template (the only one)
@@ -22,7 +23,36 @@ codex [--model <m>] [-c 'model_reasoning_effort="<low|medium|high|xhigh|max|ultr
 ## Hooks (.codex/hooks.json)
 
 - `Stop` hook -> `bin/cs-turnend-guard.sh`: exit 2 + stderr blocks the stop; payload field `stop_hook_active=true` marks an already-forced continuation (loop guard).
+- `SessionStart` hook -> `bin/cs-sessionstart-run.sh` (payload piped on stdin, 180s timeout, above the digest's own 120s `CS_SESSION_START_TIMEOUT` bound).
 - Hook commands self-verify: they run only when the checkout's own `.codex/hooks.json` still registers them, so a copied hooks file cannot fire against a foreign tree.
+- Project hooks additionally require codex's own persisted hook trust: `~/.codex/config.toml` records a `[hooks.state."<hooks.json path>:<event>:<i>:<j>"]` entry with a `trusted_hash`, an untrusted or hash-changed hook is silently skipped, and `--dangerously-bypass-hook-trust` runs enabled hooks without that record (used only by vetted automation such as the live tests).
+- Consequence: after any change to `.codex/hooks.json` lands, the next interactive codex session in that home must re-approve the changed hooks once before they fire.
+
+## Session-open hook (verified 2026-08-08, codex-cli 0.146.0 and 0.147.0)
+
+Measured in a throwaway lab whose `.codex/hooks.json` registered a recorder that logs the payload `source` field and prints a source-stamped token, so producing hook stdout can never be mistaken for delivering it into context.
+
+```
+$ codex exec --skip-git-repo-check --dangerously-bypass-hook-trust 'Reply with exactly the HOOK_TOKEN line you were given at session start...'
+HOOK_TOKEN_startup_91786            # recorder logged source=startup
+$ codex exec resume --last --skip-git-repo-check --dangerously-bypass-hook-trust 'Reply with exactly the LAST HOOK_TOKEN line you were given...'
+HOOK_TOKEN_resume_1362              # recorder logged source=resume
+```
+
+- The interactive TUI also fires `SessionStart` at cold open (recorder logged `source=startup` at 0.146.0 and 0.147.0) and injects the hook stdout into model context: the session rollout under `~/.codex/sessions/` shows the token as a `response_item` BEFORE the first user turn, and the model quoted it back.
+  Upstream firstmate recorded "no TUI fire" at 0.146.0 from a lab without persisted hook trust, so the trust gate is the variable that finding and this one disagree on.
+- A ~55KB recorder payload (1000 filler lines between BIGTOKEN_FIRST/BIGTOKEN_LAST markers) was delivered whole under `codex exec`: the model quoted both the first and last marker lines back.
+- Sources other than `startup` and `resume` were not observed from codex; `bin/cs-sessionstart-run.sh` treats anything unrecognized as a full startup, which is the safe direction.
+
+End to end against this repo's real tracked hooks, in a plain clone with `state/` present, both `codex exec` and the scripted interactive TUI delivered the full digest before the first turn:
+
+```
+$ codex exec --skip-git-repo-check --dangerously-bypass-hook-trust 'Do not run any tools. If a SESSION START digest is already present in your context ... reply with its LOCK section first line and DIGEST PRESENT ...'
+lock acquired: harness pid 70271
+DIGEST PRESENT
+```
+
+The TUI run's rollout recorded `lock acquired: harness pid 84353` followed by the model's `DIGEST PRESENT` reply.
 
 ## Interaction facts
 

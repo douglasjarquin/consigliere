@@ -67,9 +67,13 @@ harness_process_is() { # <comm> <args>
   return 1
 }
 
+# Sixteen hops, not eight: a hook-run session start (bin/cs-sessionstart-run.sh
+# -> bounded parent -> timeout runner -> wrapper shell -> bounded child ->
+# cs-lock) stacks four to five more shells between this walk and the harness
+# than a directly invoked one.
 harness_pid() {
   local pid=$$ comm args
-  for _ in 1 2 3 4 5 6 7 8; do
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
     comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
     args=$(ps -o args= -p "$pid" 2>/dev/null)
     if harness_process_is "$comm" "$args"; then
