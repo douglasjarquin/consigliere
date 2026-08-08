@@ -4,10 +4,13 @@
 # Produces ONE ordered digest so a session starts in one or two turns:
 #   1. lock          - acquire the per-home session lock FIRST, before any
 #                      mutating step runs (cs-lock.sh).
-#   2. bootstrap     - detect-only diagnostics always run; the mutating sweeps
-#                      (fleet sync, capo fast-forward, capo liveness) run only
-#                      when this session actually holds the lock
-#                      (CS_BOOTSTRAP_DETECT_ONLY=1 otherwise).
+#   2. bootstrap     - the LOCAL detect-only diagnostics always run; the local
+#                      mutating sweeps (capo fast-forward, capo liveness) run
+#                      only when this session actually holds the lock
+#                      (CS_BOOTSTRAP_DETECT_ONLY=1 otherwise). Its network half
+#                      (the gh auth probe and the fleet sync) runs in the
+#                      deferred stage started at step 1, never here
+#                      (CS_BOOTSTRAP_NETWORK=skip on every path).
 #   3. wake-drain    - mutates the durable wake queue, so it also only runs
 #                      when locked; drained records are this turn's first work
 #                      queue. The read-only path leaves the queue untouched
@@ -30,15 +33,35 @@
 #                      (cs-board-watch.sh sync), so a sweep the boss started in
 #                      an earlier session survives a wiped state/ or an
 #                      interrupted arm instead of going quiet.
-#   7. context       - config/projects.md, host/capos.md, config/boss.md,
+#   7. network checks - the result of the deferred network stage started back at
+#                      step 1, harvested WITHOUT waiting for it.
+#   8. context       - config/projects.md, host/capos.md, config/boss.md,
 #                      config/boss-shared.md, config/learnings.md, each with an
 #                      explicit ABSENT marker when missing (absence is
 #                      meaningful and never confused with empty-but-present).
 #                      The three curated startup-memory files also report when
 #                      they exceed CS_STARTUP_MEMORY_MAX_BYTES, since every
 #                      session of the home pays their cost; /vault consolidates.
-#   8. next step     - points back at the supervision block; this script never
+#   9. next step     - points back at the supervision block; this script never
 #                      starts supervision itself.
+#
+# NO NETWORK ON THE BLOCKING PATH. This digest runs on a session-open hook that
+# blocks session initialization, so anything it waits for is time the boss waits
+# before the first turn - and every external-network call it used to make was
+# individually unbounded. One unreachable remote could burn the entire
+# CS_SESSION_START_TIMEOUT and truncate the digest, so a slow network could cost
+# the work queue itself. So no step between here and the last line below makes
+# an external-network call. The two that did - `gh auth status` and the
+# fleet-sync fetch of every project clone - are started as one detached bounded
+# worker right after the lock (step 1) and harvested at step 7 without ever
+# blocking on it. bin/cs-startup-network.sh owns that stage and its safety
+# argument; bin/cs-bootstrap.sh remains the owner of the sweeps themselves and
+# still runs every one of them. The capo sweeps stay here because they are
+# local: a capo home is a detached worktree of this repo on this machine and its
+# liveness probe asks the local herdr server.
+# What this deliberately trades: on a slow network the digest prints IN PROGRESS
+# and names exactly which checks are not yet confirmed, instead of waiting for
+# them. It never reports an unconfirmed check as passed.
 #
 # ORDERING, and why FLEET STATE runs before CONTEXT: this digest is delivered
 # through a harness that truncates an oversized payload from the TAIL, and it
@@ -57,8 +80,9 @@
 # mutation authority and this turn's work queue before anything else is read.
 #
 # COMPOSITION, NOT DUPLICATION: this script calls cs-lock.sh, cs-bootstrap.sh,
-# and cs-wake-drain.sh as real subprocesses and prints their real output; all
-# sequencing/formatting logic added here stays local to this file.
+# cs-wake-drain.sh, and cs-startup-network.sh as real subprocesses and prints
+# their real output; all sequencing/formatting logic added here stays local to
+# this file.
 #
 # BACKLOG DIGEST: the startup listing is a RECOVERY input, not a reporting
 # surface, so it carries what this turn can act on and nothing else.
@@ -105,10 +129,15 @@
 # RUNTIME BOUND: the digest is executed by the session-open hooks (see
 # bin/cs-sessionstart-run.sh), which block session initialization while it
 # runs, so an unbounded digest is no longer merely slow - it can strand a whole
-# session behind one hung subprocess. Not every step is individually bounded:
-# bootstrap's gh auth probe, its tool presence probes, the backlog listing, and
-# the per-task endpoint reads are not. So the whole digest runs as ONE bounded
-# child of this script (CS_SESSION_START_TIMEOUT, default 120s). The child
+# session behind one hung subprocess. Every remaining step is local, but local
+# is not the same as bounded: bootstrap's tool presence probes, the backlog
+# listing, and the per-task endpoint reads are all unbounded subprocesses. So
+# the whole digest still runs as ONE bounded child of this script
+# (CS_SESSION_START_TIMEOUT, default 120s). The deferred network stage
+# deliberately sits OUTSIDE that bound, in its own process group under its own
+# aggregate deadline (CS_STARTUP_NETWORK_TIMEOUT), so a truncated digest neither
+# waits for it nor orphans it unbounded.
+# The child
 # writes the digest straight to this script's stdout, so everything it emitted
 # before the bound was hit is already delivered; the parent then prints a loud
 # STARTUP TRUNCATED banner naming the stage that did not finish and the stages
@@ -134,7 +163,9 @@
 #             bootstrap's mutating sweeps (fleet sync, capo fast-forward, capo
 #             liveness; bootstrap runs CS_BOOTSTRAP_DETECT_ONLY=1 with
 #             CS_BOOTSTRAP_LOCKED=1 so repair ownership stays with this
-#             session) - and re-emit the rest. The wake-queue drain is NOT
+#             session, and the deferred network stage runs its read-only gh
+#             auth probe alone) - and re-emit the rest.
+#             The wake-queue drain is NOT
 #             skipped: queued records arrived after startup and are this turn's
 #             work, and the session that owns the lock is exactly the session
 #             that must take them. Lock acquisition still runs, because
@@ -167,7 +198,7 @@ done
 # child names the stage it is entering, and the parent reports every stage
 # after that one as never emitted. Keep it in the exact order the digest
 # prints.
-SESSION_START_STAGES='lock bootstrap wake-queue supervision read-once fleet-state context next-step'
+SESSION_START_STAGES='lock bootstrap wake-queue supervision read-once fleet-state network-checks context next-step'
 
 stage() {  # <stage-name>: breadcrumb for the parent's truncation banner
   [ -n "${CS_SESSION_START_STAGE_FILE:-}" ] || return 0
@@ -568,18 +599,41 @@ if [ "$READ_ONLY" -eq 0 ] && [ "$REEMIT" -eq 0 ]; then
   fi
 fi
 
+# --- 1c. deferred network stage (started, never waited on) -----------------
+# Every network call this session start owes is launched HERE, detached and
+# bounded, so it runs concurrently with the whole digest below instead of in
+# front of it. Step 7 harvests whatever it has finished, without ever waiting.
+# --reemit passes --locked 0 for the same reason it runs bootstrap detect-only:
+# this process already ran the mutating sweeps at its own startup, so only the
+# read-only GitHub-auth probe is owed. A read-only session starts nothing at
+# all: it holds no mutation authority for the sweeps, and it must not spawn,
+# steer, or merge anyway, so it has no action left for an auth verdict to gate.
+NETWORK_STAGE_STARTED=0
+if [ "$READ_ONLY" -eq 0 ]; then
+  NETWORK_STAGE_LOCKED=1
+  [ "$REEMIT" -eq 0 ] || NETWORK_STAGE_LOCKED=0
+  if "$SCRIPT_DIR/cs-startup-network.sh" start \
+    --locked "$NETWORK_STAGE_LOCKED" --harvest-pid $$ >/dev/null 2>&1; then
+    NETWORK_STAGE_STARTED=1
+  fi
+fi
+
 # --- 2. bootstrap --------------------------------------------------------
+# CS_BOOTSTRAP_NETWORK=skip on every path: bootstrap's own network half is what
+# the deferred stage above is running right now, and running it here too would
+# both re-block this digest and race the worker's sweeps against themselves.
 stage bootstrap
 subsection "BOOTSTRAP"
 if [ "$READ_ONLY" -eq 1 ]; then
-  BOOT_OUT=$(CS_BOOTSTRAP_DETECT_ONLY=1 "$SCRIPT_DIR/cs-bootstrap.sh" 2>&1)
+  BOOT_OUT=$(CS_BOOTSTRAP_DETECT_ONLY=1 CS_BOOTSTRAP_NETWORK=skip "$SCRIPT_DIR/cs-bootstrap.sh" 2>&1)
 elif [ "$REEMIT" -eq 1 ]; then
   # Detect-only because startup already ran the sweeps, LOCKED because this
   # session still owns repair - it must not defer to a lock holder that is
   # itself.
-  BOOT_OUT=$(CS_BOOTSTRAP_DETECT_ONLY=1 CS_BOOTSTRAP_LOCKED=1 "$SCRIPT_DIR/cs-bootstrap.sh" 2>&1)
+  BOOT_OUT=$(CS_BOOTSTRAP_DETECT_ONLY=1 CS_BOOTSTRAP_LOCKED=1 CS_BOOTSTRAP_NETWORK=skip \
+    "$SCRIPT_DIR/cs-bootstrap.sh" 2>&1)
 else
-  BOOT_OUT=$("$SCRIPT_DIR/cs-bootstrap.sh" 2>&1)
+  BOOT_OUT=$(CS_BOOTSTRAP_NETWORK=skip "$SCRIPT_DIR/cs-bootstrap.sh" 2>&1)
 fi
 if [ -n "$BOOT_OUT" ]; then
   printf '%s\n' "$BOOT_OUT"
@@ -684,6 +738,8 @@ Go to a source directly only when:
     held or blocked, or queued - and this turn needs them, in which case take the
     targeted follow-up that disclosure names (the group's own tasks-axi listing,
     or that one section of config/backlog.md) rather than a bulk read,
+  - the NETWORK CHECKS section reported its checks still IN PROGRESS and this
+    turn needs their verdict (bin/cs-startup-network.sh read),
   - or this digest reports a stage as never emitted (a truncated startup names
     the stages that never ran), in which case that stage's sources were never
     printed and must be reconciled.
@@ -763,7 +819,30 @@ else
   printf 'absent\n'
 fi
 
-# --- 7. context digest -----------------------------------------------------
+# --- 7. network checks ------------------------------------------------------
+# Deliberately here and not later: these lines are actionable (broken GitHub
+# auth, a stuck clone), and the section after this one is the curated memory a
+# truncated tail is meant to take first.
+# Deliberately here and not earlier: this is the last point in the digest, so
+# the worker started at step 1 has had the whole composition above to finish in.
+# It is a NON-BLOCKING read either way - whatever the worker has published by
+# now is printed, and whatever it has not is named as not yet confirmed.
+stage network-checks
+section "NETWORK CHECKS"
+if [ "$READ_ONLY" -eq 1 ]; then
+  printf 'skipped (read-only session) - GitHub authentication and project clone refresh\n'
+  printf 'were not run. They need the fleet lock, and this session must not spawn, steer,\n'
+  printf 'or merge, so it has no action they would gate. The session holding the lock runs\n'
+  printf 'them.\n'
+elif [ "$NETWORK_STAGE_STARTED" -eq 0 ]; then
+  printf 'NETWORK_CHECKS: the deferred check stage could not be started, so GitHub\n'
+  printf 'authentication and project clone refresh did not run; start them with\n'
+  printf '%s/bin/cs-startup-network.sh run --locked 1\n' "$CS_ROOT"
+else
+  "$SCRIPT_DIR/cs-startup-network.sh" harvest --pid $$ 2>&1 || true
+fi
+
+# --- 8. context digest -----------------------------------------------------
 # Last of the bulk sections deliberately: curated memory is stable session to
 # session, already reported against CS_STARTUP_MEMORY_MAX_BYTES, and
 # recoverable with one targeted read, so it is the cheapest thing for a
@@ -777,7 +856,7 @@ print_startup_memory "$CONFIG/boss.md" "config/boss.md"
 print_startup_memory "$CONFIG/boss-shared.md" "config/boss-shared.md (shared, main-authoritative, read-only in capo homes)"
 print_startup_memory "$CONFIG/learnings.md" "config/learnings.md"
 
-# --- 8. closing reminder -----------------------------------------------
+# --- 9. closing reminder -----------------------------------------------
 stage next-step
 section "NEXT STEP"
 if [ "$READ_ONLY" -eq 1 ]; then

@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# Behavior (portable): bin/cs-bootstrap.sh's axi-family version floors.
+# Behavior (portable): bin/cs-bootstrap.sh's axi-family version floors and its
+# CS_BOOTSTRAP_NETWORK phase split.
+#
+# The phase split exists so bin/cs-session-start.sh can compose its digest from
+# local reads alone while bin/cs-startup-network.sh runs the network half
+# concurrently. Its whole safety argument is that the two halves are a strict
+# PARTITION of the unsplit run - no step in both, none in neither - so that
+# section drives all three phases against one fixture and compares the line
+# multisets directly rather than trusting a reading of the source.
 #
 # bin/cs-deps-lib.sh owns the axi-family floors and their bump policy; bootstrap
 # is the session-start gate that enforces them. These tests pin the enforcement
@@ -175,4 +183,101 @@ out=$(run_bootstrap)
 assert_no_line "$out" 'below floor' 'default 9.9.9 fakes sit above every floor'
 pass 'a version-reporting fake suite is never reported as out of date'
 
-printf 'ok - cs-bootstrap axi version floors\n'
+# --- CS_BOOTSTRAP_NETWORK: skip and only partition the unsplit run ------------
+# A mutating fixture (DETECT_ONLY unset) so the sweeps are in scope too, built
+# so every one of its diagnostics is deterministic and reproducible on repeat:
+# a project directory that is not a git repo (fleet sync reports it and returns
+# before any fetch, so nothing leaves this machine) and a malformed capo
+# registry row (the capo sweep reports it and touches nothing).
+
+PART_ROOT="$TMP/partition-root"
+mkdir -p "$PART_ROOT"
+git init -q -b main "$PART_ROOT"
+git -C "$PART_ROOT" commit -q --allow-empty -m init
+
+PART_HOME="$TMP/partition-home"
+mkdir -p "$PART_HOME/config" "$PART_HOME/state" "$PART_HOME/data" \
+  "$PART_HOME/host" "$PART_HOME/projects/plainproj"
+printf -- '- broken-capo - no structured fields here\n' > "$PART_HOME/host/capos.md"
+
+PART_FB=$(cs_fakebin "$TMP/partition-tools")
+# gh must be PRESENT and unauthenticated: an absent gh is skipped by bootstrap's
+# own presence guard, which would leave the network half without its probe line.
+cat > "$PART_FB/gh" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+cat > "$PART_FB/herdr" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+chmod +x "$PART_FB/gh" "$PART_FB/herdr"
+for t in gh-axi tasks-axi lavish-axi quota-axi; do
+  cs_fake_version_tool "$PART_FB" "$t" "CS_TEST_UNUSED_${t//-/_}_VERSION" 9.9.9
+done
+
+run_partition() {  # <all|skip|only>
+  PATH="$PART_FB:$PATH" CS_HOME="$PART_HOME" CS_ROOT_OVERRIDE="$PART_ROOT" \
+    CS_BOOTSTRAP_NETWORK="$1" "$BOOTSTRAP" 2>&1
+}
+
+part_all=$(run_partition all)
+part_skip=$(run_partition skip)
+part_only=$(run_partition only)
+
+# Each half must actually carry work, or the partition below would hold
+# vacuously for a split that silently dropped everything.
+assert_contains "$part_only" 'NEEDS_GH_AUTH:' 'the network half lost the gh auth probe'
+assert_contains "$part_only" 'FLEET_SYNC: plainproj: skipped: not a git repo' \
+  'the network half lost the fleet sync'
+assert_contains "$part_skip" 'CAPO_SYNC: skipped: malformed capo registry entry' \
+  'the local half lost the capo sweep'
+assert_not_contains "$part_skip" 'NEEDS_GH_AUTH:' 'the local half ran the network gh auth probe'
+assert_not_contains "$part_skip" 'FLEET_SYNC:' 'the local half ran the network fleet sync'
+assert_not_contains "$part_only" 'CAPO_SYNC:' 'the network half ran the local capo sweep'
+assert_not_contains "$part_only" 'BOOTSTRAP_INFO:' 'the network half repeated local tool detection'
+
+# No line in both halves.
+printf '%s\n' "$part_skip" | sort -u > "$TMP/part.skip"
+printf '%s\n' "$part_only" | sort -u > "$TMP/part.only"
+both=$(comm -12 "$TMP/part.skip" "$TMP/part.only" | grep -v '^$' || true)
+[ -z "$both" ] || fail "a check ran in BOTH phases: $both"
+
+# Their union is exactly the unsplit run, as a multiset: nothing added, nothing
+# lost, and no duplicate introduced by a step landing in both halves.
+printf '%s\n%s\n' "$part_skip" "$part_only" | grep -v '^$' | sort > "$TMP/part.union"
+printf '%s\n' "$part_all" | grep -v '^$' | sort > "$TMP/part.all"
+diff "$TMP/part.all" "$TMP/part.union" > "$TMP/part.diff" 2>&1 \
+  || fail "skip + only is not the unsplit run:"$'\n'"$(cat "$TMP/part.diff")"
+pass 'CS_BOOTSTRAP_NETWORK skip and only are a strict partition of the unsplit run'
+
+# An unrecognized value must run EVERYTHING rather than silently skipping a
+# safety sweep, so a typo can never quietly disable a check.
+part_typo=$(run_partition nonsense)
+printf '%s\n' "$part_typo" | grep -v '^$' | sort > "$TMP/part.typo"
+diff "$TMP/part.all" "$TMP/part.typo" >/dev/null 2>&1 \
+  || fail "an unrecognized CS_BOOTSTRAP_NETWORK did not fall back to the full run"
+pass 'an unrecognized CS_BOOTSTRAP_NETWORK falls back to the full run'
+
+# --- CS_BOOTSTRAP_NETWORK_LOCK_PID: a stale worker never sweeps ---------------
+# The deferred worker outlives the session start that launched it, so each
+# network mutating sweep re-verifies that state/.lock still names the session
+# that asked. A changed owner reports the skip; it never runs the sweep anyway.
+printf '424242\n' > "$PART_HOME/state/.lock"
+stale=$(PATH="$PART_FB:$PATH" CS_HOME="$PART_HOME" CS_ROOT_OVERRIDE="$PART_ROOT" \
+  CS_BOOTSTRAP_NETWORK=only CS_BOOTSTRAP_NETWORK_LOCK_PID=999999 "$BOOTSTRAP" 2>&1)
+assert_contains "$stale" 'NETWORK_CHECKS: fleet lock ownership changed before project clone refresh' \
+  'a stale worker did not report the sweep it skipped'
+assert_not_contains "$stale" 'FLEET_SYNC:' 'a stale worker ran a mutating sweep it no longer owned'
+assert_contains "$stale" 'NEEDS_GH_AUTH:' 'the read-only probe was withheld from a stale worker'
+
+owned=$(PATH="$PART_FB:$PATH" CS_HOME="$PART_HOME" CS_ROOT_OVERRIDE="$PART_ROOT" \
+  CS_BOOTSTRAP_NETWORK=only CS_BOOTSTRAP_NETWORK_LOCK_PID=424242 "$BOOTSTRAP" 2>&1)
+assert_contains "$owned" 'FLEET_SYNC: plainproj: skipped: not a git repo' \
+  'a worker whose lock still names its own session was refused its sweep'
+assert_not_contains "$owned" 'NETWORK_CHECKS:' \
+  'an authorized worker reported an ownership change that did not happen'
+rm -f "$PART_HOME/state/.lock"
+pass 'a deferred worker sweeps only while state/.lock still names the session that asked'
+
+printf 'ok - cs-bootstrap axi version floors and network phase split\n'

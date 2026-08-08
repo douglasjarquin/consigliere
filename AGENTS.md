@@ -113,6 +113,7 @@ state/               volatile runtime signals; gitignored
   <id>.check.sh      authenticated slow poll; watcher runs registered checks from hash-validated snapshots only
   .home-pane         this home's own agent pane, recorded at session start; revalidated before any activation
   .session-start-complete  completion proof gating the session-open re-emit; bin/cs-sessionstart-run.sh
+  .startup-network.*  the deferred network stage's status, current result, pending unread results, claim, delivery proof, and lock; bin/cs-startup-network.sh
   .activation-stalled  present when this home cannot self-activate (pane gone or agent dead); needs recovery
   <id>.check-trust   content binding created by cs-check-register.sh
   <id>.pr-poll       validated data sidecar for the byte-static PR merge poll
@@ -148,8 +149,10 @@ An `ABSENT` boss, shared-boss, capo, or learnings file means built-in defaults, 
 If the session lock is refused, tell the boss another active session is managing the fleet and remain read-only.
 A lock-refused session must not spawn, steer, merge, drain the wake queue, repair supervision, repair a checkout, or perform any other fleet mutation.
 
-The digest order is: lock, bootstrap, wake queue, the supervision operating block, the read-once contract, fleet digest, context digest, and the next step.
+The digest order is: lock, bootstrap, wake queue, the supervision operating block, the read-once contract, fleet digest, network checks, context digest, and the next step.
 The fleet digest precedes the context digest so a tail-truncated delivery drops curated memory before live fleet identity.
+Every step that composes the digest reads locally; the external-network checks run off the blocking session-open path in a bounded detached worker (`bin/cs-startup-network.sh`) and the network-checks section prints whatever has finished without ever waiting.
+A section that reports its checks still in progress has confirmed nothing, and the result arrives later as a `check: startup-network` wake.
 Bootstrap detects first, asks for consent, and installs only after the boss approves in the current session.
 Do not dispatch until the root harness (codex or claude), herdr, gh auth, and the other required tools are present and healthy.
 Use `gh-axi` for GitHub, `chrome-devtools-axi` for browser work, and `lavish-axi` for structured decisions or reports; consult current help rather than memorizing flags.
