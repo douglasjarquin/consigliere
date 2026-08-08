@@ -558,7 +558,15 @@ EOF
 cmd_run() {  # <locked> <lock-pid> <generation>
   local locked=$1 lock_pid=$2 generation=$3 phases started budget out rc
   local sweep_locked=0 downgraded=0 internal=0
-  mkdir -p "$STATE" 2>/dev/null || return 1
+  # `run` is the command every printed remedy in this stage names, so each of its
+  # refusals says why on the way out. A remedy that exits nonzero in silence is
+  # worse than no remedy: the reader cannot tell a deliberate refusal from a
+  # crash, and has nothing to act on either way.
+  if ! mkdir -p "$STATE" 2>/dev/null; then
+    printf 'NETWORK_CHECKS: %s could not be created, so the deferred network checks did not run; fix that directory and rerun %s/bin/cs-startup-network.sh run --locked %s\n' \
+      "$STATE" "$CS_ROOT" "$locked"
+    return 1
+  fi
   started=$(now)
   budget=$(stage_budget)
   phases=probe
@@ -599,6 +607,14 @@ cmd_run() {  # <locked> <lock-pid> <generation>
     generation="$(now).$$.manual"
     cs_lock_acquire_wait "$PUBLISH_LOCK"
     if [ "$(status_get state)" = running ] && worker_alive; then
+      # The refusal itself is the single-flight guarantee and stays exactly as it
+      # is - a second pass over the same clones is the one thing this stage must
+      # never do. What it owes the reader is the reason, because this is the
+      # command print_uncovered names and it is reached precisely while the pass
+      # that left a check uncovered is still in flight.
+      # shellcheck disable=SC2016  # The backticked wake name is literal report text.
+      printf 'NETWORK_CHECKS: a deferred check pass is already in flight covering %s, so this did not start a second pass over the same clones; its result arrives inline in the next digest or as the queued `check: startup-network` wake, and rerunning after it finishes covers anything it does not\n' \
+        "$(phase_label "$(status_get phases)")"
       cs_lock_release "$PUBLISH_LOCK"
       return 1
     fi
@@ -618,7 +634,11 @@ EOF
   # Recorded into a temp file rather than straight into state/ so a run that is
   # killed mid-sweep cannot leave a half-written artifact where the previous
   # run's complete one used to be; publish() promotes it atomically at the end.
-  out=$(mktemp "${TMPDIR:-/tmp}/cs-startup-network.XXXXXX" 2>/dev/null) || return 1
+  if ! out=$(mktemp "${TMPDIR:-/tmp}/cs-startup-network.XXXXXX" 2>/dev/null); then
+    printf 'NETWORK_CHECKS: no temporary file could be created under %s, so %s never ran; fix TMPDIR and rerun %s/bin/cs-startup-network.sh run --locked %s\n' \
+      "${TMPDIR:-/tmp}" "$(phase_label "$phases")" "$CS_ROOT" "$sweep_locked"
+    return 1
+  fi
   rc=0
   if [ "$sweep_locked" -eq 1 ]; then
     cs_run_timed "$budget" env CS_BOOTSTRAP_NETWORK=only \

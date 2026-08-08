@@ -93,6 +93,12 @@ git -C "$FIX_ROOT" commit -q --allow-empty -m init
 mkdir -p "$FIX_ROOT/bin"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$FIX_ROOT/bin/cs-guard.sh"
 chmod +x "$FIX_ROOT/bin/cs-guard.sh"
+# Every remedy the section prints is rooted at CS_ROOT, so the fixture root
+# carries a runnable forwarder. A case cannot prove a named remedy works if the
+# path it names does not resolve, and a wrapper rather than a symlink is what
+# keeps the real script's SCRIPT_DIR pointing at the real bin/.
+printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$SNET" > "$FIX_ROOT/bin/cs-startup-network.sh"
+chmod +x "$FIX_ROOT/bin/cs-startup-network.sh"
 
 # fakebin <dir> [<gate-file>] [<gh-auth-rc>] - gh must be PRESENT; it is
 # unauthenticated by default so the probe has a line to report, and <gh-auth-rc>
@@ -624,14 +630,36 @@ generation=$(sed -n 's/^generation=//p' "$HOME_DIR/state/.startup-network.status
 [ "$generation" = g-narrow ] \
   || fail "start raced a second pass beside the live one (generation is now '$generation')"
 out=$(snet "$HOME_DIR" "$FB" harvest --pid $$)
-kill "$LIVE_PID" 2>/dev/null || true
 assert_contains "$out" 'NOT covered by this run: project clone refresh with its drift reporting' \
   "adopting a probe-only pass dropped the fleet sync without naming it"
 assert_contains "$out" 'NOT yet confirmed: GitHub authentication' \
   "the adopted pass stopped naming the check it does cover"
 assert_not_contains "$out" 'completed off the startup path' \
   "an adopted in-flight pass reported itself as completed"
-pass "adopting a narrower pass names the check that pass does not cover"
+
+# The remedy that section just named has to answer for itself. Run the command
+# the section actually printed - not a copy of it, so the two cannot drift - in
+# the window it is printed in, where single flight must still refuse it. A
+# refusal that exits nonzero in silence reads as a crash and leaves the reader
+# with nothing, which is worse than naming no remedy at all.
+remedy=$(printf '%s\n' "$out" | sed -n 's/^Cover it with \(.*\)\.$/\1/p')
+[ -n "$remedy" ] || fail "the section named no remedy for the check it left uncovered"
+remedy_status=0
+# shellcheck disable=SC2086  # Run the remedy as the command line the section printed it.
+remedy_out=$(PATH="$FB:$PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$FIX_ROOT" $remedy 2>&1) \
+  || remedy_status=$?
+kill "$LIVE_PID" 2>/dev/null || true
+
+[ "$remedy_status" -ne 0 ] || fail "the remedy started a second pass beside the live one"
+[ -n "$remedy_out" ] || fail "the remedy the section named refused in silence: '$remedy'"
+assert_contains "$remedy_out" 'already in flight' \
+  "the refused remedy did not say a pass was already running"
+assert_contains "$remedy_out" 'check: startup-network' \
+  "the refused remedy did not name where the running pass's result lands"
+generation=$(sed -n 's/^generation=//p' "$HOME_DIR/state/.startup-network.status" | tail -1)
+[ "$generation" = g-narrow ] \
+  || fail "the refused remedy still reserved a pass (generation is now '$generation')"
+pass "adopting a narrower pass names the check it misses and a remedy that answers for itself"
 
 # --- an adopted pass that then dies still names what it never covered ---------
 # The same adoption, followed by the worker dying before it publishes. This is
