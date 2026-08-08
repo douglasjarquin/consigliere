@@ -134,3 +134,84 @@ assert_not_contains "$invariants_block" 'needs: changes' \
 assert_not_contains "$invariants_block" 'if:' \
   "the repo-invariants job must stay unconditional"
 pass "repo invariants run for every change, including docs-only ones"
+
+# --- every source site in the canonical set declares its target --------------
+#
+# `# shellcheck source=` is a declarative contract with two machine consumers:
+# ShellCheck reads it to follow a source, and bin/cs-lint.sh reads the same
+# directives to build the graph that decides which files a narrowed local run
+# lints. A source site with no directive is an edge that graph cannot see, and the
+# local gate then diverges from the full CI run in whichever direction the missing
+# edge points - green here, red there, or the reverse. Keeping the directives
+# complete is what lets cs-lint.sh read them instead of reimplementing
+# ShellCheck's path resolver, so the completeness is asserted here rather than
+# left to whoever writes the next source line.
+
+# undirectived_sources <file>... - report `file:line: <the line>` for every source
+# site that names no target. Heredoc bodies are skipped (they are data, not
+# commands here), and a wholly dynamic path such as `. "$1"` is exempt because
+# neither ShellCheck nor the graph can resolve it in any run.
+undirectived_sources() {
+  awk '
+    FNR == 1 { heredoc = ""; prev = "" }
+    {
+      if (heredoc != "") {
+        if ($0 ~ ("^[[:space:]]*" heredoc "[[:space:]]*$")) heredoc = ""
+        prev = $0
+        next
+      }
+      if (match($0, /<<-?[[:space:]]*['"'"'"]?[A-Za-z_][A-Za-z0-9_]*/)) {
+        tag = substr($0, RSTART, RLENGTH)
+        sub(/^<<-?[[:space:]]*/, "", tag)
+        gsub(/['"'"'"]/, "", tag)
+        heredoc = tag
+      }
+      if ($0 ~ /^[[:space:]]*(\.|source)[[:space:]]+/) {
+        target = $0
+        sub(/^[[:space:]]*(\.|source)[[:space:]]+/, "", target)
+        sub(/[[:space:]]*$/, "", target)
+        gsub(/['"'"'"]/, "", target)
+        dynamic = (target ~ /^\$[A-Za-z_0-9]+$/ || target ~ /^\$\{[^}]*\}$/)
+        declared = (prev ~ /shellcheck[[:space:]]+source=/ ||
+                    prev ~ /shellcheck[[:space:]]+disable=[^[:space:]]*SC1091/)
+        if (!dynamic && !declared) printf "%s:%d: %s\n", FILENAME, FNR, $0
+      }
+      prev = $0
+    }
+  ' "$@"
+}
+
+canonical_set=()
+while IFS= read -r rel; do
+  [ -n "$rel" ] && [ -f "$ROOT/$rel" ] || continue
+  canonical_set+=("$ROOT/$rel")
+done < <("$LINT" --canonical-set)
+[ "${#canonical_set[@]}" -gt 0 ] \
+  || fail "cs-lint.sh --canonical-set must print the canonical file set"
+
+offenders=$(undirectived_sources "${canonical_set[@]}")
+[ -z "$offenders" ] || fail "every source site in the canonical set needs a '# shellcheck source=<path>' directive on the line above it (or '# shellcheck disable=SC1091' when the path cannot be resolved), or bin/cs-lint.sh cannot see the edge:
+$offenders"
+pass "every canonical source site declares its target, so the lint graph is complete"
+
+# The check itself has to be able to fail, or the assertion above proves nothing.
+probe_dir=$(cs_test_tmproot cs-ci-contract)
+mkdir -p "$probe_dir"
+probe="$probe_dir/probe.sh"
+cat >"$probe" <<'SH'
+#!/usr/bin/env bash
+# shellcheck source=bin/declared.sh
+. "$ROOT/bin/declared.sh"
+. "$1"
+cat <<'INNER'
+. "$ROOT/bin/inside-a-heredoc.sh"
+INNER
+. "$ROOT/bin/undeclared.sh"
+SH
+probe_hits=$(undirectived_sources "$probe")
+assert_contains "$probe_hits" 'bin/undeclared.sh' "the check catches an undeclared source"
+assert_not_contains "$probe_hits" 'bin/declared.sh' "a declared source is not an offender"
+assert_not_contains "$probe_hits" 'inside-a-heredoc' "a heredoc body is not a source site"
+# shellcheck disable=SC2016  # the literal probe line, not an expansion
+assert_not_contains "$probe_hits" '. "$1"' "a wholly dynamic path is not an offender"
+pass "the source-site check catches an undeclared source and spares declared, heredoc, and dynamic ones"

@@ -60,8 +60,7 @@ git -C "$REPO" symbolic-ref HEAD refs/heads/main
 cp "$LINT" "$REPO/bin/cs-lint.sh"
 chmod +x "$REPO/bin/cs-lint.sh"
 for f in bin/kept.sh bin/edited.sh bin/removed.sh bin/lib-one.sh bin/lib-two.sh \
-  bin/shared-lib.sh bin/bare-consumer.sh tests/kept.test.sh tests/edited.test.sh \
-  tests/lib.sh; do
+  bin/shared-lib.sh tests/kept.test.sh tests/edited.test.sh tests/lib.sh; do
   printf '#!/usr/bin/env bash\ntrue\n' >"$REPO/$f"
 done
 printf 'notes\n' >"$REPO/docs/notes.md"
@@ -99,12 +98,6 @@ SH
 cat >>"$REPO/tests/kept.test.sh" <<'SH'
 # shellcheck source=bin/shared-lib.sh
 . "$(dirname "$0")/../bin/shared-lib.sh"
-SH
-# No directive here on purpose. ShellCheck resolves this one by itself - it drops
-# the expansion it cannot read and looks for the literal remainder - so the graph
-# has to see the edge, or narrowing reports what a full run never would.
-cat >>"$REPO/bin/bare-consumer.sh" <<'SH'
-. "$SOME_ROOT/bin/shared-lib.sh"
 SH
 git -C "$REPO" add -A
 git -C "$REPO" commit -qm initial
@@ -297,10 +290,28 @@ printf 'true\n' >>"$REPO/bin/shared-lib.sh"
 
 out=$(run_lint)
 got=$(linted)
-[ "$got" = 'bin/bare-consumer.sh bin/kept.sh bin/lib-one.sh bin/lib-two.sh bin/shared-lib.sh tests/kept.test.sh ' ] \
+[ "$got" = 'bin/kept.sh bin/lib-one.sh bin/lib-two.sh bin/shared-lib.sh tests/kept.test.sh ' ] \
   || fail "a changed library must lint its consumers and their own sourced libraries, got: $got"
-assert_contains "$out" 'linting 1 changed file(s) plus 5 source-linked file(s) since origin/main' \
+assert_contains "$out" 'linting 1 changed file(s) plus 4 source-linked file(s) since origin/main' \
   'the reverse closure is counted in the summary'
 pass 'a changed library pulls in every canonical file that sources it'
 pass 'a pulled-in consumer brings its own sourced libraries along'
-pass 'a source ShellCheck resolves without a directive is an edge like any other'
+
+# --- a deleted library still pulls in the consumers it left behind ------------
+#
+# Deleting a library is a change its consumers are judged on: a full run reports
+# SC1091 in every file still sourcing it. The deleted path seeds the reverse pass
+# and then has to come back out, since ShellCheck cannot read a file that is gone.
+
+git -C "$REPO" checkout -q -b drop-shared-lib
+git -C "$REPO" checkout -q -- bin/shared-lib.sh
+git -C "$REPO" rm -q "$REPO/bin/shared-lib.sh"
+
+out=$(run_lint)
+got=$(linted)
+[ "$got" = 'bin/kept.sh bin/lib-one.sh bin/lib-two.sh tests/kept.test.sh ' ] \
+  || fail "a deleted library must lint the consumers it left behind, got: $got"
+assert_not_contains "$out" 'nothing to lint' 'a deleted library is not an empty change set'
+assert_contains "$out" 'linting 0 changed file(s) plus 4 source-linked file(s) since origin/main' \
+  'the deleted path is counted as source-linked, never as an input'
+pass 'a deleted library lints the canonical files that still source it, and is not linted itself'

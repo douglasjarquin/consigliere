@@ -48,6 +48,8 @@
 #                                  (developer convenience; the gates never pass args)
 #   cs-lint.sh --required-version print the pinned ShellCheck version and exit
 #                                  (CI reads this to install the exact same one)
+#   cs-lint.sh --canonical-set    print the canonical file set, one path per line,
+#                                  and exit (so a caller never re-spells the globs)
 #
 # Exit status is ShellCheck's own on a lint run, so a caller (CI or a gate) fails
 # exactly when ShellCheck reports a finding; a version mismatch or a missing
@@ -66,10 +68,44 @@ BASE_REF="origin/$DEFAULT_BRANCH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
-# Expose the pinned version without needing ShellCheck installed, so CI can read
-# it to install the exact same build before any lint runs.
+# Canonical file set: the ONE authoritative definition. Callers reference this
+# script; they never re-spell these globs. consigliere keeps all shell under
+# bin/ and tests/ (Python helpers such as bin/*.py are not shell and are out of
+# scope); tests/*.sh covers both *.test.sh files and shared *-helpers.sh / lib.sh.
+# The change selection below never widens this set; it only narrows it.
+# The globs are kept as patterns because the set has to answer two questions: what
+# is on disk now (their expansion) and whether a path a branch deleted was one of
+# ours (no expansion can match a file that is gone).
+canonical_globs=('bin/*.sh' 'tests/*.sh')
+canonical=()
+for glob in "${canonical_globs[@]}"; do
+  # shellcheck disable=SC2086  # unquoted on purpose: $glob is a pattern to expand
+  for path in $glob; do
+    canonical+=("$path")
+  done
+done
+
+cs_is_canonical() {
+  local glob
+  for glob in "${canonical_globs[@]}"; do
+    # shellcheck disable=SC2254  # unquoted on purpose: $glob is a case pattern
+    case "$1" in
+      $glob) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# Both queries answer before the ShellCheck pin is enforced, so a caller can read
+# what this script owns without ShellCheck installed: CI reads the version to
+# install that exact build, and the contract test reads the file set instead of
+# re-spelling the globs.
 if [ "${1:-}" = "--required-version" ]; then
   printf '%s\n' "$REQUIRED_SHELLCHECK"
+  exit 0
+fi
+if [ "${1:-}" = "--canonical-set" ]; then
+  printf '%s\n' "${canonical[@]}"
   exit 0
 fi
 
@@ -93,13 +129,6 @@ fi
 if [ "$#" -gt 0 ]; then
   exec shellcheck --norc "$@"
 fi
-
-# Canonical file set: the ONE authoritative definition. Callers reference this
-# script; they never re-spell these globs. consigliere keeps all shell under
-# bin/ and tests/ (Python helpers such as bin/*.py are not shell and are out of
-# scope); tests/*.sh covers both *.test.sh files and shared *-helpers.sh / lib.sh.
-# The change selection below never widens this set; it only narrows it.
-canonical=(bin/*.sh tests/*.sh)
 
 # Decide whether this run must lint the whole canonical set. Each reason is a
 # case where a local diff cannot stand in for full coverage: CI is the gate of
@@ -137,15 +166,20 @@ fi
 
 # The branch's changed files: everything that differs from the merge-base in the
 # working tree (committed, staged, and unstaged alike), plus untracked files, so
-# a brand-new script is linted before it is ever committed. Deletions are
-# dropped, since ShellCheck cannot read a file that is gone. Each query's exit
-# status is checked on its own, because a pipeline into `sort` would report
-# `sort`'s success and turn a failed query into an empty change set.
+# a brand-new script is linted before it is ever committed. Deletions are kept
+# apart rather than discarded: ShellCheck cannot read a file that is gone, but
+# deleting a library is a change the files that still source it are judged on, so
+# a deleted path has to reach the reverse pass below. Each query's exit status is
+# checked on its own, because a pipeline into `sort` would report `sort`'s success
+# and turn a failed query into an empty change set.
 changed=
+deleted=
 if [ -z "$full_reason" ]; then
   if tracked_changed=$(git diff --name-only --diff-filter=d "$merge_base" --) &&
+    tracked_deleted=$(git diff --name-only --diff-filter=D "$merge_base" --) &&
     untracked=$(git ls-files --others --exclude-standard --); then
     changed=$(printf '%s\n%s\n' "$tracked_changed" "$untracked" | LC_ALL=C sort -u)
+    deleted=$(printf '%s\n' "$tracked_deleted" | LC_ALL=C sort -u)
   else
     full_reason="the change set could not be determined"
   fi
@@ -164,8 +198,14 @@ while IFS= read -r path; do
   [ -n "$path" ] || continue
   selected+=("$path")
 done < <(printf '%s\n' "$canonical_sorted" | LC_ALL=C comm -12 - <(printf '%s\n' "$changed"))
+deleted_canonical=$(
+  printf '%s\n' "$deleted" | while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if cs_is_canonical "$path"; then printf '%s\n' "$path"; fi
+  done | LC_ALL=C sort -u
+)
 
-if [ "${#selected[@]}" -eq 0 ]; then
+if [ "${#selected[@]}" -eq 0 ] && [ -z "$deleted_canonical" ]; then
   printf 'cs-lint.sh: no canonical-set file changed since %s; nothing to lint.\n' \
     "$BASE_REF" >&2
   exit 0
@@ -180,18 +220,16 @@ fi
 #     sources it, not in the library, so editing a library out from under its
 #     consumers (dropping a variable they read, say) is invisible unless those
 #     consumers are inputs as well - green locally, red in CI one push later.
-# The graph has to see every source ShellCheck itself can resolve, or narrowing
-# breaks parity in whichever direction the missing edge points. A
-# `# shellcheck source=` directive is one way to name a target, but ShellCheck
-# also resolves a plain `. "$ROOT/bin/lib.sh"` on its own - it drops what it
-# cannot expand and looks for the literal remainder (./bin/lib.sh) - so reading
-# directives alone would leave those edges out and make the graph a promise about
-# repo convention rather than a fact about ShellCheck. Both forms are read here,
-# with the same expansion-dropping rule, so a source with no directive is still
-# an edge. A path that expands to nothing (`. "$1"`) yields no edge because
-# ShellCheck cannot follow it either. Targets outside the canonical set
-# (/dev/null, anything unshipped) fall away at the intersection below: the full
-# run does not have them as input either, so parity means leaving them out.
+# The graph is the repo's own `# shellcheck source=` directives, nothing else.
+# Reading the source lines themselves would mean reimplementing ShellCheck's path
+# resolver here and keeping the copy honest forever; the directives are already
+# the declaration ShellCheck itself reads, so they are the one place a source
+# edge is written down. That makes the graph exactly as complete as the
+# directives are, which is why tests/cs-ci-contract.test.sh fails the build when a
+# source site in the canonical set has no directive. Targets outside the canonical
+# set (/dev/null, anything unshipped) fall away at the intersection in cs_close:
+# the full run does not have them as input either, so parity means leaving them
+# out.
 canonical_files=()
 while IFS= read -r file; do
   [ -n "$file" ] && [ -f "$file" ] || continue
@@ -204,19 +242,6 @@ edges=$(
       target = $0
       sub(/^.*source=/, "", target)
       sub(/[[:space:]].*$/, "", target)
-      if (target != "") print FILENAME "\t" target
-      next
-    }
-    /^[[:space:]]*(\.|source)[[:space:]]+/ {
-      target = $0
-      sub(/^[[:space:]]*(\.|source)[[:space:]]+/, "", target)
-      gsub(/\$\([^)]*\)/, "", target)
-      gsub(/`[^`]*`/, "", target)
-      gsub(/\$\{[^}]*\}/, "", target)
-      gsub(/\$[A-Za-z_][A-Za-z0-9_]*/, "", target)
-      gsub(/["'"'"']/, "", target)
-      sub(/[[:space:]].*$/, "", target)
-      sub(/^[.\/]+/, "", target)
       if (target != "") print FILENAME "\t" target
     }
   ' "${canonical_files[@]}"
@@ -251,15 +276,33 @@ cs_close() {
 # linting, while an unchanged library pulled in for its definitions does not drag
 # in its own unrelated consumers. Sourcing is transitive, so a dependent's
 # dependent sees the change too and the reverse pass runs to a fixpoint; the
-# forward pass then keeps every input SC1091-clean.
-inputs=$(cs_close dependents "$(printf '%s\n' "${selected[@]}" | LC_ALL=C sort -u)")
+# forward pass then keeps every input SC1091-clean. Deleted paths seed the reverse
+# pass alongside the surviving changes, then come back out: a consumer left
+# sourcing a library this branch removed is exactly what a full run fails on, and
+# cs_close intersects only what it discovers with the canonical set, never the
+# seed, so the seed has to be subtracted by hand before ShellCheck is handed a
+# file that is no longer there.
+seed=$(
+  {
+    if [ "${#selected[@]}" -gt 0 ]; then printf '%s\n' "${selected[@]}"; fi
+    printf '%s\n' "$deleted_canonical"
+  } | LC_ALL=C sort -u
+)
+inputs=$(cs_close dependents "$seed")
 inputs=$(cs_close sources "$inputs")
+inputs=$(printf '%s\n' "$inputs" | LC_ALL=C comm -23 - <(printf '%s\n' "$deleted_canonical"))
 
 lint_set=()
 while IFS= read -r path; do
   [ -n "$path" ] || continue
   lint_set+=("$path")
 done <<<"$inputs"
+
+if [ "${#lint_set[@]}" -eq 0 ]; then
+  printf 'cs-lint.sh: only deleted canonical files changed since %s; nothing to lint.\n' \
+    "$BASE_REF" >&2
+  exit 0
+fi
 
 printf 'cs-lint.sh: linting %s changed file(s) plus %s source-linked file(s) since %s (CI lints the full set)\n' \
   "${#selected[@]}" "$((${#lint_set[@]} - ${#selected[@]}))" "$BASE_REF" >&2
