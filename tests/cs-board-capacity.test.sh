@@ -83,6 +83,14 @@ case "$*" in
         printf 'api_response:\n  body: OPEN|false|%s|SUCCESS|NONE\nextra\n  truncated: false\n' \
           "${CS_FAKE_301_HEAD:?}"
         ;;
+      empty_sixth_field)
+        printf 'api_response:\n  body: OPEN|false|%s|SUCCESS|NONE|\n  truncated: false\n' \
+          "${CS_FAKE_301_HEAD:?}"
+        ;;
+      trailing_blank_line)
+        printf 'api_response:\n  body: OPEN|false|%s|SUCCESS|NONE\n  truncated: false\n\n' \
+          "${CS_FAKE_301_HEAD:?}"
+        ;;
       unauthenticated) exit 1 ;;
       *) exit 1 ;;
     esac
@@ -220,6 +228,14 @@ assert_contains "$truncated" 'released=0' "a truncated gh-axi response stops rel
 
 multiline=$(CS_CASE_RESPONSE=multiline run_capacity)
 assert_contains "$multiline" 'released=0' "a multiline gh-axi response stops release"
+
+empty_sixth_field=$(CS_CASE_RESPONSE=empty_sixth_field run_capacity)
+assert_contains "$empty_sixth_field" 'released=0' "an empty sixth field stops release"
+assert_contains "$empty_sixth_field" 'free=0' "an empty sixth field keeps the five lanes full"
+
+trailing_blank_line=$(CS_CASE_RESPONSE=trailing_blank_line run_capacity)
+assert_contains "$trailing_blank_line" 'released=0' "a trailing blank response line stops release"
+assert_contains "$trailing_blank_line" 'free=0' "a trailing blank response line keeps the five lanes full"
 
 unauthenticated=$(CS_CASE_RESPONSE=unauthenticated run_capacity)
 assert_contains "$unauthenticated" 'released=0' "an unauthenticated gh-axi response stops release"

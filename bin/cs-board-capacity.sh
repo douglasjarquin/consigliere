@@ -86,16 +86,23 @@ CS_CAP_PR_CHECKS=
 CS_CAP_PR_REVIEW=
 
 gh_axi_body_token() {
-  local out header body_line truncated extra body
-  out=$("$@" 2>/dev/null) || return 1
+  local out header body_line truncated terminator extra body
+  out=$(
+    "$@" 2>/dev/null
+    command_status=$?
+    printf '%s\n' __CS_GH_AXI_RESPONSE_END__
+    exit "$command_status"
+  ) || return 1
   {
     IFS= read -r header \
       && IFS= read -r body_line \
       && IFS= read -r truncated \
+      && IFS= read -r terminator \
       && ! IFS= read -r extra
   } <<< "$out" || return 1
   [ "$header" = api_response: ] || return 1
   [ "$truncated" = '  truncated: false' ] || return 1
+  [ "$terminator" = __CS_GH_AXI_RESPONSE_END__ ] || return 1
   case "$body_line" in
     '  body: '*) body=${body_line#'  body: '} ;;
     *) return 1 ;;
@@ -107,7 +114,7 @@ gh_axi_body_token() {
 }
 
 github_pr_snapshot() {
-  local path=$1 number=$2 owner repo query token extra
+  local path=$1 number=$2 owner repo query token separators extra
   command -v gh-axi >/dev/null 2>&1 || return 1
   owner=${path%%/*}
   repo=${path#*/}
@@ -116,6 +123,8 @@ github_pr_snapshot() {
     --field "query=$query" \
     --jq ".data.repository.pullRequest as \$pr | if \$pr == null then \"UNKNOWN\" else [\$pr.state, (\$pr.isDraft|tostring), (\$pr.headRefOid // \"NONE\"), (\$pr.commits.nodes[0].commit.statusCheckRollup.state // \"NONE\"), (\$pr.reviewDecision // \"NONE\")] | join(\"|\") end") \
     || return 1
+  separators=${token//[!|]/}
+  [ "${#separators}" -eq 4 ] || return 1
   IFS='|' read -r CS_CAP_PR_STATE CS_CAP_PR_DRAFT CS_CAP_PR_HEAD \
     CS_CAP_PR_CHECKS CS_CAP_PR_REVIEW extra <<< "$token"
   [ -z "$extra" ] || return 1
