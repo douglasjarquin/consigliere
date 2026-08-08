@@ -65,26 +65,34 @@
 #   - Done rows are never listed. Retained completion history belongs to the
 #     reporting surfaces (bin/cs-fleet-view.sh, /the-books); at startup it is
 #     pure weight.
-#   - Every in-flight, held, blocked, and public-followup row is listed IN FULL,
-#     with its hold_kind/hold_reason and blocked_by, up to
-#     CS_SESSION_START_ACTIVE_LIMIT rows per group, default 40. Those are the
-#     rows AGENTS.md sections 7 and 10 make actionable at startup, so they are
-#     shown whole rather than summarized - but a pathological fleet may not
-#     spend the whole digest on them either, because this section shares the
-#     payload with the live-task inventory above it.
+#   - Every in-flight, held, and blocked row is listed IN FULL, with its
+#     hold_kind/hold_reason and blocked_by, up to CS_SESSION_START_ACTIVE_LIMIT
+#     rows per group, default 40. Those are the rows AGENTS.md sections 7 and 10
+#     make actionable at startup, so they are shown whole rather than summarized
+#     - but a pathological fleet may not spend the whole digest on them either,
+#     because this section shares the payload with the live-task inventory above
+#     it.
+#   - Queued public-followup rows are the one group NO bound may touch. They are
+#     delivery obligations the boss is already owed, so a startup that hides one
+#     behind a row limit is worse than a long digest; on the manual path, which
+#     runs exactly when tasks-axi is unavailable, they print in full however many
+#     there are and are counted separately so the accounting stays exact.
 #   - The plain queued (dispatchable-now) listing is bounded separately, by
 #     CS_SESSION_START_QUEUED_LIMIT, default 20, so a deep queue costs a counter
 #     rather than kilobytes.
 #   - No bound ever drops rows silently: every group that hits its limit prints
-#     an exact remainder count and the command that shows the rest.
+#     an exact remainder count and the targeted follow-up that shows the rest,
+#     which is also what the READ-ONCE CONTRACT sanctions going back to.
 # When the tasks-axi backend is selected and available, the groups are the
 # tool's own filters (`--state in_flight`, `--state held`, `--state queued
 # --blocked`, and `tasks-axi ready`), so this script never reimplements task
 # state; the groups can overlap, because an in-flight item that is also held
-# appears under both. When manual mode is selected, or tasks-axi is
-# unavailable, only backlog section headings and item title lines print, with
-# the same never-bound-held, blocked, or public-followup rule recognized from
-# the title line's own hold/blocked-by/kind markers.
+# appears under both. That path needs no public-followup rule of its own:
+# `tasks-axi ready` renders obligations under their own ready_public_followups
+# group, which is not the bounded ready[ row group. When manual mode is
+# selected, or tasks-axi is unavailable, only backlog section headings and item
+# title lines print, and the groups are recognized from the title line's own
+# hold/blocked-by/kind markers.
 #
 # STATUS TAILS: CS_SESSION_START_STATUS_TAIL bounds how many lines each task's
 # tail prints, and bin/cs-line-cap-lib.sh bounds how long each of those lines
@@ -182,19 +190,23 @@ backlog_backend() {
   esac
 }
 
-# A queued title line whose own text marks it held, blocked, or a public
-# follow-up. The manual renderer has no task model, so this is the only signal
-# it gets, and it is the one tasks-axi's markdown backend writes: "(hold: ...)",
-# "(hold-kind: ...)", "blocked-by: ...", and "(kind: public-followup)". Bracket
-# expressions rather than backslashes, because awk's -v applies escape
-# processing before the regex is ever compiled.
-MANUAL_KEEP_RE='[(]hold|blocked-by:|[(]kind:[[:space:]]*public-followup[)]'
+# The two markers a queued title line carries in its own text, kept apart
+# because they earn different treatment: a held or blocked row joins the bounded
+# actionable group, while a public-followup row is an obligation no bound may
+# hide. The manual renderer has no task model, so the title line is the only
+# signal it gets, and these are the markers tasks-axi's markdown backend writes:
+# "(hold: ...)", "(hold-kind: ...)", "blocked-by: ...", and
+# "(kind: public-followup)". Bracket expressions rather than backslashes,
+# because awk's -v applies escape processing before the regex is ever compiled.
+MANUAL_HELD_RE='[(]hold|blocked-by:'
+MANUAL_FOLLOWUP_RE='[(]kind:[[:space:]]*public-followup[)]'
 
 print_backlog_manual_compact() {
   local path=$1 reason=$2
-  printf 'compact backlog listing (%s; done rows omitted; in-flight, held, blocked, and public-followup title lines bounded to %s per group; other queued bounded to %s; indented task bodies omitted)\n' \
+  printf 'compact backlog listing (%s; done rows omitted; in-flight, held, and blocked title lines bounded to %s per group; public-followup rows never bounded; other queued bounded to %s; indented task bodies omitted)\n' \
     "$reason" "$ACTIVE_LIMIT" "$QUEUED_LIMIT"
-  awk -v max="$QUEUED_LIMIT" -v active_max="$ACTIVE_LIMIT" -v keep_re="$MANUAL_KEEP_RE" '
+  awk -v max="$QUEUED_LIMIT" -v active_max="$ACTIVE_LIMIT" \
+    -v held_re="$MANUAL_HELD_RE" -v followup_re="$MANUAL_FOLLOWUP_RE" '
     function state_for_heading(line, heading) {
       heading = line
       sub(/^##[[:space:]]+/, "", heading)
@@ -218,29 +230,32 @@ print_backlog_manual_compact() {
     state == "done" && /^[-*][[:space:]]+/ { done_total++; next }
     state == "queued" && /^[-*][[:space:]]+/ {
       queued_total++
-      if ($0 ~ keep_re) {
-        protected++
-        if (protected_shown < active_max) { protected_shown++; print $0 }
+      # A delivery obligation first, whatever else its title line also says: no
+      # bound below may cost the boss one.
+      if ($0 ~ followup_re) { followup++; print $0; next }
+      if ($0 ~ held_re) {
+        held++
+        if (held_shown < active_max) { held_shown++; print $0 }
         next
       }
       if (plain_shown < max) { plain_shown++; print $0 }
       next
     }
     END {
-      plain_total = queued_total - protected
+      plain_total = queued_total - held - followup
       if (in_flight + queued_total + done_total == 0) {
         print "(no backlog item title lines found)"
       } else {
-        printf "(shown %d of %d in-flight, %d of %d held, blocked, or public-followup queued, %d of %d other queued title line(s); %d done row(s) omitted)\n", \
-          in_flight_shown, in_flight, protected_shown, protected, plain_shown, plain_total, done_total
+        printf "(shown %d of %d in-flight, %d of %d held or blocked queued, all %d public-followup queued, %d of %d other queued title line(s); %d done row(s) omitted)\n", \
+          in_flight_shown, in_flight, held_shown, held, followup, plain_shown, plain_total, done_total
         if (in_flight > in_flight_shown) {
-          printf "(%d more in-flight - raise CS_SESSION_START_ACTIVE_LIMIT or read config/backlog.md for the rest)\n", in_flight - in_flight_shown
+          printf "(%d more in-flight - raise CS_SESSION_START_ACTIVE_LIMIT, or read the In flight section of config/backlog.md for those rows)\n", in_flight - in_flight_shown
         }
-        if (protected > protected_shown) {
-          printf "(%d more held, blocked, or public-followup queued - raise CS_SESSION_START_ACTIVE_LIMIT or read config/backlog.md for the rest)\n", protected - protected_shown
+        if (held > held_shown) {
+          printf "(%d more held or blocked queued - raise CS_SESSION_START_ACTIVE_LIMIT, or read the Queued section of config/backlog.md for those rows)\n", held - held_shown
         }
         if (plain_total > plain_shown) {
-          printf "(%d more queued - raise CS_SESSION_START_QUEUED_LIMIT or read config/backlog.md for the rest)\n", plain_total - plain_shown
+          printf "(%d more queued - raise CS_SESSION_START_QUEUED_LIMIT, or read the Queued section of config/backlog.md for those rows)\n", plain_total - plain_shown
         }
       }
     }
@@ -493,7 +508,10 @@ Go to a source directly only when:
     status line was capped and its tail matters (each task's full log path is
     printed with its tail),
   - a full task body is needed (tasks-axi show <id> --full, or config/backlog.md),
-  - the backlog listing disclosed omitted queued items and this turn needs them,
+  - the backlog listing disclosed omitted rows in any of its groups - in-flight,
+    held or blocked, or queued - and this turn needs them, in which case take the
+    targeted follow-up that disclosure names (the group's own tasks-axi listing,
+    or that one section of config/backlog.md) rather than a bulk read,
   - or this digest reports a stage as never emitted (a truncated startup names
     the stages that never ran), in which case that stage's sources were never
     printed and must be reconciled.

@@ -487,7 +487,7 @@ write_long_body_backlog "$HOME_DIR/config/backlog.md"
 
 out=$(CS_HOME="$HOME_DIR" CS_SESSION_START_QUEUED_LIMIT=4 "$BIN" 2>/dev/null)
 
-assert_contains "$out" 'compact backlog listing (manual backend; done rows omitted; in-flight, held, blocked, and public-followup title lines bounded to 40 per group; other queued bounded to 4; indented task bodies omitted)' \
+assert_contains "$out" 'compact backlog listing (manual backend; done rows omitted; in-flight, held, and blocked title lines bounded to 40 per group; public-followup rows never bounded; other queued bounded to 4; indented task bodies omitted)' \
   "manual backend did not use the composed title-line rendering"
 assert_contains "$out" '## In flight' "manual rendering omitted the in-flight section heading"
 assert_contains "$out" '- [ ] compact-startup - Compact startup digest' \
@@ -507,16 +507,19 @@ assert_contains "$out" '- [ ] plain-4 - Plain queued item 4' \
   "manual rendering dropped a queued title line inside its bound"
 assert_not_contains "$out" '- [ ] plain-5 - Plain queued item 5' \
   "manual rendering did not bound its plain queued listing"
-assert_contains "$out" '(shown 1 of 1 in-flight, 3 of 3 held, blocked, or public-followup queued, 4 of 25 other queued title line(s); 1 done row(s) omitted)' \
+assert_contains "$out" '(shown 1 of 1 in-flight, 2 of 2 held or blocked queued, all 1 public-followup queued, 4 of 25 other queued title line(s); 1 done row(s) omitted)' \
   "manual rendering did not report its bound accounting"
-assert_contains "$out" '(21 more queued - raise CS_SESSION_START_QUEUED_LIMIT or read config/backlog.md for the rest)' \
+assert_contains "$out" '(21 more queued - raise CS_SESSION_START_QUEUED_LIMIT, or read the Queued section of config/backlog.md for those rows)' \
   "manual rendering did not disclose an exact queued remainder"
 assert_not_contains "$out" 'more in-flight - raise CS_SESSION_START_ACTIVE_LIMIT' \
   "manual rendering claimed a remainder for a complete in-flight group"
 assert_contains "$out" 'or config/backlog.md' "manual digest omitted the config/backlog.md full-body pointer"
 pass "manual backlog rendering keeps held, blocked, and public-followup rows while bounding the rest"
 
-# --- backlog: the manual actionable groups are bounded the same way ------------
+# --- backlog: the manual actionable groups are bounded, obligations are not ----
+# The obligation sits AFTER enough held and blocked rows to exhaust the bound,
+# which is the shape that hides it: a delivery the boss is already owed must
+# still print in full while lower-priority dispatchable work does.
 write_active_bound_backlog() {
   local path=$1 i=1
   printf '# Backlog\n\n## In flight\n' > "$path"
@@ -530,6 +533,8 @@ write_active_bound_backlog() {
 - [ ] held-one - First held item (repo: consigliere) (kind: ship) (hold: boss choice pending)
 - [ ] held-two - Second held item (repo: consigliere) (kind: ship) (hold: boss choice pending)
 - [ ] blocked-one - Blocked item blocked-by: flight-1 (repo: consigliere) (kind: scout)
+- [ ] publish-obligation - Publish required follow-up (repo: consigliere) (kind: public-followup)
+- [ ] plain-one - Plain queued item (repo: consigliere) (kind: ship)
 EOF
 }
 
@@ -546,13 +551,32 @@ assert_not_contains "$out" '- [ ] flight-3 - In flight item 3' \
 assert_contains "$out" '- [ ] held-two - Second held item' \
   "the manual actionable bound dropped a held row inside its own limit"
 assert_not_contains "$out" '- [ ] blocked-one - Blocked item' \
-  "the manual held, blocked, and public-followup group was not actually bounded"
-assert_contains "$out" '(shown 2 of 3 in-flight, 2 of 3 held, blocked, or public-followup queued, 0 of 0 other queued title line(s); 0 done row(s) omitted)' \
+  "the manual held and blocked group was not actually bounded"
+assert_contains "$out" '- [ ] publish-obligation - Publish required follow-up (repo: consigliere) (kind: public-followup)' \
+  "an exhausted actionable bound hid a delivery obligation"
+assert_contains "$out" '- [ ] plain-one - Plain queued item' \
+  "the manual rendering hid an obligation while still printing plain queued work"
+assert_contains "$out" '(shown 2 of 3 in-flight, 2 of 3 held or blocked queued, all 1 public-followup queued, 1 of 1 other queued title line(s); 0 done row(s) omitted)' \
   "manual rendering did not account for its bounded actionable groups"
-assert_contains "$out" '(1 more in-flight - raise CS_SESSION_START_ACTIVE_LIMIT or read config/backlog.md for the rest)' \
+assert_contains "$out" '(1 more in-flight - raise CS_SESSION_START_ACTIVE_LIMIT, or read the In flight section of config/backlog.md for those rows)' \
   "manual rendering did not disclose the in-flight remainder it withheld"
-assert_contains "$out" '(1 more held, blocked, or public-followup queued - raise CS_SESSION_START_ACTIVE_LIMIT or read config/backlog.md for the rest)' \
+assert_contains "$out" '(1 more held or blocked queued - raise CS_SESSION_START_ACTIVE_LIMIT, or read the Queued section of config/backlog.md for those rows)' \
   "manual rendering did not disclose the actionable queued remainder it withheld"
-pass "manual actionable groups are bounded per group with an exact disclosed remainder"
+assert_not_contains "$out" 'more public-followup' \
+  "the digest claimed it withheld a delivery obligation"
+pass "manual actionable groups are bounded while public-followup obligations stay unbounded"
+
+# --- the read-once contract sanctions every disclosed remainder ----------------
+# The backlog section tells the agent how to recover a withheld row; the
+# contract two sections earlier forbids bulk-reading the same file. They have to
+# agree, or an agent obeying the contract literally cannot recover the rows
+# AGENTS.md sections 7 and 10 make most actionable.
+assert_contains "$out" 'the backlog listing disclosed omitted rows in any of its groups - in-flight,' \
+  "the read-once contract still sanctions only omitted queued items"
+assert_contains "$out" 'targeted follow-up that disclosure names' \
+  "the read-once contract did not point at the targeted follow-up over a bulk read"
+assert_not_contains "$out" 'read config/backlog.md for the rest' \
+  "a remainder line still advised the bulk read the contract forbids"
+pass "the read-once contract covers every disclosed backlog remainder without sanctioning a bulk read"
 
 pass "cs-session-start digest composition"
