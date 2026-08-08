@@ -61,19 +61,36 @@ printf '%s\n' "$*" >> "${CS_FAKE_AXI_LOG:?}"
 [ "${1:-}" = api ] && [ "${2:-}" = POST ] && [ "${3:-}" = graphql ] || exit 1
 case "$*" in
   *"pullRequest(number: 301)"*)
-    if [ "${CS_FAKE_301_UNKNOWN:-0}" = 1 ]; then
-      printf '%s\n' 'api_response:' '  body: "UNKNOWN"' '  truncated: false'
-    else
-      printf 'api_response:\n  body: "%s|%s|%s|%s|%s"\n  truncated: false\n' \
-        "${CS_FAKE_301_STATE:-OPEN}" "${CS_FAKE_301_DRAFT:-false}" \
-        "${CS_FAKE_301_HEAD:?}" "${CS_FAKE_301_CHECKS:-SUCCESS}" \
-        "${CS_FAKE_301_REVIEW:-NONE}"
-    fi
+    case "${CS_FAKE_301_RESPONSE:-valid}" in
+      valid)
+        printf 'api_response:\n  body: %s|%s|%s|%s|%s\n  truncated: false\n' \
+          "${CS_FAKE_301_STATE:-OPEN}" "${CS_FAKE_301_DRAFT:-false}" \
+          "${CS_FAKE_301_HEAD:?}" "${CS_FAKE_301_CHECKS:-SUCCESS}" \
+          "${CS_FAKE_301_REVIEW:-NONE}"
+        ;;
+      unknown)
+        printf '%s\n' 'api_response:' '  body: UNKNOWN' '  truncated: false'
+        ;;
+      malformed)
+        printf 'unexpected:\n  body: OPEN|false|%s|SUCCESS|NONE\n  truncated: false\n' \
+          "${CS_FAKE_301_HEAD:?}"
+        ;;
+      truncated)
+        printf 'api_response:\n  body: OPEN|false|%s|SUCCESS|NONE\n  truncated: true\n' \
+          "${CS_FAKE_301_HEAD:?}"
+        ;;
+      multiline)
+        printf 'api_response:\n  body: OPEN|false|%s|SUCCESS|NONE\nextra\n  truncated: false\n' \
+          "${CS_FAKE_301_HEAD:?}"
+        ;;
+      unauthenticated) exit 1 ;;
+      *) exit 1 ;;
+    esac
     ;;
   *"pullRequest(number: 303)"*)
     printf '%s\n' \
       'api_response:' \
-      '  body: "MERGED|false|3333333333333333333333333333333333333333|SUCCESS|NONE"' \
+      '  body: MERGED|false|3333333333333333333333333333333333333333|SUCCESS|NONE' \
       '  truncated: false'
     ;;
   *) exit 1 ;;
@@ -141,7 +158,7 @@ run_capacity() {
     CS_FAKE_301_DRAFT="${CS_CASE_DRAFT:-false}" \
     CS_FAKE_301_CHECKS="${CS_CASE_CHECKS:-SUCCESS}" \
     CS_FAKE_301_REVIEW="${CS_CASE_REVIEW:-NONE}" \
-    CS_FAKE_301_UNKNOWN="${CS_CASE_UNKNOWN:-0}" \
+    CS_FAKE_301_RESPONSE="${CS_CASE_RESPONSE:-valid}" \
     "$CAPACITY" proj "${1:-5}"
 }
 
@@ -185,12 +202,27 @@ red=$(CS_CASE_CHECKS=FAILURE run_capacity)
 assert_contains "$red" 'released=0' "red checks do not release capacity"
 assert_contains "$red" 'free=0' "red checks keep the five lanes full"
 
-unknown=$(CS_CASE_UNKNOWN=1 run_capacity)
+unknown=$(CS_CASE_RESPONSE=unknown run_capacity)
 assert_contains "$unknown" 'released=0' "unknown PR checks do not release capacity"
 assert_contains "$unknown" 'occupied=5' "unknown PR checks fail closed"
 
+malformed_response=$(CS_CASE_RESPONSE=malformed run_capacity)
+assert_contains "$malformed_response" 'released=0' "a malformed gh-axi response stops release"
+
+draft=$(CS_CASE_DRAFT=true run_capacity)
+assert_contains "$draft" 'released=0' "a draft PR does not release capacity"
+
 review_blocked=$(CS_CASE_REVIEW=CHANGES_REQUESTED run_capacity)
 assert_contains "$review_blocked" 'released=0' "a new changes-requested review stops release"
+
+truncated=$(CS_CASE_RESPONSE=truncated run_capacity)
+assert_contains "$truncated" 'released=0' "a truncated gh-axi response stops release"
+
+multiline=$(CS_CASE_RESPONSE=multiline run_capacity)
+assert_contains "$multiline" 'released=0' "a multiline gh-axi response stops release"
+
+unauthenticated=$(CS_CASE_RESPONSE=unauthenticated run_capacity)
+assert_contains "$unauthenticated" 'released=0' "an unauthenticated gh-axi response stops release"
 
 cp "$STATE/proj-301.pr-poll" "$TMP_ROOT/proj-301.pr-poll.valid"
 mv "$STATE/proj-301.pr-poll" "$STATE/proj-301.pr-poll.missing"
@@ -215,7 +247,7 @@ printf '%s\n%s\n' \
 malformed_policy=$(run_capacity)
 assert_contains "$malformed_policy" 'released=0' "malformed sweep policy fails closed"
 cp "$TMP_ROOT/sweeps.valid" "$HOME_DIR/data/sweeps.md"
-pass "stale, red, unknown, review-blocked, missing, and malformed release facts all hold safely"
+pass "stale, red, draft, unknown, review-blocked, unauthenticated, and malformed release facts all hold safely"
 
 leading_zero=$(run_capacity 08) || fail "leading-zero capacity query failed: $leading_zero"
 assert_contains "$leading_zero" 'cap=8' "leading-zero cap is normalized as decimal"
