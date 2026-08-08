@@ -34,6 +34,9 @@ esac
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
+# Optional turn telemetry (off unless host/telemetry.conf enables it).
+# shellcheck source=bin/cs-telemetry-lib.sh
+. "$SCRIPT_DIR/cs-telemetry-lib.sh"
 
 USAGE="usage: cs-promote.sh <task-id> --mode <$CS_DELIVERY_MODES> --yolo <$CS_DELIVERY_YOLOS>"
 ID=
@@ -83,6 +86,8 @@ TMP="$META.tmp"
   echo "yolo=$YOLO"
 } >> "$TMP"
 mv "$TMP" "$META"
+# TELEMETRY, measurement only, recorded once the promotion is durable.
+cs_telemetry_crumb promote "$MODE" || true
 
 HOME_Q=$(printf '%q' "$CS_HOME")
 echo "promoted $ID to ship mode=$MODE yolo=$YOLO (teardown protection restored)"

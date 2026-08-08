@@ -25,6 +25,9 @@ cs_resolve_root
 # Queue reader plus cs_path_mtime; also the one owner of the queue's location.
 # shellcheck source=bin/cs-wake-lib.sh
 . "$SCRIPT_DIR/cs-wake-lib.sh"
+# Optional turn telemetry (off unless host/telemetry.conf enables it).
+# shellcheck source=bin/cs-telemetry-lib.sh
+. "$SCRIPT_DIR/cs-telemetry-lib.sh"
 
 MONITOR="${CS_CHECKPOINT_MONITOR_BIN:-$SCRIPT_DIR/cs-monitor.sh}"
 DETACH="${CS_CHECKPOINT_DETACH_BIN:-$SCRIPT_DIR/cs-detach.py}"
@@ -73,6 +76,13 @@ case "$SECONDS_ARG" in
   ''|*[!0-9]*) echo "error: --seconds must be a positive integer" >&2; exit 2 ;;
   0) echo "error: --seconds must be greater than zero" >&2; exit 2 ;;
 esac
+
+# TELEMETRY, measurement only: a turn that ran a checkpoint supervised something,
+# whether or not the checkpoint went on to return a wake or time out quietly.
+# Recorded once here, ahead of every return path, so the quiet checkpoint - the
+# "worker is still working, keep monitoring" turn this whole measurement exists
+# to size - is never the one case that goes uncounted. Silent and unfailable.
+cs_telemetry_crumb checkpoint || true
 
 OUT=$(mktemp "${TMPDIR:-/tmp}/cs-watch-checkpoint.out.XXXXXX") || exit 1
 ERR=$(mktemp "${TMPDIR:-/tmp}/cs-watch-checkpoint.err.XXXXXX") || {

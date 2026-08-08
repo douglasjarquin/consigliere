@@ -55,7 +55,7 @@ chmod +x "$FAKEBIN/herdr"
 
 HOME_DIR="$TMP/home"
 STATE="$HOME_DIR/state"
-mkdir -p "$HOME_DIR/data" "$STATE"
+mkdir -p "$HOME_DIR/data" "$HOME_DIR/config" "$STATE"
 printf -- '- project [local-only] - fixture\n' > "$HOME_DIR/config/projects.md"
 REPO="$TMP/project"
 cs_git_init_commit "$REPO"

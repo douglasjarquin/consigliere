@@ -17,6 +17,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/cs-classify-lib.sh"
 # shellcheck source=bin/cs-line-cap-lib.sh
 . "$SCRIPT_DIR/cs-line-cap-lib.sh"
+# Optional turn telemetry (off unless host/telemetry.conf enables it).
+# shellcheck source=bin/cs-telemetry-lib.sh
+. "$SCRIPT_DIR/cs-telemetry-lib.sh"
 
 DRAIN_TMP=
 DRAIN_LOCK_HELD=false
@@ -136,6 +139,21 @@ DRAIN_LOCK_HELD=false
 # Raw output and queue deletion are authoritative. Everything below is
 # best-effort and cannot restore, duplicate, hide, or fail the consumed rows.
 (cs_wake_print_annotations "$RAW_ROWS") || true
+# TELEMETRY, measurement only: record which wake kinds actually caused this turn,
+# so the turn-end emitter can attribute it to supervision and name its
+# provenance. The vocabulary is the queue's own (cs_wake_append validates
+# signal|stale|check|capo|heartbeat); nothing is re-classified here. Silent, and
+# it cannot fail, print, or change what the drain already committed above.
+record_wake_telemetry() {
+  local _epoch _seq kind _key _payload
+  while IFS="$(printf '\t')" read -r _epoch _seq kind _key _payload; do
+    [ -n "$kind" ] || continue
+    cs_telemetry_crumb wake "$kind"
+  done <<EOF
+$RAW_ROWS
+EOF
+}
+record_wake_telemetry || true
 (print_open_decisions) || true
 assert_watcher_liveness
 exit 0

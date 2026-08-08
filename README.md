@@ -75,7 +75,7 @@ Then talk to it in plain language: describe the work, name the project when it i
 
 - `bin/` - `cs-*` scripts; read each header before first use (`bin/cs-doctor.sh` for a dependency preflight)
 - `skills/` - agent-loaded procedures (afk, rundown, the-books, vault, capo-provisioning, upstream-review, ...)
-- `docs/` - architecture, configuration schema (owner), supervision protocol, verified herdr/codex/claude/lavish facts
+- `docs/` - architecture, configuration schema (owner), supervision protocol, optional turn telemetry, verified herdr/codex/claude/lavish facts
 - `tests/` - colocated behavior tests (`bash tests/<name>.test.sh`, or `bin/cs-test-run.sh --portable`; live suites opt in via `CS_TEST_HERDR_LIVE=1` / `CS_TEST_CODEX_LIVE=1`)
 - `config/` - the user-owned tree (settings and durable memory), boss-private and gitignored; back it up wholesale
 - `host/` - machine-local sibling (capo roster, harness pin, activation); never backed up, re-created per machine

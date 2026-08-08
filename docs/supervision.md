@@ -62,6 +62,11 @@ Its continuation is typed `turn-end-guard`, so it cannot be confused with boss i
 The guard scopes itself to a genuine primary home (main checkout or marked capo home) via `bin/cs-primary-scope-lib.sh`; soldier task worktrees are exempt.
 It is a backstop, never permission to omit the live cycle.
 
+## Optional measurement
+
+The drain, the bounded checkpoint, and this Stop-hook guard are instrumented for the optional turn telemetry in `docs/telemetry.md`, which is off unless a home's `host/telemetry.conf` enables it.
+It is measurement only and changes no supervision decision: `tests/cs-telemetry-invariants.test.sh` runs each of those three paths with telemetry off and on and fails on any difference in exit status or output.
+
 ## Repair
 
 A forced watcher repair is home-scoped: kill only the pid recorded in this home's `state/.watch.lock`, then start a fresh foreground checkpoint.

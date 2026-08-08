@@ -93,8 +93,8 @@ fi
 
 # True when state/.lock names a live pid in this process's own ancestry: the
 # lock holder is the harness process this hook runs under, so this session
-# already started up. Deliberately independent of cs-lock.sh's harness-name
-# matching - ancestry is the property that matters here.
+# already started up. Deliberately independent of cs-session-pid-lib.sh's
+# harness-name matching - ancestry is the property that matters here.
 lock_is_in_ancestry() {
   local lock_pid pid=$$ _
   [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 1

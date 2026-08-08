@@ -197,4 +197,59 @@ rm "$CFG_HOME/config/boss.md"
 
 pass 'the config section reports migration state, symlink targets, and the loss tripwires'
 
+# --- telemetry is optional: off is information, malformed is a named warning --
+# Telemetry can only ever stop recording, never stop a session, so nothing it
+# reports may count as a required problem. docs/telemetry.md owns the contract.
+
+out=$(cfg_doctor)
+assert_line "$out" 'ok +telemetry +- +disabled \(optional; no host/telemetry\.conf\)' \
+  'telemetry off is an ordinary informational line'
+assert_no_line "$out" 'WARN +telemetry' 'telemetry off is never a warning'
+
+printf 'enabled true\nretain_days 14\n' > "$CFG_HOME/host/telemetry.conf"
+out=$(cfg_doctor)
+assert_line "$out" 'WARN +telemetry +- +enabled but jq is missing' \
+  'telemetry is honest that it records nothing without jq'
+
+# With jq present the same config reports where it is recording.
+cs_fake_exit0 "$FAKEBIN" jq
+out=$(cfg_doctor)
+assert_line "$out" 'ok +telemetry +14d +recording to .*/data/telemetry/turns\.jsonl' \
+  'enabled telemetry reports its retention and its resolved storage path'
+assert_no_line "$out" 'WARN +telemetry\.conf +- +not a known name' \
+  'telemetry.conf is a known host-tier name, not a stray'
+
+printf 'enabled maybe\n' > "$CFG_HOME/host/telemetry.conf"
+out=$(cfg_doctor)
+assert_line "$out" 'WARN +telemetry +- +host/telemetry\.conf is enabled must be true or false' \
+  'a malformed telemetry config is reported specifically'
+assert_contains "$out" 'docs/telemetry.md' 'the malformed telemetry warning names its owner doc'
+
+# A malformed OPTIONAL config must not change the verdict. The verdict is the
+# doctor's exit status plus its closing line, and that line CARRIES the count
+# ("1 required problem" / "N required problems" / "Ready:"), so comparing the
+# line text and the status detects a config that silently added a problem.
+verdict() { # -> "<exit-status> <closing verdict line>"
+  local out rc line
+  out=$(cfg_doctor); rc=$?
+  line=$(printf '%s\n' "$out" | grep -E 'required problem|^Ready:' | head -1)
+  printf '%s %s\n' "$rc" "$line"
+}
+
+malformed_verdict=$(verdict)
+rm -f "$CFG_HOME/host/telemetry.conf"
+clean_verdict=$(verdict)
+[ "$malformed_verdict" = "$clean_verdict" ] ||
+  fail "a malformed telemetry config must not change the doctor verdict: '$malformed_verdict' vs '$clean_verdict'"
+
+# The guard must be able to FAIL, or it proves nothing. A genuine required
+# problem moves both the status and the count, so the same comparison rejects it.
+printf 'x\n' > "$CFG_HOME/data/boss.md"
+broken_verdict=$(verdict)
+rm -f "$CFG_HOME/data/boss.md"
+[ "$broken_verdict" != "$clean_verdict" ] ||
+  fail "the verdict guard cannot detect a real required problem, so it proves nothing: '$broken_verdict'"
+[ "$(verdict)" = "$clean_verdict" ] || fail 'removing the induced problem must restore the verdict'
+pass 'telemetry is reported as optional: disabled informs, enabled names its path, malformed warns'
+
 pass 'cs-doctor behaviors'

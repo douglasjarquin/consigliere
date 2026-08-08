@@ -87,6 +87,10 @@ CS_LOCK_LOG_PREFIX="cs-teardown" . "$SCRIPT_DIR/cs-lock-lib.sh"
 # shellcheck source=bin/cs-capo-registry-lib.sh
 . "$SCRIPT_DIR/cs-capo-registry-lib.sh"
 
+# Optional turn telemetry (off unless host/telemetry.conf enables it).
+# shellcheck source=bin/cs-telemetry-lib.sh
+. "$SCRIPT_DIR/cs-telemetry-lib.sh"
+
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
@@ -802,6 +806,8 @@ if [ "$KIND" = capo ]; then
   rm -f "$STATE/$ID.status" "$STATE/$ID.turn-ended" "$STATE/$ID.meta" \
     "$STATE/.decision-cursor-$ID" \
     "$STATE/.decision-cursor-$ID".read.* "$STATE/.decision-cursor-$ID".tmp.*
+  # TELEMETRY, measurement only, on a teardown that actually completed.
+  cs_telemetry_crumb teardown capo || true
   echo "teardown $ID complete (capo home $HOME_PATH retired)"
   exit 0
 fi
@@ -901,5 +907,9 @@ if [ "$KIND" != scout ] && [ "$MODE" != local-only ] && [ -x "$SCRIPT_DIR/cs-fle
   "$SCRIPT_DIR/cs-fleet-sync.sh" "$PROJ" || true
 fi
 
+# TELEMETRY, measurement only, on a teardown that actually completed. A refusal
+# never reaches this line, so a task cleaned up under protest is never counted as
+# a supervision turn that closed the loop.
+cs_telemetry_crumb teardown "$KIND" || true
 echo "teardown $ID complete (pane ${PANE:-<none>}, worktree ${WT:-<none>})"
 echo "reminder: record completion in the backlog and re-evaluate queued work."

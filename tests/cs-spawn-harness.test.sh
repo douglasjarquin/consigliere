@@ -243,4 +243,54 @@ assert_contains "$output" "no agent appeared" "the swallowed launch must be name
 assert_not_contains "$output" "spawned t-swallowed" "a swallowed launch must never print a spawn success line"
 pass "a launch line the shell swallowed fails loudly instead of reporting a spawn"
 
+# --- optional worker telemetry reaches (only) a real instrumented spawn ------
+# The launch artefacts above are the uninstrumented shape, which is the point:
+# telemetry is resolved at spawn time, so a soldier launched while telemetry is
+# off must be byte identical to one launched before the instrumentation existed.
+# docs/telemetry.md owns the contract; this proves it end to end from cs-spawn.
+assert_not_contains "$(cat "$TMP/launch-t-codex")" 'cs-telemetry-emit.sh' \
+  "telemetry off must add nothing to a codex soldier launch"
+[ "$(jq -r '.hooks.Stop[0].hooks | length' "$HOME_DIR/state/t-claude.claude-settings.json")" = 1 ] ||
+  fail "telemetry off must leave the claude soldier's Stop hook list at exactly the turn-end touch"
+[ "$(jq -r '.hooks.Stop[0].hooks[0].command' "$HOME_DIR/state/t-claude.claude-settings.json")" \
+  = "touch $HOME_DIR/state/t-claude.turn-ended" ] ||
+  fail "telemetry off must leave the claude soldier's single Stop hook command as the bare turn-end touch"
+
+mkdir -p "$HOME_DIR/host"
+printf 'enabled true\n' > "$HOME_DIR/host/telemetry.conf"
+export CS_TELEMETRY_DISABLE=''
+
+launch=$(spawn_one codex t-telemetry-codex --mode no-mistakes --yolo off)
+assert_contains "$launch" 'touch' "the codex notify command must still touch the turn-end signal"
+assert_contains "$launch" 'cs-telemetry-emit.sh' "an enabled home instruments the codex worker turn end"
+assert_contains "$launch" '--worker --task' "the worker emitter is called with its task identity"
+assert_not_contains "$launch" '--stdin' "codex notify carries no piped payload, so the emitter must not read stdin"
+case "$launch" in
+  *"touch '$HOME_DIR/state/t-telemetry-codex.turn-ended'; "*) ;;
+  *) fail "the turn-end touch must run first, joined by ';' so telemetry cannot gate it: $launch" ;;
+esac
+
+launch=$(spawn_one claude t-telemetry-claude --mode no-mistakes --yolo off)
+SETTINGS="$HOME_DIR/state/t-telemetry-claude.claude-settings.json"
+assert_not_contains "$launch" 'cs-telemetry-emit.sh' \
+  "a claude soldier is instrumented through its settings file, not its launch line"
+jq -e . "$SETTINGS" >/dev/null || fail "an instrumented claude settings file must stay valid JSON"
+[ "$(jq -r '.hooks.Stop[0].hooks[0].command' "$SETTINGS")" \
+  = "touch $HOME_DIR/state/t-telemetry-claude.turn-ended" ] ||
+  fail "the turn-end touch must remain the first, separate claude Stop hook command"
+[ "$(jq -r '.hooks.Stop[0].hooks | length' "$SETTINGS")" = 2 ] ||
+  fail "telemetry must be a second hook command, never folded into the touch"
+case "$(jq -r '.hooks.Stop[0].hooks[1].command' "$SETTINGS")" in
+  *cs-telemetry-emit.sh*--stdin) ;;
+  *) fail "claude feeds the Stop payload to every hook command, so the emitter must read it from stdin" ;;
+esac
+
+launch=$(spawn_one codex t-telemetry-headless --scout --headless)
+assert_not_contains "$launch" 'cs-telemetry-emit.sh' \
+  "a headless scout's turn end is process exit; its launch line stays uninstrumented"
+
+unset CS_TELEMETRY_DISABLE
+rm -f "$HOME_DIR/host/telemetry.conf"
+pass "worker turn-end telemetry is added only when the home enables it, never ahead of the turn-end touch"
+
 pass "cs-spawn harness resolution and launch"
