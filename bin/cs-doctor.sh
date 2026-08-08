@@ -80,18 +80,16 @@ problem() {
   PROBLEMS=$((PROBLEMS + 1))
 }
 
-# below_floor <tool> - true when <tool> carries an axi floor (owned by
-# cs-deps-lib.sh) and its installed build is below it. Sets FLOOR and
-# FLOOR_VERSION for the caller's report line; FLOOR_VERSION keeps the
-# comparator's own classification, so a build rejected as not a clean dotted
-# release reads "unparseable" instead of a number contradicting the rejection.
+# below_floor <tool> - true when the below-floor classification cs-deps-lib.sh
+# owns applies to <tool>. Sets FLOOR and FLOOR_VERSION for the caller's report
+# line, so this report and the session-start gate describe the same build with
+# the same version and the same floor.
 FLOOR=
 FLOOR_VERSION=
 below_floor() {
-  FLOOR=$(cs_deps_axi_floor "$1") || return 1
-  cs_deps_version_at_least "$1" "$FLOOR" && return 1
-  FLOOR_VERSION=$(cs_deps_version_release "$1" || true)
-  FLOOR_VERSION=${FLOOR_VERSION:-unparseable}
+  local gap
+  gap=$(cs_deps_axi_gap "$1") || return 1
+  IFS=$'\t' read -r FLOOR_VERSION FLOOR <<< "$gap"
 }
 
 # --- header -------------------------------------------------------------------

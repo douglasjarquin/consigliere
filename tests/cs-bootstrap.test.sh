@@ -14,7 +14,10 @@
 #     the optional tools), asking for an upgrade;
 #   - a build exactly at the floor is silent;
 #   - a build that answers --version with nothing is reported as below-floor
-#     (unparseable), never silently accepted.
+#     (unparseable), never silently accepted;
+#   - a version behind a single tool-name prefix ("gh-axi 0.1.29") is comparable,
+#     while a prerelease, trailing text, or prose containing a dotted token is
+#     not.
 set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -120,8 +123,19 @@ assert_line "$out" "^MISSING: gh-axi unparseable version below floor $floor" \
   'a prerelease at the stable floor stays below-floor and unparseable'
 assert_no_line "$out" "^MISSING: gh-axi $floor below floor $floor" \
   'the diagnostic never re-extracts a dotted token the comparator rejected'
+
+CS_TEST_GH_AXI_VERSION="gh-axi $floor"
+out=$(run_bootstrap)
+assert_no_line "$out" '^MISSING: gh-axi' 'an at-floor build behind a tool-name prefix is comparable'
+
+prefixed_under=$(cs_test_version_below "$floor") ||
+  fail "no below-floor fixture is derivable from the gh-axi floor $floor"
+CS_TEST_GH_AXI_VERSION="gh-axi/$prefixed_under"
+out=$(run_bootstrap)
+assert_line "$out" "^MISSING: gh-axi ${prefixed_under//./\\.} below floor $floor" \
+  'a prefixed below-floor build fires with the version behind the prefix shown'
 unset CS_TEST_GH_AXI_VERSION
-pass 'only complete dotted release versions are comparable'
+pass 'one clean release, bare or behind a tool-name prefix, is comparable'
 
 # A tool that prints a clean above-floor number but exits nonzero is rejected by
 # the comparator; the diagnostic must say so instead of naming that number.

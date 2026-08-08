@@ -53,21 +53,16 @@ DETECT_ONLY=${CS_BOOTSTRAP_DETECT_ONLY:-0}
 # shellcheck source=bin/cs-deps-lib.sh
 . "$SCRIPT_DIR/cs-deps-lib.sh"
 
-# cs_bootstrap_axi_gap <tool> - when the installed tool is below its floor,
-# print "<installed-or-unparseable> below floor <floor> - upgrade: <hint>" and
-# exit 0; silent exit 1 when the tool is ungated, absent, or at/above its floor.
-# The displayed version keeps the comparator's classification because it comes
-# from the same acceptance test: a build cs_deps_version_release rejects -
-# malformed text, a prerelease, or a --version that exits nonzero - reports as
-# unparseable rather than as a number that would contradict the rejection.
+# cs_bootstrap_axi_gap <tool> - the session-start wording for the below-floor
+# classification cs-deps-lib.sh owns: print "<version> below floor <floor> -
+# upgrade: <hint>" and exit 0, or exit 1 silently when the tool is ungated,
+# absent, or at/above its floor.
 cs_bootstrap_axi_gap() {
-  local tool=$1 floor installed
-  floor=$(cs_deps_axi_floor "$tool") || return 1
-  command -v "$tool" >/dev/null 2>&1 || return 1
-  cs_deps_version_at_least "$tool" "$floor" && return 1
-  installed=$(cs_deps_version_release "$tool" || true)
+  local tool=$1 gap installed floor
+  gap=$(cs_deps_axi_gap "$tool") || return 1
+  IFS=$'\t' read -r installed floor <<< "$gap"
   printf '%s below floor %s - upgrade: %s\n' \
-    "${installed:-unparseable version}" "$floor" "$(cs_deps_hint "$tool")"
+    "$installed" "$floor" "$(cs_deps_hint "$tool")"
 }
 
 missing=""

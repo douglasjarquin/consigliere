@@ -84,22 +84,27 @@ test_compat_probe() {
   pass "compat probe requires >=0.1.1, --archive-body, and multi-id mv"
 }
 
-# The probe reads the version through the shared comparator, so it accepts only
-# a clean dotted release - the same acceptance test the session-start floor
-# uses. A build whose --version answers with decorated text is not comparable
-# and must not be treated as compatible.
+# The probe reads the version through the shared comparator, so it accepts the
+# same shapes the session-start floor does: one release, bare or behind a single
+# tool-name prefix. Prose that merely contains a dotted token is not a version
+# statement and must not read as compatible.
 test_version_acceptance() {
   local d fb rc
   d="$TMP_ROOT/version-plain"; fb=$(cs_fakebin "$d")
   write_fake_tasks_axi "$fb" "1.12.3" "$UPDATE_OK" "$MV_OK"
   run_probe "$fb" cs_tasks_axi_compatible || fail "1.12.3 must be compatible"
 
+  d="$TMP_ROOT/version-prefixed"; fb=$(cs_fakebin "$d")
+  write_fake_tasks_axi "$fb" "tasks-axi 1.12.3" "$UPDATE_OK" "$MV_OK"
+  run_probe "$fb" cs_tasks_axi_compatible \
+    || fail "a version behind its own tool name must be compatible"
+
   d="$TMP_ROOT/version-decorated"; fb=$(cs_fakebin "$d")
   write_fake_tasks_axi "$fb" "tasks-axi version 1.12.3 (release)" "$UPDATE_OK" "$MV_OK"
   set +e; run_probe "$fb" cs_tasks_axi_compatible; rc=$?; set -e
-  [ "$rc" -ne 0 ] || fail "decorated --version output must not read as comparable"
+  [ "$rc" -ne 0 ] || fail "text around the version must not read as comparable"
 
-  pass "compatibility reads only clean dotted release versions"
+  pass "compatibility reads one release, bare or behind a tool-name prefix"
 }
 
 test_backlog_backend_value() {

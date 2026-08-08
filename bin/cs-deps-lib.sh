@@ -42,6 +42,7 @@
 #   cs_deps_version_release <tool>                # the comparable release, or nothing
 #   cs_deps_version_at_least <tool> <floor>       # exit 0 iff installed >= floor
 #   cs_deps_axi_floor <tool>                      # the tool's axi floor, or nothing
+#   cs_deps_axi_gap <tool>                        # "<version><TAB><floor>" iff below
 #
 # cs_deps_version runs the tool's own `--version`; it does not bound that call,
 # so it is only safe against the inventory's tools, never arbitrary input.
@@ -151,10 +152,18 @@ cs_deps_version() {
   printf '%s\n' "$raw" | grep -Eo '[0-9]+(\.[0-9]+)+' | head -1
 }
 
-# cs_deps_version_release <tool> - print the tool's COMPLETE --version output
-# when that output is a clean dotted release number and the tool exited 0;
-# exit nonzero for an absent tool, a --version that fails, decorated or
-# malformed text, or a prerelease such as 0.1.29-rc.1.
+# cs_deps_version_release <tool> - print the dotted release the tool's --version
+# reports, when its COMPLETE output is that release and nothing else; exit
+# nonzero for an absent tool, a --version that fails, or output this cannot read
+# as exactly one release.
+#
+# A single leading tool-name token is allowed before the number, since a CLI
+# that answers "tasks-axi 0.3.0" or "gh-axi/0.1.29" is still stating one
+# unambiguous version. Everything else is rejected: a prerelease suffix
+# (0.1.29-rc.1, which is below the stable release, never above), anything
+# trailing the number, and prose that merely contains a dotted token
+# ("requires Node 99.0"), where picking a number out of the sentence would be a
+# guess about which number is the version.
 #
 # This is the single acceptance test for "comparable version". The comparator
 # below asks it, and so does every diagnostic that displays a version, so a
@@ -165,8 +174,8 @@ cs_deps_version_release() {
   [ -n "$tool" ] || return 1
   command -v "$tool" >/dev/null 2>&1 || return 1
   have=$("$tool" --version 2>/dev/null) || return 1
-  [[ "$have" =~ ^[0-9]+(\.[0-9]+)+$ ]] || return 1
-  printf '%s\n' "$have"
+  [[ "$have" =~ ^([A-Za-z][A-Za-z0-9_-]*[\ /])?([0-9]+(\.[0-9]+)+)$ ]] || return 1
+  printf '%s\n' "${BASH_REMATCH[2]}"
 }
 
 # cs_deps_version_at_least <tool> <floor> - exit 0 when the installed version is
@@ -220,4 +229,26 @@ cs_deps_axi_floor() {
     quota-axi) printf '%s\n' "$CS_QUOTA_AXI_MIN" ;;
     *) return 1 ;;
   esac
+}
+
+# What every consumer displays where a version would go when the installed
+# build has no comparable one. Owned here so the session-start gate and the
+# preflight report cannot describe the same build two different ways.
+CS_DEPS_UNCOMPARABLE_VERSION='unparseable version'
+
+# cs_deps_axi_gap <tool> - the below-floor classification, owned once.
+# Prints "<version-or-CS_DEPS_UNCOMPARABLE_VERSION><TAB><floor>" and returns 0
+# when <tool> is gated and its installed build is below its floor; returns 1
+# silently when the tool is ungated, absent, or at or above its floor.
+#
+# The displayed version comes from the same acceptance test as the comparison,
+# so a build reported as below-floor is never displayed as a number above it.
+# Callers keep their own wording and line format and share this predicate.
+cs_deps_axi_gap() {
+  local tool=${1:-} floor installed
+  floor=$(cs_deps_axi_floor "$tool") || return 1
+  command -v "$tool" >/dev/null 2>&1 || return 1
+  cs_deps_version_at_least "$tool" "$floor" && return 1
+  installed=$(cs_deps_version_release "$tool" || true)
+  printf '%s\t%s\n' "${installed:-$CS_DEPS_UNCOMPARABLE_VERSION}" "$floor"
 }

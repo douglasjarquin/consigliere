@@ -478,9 +478,13 @@ SH
 exit 1
 SH
   chmod +x "$fakebin/herdr" "$fakebin/gh"
-  # A version-reporting gh-axi: bootstrap gates axi-family versions, so a bare
-  # failing stub would add a below-floor MISSING line this test does not want.
+  # Version-reporting axi stubs: bootstrap gates the axi family, so a bare
+  # failing stub would add a below-floor line this test does not want, and an
+  # unstubbed one would spawn the developer's real CLI from a hermetic lane.
   cs_fake_version_tool "$fakebin" gh-axi CS_TEST_GH_AXI_VERSION 9.9.9
+  cs_fake_version_tool "$fakebin" tasks-axi CS_TEST_TASKS_AXI_VERSION 9.9.9
+  cs_fake_version_tool "$fakebin" lavish-axi CS_TEST_LAVISH_AXI_VERSION 9.9.9
+  cs_fake_version_tool "$fakebin" quota-axi CS_TEST_QUOTA_AXI_VERSION 9.9.9
   # A clone we will leave STUCK (dirty), and one that self-heals (detached-clean-ancestor).
   stuck=$(build_pair "$home" stuck-clone)
   advance_origin "$home" stuck-clone C1
