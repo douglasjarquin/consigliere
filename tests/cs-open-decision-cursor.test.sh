@@ -8,7 +8,9 @@
 # missing cursor, a truncated log, and a replaced/rotated/recreated log (even
 # at the same size, via the device+inode identity check), and on a genuine
 # read failure report the already-trusted persisted set unchanged without
-# destroying the cursor.
+# destroying the cursor. When state/ itself is unwritable so the new-bytes chunk
+# cannot be staged, it must degrade to the authoritative whole-file fold rather
+# than to a silently empty open set.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -269,6 +271,39 @@ test_read_failure_preserves_trusted_set_and_cursor() {
   pass "a read failure reports the trusted set unchanged and preserves the cursor"
 }
 
+test_chunk_stage_failure_falls_back_to_full_fold() {
+  local dir state f fakebin cursor before out full
+  dir=$(make_case stage-failure); state="$dir/state"
+  f="$state/t1.status"
+  cursor=$(cursor_of "$state" t1)
+  printf 'working: start\nneeds-review [key=api]: check A\n' > "$f"
+  # Staging the new-bytes chunk needs a writable state/; when it cannot be
+  # created (ENOSPC, read-only state/) there is no trusted persisted set yet, so
+  # reporting one would hide the open review entirely. The authoritative
+  # whole-file fold must answer instead.
+  fakebin=$(cs_fakebin "$dir")
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$fakebin/mktemp"
+  chmod +x "$fakebin/mktemp"
+  out=$(PATH="$fakebin:$PATH" fold_inc "$f")
+  full=$(fold_full "$f")
+  [ "$out" = "$full" ] || fail "a staging failure with no cursor must equal the full fold (inc: '$out' full: '$full')"
+  assert_absent "$cursor" "a staging failure must not persist a cursor"
+
+  # With a cursor already persisted, the same fallback answers from the full
+  # fold and leaves the existing cursor byte-for-byte untouched.
+  fold_inc "$f" > /dev/null
+  before=$(cat "$cursor")
+  printf 'needs-decision [key=db]: pick a store\n' >> "$f"
+  out=$(PATH="$fakebin:$PATH" fold_inc "$f")
+  full=$(fold_full "$f")
+  [ "$out" = "$full" ] || fail "a staging failure must fall back to the full fold (inc: '$out' full: '$full')"
+  [ "$(cat "$cursor")" = "$before" ] || fail "a staging failure must not rewrite the cursor"
+  # A writable state/ again folds the pending append normally.
+  out=$(fold_inc "$f")
+  [ "$out" = "$full" ] || fail "recovery after a staging failure must fold the pending append (got: '$out')"
+  pass "a chunk staging failure answers from the full fold and preserves the cursor"
+}
+
 test_failed_staged_cursor_write_preserves_previous_cursor() {
   local dir state f cursor before out
   dir=$(make_case failed-stage); state="$dir/state"
@@ -417,6 +452,7 @@ test_zero_byte_invalidation_persists_reset_cursor
 test_fold_contract_change_invalidates_cursor
 test_same_size_replacement_refolds_via_inode_check
 test_read_failure_preserves_trusted_set_and_cursor
+test_chunk_stage_failure_falls_back_to_full_fold
 test_failed_staged_cursor_write_preserves_previous_cursor
 test_atomic_temp_files_ignore_predictable_symlinks
 test_compare_before_rename_skips_observed_newer_cursor

@@ -696,6 +696,16 @@ remove_watcher_markers() {
     "$STATE/.hb-surfaced-$id_key"
     "$STATE/.decision-cursor-$ID"
   )
+  # A drain killed mid-write leaves the cursor's own staging temp files behind
+  # (.decision-cursor-<id>.read.XXXXXX / .tmp.XXXXXX from cs-classify-lib.sh's
+  # mktemp), and nothing else ever reclaims them. Match ONLY those two suffixed
+  # families - never a bare .decision-cursor-$ID* glob, which would also eat the
+  # live cursor of another task whose id merely starts with this id.
+  for m in "$STATE/.decision-cursor-$ID".read.* "$STATE/.decision-cursor-$ID".tmp.*; do
+    if [ -e "$m" ] || [ -L "$m" ]; then
+      markers+=("$m")
+    fi
+  done
   if [ -n "$PANE" ]; then
     pane_key=$(printf '%s' "$PANE" | tr ':/.' '___')
     markers+=(
@@ -786,8 +796,12 @@ if [ "$KIND" = capo ]; then
     || rm -rf "$HOME_PATH"
   git -C "$CS_ROOT" worktree prune 2>/dev/null || true
   remove_capo_registry_entry "$ID"
+  # The .read.*/.tmp.* globs reclaim cursor staging temp files a killed drain
+  # left behind; they stay narrowly suffixed so another task whose id starts
+  # with this id keeps its own live cursor.
   rm -f "$STATE/$ID.status" "$STATE/$ID.turn-ended" "$STATE/$ID.meta" \
-    "$STATE/.decision-cursor-$ID"
+    "$STATE/.decision-cursor-$ID" \
+    "$STATE/.decision-cursor-$ID".read.* "$STATE/.decision-cursor-$ID".tmp.*
   echo "teardown $ID complete (capo home $HOME_PATH retired)"
   exit 0
 fi

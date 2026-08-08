@@ -527,15 +527,30 @@ EOF
 # missing cursor (new task, or someone deleted the cursor file, which is always
 # safe) takes the same full-re-fold path. The identity check remains O(1) via a
 # single stat call - no content hashing and no re-reading the consumed prefix.
-# A same-inode, same-size, in-place byte edit is NOT detected; that is a
-# deliberately accepted gap because no code path in this repo ever does that
-# to a status file.
+# "Can never disagree" is a claim about the per-line fold rule, which is
+# literally shared. Two gaps in the surrounding bookkeeping are deliberately
+# accepted, both requiring a writer this repo does not have:
+#   1. A same-inode, same-size, in-place byte edit is NOT detected. No code
+#      path in this repo ever rewrites a status file in place.
+#   2. A cursor boundary is assumed to be a line boundary. A writer appending
+#      a partial line would have its fragment folded as if complete, and the
+#      remainder folded as a second line, so the two strategies could then
+#      hold different keys for that one line. Every status writer in this repo
+#      appends whole lines via echo/printf with a trailing newline, so no
+#      cursor ever lands mid-line - which is why this needs no pending-fragment
+#      machinery (explicitly out of scope for the bounded-cost contract).
 #
 # The other real failure mode is OUR OWN read failing (a stat/wc/tail I/O
-# error), not a malformed writer: every such read here is checked, and on
-# failure this reports the already-trusted persisted set unchanged and leaves
-# the cursor file alone, rather than risking a silent invalidation that would
-# wipe it - never a bare "empty" as if nothing were open.
+# error), not a malformed writer: every such read here is checked. A failed
+# read of the STATUS FILE's identity or size reports the already-trusted
+# persisted set unchanged and leaves the cursor file alone, rather than risking
+# a silent invalidation that would wipe it - never a bare "empty" as if nothing
+# were open. A failed STAGING of the new-bytes chunk is a different case: it
+# means state/ is unwritable (ENOSPC, read-only), and the trusted set would be
+# empty for any task that has no cursor yet, so that path answers from the
+# authoritative pure-read whole-file fold (status_open_decisions) for this call
+# and leaves the cursor untouched - an unwritable state/ degrades this back to
+# the unbounded full fold, never to a silently hidden open decision.
 #
 # Not a pure status-file read: this writes/rewrites the sibling cursor file
 # (state/.decision-cursor-<task>) as a side effect, the library's second
@@ -562,14 +577,20 @@ _cs_decision_cursor_path() {  # <status-file>
 }
 
 # Portable device:inode identity for the rotation/recreation check below.
-_cs_decision_file_ident() {  # <file> -> "dev:inode", empty on I/O failure
-  local f=$1
-  if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
-    LC_ALL=C stat -f '%d:%i' "$f" 2>/dev/null
-  else
-    LC_ALL=C stat -c '%d:%i' "$f" 2>/dev/null
-  fi
-}
+# macOS (BSD) stat uses `-f <fmt>`; Linux (GNU) stat uses `-c <fmt>`. The
+# platform is resolved ONCE at source time and the wrapper defined accordingly
+# (the same shape as bin/cs-watch.sh's stat_mtime/stat_sig): this runs once per
+# status file per drain, so a per-call `uname` fork would add a fork per task to
+# the very hot path this cursor exists to bound.
+if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
+  _cs_decision_file_ident() {  # <file> -> "dev:inode", empty on I/O failure
+    LC_ALL=C stat -f '%d:%i' "$1" 2>/dev/null
+  }
+else
+  _cs_decision_file_ident() {  # <file> -> "dev:inode", empty on I/O failure
+    LC_ALL=C stat -c '%d:%i' "$1" 2>/dev/null
+  }
+fi
 
 status_open_decisions_incremental() {  # <status-file>
   local f=$1 cf offset ident cursor_contract open='' trusted_open=''
@@ -652,15 +673,21 @@ status_open_decisions_incremental() {  # <status-file>
   fi
 
   if [ "$offset" -lt "$size" ]; then
+    # Staging the chunk needs a WRITABLE state/, so its failure is not the
+    # status-file read failure handled above: the trusted set is empty for a
+    # task that has no cursor yet, and returning it would silently hide an open
+    # decision. Answer from the authoritative whole-file fold instead (a pure
+    # read, exactly what every non-drain caller uses) and leave the cursor as it
+    # was for the next call.
     chunk_file=$(umask 077; mktemp "$cf.read.XXXXXX" 2>/dev/null) \
-      || { printf '%s' "$trusted_open"; return 0; }
+      || { status_open_decisions "$f"; return 0; }
     tail -c "+$((offset + 1))" "$f" > "$chunk_file" 2>/dev/null \
-      || { rm -f "$chunk_file"; printf '%s' "$trusted_open"; return 0; }
+      || { rm -f "$chunk_file"; status_open_decisions "$f"; return 0; }
     chunk_size=$(LC_ALL=C wc -c < "$chunk_file" 2>/dev/null) \
-      || { rm -f "$chunk_file"; printf '%s' "$trusted_open"; return 0; }
+      || { rm -f "$chunk_file"; status_open_decisions "$f"; return 0; }
     chunk_size=${chunk_size//[[:space:]]/}
     case "$chunk_size" in
-      ''|*[!0-9]*) rm -f "$chunk_file"; printf '%s' "$trusted_open"; return 0 ;;
+      ''|*[!0-9]*) rm -f "$chunk_file"; status_open_decisions "$f"; return 0 ;;
     esac
     # Test-only observability seam (off by default, no production behavior
     # change): when set, records exactly how many bytes THIS call folded, so a
