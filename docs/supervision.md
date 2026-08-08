@@ -7,6 +7,7 @@ Codex cannot reason during a foreground tool call, so a background watcher that 
 
 1. Drain first: `bin/cs-wake-drain.sh` at the start of every wake-handling turn.
    The drain also prints bounded fleet-wide open-decision context, including on an empty queue, and stays silent when no decisions remain open.
+   That scan is cursor-backed (`state/.decision-cursor-<task>`), so each drain folds only status bytes appended since the previous drain instead of every task's whole lifetime log.
 2. Run one checkpoint: `bin/cs-watch-checkpoint.sh --seconds "${CS_WATCH_CHECKPOINT:-180}"`.
    It ensures `bin/cs-monitor.sh` is alive for this home, reviving it on a stale `state/.last-monitor-beat`, then waits for `state/.wake-queue` to carry something.
 3. Actionable wake (`signal:` / `stale:` / `check:` / `heartbeat`): drain, handle, start the next checkpoint in the same turn.

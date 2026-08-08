@@ -10,13 +10,18 @@
 # what it needs as arguments and touches no globals beyond the optional
 # CS_BOSS_RE override. Consumers layer their own dedup/marker state on top.
 #
-# The one exception is the absorb classification (crew_absorb_class and its
-# working/paused wrappers). It is NOT a pure status-file read: it reuses
-# bin/cs-crew-state.sh, which may make a bounded no-mistakes call, to decide
-# whether a soldier that just stopped its turn or went stale is working,
-# deliberately paused, or neither. Callers run it ONLY on no-verb signal
-# handling and first sighting of a stale hash, never on every wake, so the
-# per-wake triage stays cheap.
+# There are two documented exceptions. The absorb classification
+# (crew_absorb_class and its working/paused wrappers) is NOT a pure status-file
+# read: it reuses bin/cs-crew-state.sh, which may make a bounded no-mistakes
+# call, to decide whether a soldier that just stopped its turn or went stale is
+# working, deliberately paused, or neither. Callers run it ONLY on no-verb
+# signal handling and first sighting of a stale hash, never on every wake, so
+# the per-wake triage stays cheap. status_open_decisions_incremental (see
+# "incremental (cursor-backed) open-decisions fold" below) also writes: it
+# persists a per-status-file byte cursor and folded open-set
+# (state/.decision-cursor-<task>) as a side effect, so the per-drain fleet-wide
+# scan stays bounded by new appends instead of re-reading each task's whole
+# lifetime log every time.
 
 _CS_CLASSIFY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null)" || _CS_CLASSIFY_LIB_DIR="."
 
@@ -233,6 +238,43 @@ $set
 EOF
   return 1
 }
+# Fold ONE status line into an existing "<key>\t<verb>\t<note>\n"-per-line open
+# set, applying the needs-decision/needs-review/blocked-opens,
+# resolved-closes, boss-held-closes-except-needs-review rule that
+# status_open_decisions documents above. Pure text transform, no file I/O.
+# This is the ONE place the per-line open/resolved rule is written; both the
+# whole-file fold (status_open_decisions) and the incremental cursor-backed
+# fold (status_open_decisions_incremental) below call this instead of
+# re-deriving the rule, so the two consumption strategies can never drift
+# apart on semantics.
+_cs_decision_fold_line() {  # <open-set> <status-line> <resolve-verb> <held-verb>
+  local open=$1 line=$2 resolve=$3 held=$4 verb key note stripped open_verb
+  stripped=${line//[[:space:]]/}
+  [ -n "$stripped" ] || { printf '%s' "$open"; return 0; }
+  verb=$(status_line_verb "$line")
+  key=$(_cs_decision_key "$line") || { printf '%s' "$open"; return 0; }
+  case "$verb" in
+    needs-decision|needs-review|blocked)
+      note=$(status_line_note "$line")
+      open=$(_cs_decision_drop "$open" "$key")
+      [ -n "$open" ] && open="${open}"$'\n'
+      open="${open}${key}"$'\t'"${verb}"$'\t'"${note}"$'\n'
+      ;;
+    "$resolve")
+      open=$(_cs_decision_drop "$open" "$key")
+      [ -n "$open" ] && open="${open}"$'\n'
+      ;;
+    "$held")
+      open_verb=$(_cs_decision_verb "$open" "$key") || open_verb=''
+      if [ "$open_verb" != needs-review ]; then
+        open=$(_cs_decision_drop "$open" "$key")
+        [ -n "$open" ] && open="${open}"$'\n'
+      fi
+      ;;
+  esac
+  printf '%s' "$open"
+}
+
 # Fold the WHOLE status stream into the set of decisions still open. Prints one
 # TAB-separated "<key>\t<verb>\t<summary>" line per still-open decision, in
 # most-recently-opened-last order; prints nothing when none are open. Pure read
@@ -245,36 +287,14 @@ EOF
 # matching the sibling scanners' defense level), and an unreadable file is
 # skipped silently instead of leaking a redirection error.
 status_open_decisions() {  # <status-file>
-  local f=$1 line verb key note resolve held open='' stripped open_verb
+  local f=$1 line resolve held open=''
   if [ -L "$f" ] || [ ! -f "$f" ] || [ ! -r "$f" ]; then
     return 0
   fi
   resolve=${CS_CLASSIFY_RESOLVE_VERB:-$CS_CLASSIFY_RESOLVE_VERB_DEFAULT}
   held=${CS_CLASSIFY_BOSS_HELD_VERB:-$CS_CLASSIFY_BOSS_HELD_VERB_DEFAULT}
   while IFS= read -r line || [ -n "$line" ]; do
-    stripped=${line//[[:space:]]/}
-    [ -n "$stripped" ] || continue
-    verb=$(status_line_verb "$line")
-    key=$(_cs_decision_key "$line") || continue
-    case "$verb" in
-      needs-decision|needs-review|blocked)
-        note=$(status_line_note "$line")
-        open=$(_cs_decision_drop "$open" "$key")
-        [ -n "$open" ] && open="${open}"$'\n'
-        open="${open}${key}"$'\t'"${verb}"$'\t'"${note}"$'\n'
-        ;;
-      "$resolve")
-        open=$(_cs_decision_drop "$open" "$key")
-        [ -n "$open" ] && open="${open}"$'\n'
-        ;;
-      "$held")
-        open_verb=$(_cs_decision_verb "$open" "$key") || open_verb=''
-        if [ "$open_verb" != needs-review ]; then
-          open=$(_cs_decision_drop "$open" "$key")
-          [ -n "$open" ] && open="${open}"$'\n'
-        fi
-        ;;
-    esac
+    open=$(_cs_decision_fold_line "$open" "$line" "$resolve" "$held")
   done < "$f"
   printf '%s' "$open"
 }
@@ -454,13 +474,19 @@ scan_boss_relevant_statuses() {  # <state>
 
 # Fold EVERY state/*.status file into the fleet-wide set of still-open keyed
 # decisions. Prints one TAB-separated "<task>\t<key>\t<verb>\t<summary>" line per
-# still-open decision, across all tasks. Reuses status_open_decisions (the ONE
-# open/resolved fold) per file, so a needs-decision/needs-review/blocked line
-# buried under later unrelated appends is still surfaced. That fold's own
-# guards skip a symlinked or unreadable status file silently. No dedup and no
-# cross-task ordering guarantee: each line already carries its task id. The
-# read cost matches the sibling scan_boss_relevant_statuses (one full read of
-# each small append-only status file), so this adds no unbounded fan-out.
+# still-open decision, across all tasks. Reuses status_open_decisions per file
+# (which applies the ONE open/resolved rule, _cs_decision_fold_line), so a
+# needs-decision/needs-review/blocked line buried under later unrelated appends
+# is still surfaced. That fold's own guards skip a symlinked or unreadable
+# status file silently. No dedup and no cross-task ordering guarantee: each
+# line already carries its task id. Every call re-reads each status file in
+# full, like the sibling scan_boss_relevant_statuses, so its cost grows with
+# total lifetime log size across the fleet - which is why the per-drain path
+# (bin/cs-wake-drain.sh) now uses scan_open_decisions_incremental below
+# instead. This whole-file walk remains the point-in-time fleet fold and the
+# agreement oracle the cursor tests fold every prefix against; the per-file
+# status_open_decisions is what the non-drain consumers (cs-fleet-view,
+# cs-afk-return, cs-decision-hold) call directly.
 scan_open_decisions() {  # <state>
   local state=$1 f task line
   for f in "$state"/*.status; do
@@ -471,6 +497,293 @@ scan_open_decisions() {  # <state>
       printf '%s\t%s\n' "$task" "$line"
     done <<EOF
 $(status_open_decisions "$f")
+EOF
+  done
+  return 0
+}
+
+# --- incremental (cursor-backed) open-decisions fold ------------------------
+#
+# status_open_decisions above re-reads and re-folds a status file's ENTIRE
+# lifetime on every call, so its cost grows with total log size. The per-drain
+# fleet-wide scan (bin/cs-wake-drain.sh's OPEN DECISIONS section) would pay
+# that cost for every task on every wake, which grows unbounded as tasks run
+# longer and accumulate status history. status_open_decisions_incremental and
+# scan_open_decisions_incremental below are the bounded-cost siblings used for
+# that per-drain path: each call reads only the bytes appended to a status
+# file since its own last call (a persisted per-file byte cursor) and folds
+# just those new lines into a persisted running open-set, via the exact same
+# _cs_decision_fold_line rule status_open_decisions uses - so the two
+# strategies can never disagree on what is open. Cost is bounded by NEW
+# appends since the last drain, not by the status file's total lifetime size.
+#
+# Correctness invariant (unchanged from the whole-file fold): an open decision
+# is dropped ONLY by an explicit resolved/captain-held line for its exact key,
+# never by cursor advancement, age, or being buried under later appends - the
+# persisted open-set carries every still-open key forward across calls
+# regardless of how much new unrelated log content has since been folded in.
+#
+# Cursor invalidation is deliberately minimal, matching how status files are
+# ACTUALLY used in this repo: every one is created once and only ever appended
+# to - never replaced, renamed, or rewritten in place. A shrink (truncation),
+# a changed device+inode (replacement/rotation/recreation), or a changed
+# resolve/held fold contract falls back to a full re-fold from byte 0 - byte
+# for byte what status_open_decisions itself would compute - and rewrites the
+# cursor from that clean baseline, even when the current file is empty. A
+# missing cursor (new task, or someone deleted the cursor file, which is always
+# safe) takes the same full-re-fold path. The identity check remains O(1) via a
+# single stat call - no content hashing and no re-reading the consumed prefix.
+# "Can never disagree" is a claim about the per-line fold rule, which is
+# literally shared. Two gaps in the surrounding bookkeeping are deliberately
+# accepted, both requiring a writer this repo does not have:
+#   1. A same-inode, same-size, in-place byte edit is NOT detected. No code
+#      path in this repo ever rewrites a status file in place.
+#   2. A cursor boundary is assumed to be a line boundary. A writer appending
+#      a partial line would have its fragment folded as if complete, and the
+#      remainder folded as a second line, so the two strategies could then
+#      hold different keys for that one line. Every status writer in this repo
+#      appends whole lines via echo/printf with a trailing newline, so no
+#      cursor ever lands mid-line - which is why this needs no pending-fragment
+#      machinery (explicitly out of scope for the bounded-cost contract).
+#
+# The other real failure mode is OUR OWN read failing (a stat/wc/tail I/O
+# error), not a malformed writer: every such read here is checked. A failed
+# read of the STATUS FILE's identity or size reports the already-trusted
+# persisted set unchanged and leaves the cursor file alone, rather than risking
+# a silent invalidation that would wipe it - never a bare "empty" as if nothing
+# were open. A failed STAGING of the new-bytes chunk is a different case: it
+# means state/ is unwritable (ENOSPC, read-only), and the trusted set would be
+# empty for any task that has no cursor yet, so that path answers from the
+# authoritative pure-read whole-file fold (status_open_decisions) for this call
+# and leaves the cursor untouched - an unwritable state/ degrades this back to
+# the unbounded full fold, never to a silently hidden open decision.
+#
+# Not a pure status-file read: this writes/rewrites the sibling cursor file
+# (state/.decision-cursor-<task>) as a side effect, the library's second
+# documented exception to the pure-read rule after crew_absorb_class. The
+# cursor format is self-describing: offset, device+inode identity, effective
+# resolve/held fold contract, then the folded open-set records. Each complete
+# cursor is staged in an atomically created same-directory file before rename,
+# so a crash between calls leaves either the prior cursor or the new one, never
+# a trusted partial write. bin/cs-wake-drain.sh calls this only after releasing
+# the wake-queue lock, so overlapping drains compare the bounded cursor headers
+# immediately before rename. A writer that sees the same identity at a later
+# offset, or at the same offset under the same fold contract, discards its
+# candidate. The check and rename are deliberately not serialized: a newer
+# cursor can land in that window and then be replaced by a smaller-offset
+# candidate. That lost update is bounded and self-healing because the next
+# successful drain re-folds the suffix from the smaller offset and reconstructs
+# the same open set. It can repeat work and make the losing writer's current
+# output stale, but it cannot permanently skip status bytes or require a lock.
+_cs_decision_cursor_path() {  # <status-file>
+  local f=$1 dir base
+  dir=$(dirname "$f")
+  base=$(basename "$f")
+  printf '%s/.decision-cursor-%s' "$dir" "${base%.status}"
+}
+
+# Portable device:inode identity for the rotation/recreation check below.
+# macOS (BSD) stat uses `-f <fmt>`; Linux (GNU) stat uses `-c <fmt>`. The
+# platform is resolved ONCE at source time and the wrapper defined accordingly
+# (the same shape as bin/cs-watch.sh's stat_mtime/stat_sig): this runs once per
+# status file per drain, so a per-call `uname` fork would add a fork per task to
+# the very hot path this cursor exists to bound.
+if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
+  _cs_decision_file_ident() {  # <file> -> "dev:inode", empty on I/O failure
+    LC_ALL=C stat -f '%d:%i' "$1" 2>/dev/null
+  }
+else
+  _cs_decision_file_ident() {  # <file> -> "dev:inode", empty on I/O failure
+    LC_ALL=C stat -c '%d:%i' "$1" 2>/dev/null
+  }
+fi
+
+status_open_decisions_incremental() {  # <status-file>
+  local f=$1 cf offset ident cursor_contract open='' trusted_open=''
+  local cursor_data first rest ident_line contract_line loaded_offset loaded_ident loaded_contract
+  local size cur_ident resolve held fold_contract chunk_file chunk_size line write_cursor=0
+  local tmp_file replace_cursor disk_offset_line disk_ident_line disk_contract_line
+  local disk_offset disk_ident disk_contract
+  [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 0
+  cf=$(_cs_decision_cursor_path "$f")
+  resolve=${CS_CLASSIFY_RESOLVE_VERB:-$CS_CLASSIFY_RESOLVE_VERB_DEFAULT}
+  held=${CS_CLASSIFY_BOSS_HELD_VERB:-$CS_CLASSIFY_BOSS_HELD_VERB_DEFAULT}
+  fold_contract="resolve:${resolve}"$'\t'"held:${held}"
+  offset=0
+  ident=''
+  cursor_contract=''
+  if [ -f "$cf" ] && [ -r "$cf" ] && [ ! -L "$cf" ]; then
+    if cursor_data=$(LC_ALL=C command cat "$cf" 2>/dev/null); then
+      first=${cursor_data%%$'\n'*}
+      case "$first" in
+        offset=*)
+          offset=${first#offset=}
+          case "$offset" in
+            ''|*[!0-9]*) offset=0 ;;
+            *)
+              case "$cursor_data" in
+                *$'\n'*)
+                  rest=${cursor_data#*$'\n'}
+                  ident_line=${rest%%$'\n'*}
+                  case "$ident_line" in
+                    ident=*)
+                      ident=${ident_line#ident=}
+                      case "$rest" in
+                        *$'\n'*)
+                          rest=${rest#*$'\n'}
+                          contract_line=${rest%%$'\n'*}
+                          case "$contract_line" in
+                            fold-contract=*)
+                              cursor_contract=${contract_line#fold-contract=}
+                              case "$rest" in
+                                *$'\n'*) open=${rest#*$'\n'} ;;
+                              esac
+                              [ "$cursor_contract" = "$fold_contract" ] && trusted_open=$open
+                              ;;
+                            *) offset=0 ;;
+                          esac
+                          ;;
+                        *) offset=0 ;;
+                      esac
+                      ;;
+                    *) offset=0 ;;
+                  esac
+                  ;;
+                *) offset=0 ;;
+              esac
+              ;;
+          esac
+          ;;
+      esac
+    fi
+  fi
+  loaded_offset=$offset
+  loaded_ident=$ident
+  loaded_contract=$cursor_contract
+
+  # A stat/size-read failure is a genuine I/O error, not "the file is empty" -
+  # report the already-trusted persisted set unchanged rather than risking a
+  # silent invalidation that would wipe it.
+  cur_ident=$(_cs_decision_file_ident "$f") || { printf '%s' "$trusted_open"; return 0; }
+  [ -n "$cur_ident" ] || { printf '%s' "$trusted_open"; return 0; }
+  size=$(LC_ALL=C wc -c < "$f" 2>/dev/null) \
+    || { printf '%s' "$trusted_open"; return 0; }
+  size=${size//[[:space:]]/}
+  case "$size" in ''|*[!0-9]*) printf '%s' "$trusted_open"; return 0 ;; esac
+
+  if [ -z "$ident" ] || [ "$ident" != "$cur_ident" ] \
+    || [ "$offset" -gt "$size" ] || [ "$cursor_contract" != "$fold_contract" ]; then
+    offset=0
+    open=''
+    write_cursor=1
+  fi
+
+  if [ "$offset" -lt "$size" ]; then
+    # Staging the chunk needs a WRITABLE state/, so its failure is not the
+    # status-file read failure handled above: the trusted set is empty for a
+    # task that has no cursor yet, and returning it would silently hide an open
+    # decision. Answer from the authoritative whole-file fold instead (a pure
+    # read, exactly what every non-drain caller uses) and leave the cursor as it
+    # was for the next call.
+    chunk_file=$(umask 077; mktemp "$cf.read.XXXXXX" 2>/dev/null) \
+      || { status_open_decisions "$f"; return 0; }
+    tail -c "+$((offset + 1))" "$f" > "$chunk_file" 2>/dev/null \
+      || { rm -f "$chunk_file"; status_open_decisions "$f"; return 0; }
+    chunk_size=$(LC_ALL=C wc -c < "$chunk_file" 2>/dev/null) \
+      || { rm -f "$chunk_file"; status_open_decisions "$f"; return 0; }
+    chunk_size=${chunk_size//[[:space:]]/}
+    case "$chunk_size" in
+      ''|*[!0-9]*) rm -f "$chunk_file"; status_open_decisions "$f"; return 0 ;;
+    esac
+    # Test-only observability seam (off by default, no production behavior
+    # change): when set, records exactly how many bytes THIS call folded, so a
+    # test can assert the incremental path stays bounded by new appends rather
+    # than re-reading the whole file, without relying on timing or source text.
+    [ -n "${CS_OPEN_DECISIONS_READ_PROBE:-}" ] \
+      && printf '%s\t%s\n' "$f" "$chunk_size" >> "$CS_OPEN_DECISIONS_READ_PROBE"
+    while IFS= read -r line || [ -n "$line" ]; do
+      open=$(_cs_decision_fold_line "$open" "$line" "$resolve" "$held")
+    done < "$chunk_file"
+    rm -f "$chunk_file"
+    write_cursor=1
+  fi
+
+  if [ "$write_cursor" -eq 1 ]; then
+    if tmp_file=$(umask 077; mktemp "$cf.tmp.XXXXXX" 2>/dev/null); then
+      if {
+        printf 'offset=%s\n' "$size" \
+          && printf 'ident=%s\n' "$cur_ident" \
+          && printf 'fold-contract=%s\n' "$fold_contract" \
+          && { [ -z "$open" ] || printf '%s' "$open"; }
+      } > "$tmp_file"; then
+        replace_cursor=1
+        disk_offset_line=''
+        disk_ident_line=''
+        disk_contract_line=''
+        if [ -f "$cf" ] && [ -r "$cf" ] && [ ! -L "$cf" ] && {
+          IFS= read -r disk_offset_line \
+            && IFS= read -r disk_ident_line \
+            && IFS= read -r disk_contract_line
+        } < "$cf" 2>/dev/null; then
+          disk_offset=${disk_offset_line#offset=}
+          disk_ident=${disk_ident_line#ident=}
+          disk_contract=${disk_contract_line#fold-contract=}
+          case "$disk_offset" in
+            ''|*[!0-9]*) : ;;
+            *)
+              if [ "$disk_offset_line" = "offset=$disk_offset" ] \
+                && [ "$disk_ident_line" = "ident=$disk_ident" ] \
+                && [ "$disk_contract_line" = "fold-contract=$disk_contract" ]; then
+                if [ "$disk_ident" = "$cur_ident" ]; then
+                  if [ "$disk_offset" -gt "$size" ]; then
+                    if [ "$disk_offset" != "$loaded_offset" ] \
+                      || [ "$disk_ident" != "$loaded_ident" ] \
+                      || [ "$disk_contract" != "$loaded_contract" ]; then
+                      replace_cursor=0
+                    fi
+                  elif [ "$disk_offset" -eq "$size" ] \
+                    && [ "$disk_contract" = "$fold_contract" ]; then
+                    replace_cursor=0
+                  fi
+                elif [ -n "$disk_ident" ] && [ "$disk_ident" != "$loaded_ident" ]; then
+                  replace_cursor=0
+                fi
+              fi
+              ;;
+          esac
+        fi
+        if [ "$replace_cursor" -eq 1 ]; then
+          # Accepted compare-then-rename window: a smaller cursor self-heals on the next successful drain.
+          mv -f "$tmp_file" "$cf" 2>/dev/null || rm -f "$tmp_file"
+        else
+          rm -f "$tmp_file"
+        fi
+      else
+        rm -f "$tmp_file"
+      fi
+    fi
+  fi
+  printf '%s' "$open"
+}
+
+# Incremental sibling of scan_open_decisions: same fleet-wide directory walk
+# and output shape ("<task>\t<key>\t<verb>\t<note>" per open decision), but
+# folds each task's status log through status_open_decisions_incremental
+# instead of the whole-file status_open_decisions, so a fleet-wide per-drain
+# scan stays bounded by new appends rather than total lifetime log size across
+# every task.
+scan_open_decisions_incremental() {  # <state>
+  local state=$1 f task open line
+  for f in "$state"/*.status; do
+    [ -e "$f" ] || continue
+    task=$(basename "$f"); task="${task%.status}"
+    open=$(status_open_decisions_incremental "$f") || continue
+    [ -n "$open" ] || continue
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      printf '%s\t%s\n' "$task" "$line"
+    done <<EOF
+$open
 EOF
   done
   return 0

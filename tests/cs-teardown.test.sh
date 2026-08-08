@@ -158,18 +158,27 @@ c1_markers=(
   "$TMP/state/.stale-since-w99_p99"
   "$TMP/state/.wedge-escalations-w99_p99"
   "$TMP/state/.herdr-escalated-w99_p99"
+  "$TMP/state/.decision-cursor-c1"
+  "$TMP/state/.decision-cursor-c1.read.abc123"
+  "$TMP/state/.decision-cursor-c1.tmp.abc123"
 )
 for m in "${c1_markers[@]}"; do : > "$m"; done
 # markers belonging to a different task id / pane must survive teardown of c1
 : > "$TMP/state/.seen-other_status"
 : > "$TMP/state/.hb-surfaced-other"
 : > "$TMP/state/.hash-w88_p88"
+# a task whose id merely STARTS WITH c1 keeps its own cursor and staging temps
+: > "$TMP/state/.decision-cursor-c1x"
+: > "$TMP/state/.decision-cursor-c1x.read.abc123"
 out=$("$BIN" c1 2>&1) || fail "clean teardown failed: $out"
 assert_contains "$out" "teardown c1 complete" "clean teardown completes"
 for m in "${c1_markers[@]}"; do assert_absent "$m" "watcher marker $(basename "$m") removed"; done
 assert_present "$TMP/state/.seen-other_status" "other task's .seen marker untouched"
 assert_present "$TMP/state/.hb-surfaced-other" "other task's .hb-surfaced marker untouched"
 assert_present "$TMP/state/.hash-w88_p88" "other pane's .hash marker untouched"
+assert_present "$TMP/state/.decision-cursor-c1x" "prefix-sibling task's cursor untouched"
+assert_present "$TMP/state/.decision-cursor-c1x.read.abc123" \
+  "prefix-sibling task's cursor staging temp untouched"
 pass "clean worktree teardown completes and cleans this task's watcher markers"
 
 # 5. scout without report refuses; with report proceeds even dirty
@@ -284,6 +293,13 @@ printf 'axb\n' > "$TMP/capo-axb/.cs-capo-home"
 } > "$TMP/host/capos.md"
 cs_write_meta "$TMP/state/a.b.meta" \
   "workspace=w7" "pane=w7:p7" "kind=capo" "mode=capo" "home=$TMP/capo-ab"
+# The capo path clears this id's decision cursor and any staging temps a killed
+# drain left behind, while an id that merely starts with a.b keeps its own.
+: > "$TMP/state/.decision-cursor-a.b"
+: > "$TMP/state/.decision-cursor-a.b.read.abc123"
+: > "$TMP/state/.decision-cursor-a.b.tmp.abc123"
+: > "$TMP/state/.decision-cursor-a.bx"
+: > "$TMP/state/.decision-cursor-a.bx.read.abc123"
 out=$(CS_ROOT_OVERRIDE="$CAPO_ROOT" "$BIN" a.b 2>&1) || fail "capo retirement failed: $out"
 assert_contains "$out" "teardown a.b complete" "capo retirement reports completion"
 assert_absent "$TMP/capo-ab" "the retired capo home is removed"
@@ -292,6 +308,15 @@ assert_no_grep '- a.b ' "$TMP/host/capos.md" "the retired capo's route is remove
 assert_grep '- axb - Near miss domain.' "$TMP/host/capos.md" \
   "retiring a dotted id must not delete the near-miss route"
 assert_absent "$TMP/state/a.b.meta" "capo records cleared after retirement"
+assert_absent "$TMP/state/.decision-cursor-a.b" "capo retirement clears its decision cursor"
+assert_absent "$TMP/state/.decision-cursor-a.b.read.abc123" \
+  "capo retirement reclaims an orphaned cursor read temp"
+assert_absent "$TMP/state/.decision-cursor-a.b.tmp.abc123" \
+  "capo retirement reclaims an orphaned cursor staging temp"
+assert_present "$TMP/state/.decision-cursor-a.bx" \
+  "a prefix-sibling id's cursor must survive a capo retirement"
+assert_present "$TMP/state/.decision-cursor-a.bx.read.abc123" \
+  "a prefix-sibling id's cursor staging temp must survive a capo retirement"
 pass "retiring a dotted capo id leaves the near-miss route intact"
 
 make_task m1 ship local-only
