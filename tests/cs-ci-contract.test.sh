@@ -175,18 +175,93 @@ pass "repo invariants run for every change, including docs-only ones"
 # canonical files. Skip mode is entered only when a matching terminator really
 # follows, and a heredoc still open at the end of a file is reported rather than
 # swallowed, so lost coverage can never be silent.
+#
+# The body of a multi-line quoted string is data for the same reason a heredoc
+# body is: a `bash -c "` block that sources a library sources it in the shell that
+# string later launches, not in the file that holds it, so neither ShellCheck nor
+# bin/cs-lint.sh resolves an edge there and a directive above it would declare
+# nothing. Quote state is therefore carried across lines by a small lexer, which
+# also keeps the code that follows the closing quote on that same line scanned,
+# and reports a string left open at the end of a file rather than swallowing the
+# rest of it.
 undirectived_sources() {
   awk '
-    function scan(   i, j, k, line, code, tag, raw, target, heredoc, opened_at, declared) {
+    # lex <text> - advance the lexer over one line. QSTATE carries the quote state
+    # across lines ("u" outside, "s" single-quoted, "d" double-quoted) and QSTACK
+    # carries the command substitutions still open, so both are read and written
+    # here rather than reset per line. QREST is set to the part of the line that
+    # lies outside the string that was already open at entry: the whole line when
+    # none was, the part after the closing quote when one closes here, and empty
+    # while the string is still open.
+    #
+    # `$(` restarts quoting inside itself, in a double-quoted string as much as
+    # outside one, so the substitutions are stacked and popped rather than read as
+    # plain text. Without that, the apostrophe in a line such as
+    # `[ "$(grep -c "it is \047quoted\047")" = 1 ]` reads as an opening quote and
+    # every line after it in the file is mistaken for string data. The stack has to
+    # cross lines for the same reason the quote state does: a `$(` opened at the
+    # end of one line is still open on the next.
+    function lex(s,   i, c, n, carried, entry) {
+      n = length(s)
+      carried = (QSTATE != "u")
+      entry = QSTACK
+      QREST = (carried ? "" : s)
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (QSTATE == "s") {
+          if (c == "\047") {
+            QSTATE = "u"
+            if (carried && QSTACK == entry) { QREST = substr(s, i + 1); carried = 0 }
+          }
+          continue
+        }
+        if (c == "\\") { i++; continue }
+        if (c == "$" && substr(s, i + 1, 1) == "(") {
+          QSTACK = QSTACK QSTATE
+          QSTATE = "u"
+          i++
+          continue
+        }
+        # A `)` closes a substitution only from an unquoted position. Inside the
+        # double quotes of `"$(jq ".. (\$pr.isDraft|tostring) ..")"` it is literal
+        # text, and popping on it would hand the rest of the string back to the
+        # lexer as code with every quote after it read inside out.
+        if (c == ")" && QSTACK != "" && QSTATE == "u") {
+          QSTATE = substr(QSTACK, length(QSTACK), 1)
+          QSTACK = substr(QSTACK, 1, length(QSTACK) - 1)
+          continue
+        }
+        if (QSTATE == "d") {
+          if (c == "\"") {
+            QSTATE = "u"
+            if (carried && QSTACK == entry) { QREST = substr(s, i + 1); carried = 0 }
+          }
+          continue
+        }
+        if (c == "\047") QSTATE = "s"
+        else if (c == "\"") QSTATE = "d"
+        else if (c == "#" && (i == 1 || substr(s, i - 1, 1) ~ /[[:space:];&|(]/)) break
+      }
+    }
+    function scan(   i, j, k, line, text, code, tag, raw, target, heredoc, opened_at, declared, prev, str_at) {
       heredoc = ""
+      QSTATE = "u"
+      QSTACK = ""
       for (i = 1; i <= nlines; i++) {
         line = lines[i]
         if (heredoc != "") {
           if (line ~ ("^[[:space:]]*" heredoc "[[:space:]]*$")) heredoc = ""
           continue
         }
-        if (match(line, /<<-?[[:space:]]*['"'"'"]?[A-Za-z_][A-Za-z0-9_]*/)) {
-          tag = substr(line, RSTART, RLENGTH)
+        prev = QSTATE
+        lex(line)
+        if (prev == "u" && QSTATE != "u") str_at = i
+        # Everything the line contributes as code, which is the whole line unless
+        # a string carried in from an earlier line covers part or all of it.
+        text = QREST
+        if (text == "") continue
+        if (match(text, /<<-?[[:space:]]*['"'"'"]?[A-Za-z_][A-Za-z0-9_]*/)) {
+          tag = substr(text, RSTART, RLENGTH)
           sub(/^<<-?[[:space:]]*/, "", tag)
           gsub(/['"'"'"]/, "", tag)
           for (j = i + 1; j <= nlines; j++) {
@@ -197,7 +272,7 @@ undirectived_sources() {
             }
           }
         }
-        code = line
+        code = text
         if (code ~ /^[[:space:]]*#/) code = ""
         sub(/[[:space:]]#.*$/, "", code)
         raw = ""
@@ -228,6 +303,9 @@ undirectived_sources() {
       if (heredoc != "")
         printf "%s:%d: heredoc <<%s never closes, so the rest of this file went unscanned\n",
           scanned, opened_at, heredoc
+      if (QSTATE != "u")
+        printf "%s:%d: a quoted string opened here never closes, so the rest of this file went unscanned\n",
+          scanned, str_at
     }
     FNR == 1 { if (nlines > 0) scan(); nlines = 0; scanned = FILENAME }
     { lines[++nlines] = $0 }
@@ -250,7 +328,7 @@ offenders=$(undirectived_sources "${canonical_set[@]}")
 unscanned=$(printf '%s\n' "$offenders" | grep 'never closes' || true)
 [ -z "$unscanned" ] || fail "the source-site scan stopped early on:
 $unscanned"
-pass "no canonical file cuts the scan short at an unclosed heredoc"
+pass "no canonical file cuts the scan short at an unclosed heredoc or string"
 
 [ -z "$offenders" ] || fail "every source site in the canonical set needs a '# shellcheck source=<path>' directive in the comment block above it, or bin/cs-lint.sh cannot see the edge:
 $offenders"
@@ -291,6 +369,23 @@ fi
 # see the shellcheck source=bin/prose.sh convention we follow
 . "$ROOT/bin/prose-only.sh"
 . "$ROOT/bin/undeclared.sh"
+bash -c "
+  . '$ROOT/bin/inside-a-double-quoted-string.sh'
+" _
+bash -c '
+  . "$ROOT/bin/inside-a-single-quoted-string.sh"
+' _
+. "$ROOT/bin/after-a-multiline-string.sh"
+bash -c "
+  echo hi
+" && . "$ROOT/bin/after-the-closing-quote.sh"
+out=$(
+  . "$ROOT/bin/inside-a-substitution.sh"
+)
+[ "$(grep -c "a quoted 'apostrophe'")" = 1 ] || true
+lines=$(printf '%s\n' "$out" \
+  | grep -c "(a paren) inside a continued substitution")
+. "$ROOT/bin/after-a-quoted-apostrophe.sh"
 SH
 probe_hits=$(undirectived_sources "$probe")
 assert_contains "$probe_hits" 'bin/undeclared.sh' "the check catches an undeclared source"
@@ -337,3 +432,28 @@ pass "a source in a keyword-opened command position is checked"
 assert_contains "$probe_hits" 'bin/after-a-false-opener.sh' \
   "a << that opens no heredoc must not blind the scan"
 pass "a non-heredoc << leaves the rest of the file scanned"
+
+# The body of a multi-line quoted string is data, exactly like a heredoc body: it
+# is sourced by whatever shell the string later launches, not by this file, so
+# neither ShellCheck nor the lint graph resolves an edge there. What follows the
+# string is code again - on the next line and on the closing line itself - and a
+# multi-line command substitution is code throughout, so skipping any of those
+# would turn a completeness guard into a source of silent blind spots.
+assert_not_contains "$probe_hits" 'inside-a-double-quoted-string' \
+  "a source inside a multi-line double-quoted string is not a source site here"
+assert_not_contains "$probe_hits" 'inside-a-single-quoted-string' \
+  "a source inside a multi-line single-quoted string is not a source site here"
+assert_contains "$probe_hits" 'bin/after-a-multiline-string.sh' \
+  "the scan resumes after a multi-line string closes"
+assert_contains "$probe_hits" 'bin/after-the-closing-quote.sh' \
+  "code after the closing quote on that same line is still scanned"
+assert_contains "$probe_hits" 'bin/inside-a-substitution.sh' \
+  "a multi-line command substitution is code, not string data"
+pass "a multi-line string is data and everything around it stays scanned"
+
+# `$(` restarts quoting inside itself, so an apostrophe inside the nested quotes
+# of a substitution opens nothing. Reading it as an opening quote swallowed every
+# line after it, which is the failure this line reproduces.
+assert_contains "$probe_hits" 'bin/after-a-quoted-apostrophe.sh' \
+  "an apostrophe quoted inside a command substitution must not blind the scan"
+pass "quoting restarts inside a command substitution, on one line and across lines"
