@@ -69,6 +69,7 @@ fi
 pass "duplicate spawn refuses"
 
 # native agent detection (codex boots within a bounded wait)
+# shellcheck source=bin/cs-herdr-lib.sh
 . "$ROOT/bin/cs-herdr-lib.sh"
 found=0
 for _ in $(seq 1 30); do

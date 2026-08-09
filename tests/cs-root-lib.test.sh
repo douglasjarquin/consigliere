@@ -176,6 +176,7 @@ pass "cs_abs_path passes absolute paths through and refuses an empty one"
 
 # --- idempotent double-source -----------------------------------------------
 # Sourcing again must not error or clobber the function (guard returns early).
+# shellcheck source=bin/cs-root-lib.sh
 . "$ROOT/bin/cs-root-lib.sh"
 out=$(CS_ROOT_OVERRIDE='' CS_HOME='' CS_DATA_OVERRIDE='' CS_STATE_OVERRIDE='' CS_CONFIG_OVERRIDE='' lib_resolve)
 read_resolved "$out"

@@ -77,7 +77,9 @@ Keep instructions as the authority and discovery layer, but make repeated execut
 - Never wrap multiple sentences onto one physical line.
 - Plain dash `-`, never an em dash.
 - Never add an agent name as a commit co-author.
-- `bin/*.sh` must pass `shellcheck -x` run from the repo root before a script change is treated as done.
+- `bin/*.sh` and `tests/*.sh` must pass `bin/cs-lint.sh`, the single owner of the lint file set, flags, and pinned ShellCheck version, before a script change is treated as done.
+- A plain local run lints only what this branch changed plus the files linked to it by the source graph, so use `CI=true bin/cs-lint.sh` to reproduce CI's full-set run (README's CI table owns the details).
+- Every `.` or `source` site in that file set needs a `# shellcheck source=<path>` directive in the comment block above it, because `bin/cs-lint.sh` builds that graph from the directives and `tests/cs-ci-contract.test.sh` fails the build when a site has none.
 - Colocate tests with the existing pattern in `tests/`, name them `<subject>.test.sh`, and extend an existing script rather than inventing a new runner.
 - A verified-facts doc (`docs/herdr.md`, `docs/codex.md`, `docs/claude.md`, `docs/lavish.md`) records empirical facts, not assumptions.
 - Include the date, version, exact commands run, and exact output.

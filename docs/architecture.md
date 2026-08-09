@@ -71,4 +71,4 @@ Self-updates are fast-forward-only git pulls of this repo (`bin/cs-update.sh`), 
 ## Development notes
 
 Tests are colocated in `tests/` (offline by default; live suites behind `CS_TEST_HERDR_LIVE`/`CS_TEST_CODEX_LIVE` use `bin/cs-herdr-lab.sh` isolated sessions, never the `default` session).
-Every bin script is `shellcheck -x` clean; one sentence per line in contract prose; scripts own their exact mechanics in their headers.
+Every bin script is ShellCheck-clean under the canonical lint `bin/cs-lint.sh`, which owns the file set, flags, and pinned version; one sentence per line in contract prose; scripts own their exact mechanics in their headers.

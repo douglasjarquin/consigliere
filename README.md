@@ -98,7 +98,7 @@ checks cannot drift from what you run before pushing:
 
 | Hosted check | Reproduce locally |
 | --- | --- |
-| Shell lint | `bin/cs-lint.sh` (single owner of the file set, config, and pinned ShellCheck version; `--required-version` prints the pin) |
+| Shell lint | `CI=true bin/cs-lint.sh` (single owner of the file set, config, and pinned ShellCheck version; `--required-version` prints the pin). A plain local `bin/cs-lint.sh` lints only the canonical-set files changed since the merge-base with `origin/main`, plus both directions of the source graph around them - the libraries a changed file sources, and the canonical files that source a changed file, since ShellCheck blames a broken library contract on its consumers - so parallel lanes do not each re-lint the whole tree. That graph is built from the repo's own `# shellcheck source=` directives, and `tests/cs-ci-contract.test.sh` fails the build when a source site in the canonical set has no directive, so the graph cannot go stale; CI, the default branch, and a branch with no merge-base always lint the full set |
 | Portable behavior | `bin/cs-test-run.sh --portable` (every hermetic test, serial) |
 | Real Herdr behavior | `CS_TEST_HERDR_LIVE=1 bin/cs-test-run.sh --herdr` (needs a real herdr + a running default session for the lab tripwire) |
 | Repo invariants | `git ls-files -- .env data state config host projects .no-mistakes` prints nothing; tracked symlinks stay symlinks |
