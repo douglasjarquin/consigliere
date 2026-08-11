@@ -67,25 +67,28 @@ run_activate() {  # <dir> [env...]
 
 ACT_ARGS=(--status)
 
-# 1. Default scope is afk-only, and the boss being present means silence. This
-#    is the asymmetry the boss chose: the main home is the pane they type in.
-dir=$(make_home default-afk)
+# 1. Default scope is always, everywhere, including the main home. Turns now END
+#    rather than re-arming a checkpoint forever, so an unattended queue would
+#    otherwise sit until the boss next typed - which is the failure this whole
+#    change exists to remove. The boss accepted the composer race that comes with
+#    it on 2026-08-11.
+dir=$(make_home default-always)
 out=$(run_activate "$dir")
-assert_contains "$out" "afk-only and the boss is present" "default scope must be afk-only"
-pass "with no config, a home does not activate while the boss is present"
+assert_contains "$out" "due:" "the built-in default must activate with the boss present"
+pass "with no config, a home activates on its own"
 
-# 2. Same home, boss away -> due.
+# 2. afk-only is still selectable, and then the boss being present means silence.
+dir=$(make_home explicit-afk)
+printf 'afk-only\n' > "$dir/host/activation.conf"
+out=$(run_activate "$dir")
+assert_contains "$out" "afk-only and the boss is present" "afk-only must still gate on presence"
+pass "an explicit afk-only home stays quiet while the boss is present"
+
+# 3. Same home, boss away -> due.
 : > "$dir/state/.afk"
 out=$(run_activate "$dir")
 assert_contains "$out" "due:" "afk-only home must activate once the boss is away"
 pass "afk-only activates while away"
-
-# 3. A capo home (host/activation.conf=always) activates with no .afk at all.
-dir=$(make_home capo-always)
-printf 'always\n' > "$dir/host/activation.conf"
-out=$(run_activate "$dir")
-assert_contains "$out" "due:" "an always-on home must activate with the boss present"
-pass "always-on (the capo default) activates without away mode"
 
 # 4. off means off.
 dir=$(make_home offhome)
@@ -110,6 +113,20 @@ out=$(run_activate "$dir")
 assert_contains "$out" "queue empty" "an empty queue must not activate"
 pass "an empty queue never activates"
 
+# 6b. Standing open decisions must never drive activation. The wake drain prints
+#     fleet-wide open decisions on every drain, including an empty one, so a home
+#     with an unanswered decision has something to say on every single drain -
+#     but nothing enqueued. Activation triggers on the QUEUE alone, or that
+#     never-empty print would become a self-feeding turn loop.
+dir=$(make_home open-decision)
+printf 'always\n' > "$dir/host/activation.conf"
+: > "$dir/state/.wake-queue"
+cs_write_meta "$dir/state/task.meta" "window=consigliere:cs-task" "kind=ship"
+printf 'working: on it\nneeds-decision: pick A or B [key=pick-one]\n' > "$dir/state/task.status"
+out=$(run_activate "$dir")
+assert_contains "$out" "queue empty" "a standing open decision must not activate on its own"
+pass "standing open decisions never activate a home"
+
 # 7. A queue still receiving wakes settles first: one burst, one turn.
 dir=$(make_home settling)
 printf 'always\n' > "$dir/host/activation.conf"
@@ -117,6 +134,35 @@ printf 'fresh\n' > "$dir/state/.wake-queue"   # mtime = now
 out=$(run_activate "$dir")
 assert_contains "$out" "still settling" "a fresh queue must wait out the quiet window"
 pass "a still-arriving queue waits for quiet"
+
+# 7b. The quiet window is where the asymmetry lives now that every home is
+#     always-on. Nobody types into a capo pane, so 60s of quiet is enough there;
+#     the main home waits 180s, because every second of quiet is a second the
+#     check-then-act composer race is not entered. A queue that settled 120s ago
+#     separates the two.
+backdate_queue() {  # <dir> <seconds>
+  local back
+  back=$(( $(date +%s) - $2 ))
+  if [ "$(uname)" = Darwin ]; then
+    touch -mt "$(date -r "$back" '+%Y%m%d%H%M.%S')" "$1/state/.wake-queue"
+  else
+    touch -m -d "@$back" "$1/state/.wake-queue"
+  fi
+}
+
+dir=$(make_home main-quiet)
+backdate_queue "$dir" 120
+out=$(run_activate "$dir")
+assert_contains "$out" "still settling" "the main home must wait out the longer window"
+assert_contains "$out" "180s" "the main home default must be 180s"
+pass "the main home waits a longer quiet window before prompting its own pane"
+
+dir=$(make_home capo-quiet)
+printf 'thecapo\n' > "$dir/.cs-capo-home"
+backdate_queue "$dir" 120
+out=$(run_activate "$dir")
+assert_contains "$out" "due:" "a capo home must pick the same queue up at 60s"
+pass "a capo home uses the shorter quiet window"
 
 # 8. Cooldown is also the recursion guard: the turn this starts drains the queue
 #    and may append more wakes.

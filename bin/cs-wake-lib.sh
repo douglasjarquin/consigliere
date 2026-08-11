@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Shared durable wake queue and portable lock helpers.
 #
-# cs_pid_identity, the reuse-proof process identity this file's watcher-lock
-# validation compares, is owned by bin/cs-session-pid-lib.sh alongside the pid
-# ancestry walk and is re-exported here by sourcing it.
+# cs_pid_identity, the reuse-proof process identity the watcher lock records, is
+# owned by bin/cs-session-pid-lib.sh alongside the pid ancestry walk and is
+# re-exported here by sourcing it.
 
 CS_WAKE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/cs-session-pid-lib.sh
@@ -47,35 +47,6 @@ cs_path_age() {
   local path=$1 m
   m=$(cs_path_mtime "$path") || { echo 999999; return; }
   echo $(( $(date +%s) - m ))
-}
-
-cs_watcher_lock_matches_pid() {
-  local state=$1 watch_path=$2 pid=$3 home=${4:-$CS_HOME} lockdir lock_home lock_path lock_identity current_identity
-  lockdir="$state/.watch.lock"
-  lock_home=$(cat "$lockdir/cs-home" 2>/dev/null || true)
-  lock_path=$(cat "$lockdir/watcher-path" 2>/dev/null || true)
-  lock_identity=$(cat "$lockdir/pid-identity" 2>/dev/null || true)
-  [ "$lock_home" = "$home" ] || return 1
-  [ "$lock_path" = "$watch_path" ] || return 1
-  [ -n "$lock_identity" ] || return 1
-  current_identity=$(cs_pid_identity "$pid") || return 1
-  [ "$current_identity" = "$lock_identity" ]
-}
-
-CS_WATCHER_HEALTHY_PID=
-cs_watcher_healthy() {
-  local state=$1 watch_path=$2 grace=${3:-${CS_GUARD_GRACE:-300}} home=${4:-$CS_HOME} lockdir beat pid age
-  CS_WATCHER_HEALTHY_PID=
-  lockdir="$state/.watch.lock"
-  beat="$state/.last-watcher-beat"
-  pid=$(cat "$lockdir/pid" 2>/dev/null || true)
-  cs_pid_alive "$pid" || return 1
-  cs_watcher_lock_matches_pid "$state" "$watch_path" "$pid" "$home" || return 1
-  age=$(cs_path_age "$beat")
-  [ "$age" -lt "$grace" ] || return 1
-  # shellcheck disable=SC2034 # Read by callers after cs_watcher_healthy returns.
-  CS_WATCHER_HEALTHY_PID=$pid
-  return 0
 }
 
 cs_lock_clean_known_files() {

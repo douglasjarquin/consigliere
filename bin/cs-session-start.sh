@@ -664,6 +664,11 @@ stage supervision
 AFK_PRESENT=0
 [ -e "$STATE/.afk" ] && AFK_PRESENT=1
 
+# A session start is a fresh turn. Drop any per-turn checkpoint counter left
+# behind by a turn that died before its turn-end hook could clear it, or the
+# first checkpoint of this session would be refused as a repeat.
+rm -f "$STATE/.checkpoint-turn" 2>/dev/null || true
+
 subsection "SUPERVISION (foreground checkpoint)"
 if [ "$READ_ONLY" -eq 1 ]; then
   cat <<'EOF'
@@ -679,21 +684,23 @@ else
   cat <<'EOF'
 When this session owns supervision:
 1. Drain first with bin/cs-wake-drain.sh.
-2. Run one foreground watcher checkpoint:
+2. Run at most ONE foreground watcher checkpoint per turn:
      bin/cs-watch-checkpoint.sh --seconds "${CS_WATCH_CHECKPOINT:-180}"
-3. Ordinary wake: if it prints signal:, stale:, check:, or heartbeat, drain
-   queued wakes, handle that wake, then start the next checkpoint in the SAME
-   turn.
-4. Quiet checkpoint (prints checkpoint: / exits 124): drain queued wakes
-   anyway, process any queued boss message now visible, then start the next
-   checkpoint.
+3. Whatever it returns - a wake (signal:, stale:, check:, capo:, heartbeat) or
+   a quiet checkpoint (prints checkpoint: / exits 124) - drain queued wakes,
+   handle what they report, say what happened, and END the turn. A second
+   checkpoint in the same turn is refused: a turn boundary is the only moment
+   the boss's message can reach you.
+4. Ending the turn does not end supervision. The persistent monitor keeps
+   watching this home, queued wakes are durable, and a wake that sits starts
+   the next turn on its own.
 5. Never use shell '&' or background tasks for watcher supervision; the harness
    cannot reason during a foreground tool call, and the bounded checkpoint is
    the only sanctioned wait shape.
 6. Failure or missing cycle only: drain queued wakes, inspect the failure,
    then start a fresh foreground checkpoint.
-No turn ends blind while work is under way; the Stop-hook guard
-(bin/cs-turnend-guard.sh) is the structural backstop, not a substitute.
+The Stop-hook guard (bin/cs-turnend-guard.sh) blocks a turn end only when this
+home could not wake itself.
 EOF
 fi
 

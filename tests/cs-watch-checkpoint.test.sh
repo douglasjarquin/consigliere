@@ -17,6 +17,8 @@
 #     - queued wakes are printed WITHOUT being consumed (bin/cs-wake-drain.sh
 #       owns draining), and a home with no startable monitor still watches
 #       inline for the bound rather than not at all.
+#     - ONE PER TURN: a second invocation before a turn end exits 3 without
+#       waiting, and the marker the turn-end hook clears is what releases it.
 #
 # Hermetic: reuses the offline cs-watch fixtures (fake herdr + fake
 # cs-crew-state.sh) so the real cs-watch.sh runs with no live backend. The
@@ -127,12 +129,48 @@ printf 'needs-decision: pick A or B\n' > "$state/task.status"
 set +e
 out=$(env PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
   CS_CREW_STATE_BIN="$fakebin/cs-crew-state.sh" CS_HERDR_EVENTS_FORCE=0 \
-  CS_CHECKPOINT_MONITOR_BIN="$dir/no-such-monitor" \
+  CS_MONITOR_BIN="$dir/no-such-monitor" \
   CS_POLL=1 CS_SIGNAL_GRACE=1 "$CHECKPOINT" --seconds 20 2>&1); rc=$?
 set -e
 expect_code 0 "$rc" "the inline fallback should still surface an actionable wake"
 assert_contains "$out" "no persistent monitor could be started" "the fallback is announced, never silent"
 assert_contains "$out" "signal:" "the inline fallback still passes the wake through"
 pass "cs-watch-checkpoint falls back to inline watching when no monitor can start"
+
+# --- one checkpoint per turn --------------------------------------------------
+
+# 10. the whole reason this limit is in code and not in prose: a turn that keeps
+#     re-arming the checkpoint can never receive a boss message, because the
+#     harness only delivers one at a turn boundary. The second invocation must
+#     refuse immediately rather than wait out another bound.
+dir=$(make_case per-turn); state="$dir/state"; fakebin="$dir/fakebin"
+touch "$state/.last-monitor-beat"
+run_checkpoint() {
+  env PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
+    CS_CREW_STATE_BIN="$fakebin/cs-crew-state.sh" CS_HERDR_EVENTS_FORCE=0 \
+    CS_MONITOR_BIN="$dir/no-such-monitor" CS_POLL=1 "$CHECKPOINT" --seconds 1 2>&1
+}
+set +e
+out=$(run_checkpoint); rc=$?
+set -e
+expect_code 124 "$rc" "the first checkpoint of a turn should still run"
+assert_present "$state/.checkpoint-turn" "the first checkpoint must record that this turn used one"
+
+set +e
+out=$(run_checkpoint); rc=$?
+set -e
+expect_code 3 "$rc" "a second checkpoint in the same turn must be refused with exit 3"
+assert_contains "$out" "this turn already ran one" "the refusal must name the reason"
+assert_contains "$out" "End the turn" "the refusal must say what to do instead"
+pass "cs-watch-checkpoint refuses a second checkpoint in the same turn"
+
+# 11. the marker is per TURN, not per session: clearing it (what the turn-end
+#     hook does at every turn end) makes the next checkpoint run normally.
+rm -f "$state/.checkpoint-turn"
+set +e
+out=$(run_checkpoint); rc=$?
+set -e
+expect_code 124 "$rc" "a cleared marker must let the next turn check in again"
+pass "cs-watch-checkpoint runs again once the turn-end hook clears the marker"
 
 pass "cs-watch-checkpoint bounded-checkpoint behavior characterized"

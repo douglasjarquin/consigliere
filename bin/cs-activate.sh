@@ -15,16 +15,23 @@
 # no session-lock change - the agent taking the turn is the pane's own agent,
 # which already holds this home's lock.
 #
-# SCOPE IS DELIBERATELY ASYMMETRIC (host/activation.conf):
-#   always    - activate whenever the queue has sat. The default for CAPO homes,
-#               whose queues rot any time the parent is busy, not just overnight.
-#   afk-only  - activate only while state/.afk is present. The default EVERYWHERE
-#               ELSE, and specifically for the main home, because that is the pane
-#               the boss actually types in: the composer guard is check-then-act,
-#               so an always-on prompt into a pane a human is using has an
-#               inherent race, and presence-gating is what removes it.
+# SCOPE (host/activation.conf):
+#   always    - activate whenever the queue has sat. THE DEFAULT, everywhere.
+#   afk-only  - activate only while state/.afk is present.
 #   off       - never.
-# Absent = afk-only. The safe direction is to do nothing.
+# Absent = always.
+#
+# The main home was afk-only until 2026-08-11, because it is the pane the boss
+# types into and the composer guard is check-then-act: a prompt can still land in
+# a composer if the boss starts typing between the check and the send. The boss
+# accepted that race, because the alternative turned out to be worse. Turns now
+# END rather than re-arming a checkpoint forever (bin/cs-watch-checkpoint.sh), so
+# an unattended queue in an afk-only main home would simply sit until the boss
+# next typed - and a thread that cannot hear the boss is what this whole change
+# exists to fix. The residual cost is a mangled draft, recoverable by clearing
+# the composer. What remains asymmetric is the QUIET window below, which is
+# longer in the pane a human uses so the check-then-act window is entered less
+# often.
 #
 # WHAT IT NEVER DOES. It starts a turn; it does not decide anything. The prompted
 # turn is bound by the same approval boundaries as away mode: no merging, no
@@ -39,7 +46,8 @@
 # look like a failure to the monitor that calls it every cycle.
 #
 # Env:
-#   CS_ACTIVATE_QUIET_SECS      queue must have been still this long (default 60)
+#   CS_ACTIVATE_QUIET_SECS      queue must have been still this long (default 180
+#                               in the main home, 60 in a capo home)
 #   CS_ACTIVATE_COOLDOWN_SECS   min seconds between activations (default 600)
 set -u
 
@@ -55,9 +63,17 @@ cs_resolve_root
 . "$SCRIPT_DIR/cs-composer-lib.sh"
 # shellcheck source=bin/cs-prompt-lib.sh
 . "$SCRIPT_DIR/cs-prompt-lib.sh"
+# cs_root_is_capo_home, for the quiet-window asymmetry below.
+# shellcheck source=bin/cs-primary-scope-lib.sh
+. "$SCRIPT_DIR/cs-primary-scope-lib.sh"
 
-QUIET=${CS_ACTIVATE_QUIET_SECS:-60}
-case "$QUIET" in ''|*[!0-9]*) QUIET=60 ;; esac
+# Nobody types into a capo pane, so its queue can be picked up as soon as it
+# settles. The main home is the pane the boss uses, so it waits longer: every
+# second of quiet is a second the check-then-act composer race is not entered.
+QUIET_DEFAULT=180
+cs_root_is_capo_home "$CS_HOME" && QUIET_DEFAULT=60
+QUIET=${CS_ACTIVATE_QUIET_SECS:-$QUIET_DEFAULT}
+case "$QUIET" in ''|*[!0-9]*) QUIET=$QUIET_DEFAULT ;; esac
 COOLDOWN=${CS_ACTIVATE_COOLDOWN_SECS:-600}
 case "$COOLDOWN" in ''|*[!0-9]*) COOLDOWN=600 ;; esac
 
@@ -71,7 +87,7 @@ STATUS_ONLY=0
 case "${1:-}" in
   '') ;;
   --status) STATUS_ONLY=1 ;;
-  -h|--help) sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,51p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) echo "usage: cs-activate.sh [--status]" >&2; exit 2 ;;
 esac
 
@@ -80,7 +96,7 @@ decision() { [ "$STATUS_ONLY" = 1 ] && printf '%s\n' "$1"; return 0; }
 
 # --- scope ------------------------------------------------------------------
 
-mode=afk-only
+mode=always
 if [ -f "$HOST_DIR/activation.conf" ]; then
   mode=$(awk 'NF && $0 !~ /^[[:space:]]*#/ { gsub(/[[:space:]]/, "", $0); print; exit }' "$HOST_DIR/activation.conf")
 fi

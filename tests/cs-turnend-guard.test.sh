@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
-# Behavior: the push-based turn-end Stop-hook guard defers to the session that
-# actually holds the home lock.
+# Behavior: the push-based turn-end Stop-hook guard.
 #
-# The guard scopes to a PRIMARY checkout but that does not tell it whether THIS
-# session is the supervisor. cs-session-start.sh already turns "another live
-# consigliere session holds the fleet lock" into a read-only session; the guard
-# must mirror that and step aside (exit 0) instead of nagging a secondary session
-# to drive a fleet it does not own.
+# Two properties, and they pull in opposite directions.
 #
-#   Case A (the bug): another live process holds the lock -> guard exits 0, prints
-#     no block banner, even with in-flight work and no watcher.
-#   Case B (regression guard for the real primary): lock free, stale, or held by
-#     this session's own process tree -> guard still blocks (exit 2) when work is
-#     in flight and no watcher is live.
-#   Case C: away mode (.afk) -> still exits 0 (existing behavior, unchanged).
+# It defers to the session that actually holds the home lock. The guard scopes to
+# a PRIMARY checkout but that does not tell it whether THIS session is the
+# supervisor; cs-session-start.sh already turns "another live consigliere session
+# holds the fleet lock" into a read-only session, so the guard must step aside
+# (exit 0) instead of nagging a secondary session to drive a fleet it does not
+# own.
+#
+# And it blocks a stop only when this home could not WAKE ITSELF. Ending a turn
+# is now the required thing to do - a turn that never ends cannot receive a boss
+# message - so the old "work is under way and no watcher is live" predicate is
+# gone. What survives is the case an ended turn really would lose: no monitor, no
+# recorded pane, a record naming someone else's pane, or an activation stall.
+#
+# It also clears state/.checkpoint-turn, since a Stop hook is the one component
+# that observes a turn boundary.
 set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -25,12 +29,12 @@ TMP_ROOT=$(cs_test_tmproot cs-turnend-guard)
 # as live "harness" processes - the same widening tests/cs-lock.test.sh uses.
 GUARD_HARNESS_RE='sleep|bash|zsh|codex|claude'
 
-BLOCK_BANNER='TURN WOULD END BLIND - SUPERVISION IS OFF'
+BLOCK_BANNER='THIS HOME CANNOT WAKE ITSELF'
 
 # make_primary_home <name>: a genuine primary-scoped consigliere home with one
-# in-flight task and no live watcher. A capo-home marker force-includes it so the
-# fixture needs no real git checkout; AGENTS.md, bin/, and state/ satisfy the
-# rest of cs_primary_scope_matches.
+# in-flight task and NO recorded home pane, so the wake-up predicate fails. A
+# capo-home marker force-includes it so the fixture needs no real git checkout;
+# AGENTS.md, bin/, and state/ satisfy the rest of cs_primary_scope_matches.
 make_primary_home() {
   local name=$1 dir
   dir="$TMP_ROOT/$name"
@@ -41,16 +45,30 @@ make_primary_home() {
   printf '%s\n' "$dir"
 }
 
-# run_guard <home>: feed the Stop payload and run the guard scoped to <home>.
-# Echoes combined stdout+stderr; the caller reads $? for the exit code.
+# make_wakeable_home <name>: the same home, but able to start its own next turn -
+# a fresh monitor beacon and a recorded pane that matches this session's.
+make_wakeable_home() {
+  local dir
+  dir=$(make_primary_home "$1")
+  touch "$dir/state/.last-monitor-beat"
+  printf 'w1:p1\n' > "$dir/state/.home-pane"
+  printf '%s\n' "$dir"
+}
+
+# run_guard <home> [env...]: feed the Stop payload and run the guard scoped to
+# <home>. Echoes combined stdout+stderr; the caller reads $? for the exit code.
+# A monitor binary that cannot exist keeps the fixtures from detaching a real
+# monitor into a temporary directory.
 run_guard() {
-  local home=$1
+  local home=$1; shift
   printf '{"stop_hook_active":false}' | \
-    CS_ROOT_OVERRIDE="$home" \
+    env CS_ROOT_OVERRIDE="$home" \
     CS_HOME="$home" \
     CS_GUARD_GRACE=999 \
     CS_LOCK_HARNESS_RE="$GUARD_HARNESS_RE" \
-    "$ROOT/bin/cs-turnend-guard.sh" 2>&1
+    CS_MONITOR_BIN="$home/no-such-monitor" \
+    HERDR_PANE_ID=w1:p1 \
+    "$@" "$ROOT/bin/cs-turnend-guard.sh" 2>&1
 }
 
 test_defers_when_another_live_session_holds_lock() {
@@ -74,50 +92,90 @@ test_defers_when_another_live_session_holds_lock() {
   pass "cs-turnend-guard: defers when another live session holds the home lock"
 }
 
-test_blocks_when_lock_free() {
+test_permits_a_stop_when_the_home_can_wake_itself() {
   local home out rc
-  home=$(make_primary_home free-lock)
-  # No state/.lock at all -> lock is free -> the real primary must still block.
-
+  home=$(make_wakeable_home wakeable)
+  # Work in flight, lock free, and no checkpoint held: this is the ordinary turn
+  # end the old predicate blocked and the whole change exists to allow.
   out=$(run_guard "$home")
   rc=$?
 
-  expect_code 2 "$rc" "guard must still block (exit 2) when the lock is free and work is in flight"
-  assert_contains "$out" "$BLOCK_BANNER" \
-    "guard must print the block banner for a genuine primary ending a turn blind"
-  pass "cs-turnend-guard: still blocks the real primary when the lock is free"
+  expect_code 0 "$rc" "a home that can wake itself must be allowed to end its turn"
+  [ -z "$out" ] || fail "a permitted turn end must print nothing, got:"$'\n'"$out"
+  pass "cs-turnend-guard: permits an ordinary turn end while work is in flight"
 }
 
-test_blocks_when_lock_stale() {
+test_blocks_when_no_monitor_can_be_started() {
   local home out rc
-  home=$(make_primary_home stale-lock)
-  # A dead holder (no such pid) is a stale lock, not another live session.
-  printf '99999999\n' > "$home/state/.lock"
+  home=$(make_wakeable_home dead-monitor)
+  # The beacon is what proves a monitor is alive; without one, and with no
+  # monitor binary to revive, nothing is watching after this turn.
+  rm -f "$home/state/.last-monitor-beat"
 
   out=$(run_guard "$home")
   rc=$?
 
-  expect_code 2 "$rc" "guard must still block (exit 2) when the lock is stale"
-  assert_contains "$out" "$BLOCK_BANNER" \
-    "a stale lock must not disable the guard for the real primary"
-  pass "cs-turnend-guard: still blocks the real primary when the lock is stale"
+  expect_code 2 "$rc" "a dead, unrevivable monitor must block the stop"
+  assert_contains "$out" "$BLOCK_BANNER" "the block must name the real problem"
+  assert_contains "$out" "no watcher is running" "the block must say the monitor is gone"
+  pass "cs-turnend-guard: blocks when the monitor is dead and cannot be revived"
 }
 
-test_blocks_when_lock_held_by_own_session() {
+test_blocks_when_activation_is_stalled() {
   local home out rc
-  home=$(make_primary_home own-holder)
-  # $$ is the test shell, a genuine ancestor of the guard spawned below, so this
-  # models a lock held by THIS session's own process tree. The guard must treat
-  # it as its own and fall through to block, exactly as the real primary does.
-  printf '%s\n' "$$" > "$home/state/.lock"
+  home=$(make_wakeable_home stalled)
+  : > "$home/state/.activation-stalled"
 
   out=$(run_guard "$home")
   rc=$?
 
-  expect_code 2 "$rc" "guard must still block (exit 2) when it holds the lock itself"
-  assert_contains "$out" "$BLOCK_BANNER" \
-    "guard must not defer to itself when its own session holds the lock"
-  pass "cs-turnend-guard: still blocks when this session holds the lock"
+  expect_code 2 "$rc" "a stalled activation must block the stop"
+  assert_contains "$out" "$BLOCK_BANNER" "a stalled home must be told it cannot wake itself"
+  assert_contains "$out" "activation-stalled" "the block must name the durable marker"
+  pass "cs-turnend-guard: blocks on state/.activation-stalled"
+}
+
+test_blocks_when_no_pane_is_recorded() {
+  local home out rc
+  home=$(make_wakeable_home no-pane)
+  rm -f "$home/state/.home-pane"
+
+  out=$(run_guard "$home")
+  rc=$?
+
+  expect_code 2 "$rc" "with no recorded pane nothing can start the next turn"
+  assert_contains "$out" "no pane is recorded" "the block must name the missing record"
+  pass "cs-turnend-guard: blocks when no home pane is recorded"
+}
+
+test_blocks_when_the_recorded_pane_is_someone_else() {
+  local home out rc
+  home=$(make_wakeable_home wrong-pane)
+  # A recycled or stale record points activation at a pane this session does not
+  # live in, so a wake would be delivered to whoever owns that pane now.
+  printf 'w9:p9\n' > "$home/state/.home-pane"
+
+  out=$(run_guard "$home")
+  rc=$?
+
+  expect_code 2 "$rc" "a record naming another pane must block the stop"
+  assert_contains "$out" "not this one" "the block must say the record names another pane"
+  pass "cs-turnend-guard: blocks when the recorded pane is not this session's"
+}
+
+test_no_work_in_flight_is_always_permitted() {
+  local home out rc
+  home=$(make_primary_home idle-home)
+  # Nothing in flight and nothing armed: there is nothing riding on the wake-up
+  # path, so none of the conditions above matter.
+  rm -f "$home/state/task.meta"
+
+  out=$(run_guard "$home")
+  rc=$?
+
+  expect_code 0 "$rc" "an idle home must always be allowed to end its turn"
+  [ -z "$out" ] || fail "an idle turn end must print nothing, got:"$'\n'"$out"
+  pass "cs-turnend-guard: an idle home ends its turn without a word"
 }
 
 test_away_mode_still_exits_zero() {
@@ -135,8 +193,42 @@ test_away_mode_still_exits_zero() {
   pass "cs-turnend-guard: away mode still exits 0 (existing behavior unchanged)"
 }
 
+test_clears_the_per_turn_checkpoint_marker() {
+  local home
+  # The Stop hook is the one component that observes a turn boundary, so it is
+  # what releases the next turn's checkpoint. It must clear the marker on a
+  # permitted stop AND on a blocked one, since a blocked stop continues the turn
+  # precisely so the agent can supervise.
+  home=$(make_wakeable_home clears-marker)
+  : > "$home/state/.checkpoint-turn"
+  run_guard "$home" >/dev/null
+  assert_absent "$home/state/.checkpoint-turn" \
+    "a permitted turn end must release the next turn's checkpoint"
+
+  home=$(make_wakeable_home clears-marker-blocked)
+  rm -f "$home/state/.last-monitor-beat"
+  : > "$home/state/.checkpoint-turn"
+  run_guard "$home" >/dev/null || true
+  assert_absent "$home/state/.checkpoint-turn" \
+    "a blocked stop must still release the checkpoint it is telling the agent to run"
+
+  # Out of scope (no capo marker, not a plain checkout) means this is not a
+  # primary home's turn boundary at all, so the marker is left alone.
+  home=$(make_wakeable_home keeps-marker-out-of-scope)
+  rm -f "$home/.cs-capo-home"
+  : > "$home/state/.checkpoint-turn"
+  run_guard "$home" >/dev/null
+  assert_present "$home/state/.checkpoint-turn" \
+    "a turn end outside the primary scope must not touch this home's counter"
+  pass "cs-turnend-guard: clears the per-turn checkpoint marker at a primary turn boundary"
+}
+
 test_defers_when_another_live_session_holds_lock
-test_blocks_when_lock_free
-test_blocks_when_lock_stale
-test_blocks_when_lock_held_by_own_session
+test_permits_a_stop_when_the_home_can_wake_itself
+test_blocks_when_no_monitor_can_be_started
+test_blocks_when_activation_is_stalled
+test_blocks_when_no_pane_is_recorded
+test_blocks_when_the_recorded_pane_is_someone_else
+test_no_work_in_flight_is_always_permitted
 test_away_mode_still_exits_zero
+test_clears_the_per_turn_checkpoint_marker
