@@ -318,6 +318,11 @@ LAUNCH_MODEL=${MODEL:-$PRIOR_MODEL}
 LAUNCH_EFFORT=${EFFORT:-$PRIOR_EFFORT}
 cs_harness_effort_valid "$HARNESS" "$LAUNCH_EFFORT" ||
   die "task '$ID' records effort '$LAUNCH_EFFORT', which $HARNESS does not accept; pass --effort to choose a usable level"
+# Mirrors the launch owner's own permission-mode validation, like the effort and
+# pane-cwd checks above: a malformed config/permission-mode.conf must refuse
+# here, with the agent still running, not after bin/cs-spawn.sh has it stopped.
+cs_harness_permission_mode "$HARNESS" >/dev/null ||
+  die "config/permission-mode.conf is malformed (details above); fix it before relaunching - the launch owner would refuse it only after the agent was stopped"
 
 # The journal check runs LAST among the refusals: acknowledging a stale journal
 # with --clear-journal displaces a record, so nothing that can still refuse may

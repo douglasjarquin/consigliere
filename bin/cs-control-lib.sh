@@ -204,11 +204,20 @@ cs_control_interrupt() { # <pane_id> <harness> -> token
 # refusing on an unreadable reading blocked recovery on healthy soldiers
 # (measured - the refuse-on-pending history above), so the caller types and the
 # verified postcondition decides, exactly as the flush contract states.
+# Positive evidence is never discarded in favour of an unreadable re-read: an
+# obstacle the cancel attempt OBSERVED (a dialog it parked on, a turn that
+# would not stop) keeps that answer even when the fresh read after it fails,
+# so a transient herdr failure degrades to the observed obstacle, never to
+# permission to type.
 cs_control_exit_gate() { # <pane_id> <harness> -> clear|still-running|blocked|gone|cannot-tell
-  local pane=$1 harness=$2 state
+  local pane=$1 harness=$2 state itok
   state=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || state=unknown
   if [ "$state" = busy ]; then
-    cs_control_interrupt "$pane" "$harness" >/dev/null 2>&1 || true
+    itok=$(cs_control_interrupt "$pane" "$harness" 2>/dev/null) || true
+    case "$itok" in
+      blocked)       printf 'blocked\n'; return 1 ;;
+      still-working) printf 'still-running\n'; return 1 ;;
+    esac
     state=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || state=unknown
   fi
   case "$state" in

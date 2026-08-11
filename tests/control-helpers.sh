@@ -33,8 +33,9 @@
 #                  stale-belief husk shape a real exited agent can leave behind
 #   on_esc         `idle` sets status=idle when Escape arrives; `gone` removes
 #                  the agent; `unknown` sets status=unknown (the uncorroborated
-#                  reading a transient herdr failure yields); absent leaves the
-#                  state alone
+#                  reading a transient herdr failure yields); `blocked` sets
+#                  status=blocked (the turn parked on a harness dialog instead
+#                  of cancelling); absent leaves the state alone
 #   on_enter       `gone` removes the agent when Enter arrives; `busy` sets
 #                  status=working; `blocked` sets status=blocked (the turn the
 #                  Enter submitted parked on a harness dialog); absent leaves
@@ -111,6 +112,7 @@ case "$1 $2" in
           idle) printf 'idle\n' > "$S/status" ;;
           gone) : > "$S/agent" ;;
           unknown) printf 'unknown\n' > "$S/status" ;;
+          blocked) printf 'blocked\n' > "$S/status" ;;
         esac
         ;;
       Enter)

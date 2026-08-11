@@ -202,6 +202,13 @@ expect_code 1 "$rc" "a stop that cannot be corroborated is not confirmed"
 assert_contains "$out" "cannot be positively read" "an uncorroborated final reading is state-unknown, not still-working"
 [ "$(esc_count "$TMP/l-murky")" -eq 1 ] || fail "the murky case still delivers the key exactly once"
 
+mblocked=$(cs_control_state "$TMP/s-mblocked" agent=codex status=working on_esc=blocked)
+rc=0
+out=$(run_control "$home" "$mblocked" "$TMP/l-mblocked" interrupt t1) || rc=$?
+expect_code 1 "$rc" "a turn that parks on a dialog is not a stopped turn"
+assert_contains "$out" "waiting on a human" "the mid-wait dialog is reported as blocked"
+[ "$(esc_count "$TMP/l-mblocked")" -eq 1 ] || fail "a dialog must not be keyed past after the cancel attempt"
+
 foggy=$(cs_control_state "$TMP/s-foggy" agent=codex status=working on_esc=unknown)
 rc=0
 out=$(run_control "$home" "$foggy" "$TMP/l-foggy" interrupt t1) || rc=$?
@@ -301,6 +308,18 @@ out=$(run_control "$home" "$fblocked" "$TMP/l-fblocked" exit t1) || rc=$?
 expect_code 1 "$rc" "a flush that ends on a dialog blocks the exit"
 assert_contains "$out" "waiting on a human" "the blocked pane is reported, never keyed past"
 assert_no_line "$(cat "$TMP/l-fblocked")" 'send-text' "no exit command is delivered into a dialog"
+
+# A turn started by the flush can park on a dialog DURING the gate's cancel
+# attempt; the obstacle the cancel attempt observed is kept, and nothing more
+# is delivered to the dialog.
+gblocked=$(cs_control_state "$TMP/s-gblocked" agent=codex status=idle \
+  composer='❯ queued steer' on_enter=busy on_esc=blocked)
+rc=0
+out=$(run_control "$home" "$gblocked" "$TMP/l-gblocked" exit t1) || rc=$?
+expect_code 1 "$rc" "a dialog observed by the cancel attempt blocks the exit"
+assert_contains "$out" "waiting on a human" "the observed dialog is reported, never keyed past"
+assert_no_line "$(cat "$TMP/l-gblocked")" 'send-text' "no exit command is delivered after the cancel attempt saw the dialog"
+[ "$(esc_count "$TMP/l-gblocked")" -eq 1 ] || fail "the dialog receives no second key after the cancel attempt"
 
 # A flush Enter can start a turn that will not cancel; typing the exit command
 # then would queue it invisibly as input, so the gate withholds it and reports

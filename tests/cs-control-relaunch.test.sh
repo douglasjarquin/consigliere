@@ -117,6 +117,18 @@ expect_code 1 "$rc" "a pane sitting outside the recorded worktree refuses BEFORE
 assert_contains "$out" "is not in the recorded worktree" "the refusal names the drift"
 assert_no_line "$(cat "$TMP/l")" 'send-text' "no agent is stopped on a drifted pane"
 
+badconf=$(setup_home badconf)
+mkdir -p "$badconf/config"
+printf 'codex bypass\n' > "$badconf/config/permission-mode.conf"
+badconf_before=$(manifest "$badconf")
+badconf_state=$(cs_control_state "$TMP/s-badconf" agent=codex status=idle cwd="$badconf/wt")
+rc=0; out=$(run_relaunch "$badconf" "$badconf_state" "$TMP/l" t1 --note n) || rc=$?
+expect_code 1 "$rc" "a malformed permission-mode conf refuses BEFORE the stop"
+assert_contains "$out" "permission-mode.conf is malformed" "the refusal names the malformed conf"
+assert_no_line "$(cat "$TMP/l")" 'send-text' "no agent is stopped on a malformed permission-mode conf"
+[ "$(manifest "$badconf")" = "$badconf_before" ] ||
+  fail "a malformed-conf refusal must leave records and instructions byte-identical"
+
 nodircwd=$(cs_control_state "$TMP/s-nodircwd" agent=codex status=idle cwd=)
 rc=0; out=$(run_relaunch "$home" "$nodircwd" "$TMP/l" t1 --note n) || rc=$?
 expect_code 1 "$rc" "an unreportable pane cwd refuses BEFORE the stop"
