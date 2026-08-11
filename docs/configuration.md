@@ -24,7 +24,7 @@ Test and script overrides: `CS_ROOT_OVERRIDE`, `CS_STATE_OVERRIDE` narrow a sing
 `config/` is the one directory a person owns, backs up, and restores: `cp -a <home>/config`, no exclusions, and restore on a new machine is that same copy.
 `host/` is a top-level sibling, not part of the user tree: machine-local runtime configuration, mostly script-written, correct only on the machine that wrote it.
 It is never backed up, restored, or propagated; on a new machine run `bin/cs-doctor.sh` and fill in `host/` fresh.
-Prose and records use `.md`; settings use `.conf`; the extension marks the format, never the tier - `config/` holds four genuinely portable `.conf` files, and every other `.conf` file is machine-local and lives in `host/`.
+Prose and records use `.md`; settings use `.conf`; the extension marks the format, never the tier - `config/` holds three genuinely portable `.conf` files, and every other `.conf` file is machine-local and lives in `host/`.
 `bin/cs-migrate-config.sh` owns the one-shot move from the pre-2026-08 layout, and the fail-closed gate in `bin/cs-root-lib.sh` refuses every script while any old-name path exists.
 
 | file | tier | semantics |

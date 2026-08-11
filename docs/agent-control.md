@@ -51,7 +51,7 @@ It is the preferred half of `relaunch`, not a separate command: relaunch resumes
 `relaunch` is the only verb that changes durable records, so it runs as a transaction with a journal at `state/<id>.control-relaunch` (flat `key=value`, last occurrence wins, read and written through `bin/cs-meta-lib.sh`; `bin/cs-control.sh --help` owns the field list).
 
 1. **Validate everything.** The target must be a recorded ordinary direct report in THIS home with a positively present pane, a worktree that is its own git root, a brief on disk, and a one-line `--note`. A `kind=capo` and a headless scout are refused by name.
-2. **Journal the checkpoint.** Phase `prepared` records the endpoint, the profile before and after, the agent pid and session id that were running, and the work being preserved: the worktree's HEAD and its uncommitted-file count.
+2. **Journal the checkpoint.** Phase `prepared` records the endpoint, the agent pid and session id that were running, and the work being preserved: the worktree's HEAD and its uncommitted-file count.
 3. **Record the note.** The note is appended to `data/<id>/brief.md` atomically (write, rename), because the replacement inherits the local copy and none of the conversation. A cold launch therefore reads it as part of its instructions, and a relaunch that fails later still leaves it for the next recovery.
 4. **Stop the old agent** through the `exit` verb, with its postcondition.
 5. **Launch the replacement** through its single owner, `bin/cs-spawn.sh --relaunch`, which adopts the recorded endpoint and worktree instead of creating either.
