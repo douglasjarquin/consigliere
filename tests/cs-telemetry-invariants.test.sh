@@ -257,7 +257,11 @@ test_checkpoint_behavior_is_unchanged_by_telemetry() {
 # --- the worker turn-end wiring -----------------------------------------------
 
 launch() { # <harness> [telemetry-cmd]
-  CS_HARNESS_OVERRIDE="$1" bash -c "
+  # CS_CONFIG_OVERRIDE is pinned to a nonexistent dir so a real
+  # config/permission-mode.conf on the developer's own machine (e.g. a claude
+  # account policy narrower than full bypass) cannot change the expected
+  # launch string below - the same isolation tests/cs-harness-lib.test.sh uses.
+  CS_HARNESS_OVERRIDE="$1" CS_CONFIG_OVERRIDE="$TMP_ROOT/no-such-config" bash -c "
 set -eu
 . '$ROOT/bin/cs-harness-lib.sh'
 cs_harness_soldier_launch '$1' \"'/op'\" \"'/brief'\" \"'/turnend'\" \"'/settings'\" '${2:-}'"
