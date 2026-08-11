@@ -74,8 +74,10 @@ pass "every offset counts from one origin, so a nested record falls inside its p
 # The stage records across process boundaries (the deferred worker's checks run
 # in bin/cs-bootstrap.sh and its children), so the origin has to travel with the
 # environment rather than being re-derived per process. A child that re-derived
-# its own origin would report an offset near zero no matter when it ran.
-sleep 0.2
+# its own origin would report an offset near zero no matter when it ran, so the
+# child must land at least the slept second after the origin. A full second is
+# the smallest delay the whole-second date fallback clock can still see.
+sleep 1
 cat > "$TMP/child.sh" <<SH
 #!/usr/bin/env bash
 set -u
@@ -86,7 +88,7 @@ chmod +x "$TMP/child.sh"
 "$TMP/child.sh" || fail "the child process failed"
 child_record=$(grep 'somecapo$' "$FILE") || fail "a child process recorded nothing"
 child_off=$(field "$child_record" 1)
-[ "$child_off" -ge "$p_off" ] \
+[ "$child_off" -ge 1000 ] \
   || fail "the child re-derived its own origin instead of sharing the run's"
 pass "a child process records against the run's one shared origin"
 
