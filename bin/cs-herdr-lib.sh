@@ -342,6 +342,27 @@ cs_herdr_agent_wait_present() { # <pane_id> [timeout-secs]
   return 1
 }
 
+# cs_herdr_agent_wait_unblocked <pane_id> [timeout-secs] - 0 as soon as the
+# pane's agent reads anything other than herdr's native `blocked`, 1 when it was
+# still blocked for the whole window.
+#
+# `blocked` is herdr's native reading for "waiting on a HUMAN" - a trust dialog,
+# an interactive menu, a login prompt - which is precisely the state an
+# agent-presence check cannot distinguish from a working one: the agent is
+# genuinely there, it just will never do anything. A settle window is required
+# rather than a single read because a healthy launch passes through no blocked
+# state at all, so any blocked reading that survives the window is the real
+# thing rather than a startup transient.
+cs_herdr_agent_wait_unblocked() { # <pane_id> [timeout-secs]
+  local pane=$1 limit=${2:-10} waited=0
+  while :; do
+    [ "$(cs_herdr_agent_busy_state "$pane" 2>/dev/null)" = blocked ] || return 0
+    [ "$waited" -lt "$limit" ] || return 1
+    sleep 1
+    waited=$((waited + 1))
+  done
+}
+
 # --- agent session identity ------------------------------------------------
 # The agent instance occupying a pane, as reported by herdr's official agent
 # integrations (claude and codex are installed; `herdr integration status`
