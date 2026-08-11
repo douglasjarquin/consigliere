@@ -67,7 +67,6 @@ cs_abs_path() {  # <path> -> the same path, guaranteed absolute; rc=1 if empty
 cs_layout_pairs() {
   printf '%s\t%s\n' \
     "$CONFIG/backlog-backend"  "$CONFIG/backlog-backend.conf" \
-    "$CONFIG/dispatch-policy"  "$CONFIG/dispatch-policy.conf" \
     "$CONFIG/permission-mode"  "$CONFIG/permission-mode.conf" \
     "$CONFIG/upstream"         "$HOST_DIR/upstream.conf" \
     "$CONFIG/activation"       "$HOST_DIR/activation.conf" \

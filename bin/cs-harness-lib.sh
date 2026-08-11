@@ -79,38 +79,6 @@ cs_harness_detect_root() {
   printf '%s\n' "$CS_HARNESS_DEFAULT"
 }
 
-# cs_harness_effort_valid <h> <effort> - true if <effort> is accepted by <h>.
-# Codex accepts max and ultra; Claude accepts max but rejects ultra.
-cs_harness_effort_valid() {
-  local h=$1 effort=$2
-  case "$effort" in
-    ''|default|low|medium|high|xhigh) return 0 ;;
-    max) [ "$h" = codex ] || [ "$h" = claude ] ;;
-    ultra) [ "$h" = codex ] ;;
-    *) return 1 ;;
-  esac
-}
-
-# cs_harness_model_flag <h> <model> - rendered --model flag (trailing space) or
-# empty for an unset/default model. Both harnesses accept --model.
-cs_harness_model_flag() {
-  local model=$2
-  [ -n "$model" ] && [ "$model" != default ] || return 0
-  printf -- '--model %s ' "$(cs_harness_shell_quote "$model")"
-}
-
-# cs_harness_effort_flag <h> <effort> - rendered effort flag (trailing space) or
-# empty. codex uses `-c model_reasoning_effort="E"`; claude uses `--effort E`.
-cs_harness_effort_flag() {
-  local h=$1 effort=$2
-  [ -n "$effort" ] && [ "$effort" != default ] || return 0
-  case "$h" in
-    codex) printf -- '-c %s ' "$(cs_harness_shell_quote "model_reasoning_effort=\"$effort\"")" ;;
-    claude) printf -- '--effort %s ' "$(cs_harness_shell_quote "$effort")" ;;
-    *) return 1 ;;
-  esac
-}
-
 # cs_harness_permission_mode_valid <h> <mode> - true if <mode> is a launch
 # permission mode this harness accepts AND one an unattended soldier can work
 # under with nobody at the keyboard. Claude's `plan`, `manual`, and `dontAsk`
@@ -340,7 +308,7 @@ cs_harness_launch_env() {
   esac
 }
 
-# cs_harness_soldier_launch <h> <model> <effort> <sq_op> <sq_brief> <sq_turnend> <sq_settings> [telemetry-cmd]
+# cs_harness_soldier_launch <h> <sq_op> <sq_brief> <sq_turnend> <sq_settings> [telemetry-cmd]
 # Full launch string for an interactive supervised soldier (or interactive scout).
 # codex wires turn-end inline via `-c notify=`; claude via the --settings Stop hook.
 #
@@ -352,10 +320,8 @@ cs_harness_launch_env() {
 # With no telemetry command both launch strings are byte identical to an
 # uninstrumented soldier's.
 cs_harness_soldier_launch() {
-  local h=$1 model=$2 effort=$3 sq_op=$4 sq_brief=$5 sq_turnend=$6 sq_settings=$7 telemetry=${8:-}
-  local mf ef auto env notify
-  mf=$(cs_harness_model_flag "$h" "$model")
-  ef=$(cs_harness_effort_flag "$h" "$effort")
+  local h=$1 sq_op=$2 sq_brief=$3 sq_turnend=$4 sq_settings=$5 telemetry=${6:-}
+  local auto env notify
   auto=$(cs_harness_autonomy_flag "$h") || return 1
   env=$(cs_harness_launch_env "$h")
   notify="touch $sq_turnend"
@@ -367,19 +333,19 @@ cs_harness_soldier_launch() {
   case "$h" in
     codex)
       # shellcheck disable=SC2016
-      printf '%scodex %s%s%s -c "notify=[\\"bash\\",\\"-c\\",\\"%s\\"]" "$(%s encode launch-brief < %s)"' \
-        "$env" "$mf" "$ef" "$auto" "$notify" "$sq_op" "$sq_brief"
+      printf '%scodex %s -c "notify=[\\"bash\\",\\"-c\\",\\"%s\\"]" "$(%s encode launch-brief < %s)"' \
+        "$env" "$auto" "$notify" "$sq_op" "$sq_brief"
       ;;
     claude)
       # shellcheck disable=SC2016
-      printf '%sclaude %s%s%s --settings %s "$(%s encode launch-brief < %s)"' \
-        "$env" "$mf" "$ef" "$auto" "$sq_settings" "$sq_op" "$sq_brief"
+      printf '%sclaude %s --settings %s "$(%s encode launch-brief < %s)"' \
+        "$env" "$auto" "$sq_settings" "$sq_op" "$sq_brief"
       ;;
     *) return 1 ;;
   esac
 }
 
-# cs_harness_soldier_resume <h> <model> <effort> <sq_turnend> <sq_settings> [telemetry-cmd]
+# cs_harness_soldier_resume <h> <sq_turnend> <sq_settings> [telemetry-cmd]
 # The relaunch shape of cs_harness_soldier_launch: identical flags and identical
 # turn-end wiring, with the harness's cwd-keyed resume command in place of the
 # positional brief prompt. A soldier owns a unique worktree cwd, so resuming
@@ -387,10 +353,8 @@ cs_harness_soldier_launch() {
 # (docs/codex.md, docs/claude.md); bin/cs-spawn.sh --relaunch prefers this over
 # the cold launch and falls back only when no session was resumable.
 cs_harness_soldier_resume() {
-  local h=$1 model=$2 effort=$3 sq_turnend=$4 sq_settings=$5 telemetry=${6:-}
-  local mf ef auto env notify resume
-  mf=$(cs_harness_model_flag "$h" "$model")
-  ef=$(cs_harness_effort_flag "$h" "$effort")
+  local h=$1 sq_turnend=$2 sq_settings=$3 telemetry=${4:-}
+  local auto env notify resume
   auto=$(cs_harness_autonomy_flag "$h") || return 1
   env=$(cs_harness_launch_env "$h")
   resume=$(cs_harness_resume_cmd "$h") || return 1
@@ -403,27 +367,25 @@ cs_harness_soldier_resume() {
   case "$h" in
     codex)
       # `resume` is a subcommand, so every flag follows it (verified: codex
-      # 0.147 `codex resume --help` accepts -c, --model, and the autonomy flag).
+      # 0.147 `codex resume --help` accepts -c and the autonomy flag).
       # shellcheck disable=SC2016
-      printf '%scodex %s %s%s%s -c "notify=[\\"bash\\",\\"-c\\",\\"%s\\"]"' \
-        "$env" "$resume" "$mf" "$ef" "$auto" "$notify"
+      printf '%scodex %s %s -c "notify=[\\"bash\\",\\"-c\\",\\"%s\\"]"' \
+        "$env" "$resume" "$auto" "$notify"
       ;;
     claude)
-      printf '%sclaude %s %s%s%s --settings %s' \
-        "$env" "$resume" "$mf" "$ef" "$auto" "$sq_settings"
+      printf '%sclaude %s %s --settings %s' \
+        "$env" "$resume" "$auto" "$sq_settings"
       ;;
     *) return 1 ;;
   esac
 }
 
-# cs_harness_scout_launch <h> <model> <effort> <sq_op> <sq_brief> <sq_status>
+# cs_harness_scout_launch <h> <sq_op> <sq_brief> <sq_status>
 # Fire-and-forget headless scout: process exit IS the turn end; the launch line
 # appends the terminal done/failed status event.
 cs_harness_scout_launch() {
-  local h=$1 model=$2 effort=$3 sq_op=$4 sq_brief=$5 sq_status=$6
-  local mf ef auto bin env
-  mf=$(cs_harness_model_flag "$h" "$model")
-  ef=$(cs_harness_effort_flag "$h" "$effort")
+  local h=$1 sq_op=$2 sq_brief=$3 sq_status=$4
+  local auto bin env
   auto=$(cs_harness_autonomy_flag "$h") || return 1
   env=$(cs_harness_launch_env "$h")
   case "$h" in
@@ -432,23 +394,21 @@ cs_harness_scout_launch() {
     *) return 1 ;;
   esac
   # shellcheck disable=SC2016
-  printf 'if %s%s %s%s%s "$(%s encode launch-brief < %s)"; then echo '\''done: headless scout finished; read the report'\'' >> %s; else echo "failed: %s exited $?" >> %s; fi' \
-    "$env" "$bin" "$mf" "$ef" "$auto" "$sq_op" "$sq_brief" "$sq_status" "$bin" "$sq_status"
+  printf 'if %s%s %s "$(%s encode launch-brief < %s)"; then echo '\''done: headless scout finished; read the report'\'' >> %s; else echo "failed: %s exited $?" >> %s; fi' \
+    "$env" "$bin" "$auto" "$sq_op" "$sq_brief" "$sq_status" "$bin" "$sq_status"
 }
 
-# cs_harness_capo_launch <h> <model> <effort> <sq_op> <sq_brief> <sq_home>
+# cs_harness_capo_launch <h> <sq_op> <sq_brief> <sq_home>
 # A capo is a supervisor, not a supervised turn-taker: no turn-end wiring.
 cs_harness_capo_launch() {
-  local h=$1 model=$2 effort=$3 sq_op=$4 sq_brief=$5 sq_home=$6
-  local mf ef auto bin env
-  mf=$(cs_harness_model_flag "$h" "$model")
-  ef=$(cs_harness_effort_flag "$h" "$effort")
+  local h=$1 sq_op=$2 sq_brief=$3 sq_home=$4
+  local auto bin env
   auto=$(cs_harness_autonomy_flag "$h") || return 1
   bin=$(cs_harness_binary "$h")
   env=$(cs_harness_launch_env "$h")
   # shellcheck disable=SC2016
-  printf '%sCS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME=%s %s %s%s%s "$(%s encode launch-brief < %s)"' \
-    "$env" "$sq_home" "$bin" "$mf" "$ef" "$auto" "$sq_op" "$sq_brief"
+  printf '%sCS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME=%s %s %s "$(%s encode launch-brief < %s)"' \
+    "$env" "$sq_home" "$bin" "$auto" "$sq_op" "$sq_brief"
 }
 
 # cs_harness_busy_re <h> - the rendered-banner busy signature used ONLY to

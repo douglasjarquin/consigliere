@@ -91,7 +91,6 @@ config/              THE USER-OWNED TREE; LOCAL, gitignored; back it up wholesal
   backlog.md         task queue, dependencies, history; done-archive.md and note-archive.md are its tasks-axi siblings
   charter.md         capo homes only; the capo's filled charter brief
   backlog-backend.conf  backlog backend override; absent or "tasks-axi" = default, "manual" = hand-edit
-  dispatch-policy.conf  optional per-home model/effort defaults by harness and task kind
   permission-mode.conf  optional narrower claude launch permission mode; a Claude ACCOUNT policy, portable across that account's machines; absent = full autonomy
   wedge-alarm.conf   optional away-mode wedge-alarm directives; absent = auto, which adapts per OS; a command: directive naming a machine-local path is the one non-portable use
 host/                MACHINE-LOCAL; LOCAL, gitignored; not backed up, re-created per machine, never propagated
@@ -158,10 +157,10 @@ Do not dispatch until the root harness (codex or claude), herdr, gh auth, and th
 Use `gh-axi` for GitHub, `chrome-devtools-axi` for browser work, and `lavish-axi` for structured decisions or reports; consult current help rather than memorizing flags.
 A silent bootstrap section needs no action; any printed actionable diagnostic line names its owner script or doc - follow it.
 
-## 4. Model and effort per task
+## 4. Harness
 
-The harness is codex or claude, inherited from the root session; `bin/cs-harness-lib.sh` owns the per-harness launch, turn-end wiring, skill syntax, and resume command. The optional home-local dispatch policy chooses model and effort defaults by harness and task kind; `docs/configuration.md` owns its exact format and `bin/cs-spawn.sh` applies it.
-Explicit `--model` and `--effort` choices at intake take precedence over the policy; absent a matching policy record, the existing harness default remains. Use low for well-understood explicit work, xhigh for ambiguous investigation or design, intermediate levels proportionally, and select Claude's max deliberately when appropriate.
+The harness is codex or claude, inherited from the root session; `bin/cs-harness-lib.sh` owns the per-harness launch, turn-end wiring, skill syntax, and resume command.
+The harness itself selects the model and the reasoning level for every task, and consigliere never passes either.
 `bin/cs-spawn.sh` owns launch flags and fail-closed validation.
 A missing dependency, authentication failure, or version refusal is a blocker; report it rather than improvising a workaround.
 

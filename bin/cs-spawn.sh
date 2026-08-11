@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a soldier in a herdr-native task worktree, or a capo
 # in its isolated consigliere home.
-# Usage: cs-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--model <name>] [--effort <level>] [--base <ref>] [--issue <n>]
-#        cs-spawn.sh <task-id> <project-dir> --scout [--headless] [--model <name>] [--effort <level>] [--base <ref>]
-#        cs-spawn.sh <task-id> <capo-home> --capo [--model <name>] [--effort <level>]
-#        cs-spawn.sh --relaunch <task-id> [--model <name>] [--effort <level>]
+# Usage: cs-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--base <ref>] [--issue <n>]
+#        cs-spawn.sh <task-id> <project-dir> --scout [--headless] [--base <ref>]
+#        cs-spawn.sh <task-id> <capo-home> --capo
+#        cs-spawn.sh --relaunch <task-id>
 #
 #   --mode and --yolo are REQUIRED on a ship spawn and refused on --scout and
 #   --capo. A ship task's delivery posture is decided per task at intake, never
@@ -23,11 +23,8 @@
 #   report, so there is no delivery contract to honour. cs-promote.sh is where a
 #   promoted scout first states one.
 #
-#   --model <name> and --effort <default|low|medium|high|xhigh|max|ultra> override the optional
-#   config/dispatch-policy.conf entry for the resolved harness and task kind.
-#   The policy's exact format is in docs/configuration.md.
-#   Codex accepts max and ultra through model_reasoning_effort; default omits it.
-#   Claude accepts max but not ultra.
+#   Model and reasoning level are NOT selectable here: the harness resolves its own
+#   profile per task (AGENTS.md section 4), so no launch built here names either.
 #   A claude home whose account policy forbids --dangerously-skip-permissions
 #   selects a narrower launch mode in config/permission-mode.conf (auto|acceptEdits|
 #   bypassPermissions); an unusable or malformed record blocks the dispatch.
@@ -83,10 +80,9 @@
 #     launch with the brief only once the pane is positively agent-free again,
 #     which is exactly what a harness that had no session to resume leaves
 #     behind (docs/codex.md, docs/claude.md).
-#   - Keeps the recorded model, effort, harness, kind, mode, and yolo. --model
-#     and --effort override the profile for this relaunch and are recorded once
-#     an agent is confirmed; the harness is deliberately not switchable, since a
-#     soldier inherits the root session's harness.
+#   - Keeps the recorded harness, kind, mode, and yolo; the harness is
+#     deliberately not switchable, since a soldier inherits the root session's
+#     harness.
 #
 # Capo mechanics:
 #   - The capo home must already be seeded (cs-home-seed.sh); this script
@@ -144,70 +140,7 @@ mkdir -p "$STATE"
 # and cs-crew-state read it back without re-detecting.
 HARNESS=$(cs_harness_detect_root)
 
-cs_spawn_apply_dispatch_policy() {
-  local file="$CONFIG/dispatch-policy.conf" line entry_harness entry_kind entry_model entry_effort extra
-  local line_no=0 seen='|' match_model='' match_effort=''
-  # A symlink is allowed as long as it resolves to a regular file, so a home may
-  # keep its policy under external configuration management. A symlink that does
-  # not resolve stops dispatch rather than falling back to the harness default:
-  # silently ignoring a broken policy is indistinguishable from having none.
-  if [ -L "$file" ] && [ ! -e "$file" ]; then
-    echo "error: dispatch policy symlink does not resolve: $file" >&2
-    exit 2
-  fi
-  [ -e "$file" ] || return 0
-  if [ ! -f "$file" ]; then
-    echo "error: dispatch policy must be a regular file or a symlink to one: $file" >&2
-    exit 2
-  fi
-
-  while IFS= read -r line || [ -n "$line" ]; do
-    line_no=$((line_no + 1))
-    entry_harness='' entry_kind='' entry_model='' entry_effort='' extra=''
-    IFS=$' \t' read -r entry_harness entry_kind entry_model entry_effort extra <<EOF
-$line
-EOF
-    case "$entry_harness" in
-      ''|'#'*) continue ;;
-    esac
-    if [ -z "$entry_kind" ] || [ -z "$entry_model" ] || [ -z "$entry_effort" ] || [ -n "$extra" ]; then
-      echo "error: dispatch policy line $line_no must be: <harness> <kind> <model> <effort>" >&2
-      exit 2
-    fi
-    if ! cs_harness_valid "$entry_harness"; then
-      echo "error: dispatch policy line $line_no has unknown harness '$entry_harness'" >&2
-      exit 2
-    fi
-    case "$entry_kind" in ship|scout|capo) ;; *)
-      echo "error: dispatch policy line $line_no has unknown kind '$entry_kind'" >&2
-      exit 2
-    esac
-    case "$entry_model" in default|*[!A-Za-z0-9._:-]*|'')
-      echo "error: dispatch policy line $line_no has invalid model '$entry_model'" >&2
-      exit 2
-    esac
-    if ! cs_harness_effort_valid "$entry_harness" "$entry_effort"; then
-      echo "error: dispatch policy line $line_no has invalid $entry_harness effort '$entry_effort'" >&2
-      exit 2
-    fi
-    case "$seen" in *"|$entry_harness:$entry_kind|"*)
-      echo "error: dispatch policy line $line_no duplicates $entry_harness $entry_kind" >&2
-      exit 2
-    esac
-    seen="$seen$entry_harness:$entry_kind|"
-    if [ "$entry_harness" = "$HARNESS" ] && [ "$entry_kind" = "$KIND" ]; then
-      match_model=$entry_model
-      match_effort=$entry_effort
-    fi
-  done < "$file"
-
-  [ -n "$MODEL" ] || MODEL=$match_model
-  [ -n "$EFFORT" ] || EFFORT=$match_effort
-}
-
 KIND=ship
-MODEL=
-EFFORT=
 MODE=
 YOLO=
 BASE=
@@ -226,8 +159,6 @@ while [ "$#" -gt 0 ]; do
     --capo) KIND=capo ;;
     --relaunch) RELAUNCH=1 ;;
     --headless) HEADLESS=1 ;;
-    --model) MODEL=${2:?--model requires a value}; shift ;;
-    --effort) EFFORT=${2:?--effort requires a value}; shift ;;
     --mode) MODE=${2:?--mode requires a value}; shift ;;
     --yolo) YOLO=${2:?--yolo requires a value}; shift ;;
     --base) BASE=${2:?--base requires a value}; shift ;;
@@ -266,20 +197,6 @@ fi
 case "$ID" in
   *[!A-Za-z0-9._-]*|'') echo "error: task id must be [A-Za-z0-9._-]+: '$ID'" >&2; exit 2 ;;
 esac
-# The dispatch policy states a default for NEW work. A relaunch keeps the profile
-# the task was dispatched on, so a policy edited since then never silently moves
-# a running task's model or effort.
-[ "$RELAUNCH" -eq 1 ] || cs_spawn_apply_dispatch_policy
-# A relaunch validates effort against the task's RECORDED harness in its own
-# section below; checking it here against the root-detected harness would turn
-# a valid relaunch into a refusal when the root pin has moved since dispatch.
-if [ "$RELAUNCH" -eq 0 ] && ! cs_harness_effort_valid "$HARNESS" "$EFFORT"; then
-  case "$HARNESS:$EFFORT" in
-    claude:ultra) echo "error: claude does not accept effort=ultra; choose default|low|medium|high|xhigh|max" >&2 ;;
-    *) echo "error: unknown effort '$EFFORT'" >&2 ;;
-  esac
-  exit 2
-fi
 # Resolve config/permission-mode.conf up front. The launch builders read it too, but
 # they run after the worktree and metadata exist; validating here keeps a
 # malformed file from leaving a half-created task behind.
@@ -498,15 +415,6 @@ if [ "$RELAUNCH" -eq 1 ]; then
     *) echo "error: herdr did not report a working directory for pane $R_PANE; refusing to launch into an unverified location" >&2; exit 1 ;;
   esac
 
-  R_MODEL=${MODEL:-$(cs_meta_get "$META" model 2>/dev/null || true)}
-  R_EFFORT=${EFFORT:-$(cs_meta_get "$META" effort 2>/dev/null || true)}
-  [ -n "$R_MODEL" ] || R_MODEL=default
-  [ -n "$R_EFFORT" ] || R_EFFORT=default
-  cs_harness_effort_valid "$R_HARNESS" "$R_EFFORT" || {
-    echo "error: effort '$R_EFFORT' is not accepted by $R_HARNESS; pass --effort to choose a usable level" >&2
-    exit 1
-  }
-
   R_TURNEND="$STATE/$ID.turn-ended"
   sq_brief=$(shell_quote "$BRIEF")
   sq_turnend=$(shell_quote "$R_TURNEND")
@@ -541,7 +449,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   R_RESUME_CONFIRM=${CS_CONTROL_RESUME_CONFIRM_SECS:-4}
   case "$R_RESUME_CONFIRM" in ''|*[!0-9]*) R_RESUME_CONFIRM=4 ;; esac
   r_agent_running() { cs_herdr_agent_alive "$R_PANE" && cs_control_agent_pid "$R_PANE" >/dev/null 2>&1; }
-  R_LAUNCH=$(cs_harness_soldier_resume "$R_HARNESS" "$R_MODEL" "$R_EFFORT" "$sq_turnend" "$sq_settings" "$R_TELEMETRY")
+  R_LAUNCH=$(cs_harness_soldier_resume "$R_HARNESS" "$sq_turnend" "$sq_settings" "$R_TELEMETRY")
   cs_herdr_run "$R_PANE" "$R_LAUNCH" >/dev/null
   R_PATH=resume
   waited=0
@@ -562,7 +470,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
       exit 1
     fi
     R_PATH=cold
-    R_LAUNCH=$(cs_harness_soldier_launch "$R_HARNESS" "$R_MODEL" "$R_EFFORT" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings" "$R_TELEMETRY")
+    R_LAUNCH=$(cs_harness_soldier_launch "$R_HARNESS" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings" "$R_TELEMETRY")
     cs_herdr_run "$R_PANE" "$R_LAUNCH" >/dev/null
     if ! cs_herdr_agent_wait_present "$R_PANE" "$LAUNCH_WAIT"; then
       echo "error: no session was resumable for '$ID' and the cold launch brought up no agent within ${LAUNCH_WAIT}s; pane $R_PANE and worktree $R_WT_REAL are untouched" >&2
@@ -577,16 +485,13 @@ if [ "$RELAUNCH" -eq 1 ]; then
     fi
   fi
 
-  # Record a changed profile only now that an agent is actually running on it.
-  [ "$R_MODEL" = "$(cs_meta_get "$META" model 2>/dev/null || echo default)" ] || cs_meta_set "$META" model "$R_MODEL"
-  [ "$R_EFFORT" = "$(cs_meta_get "$META" effort 2>/dev/null || echo default)" ] || cs_meta_set "$META" effort "$R_EFFORT"
   # TELEMETRY, measurement only: a relaunch is a dispatch of this task's work.
   cs_telemetry_crumb spawn "$R_KIND" || true
   # LOCKSTEP: bin/cs-control.sh reads `path=` off this line to decide whether the
   # session survived (and so whether the progress note must be steered in, and
   # whether an unchanged agent session id is evidence of failure). It refuses
   # rather than assuming a path, so keep this token if the line is reworded.
-  echo "relaunched $ID kind=$R_KIND path=$R_PATH harness=$R_HARNESS model=$R_MODEL effort=$R_EFFORT pane=$R_PANE worktree=$R_WT_REAL"
+  echo "relaunched $ID kind=$R_KIND path=$R_PATH harness=$R_HARNESS pane=$R_PANE worktree=$R_WT_REAL"
   exit 0
 fi
 
@@ -609,8 +514,6 @@ if [ "$KIND" = capo ]; then
     "pane=$PANE" \
     "worktree=$HOME_ABS" \
     "project=$HOME_ABS" \
-    "model=${MODEL:-default}" \
-    "effort=${EFFORT:-default}" \
     "kind=capo" \
     "mode=capo" \
     "yolo=off" \
@@ -619,7 +522,7 @@ if [ "$KIND" = capo ]; then
 
   sq_brief=$(shell_quote "$BRIEF")
   sq_home=$(shell_quote "$HOME_ABS")
-  LAUNCH=$(cs_harness_capo_launch "$HARNESS" "${MODEL:-default}" "${EFFORT:-default}" "$sq_operational" "$sq_brief" "$sq_home")
+  LAUNCH=$(cs_harness_capo_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_home")
   cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
   # `pane run` reports success even when a not-yet-ready shell swallowed the
   # line, so a capo could be recorded as provisioned while its pane sits at a
@@ -759,8 +662,6 @@ META_LINES=(
   "pane=$PANE"
   "worktree=$WT_REAL"
   "project=$PROJ_ABS"
-  "model=${MODEL:-default}"
-  "effort=${EFFORT:-default}"
   "kind=$KIND"
 )
 # A scout records no delivery posture at all: its deliverable is a report, so
@@ -774,8 +675,6 @@ cs_meta_write "$STATE/$ID.meta" "${META_LINES[@]}"
 
 sq_brief=$(shell_quote "$BRIEF")
 sq_turnend=$(shell_quote "$TURNEND")
-MODEL_ARG=${MODEL:-default}
-EFFORT_ARG=${EFFORT:-default}
 # TELEMETRY, measurement only. Resolved HERE, at spawn, so a soldier launched
 # while telemetry is off carries a byte-identical launch line and settings file:
 # with no command to add, every builder below produces exactly what it produced
@@ -797,7 +696,7 @@ if [ "$HEADLESS" -eq 1 ]; then
   # completion surfaces through the watcher's ordinary signal path with no
   # special classification. No turn-end hook: process exit IS the turn end.
   sq_status=$(shell_quote "$STATE/$ID.status")
-  LAUNCH=$(cs_harness_scout_launch "$HARNESS" "$MODEL_ARG" "$EFFORT_ARG" "$sq_operational" "$sq_brief" "$sq_status")
+  LAUNCH=$(cs_harness_scout_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_status")
 else
   # Interactive supervised soldier. codex wires turn-end inline via -c notify;
   # claude via a launch-scoped --settings Stop hook written per-soldier here
@@ -812,7 +711,7 @@ else
     # pre-trust it so the unattended soldier can take its first turn.
     cs_harness_claude_trust_dir "$WT_REAL" || abort_task "could not pre-trust claude worktree $WT_REAL"
   fi
-  LAUNCH=$(cs_harness_soldier_launch "$HARNESS" "$MODEL_ARG" "$EFFORT_ARG" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings" "$TELEMETRY_HOOK")
+  LAUNCH=$(cs_harness_soldier_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings" "$TELEMETRY_HOOK")
 fi
 cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
 

@@ -17,9 +17,7 @@
 #   7. A journal left mid-transaction (the process was killed) makes the next
 #      relaunch refuse instead of launching a second agent; --clear-journal
 #      acknowledges it and sets it aside.
-#   8. --model and --effort move the profile for this relaunch and are recorded
-#      only once an agent is confirmed.
-#   9. bin/cs-spawn.sh --relaunch refuses independently: a live agent, a pane
+#   8. bin/cs-spawn.sh --relaunch refuses independently: a live agent, a pane
 #      sitting elsewhere, an unreportable cwd, no metadata, and new-task flags.
 set -u
 # shellcheck source=tests/control-helpers.sh
@@ -44,7 +42,7 @@ setup_home() { # <name> [meta key=value...] -> home with task t1 and a worktree
   cs_git_init_commit "$home/wt" >/dev/null 2>&1
   cs_write_meta "$home/state/t1.meta" \
     "workspace=w1" "pane=w1:p1" "worktree=$home/wt" "project=$home/proj" \
-    "model=default" "effort=default" "kind=ship" "mode=no-mistakes" "yolo=off" "harness=codex" "$@"
+    "kind=ship" "mode=no-mistakes" "yolo=off" "harness=codex" "$@"
   printf '%s\n' "$home"
 }
 
@@ -82,11 +80,11 @@ expect_code 2 "$rc" "a relaunch with no note refuses"
 assert_contains "$out" "requires --note" "the refusal names the missing note"
 rc=0; out=$(run_relaunch "$home" "$state" "$TMP/l" t1 --note "$(printf 'a\nb')") || rc=$?
 expect_code 2 "$rc" "a multiline note refuses"
-rc=0; out=$(run_relaunch "$home" "$state" "$TMP/l" t1 --note n --effort banana) || rc=$?
-expect_code 2 "$rc" "an effort the harness rejects refuses"
-assert_contains "$out" "is not a codex effort level" "the refusal names the harness"
-rc=0; out=$(run_relaunch "$home" "$state" "$TMP/l" t1 --note n --model 'bad model!') || rc=$?
-expect_code 2 "$rc" "a malformed model refuses"
+for flag in --model --effort; do
+  rc=0; out=$(run_relaunch "$home" "$state" "$TMP/l" t1 --note n "$flag" high) || rc=$?
+  expect_code 2 "$rc" "$flag is refused, not silently ignored"
+  assert_contains "$out" "unknown argument '$flag'" "the refusal names the removed flag"
+done
 
 gone_wt=$(setup_home gonewt)
 rm -rf "$gone_wt/wt"
@@ -160,7 +158,7 @@ assert_contains "$out" "progress note steered" "a resumed session is told the no
 assert_grep 'you were rebasing' "$home/data/t1/brief.md" "the note is appended to the instructions"
 assert_grep "Progress note (relaunch" "$home/data/t1/brief.md" "the note is stamped"
 assert_grep 'do the thing' "$home/data/t1/brief.md" "the original brief is preserved"
-[ "$(grep -c '^model=' "$home/state/t1.meta")" -eq 1 ] || fail "an unchanged profile must not be re-recorded"
+assert_no_grep '^model=' "$home/state/t1.meta" "a relaunch records no model; the harness owns it"
 log=$(cat "$TMP/l-resume")
 assert_line "$log" 'pane send-text w1:p1 /quit' "the old agent is stopped with the harness exit command"
 assert_line "$log" 'pane run w1:p1 codex resume --last' "the replacement resumes the soldier's own session"
@@ -233,7 +231,6 @@ assert_contains "$out" "work is preserved" "the failure says where the work is"
 [ "$(journal_field "$home" phase)" = failed ] || fail "the journal must record the failure"
 [ "$(journal_field "$home" failed_phase)" = launching ] || fail "the journal must name the launching phase"
 assert_grep 'mid-rebase' "$home/data/t1/brief.md" "the note stays in the brief for the next recovery"
-[ "$(grep -c '^model=' "$home/state/t1.meta")" -eq 1 ] || fail "a failed launch must not rewrite the profile"
 
 home=$(setup_home nostop)
 state=$(cs_control_state "$TMP/s-nostop" agent=codex status=working cwd="$home/wt")
@@ -266,38 +263,9 @@ assert_present "$home/state/t1.control-relaunch.abandoned" "the acknowledged jou
 assert_grep 'pre_pid=699' "$home/state/t1.control-relaunch.abandoned" "the kept journal is the old one"
 [ "$(journal_field "$home" phase)" = 'done' ] || fail "the fresh transaction journals its own outcome"
 
-badeffort=$(setup_home badeffort "harness=claude" "effort=ultra")
-printf 'phase=stopped\ntask=t1\npane=w1:p1\npre_pid=799\n' > "$badeffort/state/t1.control-relaunch"
-badeffort_before=$(manifest "$badeffort")
-badstate=$(cs_control_state "$TMP/s-badeffort" agent=claude status=idle cwd="$badeffort/wt" on_run=up)
-rc=0
-out=$(run_relaunch "$badeffort" "$badstate" "$TMP/l-badeffort" t1 --note n --clear-journal) || rc=$?
-expect_code 1 "$rc" "an unusable recorded effort refuses even with --clear-journal"
-assert_contains "$out" "does not accept" "the refusal names the unusable recorded effort"
-[ "$(manifest "$badeffort")" = "$badeffort_before" ] ||
-  fail "a refusal after --clear-journal must still leave records byte-identical, including the stale journal"
-assert_absent "$badeffort/state/t1.control-relaunch.abandoned" "no journal is displaced by a refused relaunch"
 pass "cs-control relaunch: an interrupted transaction is reported, never launched over"
 
-# --- 8. profile overrides ---------------------------------------------------
-
-home=$(setup_home profile)
-state=$(cs_control_state "$TMP/s-profile" agent=codex status=idle pid=800 cwd="$home/wt" \
-  on_enter=gone on_run=up)
-out=$(run_relaunch "$home" "$state" "$TMP/l-profile" t1 --note n --model gpt-5.6-sol --effort low) ||
-  fail "a profile override must succeed: $out"
-assert_contains "$out" "model gpt-5.6-sol effort low" "the report names the launched profile"
-log=$(cat "$TMP/l-profile")
-assert_line "$log" "pane run w1:p1 codex resume --last --model 'gpt-5.6-sol'" "the override reaches the launch line"
-assert_line "$log" "model_reasoning_effort=\"low\"" "the effort override reaches the launch line"
-[ "$(sed -n 's/^model=//p' "$home/state/t1.meta" | tail -1)" = gpt-5.6-sol ] ||
-  fail "a confirmed relaunch records the new model"
-[ "$(sed -n 's/^effort=//p' "$home/state/t1.meta" | tail -1)" = low ] ||
-  fail "a confirmed relaunch records the new effort"
-[ "$(journal_field "$home" prior_model)" = default ] || fail "the journal must record the prior profile"
-pass "cs-control relaunch: --model and --effort move the profile and are recorded on success"
-
-# --- 9. cs-spawn --relaunch refuses on its own ------------------------------
+# --- 8. cs-spawn --relaunch refuses on its own ------------------------------
 
 run_spawn() { # <home> <state-dir> -- <spawn args...>
   local home=$1 state=$2
@@ -326,13 +294,12 @@ ok=$(cs_control_state "$TMP/s-ok" agent= cwd="$home/wt" on_run=up)
 rc=0; out=$(run_spawn "$home" "$ok" --relaunch nosuchtask) || rc=$?
 expect_code 1 "$rc" "a task with no metadata cannot be relaunched"
 assert_contains "$out" "no metadata" "the refusal names what is missing"
-# The recorded harness is the authority for a relaunch: an effort it accepts
-# must not be refused against the machine's root pin, which may have moved
-# since the task was dispatched.
+# The recorded harness, not the machine's root pin, is what a relaunch launches
+# on: the pin may have moved since the task was dispatched.
 rootmoved=$(cs_control_state "$TMP/s-rootmoved" agent= cwd="$home/wt" on_run=up)
-rc=0; out=$(CS_HARNESS_OVERRIDE=claude run_spawn "$home" "$rootmoved" --relaunch t1 --effort ultra) || rc=$?
-expect_code 0 "$rc" "a relaunch validates effort against the recorded harness, not the root pin: $out"
-assert_contains "$out" "effort=ultra" "the recorded codex harness accepts the effort the root pin would refuse"
+rc=0; out=$(CS_HARNESS_OVERRIDE=claude run_spawn "$home" "$rootmoved" --relaunch t1) || rc=$?
+expect_code 0 "$rc" "a relaunch adopts the recorded harness rather than the root pin: $out"
+assert_contains "$out" "harness=codex" "the recorded harness owns the relaunch"
 
 rc=0; out=$(run_spawn "$home" "$ok" --relaunch t1 --mode direct-PR) || rc=$?
 expect_code 2 "$rc" "a new-task flag is refused rather than ignored"

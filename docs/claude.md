@@ -12,8 +12,7 @@ version. The launch template and per-harness facts live in `bin/cs-harness-lib.s
 ## Launch template (the only one)
 
 ```
-[CLAUDE_CONFIG_DIR=<dir>] claude [--model <m>] [--effort <low|medium|high|xhigh|max>] \
-  <--dangerously-skip-permissions | --permission-mode <mode>> \
+[CLAUDE_CONFIG_DIR=<dir>] claude <--dangerously-skip-permissions | --permission-mode <mode>> \
   --settings <state/<id>.claude-settings.json> \
   "$(bin/cs-operational-input.sh encode launch-brief < data/<id>/brief.md)"
 ```
@@ -42,7 +41,6 @@ version. The launch template and per-harness facts live in `bin/cs-harness-lib.s
   tree and would not be soldier-isolated. `--settings <file>` scopes the hooks to
   the one launch. (`--settings` also accepts a raw JSON string; a file avoids
   shell-escaping the JSON inside the pane launch line.)
-- Effort vocabulary: `low|medium|high|xhigh|max`; Claude supports `max` but not `ultra`.
 - A capo launch omits the turn-end wiring (a capo is a supervisor, not a supervised
   turn-taker) and prefixes `CS_HOME=<home>`; the `CLAUDE_CONFIG_DIR` prefix, when
   emitted, precedes those assignments.

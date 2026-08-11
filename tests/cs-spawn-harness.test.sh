@@ -89,44 +89,44 @@ assert_not_contains "$launch" '--settings' "codex root does not use --settings"
 assert_absent "$HOME_DIR/state/t-codex.claude-settings.json" "codex root writes no claude settings file"
 pass "codex root: harness=codex, codex notify launch, no settings file"
 
-cat > "$HOME_DIR/config/dispatch-policy.conf" <<'EOF'
-# harness kind model effort
-codex scout gpt-5.6-sol max
-codex ship gpt-5.6-terra ultra
-claude scout opus max
-claude ship sonnet medium
-EOF
+# --- the harness owns model and reasoning level ------------------------------
+# Consigliere selects neither, on either harness and for every task kind, so no
+# launch may name a model or a reasoning level and no task may record one.
+for spec in "codex t-noprofile-codex-ship --mode no-mistakes --yolo off" \
+  "codex t-noprofile-codex-scout --scout" \
+  "claude t-noprofile-claude-ship --mode no-mistakes --yolo off" \
+  "claude t-noprofile-claude-scout --scout"; do
+  # shellcheck disable=SC2086
+  set -- $spec
+  launch=$(spawn_one "$@")
+  id=$2
+  assert_not_contains "$launch" '--model' "$id launches with no model flag"
+  assert_not_contains "$launch" 'model_reasoning_effort' "$id launches with no codex reasoning-effort flag"
+  assert_not_contains "$launch" '--effort' "$id launches with no claude effort flag"
+  assert_no_grep '^model=' "$HOME_DIR/state/$id.meta" "$id records no model"
+  assert_no_grep '^effort=' "$HOME_DIR/state/$id.meta" "$id records no effort"
+done
+pass "a spawn launches on the harness's own model and reasoning level, and records neither"
 
-launch=$(spawn_one codex t-policy-codex-scout --scout)
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-scout.meta" model)" = gpt-5.6-sol ] || fail "codex scout policy model"
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-scout.meta" effort)" = max ] || fail "codex scout policy effort"
-assert_contains "$launch" "--model 'gpt-5.6-sol'" "codex scout policy model launch"
-assert_contains "$launch" "-c 'model_reasoning_effort=\"max\"'" "codex scout policy max effort launch"
-
-launch=$(spawn_one codex t-policy-codex-ship --mode no-mistakes --yolo off)
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-ship.meta" model)" = gpt-5.6-terra ] || fail "codex ship policy model"
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-codex-ship.meta" effort)" = ultra ] || fail "codex ship policy effort"
-assert_contains "$launch" "--model 'gpt-5.6-terra'" "codex ship policy model launch"
-assert_contains "$launch" "-c 'model_reasoning_effort=\"ultra\"'" "codex ship policy ultra effort launch"
-
-launch=$(spawn_one claude t-policy-claude-scout --scout)
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-claude-scout.meta" model)" = opus ] || fail "claude scout policy model"
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-claude-scout.meta" effort)" = max ] || fail "claude scout policy effort"
-assert_contains "$launch" "--model 'opus'" "claude scout policy model launch"
-assert_contains "$launch" "--effort 'max'" "claude scout policy effort launch"
-
-launch=$(spawn_one claude t-policy-claude-ship --mode no-mistakes --yolo off)
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-claude-ship.meta" model)" = sonnet ] || fail "claude ship policy model"
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-claude-ship.meta" effort)" = medium ] || fail "claude ship policy effort"
-assert_contains "$launch" "--model 'sonnet'" "claude ship policy model launch"
-assert_contains "$launch" "--effort 'medium'" "claude ship policy effort launch"
-
-launch=$(spawn_one codex t-policy-explicit --mode no-mistakes --yolo off --model gpt-5.6-mini --effort low)
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-explicit.meta" model)" = gpt-5.6-mini ] || fail "explicit model overrides policy"
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-explicit.meta" effort)" = low ] || fail "explicit effort overrides policy"
-assert_contains "$launch" "--model 'gpt-5.6-mini'" "explicit model launch"
-assert_contains "$launch" "model_reasoning_effort=\"low\"" "explicit effort launch"
-pass "dispatch policy selects harness and task-kind profile; explicit flags win"
+# --- --model and --effort are gone, and their absence is LOUD ----------------
+# Silently ignoring either would look like consigliere had honoured a choice it
+# no longer makes, so both must fail the spawn as unknown flags before anything
+# durable exists.
+for flag in --model --effort; do
+  id="t-refuse${flag}"
+  mkdir -p "$HOME_DIR/data/$id"
+  printf 'implement the fixture\nDelivery contract: mode=no-mistakes\n' > "$HOME_DIR/data/$id/brief.md"
+  if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
+    CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
+    CS_CLAUDE_JSON="$TMP/claude.json" \
+    CS_FAKE_SPAWN_WORKTREE="$TMP/wt-refuse$flag" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-refuse$flag" \
+    "$SPAWN" "$id" "$REPO" --mode no-mistakes --yolo off "$flag" high 2>&1); then
+    fail "$flag must be refused, not silently ignored"
+  fi
+  assert_contains "$output" "unknown flag $flag" "$flag is refused by name"
+  assert_absent "$HOME_DIR/state/$id.meta" "$flag writes no metadata"
+done
+pass "--model and --effort are refused as unknown flags"
 
 # --- claude root: --settings launch, harness=claude, settings file written --
 launch=$(spawn_one claude t-claude --mode no-mistakes --yolo off)
@@ -166,61 +166,6 @@ assert_contains "$output" "not a usable claude launch permission mode" "unusable
 assert_absent "$HOME_DIR/state/t-permmode-invalid.meta" "unusable mode writes no metadata"
 rm -f "$HOME_DIR/config/permission-mode.conf"
 pass "config/permission-mode.conf selects the claude launch mode and blocks an unusable one"
-
-printf 'codex ship gpt-5.6-sol too-much\n' > "$HOME_DIR/config/dispatch-policy.conf"
-mkdir -p "$HOME_DIR/data/t-policy-invalid"
-printf 'implement the fixture\n' > "$HOME_DIR/data/t-policy-invalid/brief.md"
-if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
-  CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
-  CS_CLAUDE_JSON="$TMP/claude.json" \
-  CS_FAKE_SPAWN_WORKTREE="$TMP/wt-policy-invalid" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-policy-invalid" \
-  "$SPAWN" t-policy-invalid "$REPO" --mode no-mistakes --yolo off 2>&1); then
-  fail "malformed dispatch policy must reject spawn"
-fi
-assert_contains "$output" "invalid codex effort 'too-much'" "malformed policy error is specific"
-assert_absent "$HOME_DIR/state/t-policy-invalid.meta" "malformed policy writes no metadata"
-pass "malformed dispatch policy blocks dispatch"
-
-# --- policy path shapes: a resolving symlink is honored, a dangling one stops -
-POLICY="$HOME_DIR/config/dispatch-policy.conf"
-rm -f "$POLICY"
-printf 'codex ship gpt-5.6-luna high\n' > "$TMP/external-policy"
-ln -s "$TMP/external-policy" "$POLICY"
-launch=$(spawn_one codex t-policy-symlink --mode no-mistakes --yolo off)
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-symlink.meta" model)" = gpt-5.6-luna ] || fail "symlinked policy model"
-[ "$(cs_meta_get "$HOME_DIR/state/t-policy-symlink.meta" effort)" = high ] || fail "symlinked policy effort"
-assert_contains "$launch" "--model 'gpt-5.6-luna'" "symlinked policy model launch"
-pass "a dispatch policy symlink resolving to a regular file is honored"
-
-rm -f "$POLICY"
-ln -s "$TMP/no-such-policy" "$POLICY"
-mkdir -p "$HOME_DIR/data/t-policy-dangling"
-printf 'implement the fixture\n' > "$HOME_DIR/data/t-policy-dangling/brief.md"
-if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
-  CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
-  CS_CLAUDE_JSON="$TMP/claude.json" \
-  CS_FAKE_SPAWN_WORKTREE="$TMP/wt-policy-dangling" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-policy-dangling" \
-  "$SPAWN" t-policy-dangling "$REPO" --mode no-mistakes --yolo off 2>&1); then
-  fail "a dangling dispatch policy symlink must reject spawn"
-fi
-assert_contains "$output" "dispatch policy symlink does not resolve" "dangling symlink error is specific"
-assert_absent "$HOME_DIR/state/t-policy-dangling.meta" "dangling symlink writes no metadata"
-rm -f "$POLICY"
-pass "a dangling dispatch policy symlink blocks dispatch"
-
-: > "$HOME_DIR/config/dispatch-policy.conf"
-mkdir -p "$HOME_DIR/data/t-claude-ultra"
-printf 'implement the fixture\n' > "$HOME_DIR/data/t-claude-ultra/brief.md"
-if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude \
-  CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
-  CS_CLAUDE_JSON="$TMP/claude.json" \
-  CS_FAKE_SPAWN_WORKTREE="$TMP/wt-claude-ultra" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-claude-ultra" \
-  "$SPAWN" t-claude-ultra "$REPO" --mode no-mistakes --yolo off --effort ultra 2>&1); then
-  fail "claude ultra must reject spawn"
-fi
-assert_contains "$output" "claude does not accept effort=ultra; choose default|low|medium|high|xhigh|max" "claude ultra error is specific"
-assert_absent "$HOME_DIR/state/t-claude-ultra.meta" "claude ultra writes no metadata"
-pass "claude ultra blocks dispatch"
 
 # --- the swallowed launch ----------------------------------------------------
 # `pane run` hands the launch line to the pane's SHELL and reports success

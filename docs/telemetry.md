@@ -255,9 +255,9 @@ Claude, from the transcript under `~/.claude/projects/`:
 - **Transcript records that land after the Stop hook.** A record written after the hook runs falls into the NEXT turn's window. Per-turn figures therefore carry a small lag; period totals do not.
 - **A cold cursor.** The first turn measured in an existing session has no previous cursor, so it is credited with the whole transcript so far. Only the first turn per session is affected, and only when telemetry was enabled mid-session.
 - **Carried-forward `model` and `effort`.** Each harness leaves one of the two out of its Stop payload and states it only in the transcript, so the cursor also carries the last value that session stated and a turn whose window carries no new record reuses it. A payload value always wins over the carried one, and a session that has never stated one records `null`.
-- **Codex worker turns.** Codex's `notify` program receives an argument rather than the Stop payload, so a codex ship or scout soldier's turns are recorded with role, kind, project, harness, model, effort, and purpose, but with `null` tokens and `null` duration. Claude workers get full usage, because their Stop hook does receive the payload.
+- **Codex worker turns.** Codex's `notify` program receives an argument rather than the Stop payload, so a codex ship or scout soldier's turns are recorded with role, kind, project, harness, and purpose, but with `null` model, effort, tokens, and duration. Claude workers get full usage, because their Stop hook does receive the payload.
 - **Headless scouts.** A headless scout's turn end is process exit and its launch line already owns the terminal status append, so it is deliberately not instrumented.
-- **`model` and `effort` for a capo.** A capo's dispatched model lives in the PARENT home's `state/<id>.meta`, not in the capo's own home, so a capo turn takes them from its own harness session instead. They are null when the harness does not expose them.
+- **`model` and `effort` are the harness's, always.** Consigliere selects neither, so no home records either at dispatch and every turn takes them from its own harness session. They are null when the harness does not expose them.
 
 ## Retention
 
@@ -293,5 +293,5 @@ It reports the period, the total recorded turns, turns by role, by purpose, by r
 `--json` carries the same aggregates for later analysis and replay.
 
 Every figure in the closing block is an ESTIMATE and an upper bound on what a cheaper supervision tier could absorb, never a guaranteed saving.
-`capo share of frontier usage` is the cheap-capo opportunity: the share of measured tokens that pointing `kind=capo` at a cheaper model through `config/dispatch-policy.conf` would move, before anything more complicated is built.
+`capo share of frontier usage` is the cheap-capo opportunity: the share of measured tokens that running capo homes on a cheaper harness profile would move, before anything more complicated is built.
 Read it beside `turns recorded, N carrying token usage`, because a token share computed over a partly instrumented period covers that subset only.

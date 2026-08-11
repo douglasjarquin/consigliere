@@ -478,16 +478,16 @@ test_role_ship_and_scout_come_from_meta() {
   local home
   home=$(make_home role-worker 'enabled true')
   cs_write_meta "$home/state/build.meta" 'kind=ship' 'harness=codex' \
-    'model=gpt-5.6-terra' 'effort=high' 'project=/tmp/projects/niceuptime'
+    'project=/tmp/projects/niceuptime'
   cs_write_meta "$home/state/look.meta" 'kind=scout' 'harness=claude' \
-    'model=default' 'effort=default' 'project=/tmp/projects/consigliere'
+    'project=/tmp/projects/consigliere'
   in_home "$home" 'cs_telemetry_worker_turn_end build ""; cs_telemetry_worker_turn_end look ""'
   [ "$(records "$home" | jq -r 'select(.task_id == "build")
-      | [.role, .kind, .purpose, .harness, .model, .effort, .project] | join(" ")')" \
-    = 'ship ship implementation codex gpt-5.6-terra high niceuptime' ] ||
+      | [.role, .kind, .purpose, .harness, .project] | join(" ")')" \
+    = 'ship ship implementation codex niceuptime' ] ||
     fail "a ship turn must read its identity from state/<id>.meta:"$'\n'"$(records "$home")"
-  # `default` in meta means "the harness default was used", which is not a model
-  # or effort identity, so it must be recorded as null rather than as a value.
+  # Consigliere selects no model or effort, so a turn whose harness session
+  # states neither records null rather than a value nobody chose.
   [ "$(records "$home" | jq -r 'select(.task_id == "look")
       | [.role, .purpose, .harness, (.model // "null"), (.effort // "null"), .project] | join(" ")')" \
     = 'scout research claude null null consigliere' ] ||

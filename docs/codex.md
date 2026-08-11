@@ -8,8 +8,7 @@ Re-verify after codex upgrades; `bin/cs-bootstrap.sh` checks presence only, not 
 ## Launch template (the only one)
 
 ```
-codex [--model <m>] [-c 'model_reasoning_effort="<low|medium|high|xhigh|max|ultra>"'] \
-  --dangerously-bypass-approvals-and-sandbox \
+codex --dangerously-bypass-approvals-and-sandbox \
   -c "notify=[\"bash\",\"-c\",\"touch state/<id>.turn-ended\"]" \
   "$(bin/cs-operational-input.sh encode launch-brief < data/<id>/brief.md)"
 ```
@@ -17,7 +16,6 @@ codex [--model <m>] [-c 'model_reasoning_effort="<low|medium|high|xhigh|max|ultr
 - The typed `launch-brief` positional prompt starts the supervised interactive session.
 - `--dangerously-bypass-approvals-and-sandbox` gives the unattended soldier full autonomy (no trust dialog).
 - The `notify` hook fires at every turn end, touching the task's turn-ended signal for the watcher.
-- Effort vocabulary: `low|medium|high|xhigh|max|ultra`; Codex supports all six levels and cs-spawn passes the selected value.
 - A capo launch omits the notify hook (a capo is a supervisor, not a supervised turn-taker) and prefixes `CS_HOME=<home>`.
 
 ## Hooks (.codex/hooks.json)
@@ -117,10 +115,10 @@ The mechanics `bin/cs-control.sh` drives, each measured in a lab pane rooted in 
   ❯
   ```
 
-- **The launch flags work after the `resume` subcommand.** `codex resume --help` (0.147.0) lists `-c`, `-m/--model`, and `--dangerously-bypass-approvals-and-sandbox`, and the live relaunch line
+- **The launch flags work after the `resume` subcommand.** `codex resume --help` (0.147.0) lists `-c` and `--dangerously-bypass-approvals-and-sandbox`, and the live relaunch line
 
   ```text
-  codex resume --last --dangerously-bypass-approvals-and-sandbox -c 'model_reasoning_effort="low"' -c "notify=[...]"
+  codex resume --last --dangerously-bypass-approvals-and-sandbox -c "notify=[...]"
   ```
 
   brought up a new agent process (pid 43908 -> 63210) whose transcript still held the pre-exit conversation, including the interrupted prompt. That is what makes resume-first worth preferring: the soldier keeps its context.

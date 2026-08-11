@@ -40,7 +40,6 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 | `config/note-archive.md` | portable | tasks-axi body archive; an internal sibling name tasks-axi creates beside the backlog |
 | `config/charter.md` | portable, capo homes only | the capo's filled charter brief |
 | `config/backlog-backend.conf` | portable | absent or `tasks-axi` = tasks-axi against `config/backlog.md`; `manual` = hand-edit the markdown |
-| `config/dispatch-policy.conf` | portable | optional per-home profiles for task dispatch; `bin/cs-spawn.sh` owns its strict four-column schema below |
 | `config/permission-mode.conf` | portable | optional narrower claude launch permission mode; absent = full autonomy; `bin/cs-harness-lib.sh` owns the two-column schema below. This is a Claude ACCOUNT policy, not a machine property - the record is `<harness> <mode>` with no machine-specific content, so the same file is correct verbatim on every machine that account uses; do not re-derive it as host-specific |
 | `config/wedge-alarm.conf` | portable | away-mode wedge-alarm active-alert directives; absent = auto (macOS Notification Center when available, degrading elsewhere). A boss preference, boss-authored only; the directives are channel selectors that adapt per OS, so the file is portable. The one non-portable use is a `command:` directive naming a machine-local path - keep such a value out of shared dotfiles |
 | `host/capos.md` | host | capo routing table; every record embeds an absolute machine-local home path |
@@ -51,7 +50,7 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 
 Symlink policy, established empirically (2026-08-06, tasks-axi 0.2.x):
 
-- `boss.md`, `boss-shared.md`, `learnings.md`, `memory-archive.md`, `projects.md`, `boards.md`, and the four portable `.conf` files are read-only to scripts and safe to symlink out to a dotfiles repository.
+- `boss.md`, `boss-shared.md`, `learnings.md`, `memory-archive.md`, `projects.md`, `boards.md`, and the three portable `.conf` files are read-only to scripts and safe to symlink out to a dotfiles repository.
 - `backlog.md`, `done-archive.md`, `note-archive.md`, and `host/capos.md` are rewritten by rename (tasks-axi and the registry writers), which replaces a symlink with a regular file and silently forks the content; they must be real files, and the doctor fails when one is a symlink.
 - A `host/` entry whose symlink target resolves outside the home defeats the host tier (the `capos.md`-across-two-machines mistake); the doctor fails on it.
 
@@ -60,36 +59,6 @@ Capo activation is local rather than inherited; see `bin/cs-home-seed.sh --help`
 The main-side source of either may be a symlink that resolves to a regular file, because propagation only reads it; an unresolved symlink stops propagation instead of mirroring absence.
 The capo-side destination must be a plain regular file, because propagation writes there and following a link out of the capo home is exactly what that check prevents.
 `bin/cs-inherit-lib.sh` owns the allowlist.
-
-### Dispatch policy
-
-`config/dispatch-policy.conf` is optional and local to one Consigliere home.
-It sets default model and effort values for the resolved harness and task kind.
-The path may be a regular file or a symlink that resolves to one, so a home may keep its policy under external configuration management.
-A symlink that does not resolve stops dispatch, because silently ignoring a broken policy is indistinguishable from having none.
-One non-comment line has exactly four whitespace-separated fields:
-
-```text
-<harness> <kind> <model> <effort>
-```
-
-`harness` is `codex` or `claude`.
-`kind` is `scout` for planning, investigations, and audits, `ship` for implementation, or `capo` for a persistent dispatcher.
-`model` is `default` or an identifier containing letters, numbers, `.`, `_`, `:`, and `-`.
-`effort` is `default`, `low`, `medium`, `high`, `xhigh`, or `max` for either harness, with `ultra` additionally supported by Codex.
-Blank lines and lines whose first field begins with `#` are ignored.
-Every record is validated and duplicate `<harness> <kind>` entries stop dispatch with an error.
-
-```text
-# harness kind  model          effort
-codex scout     gpt-5.6-sol    xhigh
-codex ship      gpt-5.6-terra  high
-claude scout    opus           xhigh
-claude ship     sonnet         high
-```
-
-An explicit `cs-spawn.sh --model` or `--effort` value overrides only that policy axis for that task.
-An absent policy or absent matching line retains the existing harness default.
 
 ### Permission mode
 
@@ -135,7 +104,7 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
   Each record arms `state/sweep-<project>.check.sh`, an ordinary hash-bound custom watcher check that reports column depth and never moves a card.
   `cs-board-watch.sh sync` converges the two in both directions and runs at every locked session start.
 - `state/sweep-<project>.board-seen` - the sweep poll's own memory: last reported Ready count, Inbox count, and epoch, one per line. It is what makes the poll silent on a column consigliere shrank and loud on one the boss grew. Deleted on arm and disarm; safe to delete by hand, which only costs one extra report.
-- `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `model=`, `effort=`, `kind=` (ship|scout|capo), `harness=` (codex|claude, inherited from the root session).
+- `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `kind=` (ship|scout|capo), `harness=` (codex|claude, inherited from the root session). No model or reasoning level is recorded, because the harness selects both.
   A `kind=ship` task also records the posture its spawn stated explicitly: `mode=` (no-mistakes|direct-PR|local-only) and `yolo=` (on|off).
   A `kind=scout` records NEITHER, because a report deliverable has no mode to honour and no approval posture to apply, which is why `cs-promote.sh` is where a promoted scout first states both.
   `kind=capo` records `mode=capo`, `yolo=off`, and `home=`.

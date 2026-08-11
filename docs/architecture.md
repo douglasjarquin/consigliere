@@ -6,7 +6,7 @@ Consigliere is a personal rewrite of Firstmate for two harnesses (codex and clau
 
 ## Two harnesses, one runtime
 
-`bin/cs-harness-lib.sh` is a thin harness-profile layer - the single owner of every per-harness fact (launch template, turn-end wiring, busy signature, skill syntax, resume command, instruction file). It is the only harness abstraction; the optional per-home dispatch policy is documented in [`docs/configuration.md`](configuration.md) and applied by `bin/cs-spawn.sh`. A soldier inherits the root session's harness (`cs_harness_detect_root`) and records it as `harness=` in `state/<id>.meta`.
+`bin/cs-harness-lib.sh` is a thin harness-profile layer - the single owner of every per-harness fact (launch template, turn-end wiring, busy signature, skill syntax, resume command, instruction file). It is the only harness abstraction, and the harness itself selects the model and the reasoning level a task runs on. A soldier inherits the root session's harness (`cs_harness_detect_root`) and records it as `harness=` in `state/<id>.meta`.
 `bin/cs-herdr-lib.sh` is the whole herdr layer (session-explicit CLI, workspace/worktree/pane/agent operations, the busy-corroboration policy); [`docs/herdr.md`](herdr.md) is its evidence ledger.
 Per-harness verified facts live in [`docs/codex.md`](codex.md) and [`docs/claude.md`](claude.md); the launch strings exist once, in `bin/cs-harness-lib.sh` (assembled by `bin/cs-spawn.sh`).
 
