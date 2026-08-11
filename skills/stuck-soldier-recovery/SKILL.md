@@ -46,6 +46,7 @@ Escalate in order:
    A husk is not recoverable by redirection - there is nothing running to redirect - so skip straight to the relaunch path below.
    "Could not read the process table" is never reported as a husk, so absence of that detail is not evidence the agent is alive.
 2. If the soldier is waiting on a question its brief already answers, answer in one line: `CS_HOME=<this-consigliere-home> bin/cs-send.sh <id> '<answer>'` from an active consigliere session unless `CS_HOME` is already set to the active consigliere home.
+   When that question is an open keyed decision or blocker in its status ledger, add `--resolve-key <key>` before the answer so the delivered answer also closes it (`bin/cs-send.sh`'s header owns that contract).
 3. If the soldier is confused or looping, interrupt with Escape, then redirect with one corrective line:
    `CS_HOME=<this-consigliere-home> bin/cs-send.sh <id> --key Escape`, then a single `cs-send` steer.
 4. Before relaunching, record the pane's agent session id (`cs_herdr_agent_session_id` in `bin/cs-herdr-lib.sh`); after the relaunch, read it again.
