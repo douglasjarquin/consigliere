@@ -421,6 +421,22 @@ cs_harness_busy_re() {
   esac
 }
 
+# cs_harness_trust_prompt_re <h> - the rendered signature of the harness's
+# directory-trust prompt: the one human gate that can capture a freshly launched
+# soldier's pane BEFORE it has read a single line of its instructions.
+# Both harnesses ask it once per repository root they hold no trust record for,
+# and neither autonomy flag suppresses it (docs/codex.md, docs/claude.md), so a
+# spawn into an untrusted root produces a real, present, permanently waiting
+# agent. Used only to NAME that state once herdr has already reported the pane
+# natively `blocked`; it is never the detector on its own.
+cs_harness_trust_prompt_re() {
+  case "$1" in
+    codex) printf '%s\n' 'Do you trust the contents of this directory\?' ;;
+    claude) printf '%s\n' 'Is this a project you created or one you trust\?' ;;
+    *) return 1 ;;
+  esac
+}
+
 # cs_harness_skill_prefix <h> - how a skill is invoked in the composer.
 cs_harness_skill_prefix() {
   case "$1" in

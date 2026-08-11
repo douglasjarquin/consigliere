@@ -3,6 +3,7 @@
 Verified against codex-cli 0.139-0.144 (upstream firstmate evidence) and re-verified live on 2026-07-27 with `codex --version` returning `codex-cli 0.145.0`.
 `codex debug models` reported `low,medium,high,xhigh,max,ultra` for both `gpt-5.6-sol` and `gpt-5.6-terra`.
 Session-open hook facts below were verified live on 2026-08-08 against codex-cli 0.146.0 and, after codex self-updated mid-verification, re-verified against codex-cli 0.147.0.
+Turn-end notify, directory trust, and the interrupted-turn gap were verified live on 2026-08-11 against codex-cli 0.147.0.
 Re-verify after codex upgrades; `bin/cs-bootstrap.sh` checks presence only, not version.
 
 ## Launch template (the only one)
@@ -14,7 +15,8 @@ codex --dangerously-bypass-approvals-and-sandbox \
 ```
 
 - The typed `launch-brief` positional prompt starts the supervised interactive session.
-- `--dangerously-bypass-approvals-and-sandbox` gives the unattended soldier full autonomy (no trust dialog).
+- `--dangerously-bypass-approvals-and-sandbox` gives the unattended soldier full autonomy over command approvals and the sandbox.
+  It does NOT suppress the directory-trust dialog, which is a separate gate keyed on the repository root; see "Turn-end notify and directory trust" below.
 - The `notify` hook fires at every turn end, touching the task's turn-ended signal for the watcher.
 - A capo launch omits the notify hook (a capo is a supervisor, not a supervised turn-taker) and prefixes `CS_HOME=<home>`.
 
@@ -94,6 +96,59 @@ $ jq -c 'select(.payload.type=="task_complete") | {turn_id:.payload.turn_id, dur
 A codex SOLDIER's turn end is the `notify` program, which is invoked with the notification JSON as an ARGUMENT and no piped payload, and that notification carries no usage.
 So a codex worker turn is measurable in count, role, and task identity, but not in tokens.
 
+## Turn-end notify and directory trust (verified live 2026-08-11, codex-cli 0.147.0, isolated herdr lab)
+
+Measured through the REAL `bin/cs-spawn.sh` launch, in a named non-`default` herdr lab, against an isolated `CS_HOME`.
+The launched process, read back with `pgrep -alf`, is the ordinary soldier launch template:
+
+```text
+codex -c model_reasoning_effort="low" --dangerously-bypass-approvals-and-sandbox \
+  -c notify=["bash","-c","touch '<CS_HOME>/state/notify1.turn-ended'"] \
+  ⁣CONSIGLIERE_OP: v1 launch-brief: ...
+```
+
+- **`-c notify=` still fires at every COMPLETED turn end, including the boot turn.**
+  With the trust dialog answered and nothing else changed, the turn-end file appeared 12s after the answer, on the positional launch brief's own turn, with no steer sent:
+
+  ```text
+  --- t=6s  busy=blocked turnend=NO  ---   # parked on the trust dialog
+  >>> answering the trust dialog with a bare Enter
+  --- t=12s busy=busy   turnend=NO  ---
+  --- t=18s busy=done   turnend=YES ---    # agent replied NOTIFY_LAB_READY
+  ```
+
+  A headless control run reached the same result without any dialog: `codex exec --skip-git-repo-check -c "notify=[...]" 'Reply with exactly: OK'` created the file in a brand-new untrusted repo.
+- **Codex's persisted HOOK trust does not gate `notify`.**
+  0.147.0 moved the notify program into the hooks crate as a legacy adapter (`codex-rs/hooks/src/legacy_notify.rs`), which makes hook trust look like a suspect, but `codex-rs/hooks/src/registry.rs` builds it into a separate `after_agent` vector dispatched directly.
+  `bypass_hook_trust`, the config layer stack, and the `[hooks.state]` records are consumed only by the engine that handles `.codex/hooks.json` handlers.
+  The live runs above confirm it: notify fired with no hook-state record for any of those labs.
+- **The directory-trust dialog is what blocks an unattended codex worker, and `--dangerously-bypass-approvals-and-sandbox` does not suppress it.**
+  A spawn into a repository root with no trust record parks forever on:
+
+  ```text
+  Do you trust the contents of this directory?
+  › 1. Yes, continue
+    2. No, quit
+  ```
+
+  `cs_herdr_agent_busy_state` read `blocked` continuously for the full 120s watch, and the turn-end file was never created, because no session opens and no turn ever runs.
+  This is a stall, never a false success.
+- **Trust does NOT cascade from a trusted ancestor directory.**
+  `~/.codex/config.toml` carries `[projects."/Users/douglasjarquin"] trust_level = "trusted"`, and a repository created fresh under that path still raised the dialog.
+  Trust is keyed on the exact resolved repository root, and for a linked worktree that root is the ORIGINAL clone, not the worktree: the dialog names it as "Trusting will apply to the repository root: `<clone>`".
+  So one record per clone covers every soldier worktree of that clone, and each newly cloned project starts untrusted.
+- **An INTERRUPTED turn produces no turn-end signal at all.**
+  Past the dialog, with a boot turn-end already recorded, a long turn was cancelled through `bin/cs-control.sh interrupt`:
+
+  ```text
+  interrupt notify5: turn stopped, agent still running (pane w2:p1, composer empty)
+  turn-end mtime before=1786476339 after=1786476339 changed=NO      # watched 60s
+  ```
+
+  The very next ordinary turn on the same agent refreshed it within 3s.
+  This is codex's own control flow: `codex-rs/core/src/session/turn.rs` returns on `TurnAborted` before it reaches `run_legacy_after_agent_hook`, so the notify program is never invoked for a cancelled turn.
+  Consequence for supervision: after a confirmed interrupt the last-completed-turn reference stays stale until the soldier finishes a real turn, so `bin/cs-watch.sh`'s busy-turn bound keeps measuring from before the cancel.
+
 ## Interaction facts
 
 - Skill invocation is `$<skill>` (codex rejects claude's `/<skill>` form); sends of `$...` need a pre-Enter settle so the completion popup does not swallow the Enter (cs-send owns this).
@@ -123,7 +178,7 @@ The mechanics `bin/cs-control.sh` drives, each measured in a lab pane rooted in 
 
   brought up a new agent process (pid 43908 -> 63210) whose transcript still held the pre-exit conversation, including the interrupted prompt. That is what makes resume-first worth preferring: the soldier keeps its context.
 - **Directory trust blocks an unattended launch.** A codex TUI started in a directory it does not trust sits at `Do you trust the contents of this directory?` and herdr reports `agent_status: blocked` with the codex process still running. So a relaunch that cannot confirm the pane is agent-free must refuse rather than launch again - a blocked codex is present, not absent.
-- NOT established here: whether `-c notify=` still fires at turn end on 0.147.0. The lab's turn-end file was never touched although the same session's `SessionStart` hooks did run, and codex's persisted hook trust (above) is the obvious suspect. The launch template is unchanged by the control plane, so this is a standing question about the codex turn-end signal, not about relaunch.
+- The turn-end file never being touched in this lab is explained by the directory-trust block above, not by the notify hook: see "Turn-end notify and directory trust" above, where `-c notify=` is verified firing on 0.147.0.
 
 ## Native features deliberately available to consigliere
 

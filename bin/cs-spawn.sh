@@ -61,6 +61,15 @@
 #     pre-delete it to make the create succeed.
 #   - Writes state/<id>.meta, then launches codex in the task pane with the
 #     turn-end notify hook touching state/<id>.turn-ended.
+#   - Reports loudly when the launched agent settles in herdr's native `blocked`
+#     state - waiting on a HUMAN, e.g. the harness's directory-trust prompt for a
+#     repository root it holds no trust record for. The spawn still succeeds and
+#     nothing is torn down, because that block clears with one keystroke; the
+#     report exists so a worker that cannot start is named as such at the moment
+#     it is created rather than reading as ordinary idleness.
+#     CS_SPAWN_HUMAN_GATE_SECS (default 10) bounds the settle window. Applies to
+#     ship, scout, capo, and relaunch; a headless scout takes no pane agent, so
+#     herdr's agent state says nothing about it and it is exempt.
 #
 # Relaunch mechanics (--relaunch <task-id>):
 #   - ADOPTS the endpoint and worktree recorded in state/<id>.meta instead of
@@ -140,6 +149,34 @@ mkdir -p "$STATE"
 # and cs-crew-state read it back without re-detecting.
 HARNESS=$(cs_harness_detect_root)
 
+# report_human_gate <pane> <harness> <subject>: an agent that PRESENTS and then settles in
+# herdr's native `blocked` state is waiting on a human, not working. The
+# agent-presence gate above cannot tell the two apart - the process is there and
+# herdr reports an agent either way - so without this the spawn prints a clean
+# success line for a worker that has not read one word of its instructions and
+# never will. Verified live (docs/codex.md): a codex TUI launched into a
+# repository root it holds no trust record for parks on the directory-trust
+# prompt indefinitely, and neither autonomy flag suppresses that prompt.
+#
+# Deliberately a report, not a failure: the pane, the worktree, and the agent
+# are all legitimate and the block clears with one keystroke, so tearing the task
+# down would destroy recoverable work over a recoverable state. The spawn still
+# succeeds, and the watcher's own immediate `blocked` escalation still applies;
+# this only makes the condition legible at the moment it is created, with its
+# concrete cause named instead of "stopped responding" four minutes later.
+report_human_gate() {  # <pane> <harness> <subject>
+  local pane=$1 harness=$2 subject=$3 re detail=''
+  if cs_herdr_agent_wait_unblocked "$pane" "$HUMAN_GATE_WAIT"; then
+    return 0
+  fi
+  if re=$(cs_harness_trust_prompt_re "$harness") \
+    && cs_herdr_capture "$pane" 60 text 2>/dev/null | grep -Eq "$re"; then
+    detail=" at the $harness directory-trust prompt, which it shows once for a repository root it holds no trust record for"
+  fi
+  printf 'warning: %s is waiting on a human%s in pane %s; it has not read its instructions and will not start until that prompt is answered\n' \
+    "$subject" "$detail" "$pane" >&2
+}
+
 KIND=ship
 MODE=
 YOLO=
@@ -150,6 +187,12 @@ HEADLESS=0
 # a false abort tears down a worktree that was about to work.
 LAUNCH_WAIT=${CS_SPAWN_LAUNCH_WAIT_SECS:-60}
 case "$LAUNCH_WAIT" in ''|*[!0-9]*|0) LAUNCH_WAIT=60 ;; esac
+# Seconds a freshly launched agent may sit in herdr's native `blocked` state
+# before the spawn says so out loud. Short on purpose: this window only has to
+# outlast a startup transient, and the agent-presence wait above has already
+# absorbed the slow part of a cold start.
+HUMAN_GATE_WAIT=${CS_SPAWN_HUMAN_GATE_SECS:-10}
+case "$HUMAN_GATE_WAIT" in ''|*[!0-9]*) HUMAN_GATE_WAIT=10 ;; esac
 ISSUE=
 RELAUNCH=0
 POS=()
@@ -485,6 +528,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
     fi
   fi
 
+  report_human_gate "$R_PANE" "$R_HARNESS" "$ID"
+
   # TELEMETRY, measurement only: a relaunch is a dispatch of this task's work.
   cs_telemetry_crumb spawn "$R_KIND" || true
   # LOCKSTEP: bin/cs-control.sh reads `path=` off this line to decide whether the
@@ -531,6 +576,7 @@ if [ "$KIND" = capo ]; then
     echo "error: capo $ID launched into $PANE but no agent appeared within ${LAUNCH_WAIT}s; the launch line was likely swallowed by a shell that was not ready. The home and its workspace are left intact - retry the spawn." >&2
     exit 1
   fi
+  report_human_gate "$PANE" "$HARNESS" "capo $ID"
   # TELEMETRY, measurement only: attribute this turn to dispatch. A capo is a
   # supervisor, not a supervised turn-taker, so its launch carries no turn-end
   # wiring here; the capo's OWN home emits its turns through its own Stop hook
@@ -732,6 +778,11 @@ cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
 # process-level signal and is deliberately not guessed at here.
 if [ "$HEADLESS" -eq 0 ] && ! cs_herdr_agent_wait_present "$PANE" "$LAUNCH_WAIT"; then
   abort_task "launched $ID into $PANE but no agent appeared within ${LAUNCH_WAIT}s; the launch line was likely swallowed by a shell that was not ready"
+fi
+# A headless scout takes no pane agent at all, so herdr's agent state says
+# nothing about it and the human-gate report does not apply.
+if [ "$HEADLESS" -eq 0 ]; then
+  report_human_gate "$PANE" "$HARNESS" "$KIND $ID"
 fi
 
 # TELEMETRY, measurement only: attribute the CONSIGLIERE turn that ran this
