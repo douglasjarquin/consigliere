@@ -271,6 +271,15 @@ done
 [ "$(cs_harness_instruction_file codex)" = AGENTS.md ] || fail "codex instruction file"
 [ "$(cs_harness_instruction_file claude)" = CLAUDE.md ] || fail "claude instruction file"
 [ "$(cs_harness_busy_re codex)" = "$(cs_harness_busy_re claude)" ] || fail "busy signature shared"
+# Live-verified 2026-08-11 (codex-cli 0.147.0, claude 2.1.228): the bare skill
+# name activates on both harnesses (evidence/task-1-*.txt).
+[ "$(cs_harness_plan_skill codex)" = 'ulw-plan' ] || fail "codex plan skill"
+[ "$(cs_harness_plan_skill claude)" = 'omo:planing-prometheustic' ] || fail "claude plan skill"
+[ "$(cs_harness_start_work_skill codex)" = 'start-work' ] || fail "codex start-work skill"
+[ "$(cs_harness_start_work_skill claude)" = 'omo:start-work' ] || fail "claude start-work skill"
+for fn in cs_harness_plan_skill cs_harness_start_work_skill; do
+  "$fn" bogus >/dev/null 2>&1 && fail "$fn must refuse an unknown harness"
+done
 pass "skill/resume/instruction/busy accessors"
 
 pass "cs-harness-lib behavior"
