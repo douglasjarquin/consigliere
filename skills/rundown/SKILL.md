@@ -29,6 +29,18 @@ Recap only the events already visible in the current conversation.
 7. If no ordinary events occurred after the previous boss message but an older visibly open decision exists, report that decision instead of claiming nothing happened.
    If neither ordinary events nor visibly open decisions exist, say directly in one sentence that nothing happened after the previous boss message.
 
+## Clearing the open decisions
+
+A recap that hands back a list of unanswered decisions tends to leave them unanswered, so work them one at a time.
+
+After the recap, when step 5 found at least one visibly open boss decision, raise only the single one you judge most consequential.
+Say plainly that the order is your judgment about what matters most right now, not a computed ranking.
+Give it escalation-quality context per `AGENTS.md` section 9: the decision, why it matters, the options, and your recommendation.
+When the boss answers, raise the next most consequential one the same way, until none are left.
+
+Draw only on what session history already shows; step 6's no-fresh-state boundary holds throughout the flow.
+Never open the flow when step 5 found nothing - end with the recap.
+
 ## Boundaries
 
 - The current `/rundown` message is outside the recap interval.
