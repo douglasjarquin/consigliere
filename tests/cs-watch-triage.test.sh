@@ -789,7 +789,7 @@ test_completed_turn_resets_the_busy_bound() {
 # --- beacon stays fresh while absorbing ---------------------------------------
 
 test_beacon_stays_fresh_while_absorbing() {
-  local dir state fakebin out status_file pid m1 m2 now
+  local dir state fakebin out status_file pid m1 m2
   dir=$(make_case beacon-fresh); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
   status_file="$state/task.status"
   printf 'working: a\n' > "$status_file"
@@ -800,17 +800,22 @@ test_beacon_stays_fresh_while_absorbing() {
   pid=$!
   absorbed_alive "$pid" "$state/.last-watcher-beat" || { reap "$pid"; fail "watcher exited while absorbing the first benign signal"; }
   m1=$(file_mtime "$state/.last-watcher-beat")
-  # A second benign signal keeps it absorbing; the beacon must keep advancing.
+  [ -n "$m1" ] || { reap "$pid"; fail "watcher beacon missing while absorbing"; }
+  # A second benign signal keeps it absorbing; the beacon must keep ADVANCING.
+  #
+  # Wait for the advance rather than checking the beacon's absolute age. The age
+  # form (`date +%s` here minus an mtime stamped over there) had a hard 10s cliff
+  # that any clock advance while the watcher was descheduled would fail, and it
+  # proved less: `.last-watcher-beat` already exists from the first cycle, so an
+  # absorbed_alive on it returned instantly without ever showing a second cycle
+  # ran. wait_mtime_after shows exactly that.
   printf 'working: b\n' >> "$status_file"
-  absorbed_alive "$pid" "$state/.last-watcher-beat" || { reap "$pid"; fail "watcher exited while absorbing a second benign signal"; }
+  wait_mtime_after "$state/.last-watcher-beat" "$m1" \
+    || { reap "$pid"; fail "the watcher stopped advancing its liveness beacon while absorbing a second benign signal"; }
+  is_live_non_zombie "$pid" || { reap "$pid"; fail "watcher exited while absorbing a second benign signal"; }
   m2=$(file_mtime "$state/.last-watcher-beat")
-  now=$(date +%s)
-  if [ -z "$m1" ] || [ -z "$m2" ]; then
-    reap "$pid"
-    fail "watcher beacon missing while absorbing"
-  fi
-  [ "$m2" -ge "$m1" ] || { reap "$pid"; fail "beacon mtime regressed while absorbing"; }
-  [ "$(( now - m2 ))" -lt 10 ] || { reap "$pid"; fail "beacon went stale while absorbing (age $(( now - m2 ))s)"; }
+  [ -n "$m2" ] || { reap "$pid"; fail "watcher beacon missing while absorbing"; }
+  [ "$m2" -gt "$m1" ] || { reap "$pid"; fail "beacon did not advance while absorbing ($m1 -> $m2)"; }
   [ ! -s "$state/.wake-queue" ] || { reap "$pid"; fail "absorbing benign signals enqueued a wake"; }
   reap "$pid"
   unset CS_FAKE_CREW_STATE

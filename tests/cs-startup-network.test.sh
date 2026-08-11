@@ -79,6 +79,40 @@ cleanup_workers() {
 }
 trap cleanup_workers EXIT
 
+# ONE OWNER for how patient this suite's poll-until-success waits are, in 0.1s
+# ticks. Matches CS_WATCH_TEST_TICKS in tests/cs-watch-helpers.sh: every wait here
+# returns the instant its positive signal lands, so the budget costs wall-clock
+# only when a case is genuinely failing.
+CS_SNET_TEST_TICKS=${CS_SNET_TEST_TICKS:-150}
+
+wait_until() {  # <limit-ticks> <cmd...>
+  local limit=$1 i=0; shift
+  while [ "$i" -lt "$limit" ]; do
+    "$@" >/dev/null 2>&1 && return 0
+    sleep 0.1
+    i=$((i + 1))
+  done
+  return 1
+}
+
+# worker_gone <home> - true once the detached worker recorded in <home> has exited.
+# A worker that has exited has finished its delivery window, which is the positive
+# signal to wait for before asserting it queued no redundant wake. Sleeping a fixed
+# couple of seconds instead only asserts "it had not queued one YET".
+worker_gone() {  # <home>
+  local pid
+  pid=$(sed -n 's/^pid=//p' "$1/state/.startup-network.status" 2>/dev/null | tail -1)
+  case "$pid" in
+    ''|*[!0-9]*|0) return 0 ;;
+  esac
+  ! kill -0 "$pid" 2>/dev/null
+}
+
+# no_wake_queued <home> - the queue holds no startup-network wake.
+no_wake_queued() {  # <home>
+  ! grep -q 'startup-network' "$1/state/.wake-queue" 2>/dev/null
+}
+
 # The fixture "consigliere repo": a plain checkout on its default branch, so
 # nothing here depends on which branch the developer's real checkout is on.
 FIX_ROOT="$TMP/root"
@@ -364,10 +398,12 @@ assert_contains "$out" 'FLEET_SYNC: plainproj: skipped: not a git repo' \
   "the inline harvest did not print the detached worker's result"
 assert_present "$HOME_DIR/state/.startup-network.delivered" \
   "an inline harvest did not record its delivery"
-# The worker is still in its delivery window; give it room to observe the
-# acknowledgement and exit without queueing a redundant wake.
-sleep 2
-! grep -q 'startup-network' "$HOME_DIR/state/.wake-queue" 2>/dev/null \
+# Wait for the worker to EXIT, which is the positive proof it observed the
+# acknowledgement and finished, then assert it queued nothing. A fixed sleep here
+# only proved the wake had not been queued yet.
+wait_until "$CS_SNET_TEST_TICKS" worker_gone "$HOME_DIR" \
+  || fail "the detached worker never finished its delivery window"
+no_wake_queued "$HOME_DIR" \
   || fail "a result already printed inline was queued as a wake as well"
 pass "an inline harvest delivers the result and suppresses its wake"
 
@@ -442,10 +478,11 @@ assert_contains "$out" 'silent - no problems found' \
   "a clean run did not report itself as having found nothing"
 assert_present "$HOME_DIR/state/.startup-network.delivered" \
   "harvest printed the silent result without acknowledging it"
-# The worker is still in its delivery window; give it room to observe the
-# acknowledgement and exit without queueing a wake for a result already printed.
-sleep 2
-! grep -q 'startup-network' "$HOME_DIR/state/.wake-queue" 2>/dev/null \
+# Same shape as the inline-harvest case above: wait for the worker to exit rather
+# than sleeping a guess, then assert it queued nothing.
+wait_until "$CS_SNET_TEST_TICKS" worker_gone "$HOME_DIR" \
+  || fail "the detached worker never finished its delivery window"
+no_wake_queued "$HOME_DIR" \
   || fail "a clean run queued a wake for a result the digest had already printed"
 pass "a clean run's silent result is delivered inline and queues no wake"
 
@@ -758,15 +795,8 @@ assert_contains "$digest" 'IN PROGRESS - the deferred network checks have not fi
 : > "$GATE"
 
 snet "$HOME_DIR" "$FB" wait 90 || fail "the deferred stage never published after the digest"
-found=0
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  if grep -q 'startup-network' "$HOME_DIR/state/.wake-queue" 2>/dev/null; then
-    found=1
-    break
-  fi
-  sleep 1
-done
-[ "$found" -eq 1 ] || fail "the deferred result never surfaced after the digest was already out"
+wait_until "$CS_SNET_TEST_TICKS" grep -q 'startup-network' "$HOME_DIR/state/.wake-queue" \
+  || fail "the deferred result never surfaced after the digest was already out"
 assert_grep 'NEEDS_GH_AUTH:' "$HOME_DIR/state/.startup-network.report" \
   "the deferred stage published no gh auth verdict"
 pass "a result the digest could not wait for still reaches the agent as a wake"
