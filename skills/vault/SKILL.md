@@ -118,7 +118,7 @@ What stale forbids is leaving it unexamined for another 30 days.
 
 ## Archive, never delete
 
-Stale entries and budget evictions MOVE to `data/memory-archive.md`.
+Stale entries and budget evictions MOVE to `config/memory-archive.md`.
 That file is the cold tier: it is never read at session start, never injected into any session's context, and costs nothing until a session deliberately opens it.
 
 Each archived entry keeps its provenance, so a later session can tell where it came from and why it left:
@@ -200,9 +200,9 @@ The end state is a fully marked file reached one considered entry at a time; the
 There is no "graduate this to a skill" move in this skill's routing.
 This is a deliberate, standing exclusion, not an oversight: a vault sweep is a memory-routing operation, not a way to author or mutate skills.
 Writing learnings into `skills/` would risk mixing fleet-local material with shared consigliere behavior.
-Until a human deliberately scopes a skill change as consigliere repo work, route knowledge about consigliere itself to the shared `AGENTS.md` (or other shared, tracked material) via the pipeline, and fleet-local knowledge to `data/`, never to a skill.
+Until a human deliberately scopes a skill change as consigliere repo work, route knowledge about consigliere itself to the shared `AGENTS.md` (or other shared, tracked material) via the pipeline, and fleet-local knowledge to `config/`, never to a skill.
 
-`data/memory-archive.md` is the ONLY cold tier this skill has.
+`config/memory-archive.md` is the ONLY cold tier this skill has.
 There is no second offload destination: not a skill, not a doc, not a new file invented mid-sweep.
 An entry either stays in startup memory or moves to the archive.
 If a sweep ever genuinely needs somewhere else for material to live, that is a decision for the boss - raise it as one rather than inventing a destination.

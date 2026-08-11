@@ -66,7 +66,7 @@ export PATH="$FAKEBIN:$PATH"
 cs_capo_home() {
   local id=$1 pane=$2 home
   home="$TMP/capos/$id"
-  mkdir -p "$home/config" "$home/data"
+  mkdir -p "$home/config"
   printf '%s\n' "$id" > "$home/.cs-capo-home"
   printf 'shared preference\n' > "$home/config/boss-shared.md"
   head -c 400 /dev/zero | tr '\0' 'x' > "$home/config/learnings.md"
@@ -115,7 +115,7 @@ assert_contains "$OUT" "capo live has more than one registry entry" \
 assert_line "$OUT" '^  memory: config/boss\.md absent$' "an absent memory file is reported as absent"
 assert_line "$OUT" '^  memory: config/boss-shared\.md [0-9]+/200 under$' "an under-budget file reports under"
 assert_line "$OUT" '^  memory: config/learnings\.md 400/200 OVER$' "an over-budget file reports OVER"
-assert_line "$OUT" '^  archive: data/memory-archive\.md absent \(cold tier' \
+assert_line "$OUT" '^  archive: config/memory-archive\.md absent \(cold tier' \
   "the cold tier is reported for orientation, never against the budget"
 assert_contains "$OUT" "sizes are never summed across homes" \
   "the report states the per-home budget rule it applies"

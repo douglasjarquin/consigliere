@@ -222,7 +222,7 @@ resolve_link_target() {
 }
 
 # 2-5. Known names, symlink visibility, host-tier tripwire, sever tripwire.
-CONFIG_KNOWN=' boss.md boss-shared.md learnings.md projects.md boards.md backlog.md done-archive.md note-archive.md charter.md backlog-backend.conf dispatch-policy.conf permission-mode.conf wedge-alarm.conf '
+CONFIG_KNOWN=' boss.md boss-shared.md learnings.md memory-archive.md projects.md boards.md backlog.md done-archive.md note-archive.md charter.md backlog-backend.conf dispatch-policy.conf permission-mode.conf wedge-alarm.conf '
 HOST_KNOWN=' capos.md harness.conf upstream.conf activation.conf telemetry.conf '
 NEVER_SYMLINK=' backlog.md done-archive.md note-archive.md capos.md '
 

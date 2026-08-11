@@ -86,7 +86,7 @@ case "$REGISTRY_BYTES" in ''|*[!0-9]*|0) REGISTRY_BYTES=65536 ;; esac
 # reported for orientation only: it is never injected into a session, so it is
 # never judged against the startup-memory budget.
 MEMORY_FILES='config/boss.md config/boss-shared.md config/learnings.md'
-ARCHIVE_REL='data/memory-archive.md'
+ARCHIVE_REL='config/memory-archive.md'
 
 usage() {
   sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'
