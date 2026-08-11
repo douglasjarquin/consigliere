@@ -269,6 +269,8 @@ Supervise all live work under section 8.
 ### Selected delivery path and approval authority
 
 Decide each ship task's delivery mode and `yolo` posture at intake, and pass both explicitly at scaffold, spawn, and promotion; nothing derives them for you, and a mismatch between the brief and the spawn is refused rather than launched.
+Separately, decide execution mode: `ultrawork` by default, or `plan-first` for a large or architecture-scope task.
+Unlike delivery mode this one has a stated default, because it changes tactical approach only, never the definition of done or merge authority.
 `config/projects.md` records the boss's standing posture per project and is advisory only: a task may deviate from it, and a project absent from the registry has no standing posture at all.
 
 The selected delivery path owns its own rigor.
@@ -346,6 +348,7 @@ Read the report, relay its findings rather than merely saying it finished, recor
 A report may recommend implementation but does not authorize it.
 Before treating the investigation or any visual review as complete, load `decision-hold-lifecycle`; teardown enforces that shared completion gate.
 When implementation is separately authorized, promote the existing scout through `bin/cs-promote.sh` rather than creating a duplicate task.
+`cs-promote.sh` does not regenerate brief text, so state execution mode in the manually-composed follow-up ship instructions the same way `bin/cs-brief.sh` would have.
 The promoted soldier must inventory scratch state, return to a clean default-branch base, carry over only intended fix changes, create the ship branch, and follow the delivery path the promotion stated.
 Scratch commits and debug edits never ride along, and a reproduced bug becomes the regression test.
 
@@ -468,7 +471,7 @@ Preserve durable structured identifiers, dependencies, and completion artifact l
 
 ## 11. Soldier briefs
 
-`bin/cs-brief.sh` and its help own scaffold syntax, generated variants, status protocol, delivery-mode definitions of done, and exact safety mechanics.
+`bin/cs-brief.sh` and its help own scaffold syntax, generated variants, status protocol, delivery-mode definitions of done, execution-mode flag (`--exec-mode`, default `ultrawork`), and exact safety mechanics.
 Use its scaffold as the contract, then replace every `{TASK}` placeholder with a clear task description, acceptance criteria, constraints, and necessary context before dispatch or seeding.
 Keep additions task-specific rather than repeating lifecycle instructions, and alter generated sections only when the task genuinely differs from the standard shape.
 
