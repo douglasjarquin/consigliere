@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
 # Run one bounded foreground supervision checkpoint. Codex cannot reason during
-# a foreground tool call, so this is consigliere's ONLY supervision wait shape:
-# the checkpoint returns control regularly so queued wakes and boss messages
-# are handled without background-task wake semantics.
+# a foreground tool call, so a wait must be bounded: the checkpoint returns
+# control at the bound instead of holding the turn open indefinitely.
+#
+# ONE PER TURN, ENFORCED HERE. A second invocation in the same turn is refused,
+# because the turn is the only channel the boss has: the harness delivers queued
+# boss input at a turn boundary, so a turn that keeps re-arming a checkpoint is a
+# thread that cannot be spoken to. Measured on the live fleet before this refusal
+# existed: 61 consecutive checkpoints, 6.2 hours, no reply possible. The rule was
+# prose for months and prose is what got reinterpreted, so the counter lives in
+# code: state/.checkpoint-turn is written here and cleared by the harness Stop
+# hook (bin/cs-turnend-guard.sh) at every turn end.
+#
+# Ending the turn is safe because supervision does not live in the turn:
+# bin/cs-monitor.sh keeps watching this home, the wake queue is durable, and
+# bin/cs-activate.sh starts the next turn when something lands in it.
 #
 # The checkpoint does NOT own the watcher. bin/cs-monitor.sh does, so this home
 # stays watched while the agent is working instead of only while it waits here.
@@ -25,17 +37,15 @@ cs_resolve_root
 # Queue reader plus cs_path_mtime; also the one owner of the queue's location.
 # shellcheck source=bin/cs-wake-lib.sh
 . "$SCRIPT_DIR/cs-wake-lib.sh"
+# Monitor liveness and revival, shared with the turn-end guard.
+# shellcheck source=bin/cs-monitor-lib.sh
+. "$SCRIPT_DIR/cs-monitor-lib.sh"
 # Optional turn telemetry (off unless host/telemetry.conf enables it).
 # shellcheck source=bin/cs-telemetry-lib.sh
 . "$SCRIPT_DIR/cs-telemetry-lib.sh"
 
-MONITOR="${CS_CHECKPOINT_MONITOR_BIN:-$SCRIPT_DIR/cs-monitor.sh}"
-DETACH="${CS_CHECKPOINT_DETACH_BIN:-$SCRIPT_DIR/cs-detach.py}"
-MONITOR_BEAT="$STATE/.last-monitor-beat"
-# A monitor refreshes its beacon every cycle (default 5s). Treat a beacon older
-# than this as no monitor at all and revive.
-MONITOR_STALE=${CS_MONITOR_STALE_SECS:-60}
 QUEUE="${CS_WAKE_QUEUE:-$STATE/.wake-queue}"
+TURN_MARK="$STATE/.checkpoint-turn"
 
 usage() {
   cat <<'EOF'
@@ -45,6 +55,8 @@ Ensure a persistent watcher (bin/cs-monitor.sh) is alive for this home, then
 wait up to <n> seconds for the durable wake queue to become non-empty.
 On queued wakes, print them (without consuming) and exit 0.
 On a quiet checkpoint, print "checkpoint: no actionable wake within <n>s" and exit 124.
+One checkpoint per turn: a second invocation in the same turn exits 3 without
+waiting, and the harness turn-end hook clears the counter when the turn ends.
 Queued wakes are drained by bin/cs-wake-drain.sh, never by this checkpoint.
 EOF
 }
@@ -76,6 +88,21 @@ case "$SECONDS_ARG" in
   ''|*[!0-9]*) echo "error: --seconds must be a positive integer" >&2; exit 2 ;;
   0) echo "error: --seconds must be greater than zero" >&2; exit 2 ;;
 esac
+
+# The per-turn refusal. It comes before the telemetry crumb because a refused
+# checkpoint supervised nothing and must not be counted as one, and before any
+# wait because the whole point is to hand the turn back immediately. Ensuring the
+# monitor first keeps the one side effect that still matters: whatever the agent
+# does next, this home stays watched.
+if [ -e "$TURN_MARK" ]; then
+  cs_monitor_ensure "$STATE" || true
+  cat >&2 <<'EOF'
+checkpoint: refused - this turn already ran one. End the turn now.
+Supervision continues without you: the monitor keeps watching this home, queued wakes are durable, and this home starts its own next turn when one lands.
+EOF
+  exit 3
+fi
+: > "$TURN_MARK" 2>/dev/null || true
 
 # TELEMETRY, measurement only: a turn that ran a checkpoint supervised something,
 # whether or not the checkpoint went on to return a wake or time out quietly.
@@ -141,49 +168,7 @@ run_watcher_inline() {  # fallback only: no monitor could be started
   exit "$RC"
 }
 
-path_age() {  # <path> - seconds since mtime, very large when missing
-  local p=$1 m now
-  m=$(cs_path_mtime "$p" 2>/dev/null) || { echo 999999; return; }
-  [ -n "$m" ] || { echo 999999; return; }
-  now=$(date +%s)
-  echo $(( now - m ))
-}
-
-monitor_alive() {
-  [ -e "$MONITOR_BEAT" ] || return 1
-  [ "$(path_age "$MONITOR_BEAT")" -lt "$MONITOR_STALE" ]
-}
-
-# Revive on a stale or absent beacon. This is the whole durability story: a
-# monitor killed by anything at all is restarted by the next checkpoint, so an
-# unexplained death costs one checkpoint rather than the rest of the session.
-ensure_monitor() {
-  monitor_alive && return 0
-  [ -x "$MONITOR" ] || return 1
-  # Start it in its OWN session, not merely immune to SIGHUP. `nohup ... &
-  # disown` does not survive teardown of this tool call's process group, and a
-  # checkpoint always runs inside one: measured over a night, a monitor launched
-  # that way died and was revived 213 times in seven hours in one home, while
-  # the same binary with a surviving parent ran 9h20m without a single restart.
-  # bin/cs-detach.py double-forks through setsid(2), which macOS exposes no
-  # binary for. If python3 is missing (doctor reports it) fall back to the old
-  # launch: degraded to the churn above, never to no monitor at all.
-  if [ -x "$DETACH" ] && command -v python3 >/dev/null 2>&1; then
-    python3 "$DETACH" --stdout "$STATE/.monitor.err" -- "$MONITOR" >/dev/null 2>&1
-  else
-    nohup "$MONITOR" >>"$STATE/.monitor.err" 2>&1 &
-    disown 2>/dev/null || true
-  fi
-  local i=0
-  while [ "$i" -lt 30 ]; do
-    monitor_alive && return 0
-    sleep 0.1
-    i=$((i + 1))
-  done
-  return 1
-}
-
-if ! ensure_monitor; then
+if ! cs_monitor_ensure "$STATE"; then
   echo "checkpoint: no persistent monitor could be started; watching inline for this checkpoint only" >&2
   run_watcher_inline
 fi
@@ -201,7 +186,7 @@ while [ "$WAITED" -lt "$SECONDS_ARG" ]; do
   fi
   # A monitor that dies mid-wait is revived here too, so a long checkpoint can
   # never sit out the rest of its bound with nothing watching.
-  monitor_alive || ensure_monitor || true
+  cs_monitor_alive "$STATE" || cs_monitor_ensure "$STATE" || true
   sleep 1
   WAITED=$((WAITED + 1))
 done

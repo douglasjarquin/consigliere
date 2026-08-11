@@ -362,13 +362,14 @@ if command -v jq >/dev/null 2>&1; then
   OUT=$(printf '{"stop_hook_active":false}' | \
     CS_ROOT_OVERRIDE="$GHOME" CS_HOME="$GHOME" CS_GUARD_GRACE=999 \
     CS_LOCK_HARNESS_RE='sleep|bash|zsh|codex|claude' \
+    CS_MONITOR_BIN="$GHOME/no-such-monitor" \
     bash "$ROOT/bin/cs-turnend-guard.sh" 2>&1)
   RC=$?
-  expect_code 2 "$RC" "G: the turn must not end blind with a source armed"
-  assert_contains "$OUT" "TURN WOULD END BLIND" "G: the turn-end guard must block"
+  expect_code 2 "$RC" "G: a home that cannot wake itself must not end the turn with a source armed"
+  assert_contains "$OUT" "THIS HOME CANNOT WAKE ITSELF" "G: the turn-end guard must block"
   assert_contains "$OUT" "1 blocking source(s) armed" \
     "G: the turn-end banner must name the armed source"
-  pass "cs-procevent: cs-turnend-guard.sh blocks a blind turn with only a source armed"
+  pass "cs-procevent: cs-turnend-guard.sh blocks an unwakeable turn end with only a source armed"
 else
   pass "cs-procevent: turn-end guard case skipped (jq not installed)"
 fi

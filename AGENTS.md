@@ -125,6 +125,7 @@ state/               volatile runtime signals; gitignored
   .watch.lock .wake-queue.lock .monitor.lock   watcher, queue, and monitor singleton locks
   .last-watcher-beat watcher liveness beacon; guard scripts read it
   .last-monitor-beat .monitor.log .monitor-stop   persistent monitor liveness, lifecycle log, and stop request; cs-monitor.sh
+  .checkpoint-turn   per-turn checkpoint counter; written by cs-watch-checkpoint.sh, cleared at every turn end
   .decision-cursor-*   per-task byte cursor and folded open-decision set bounding the wake drain's open-decision scan to new status appends; written only by cs-classify-lib.sh; safe to delete (forces one full re-fold)
   .hash-* .count-* .stale-* .paused-* .seen-* .last-* .capo-surfaced-*   watcher internals; never touch
   .subsuper-*        away-mode daemon internals; never touch
@@ -353,11 +354,12 @@ Scratch commits and debug edits never ride along, and a reproduced bug becomes t
 
 Fleet supervision is an always-loaded operational contract; `docs/supervision.md` and script help own mechanisms and recipes.
 
-Whenever work is under way, keep exactly one live supervision cycle: the bounded foreground checkpoint `bin/cs-watch-checkpoint.sh`.
-The checkpoint also keeps this home's persistent monitor alive, so the home stays watched while you work rather than only while you wait; it reports queued wakes and never drains them.
-Codex cannot reason during a foreground tool call, so the checkpoint returns on the first actionable wake or at the bounded interval; handle the wake, then start the next checkpoint in the same turn.
+Run at most one bounded foreground checkpoint `bin/cs-watch-checkpoint.sh` per turn, then end the turn.
+A second checkpoint in the same turn is refused, because a turn boundary is the only moment the boss's message can reach you.
+The checkpoint keeps this home's persistent monitor alive and reports queued wakes without draining them; codex cannot reason during a foreground tool call, so it returns on the first actionable wake or at the bounded interval.
+Handle what it reports, say what happened, and end the turn: supervision outlives the turn through the monitor, and a wake that sits starts the next turn through this home's own activation.
 Do not use shell `&`, background tasks, or a second cycle when a healthy one already exists.
-No turn ends blind while work is under way, including turns described as holding or waiting; the harness Stop hook (codex or claude) is the structural backstop, not permission to omit the live cycle.
+The harness Stop hook (codex or claude) blocks a turn end only when this home could not wake itself.
 
 At the start of every wake-handling turn, drain the durable wake queue with `bin/cs-wake-drain.sh` before peeking, reading beyond the reason line, steering, or starting work.
 Session start is the only exception because its one-shot digest already drained while locked.
@@ -377,8 +379,8 @@ A capo's idle endpoint is healthy, and parent supervision relies on its routed s
 Waiting on a healthy supervision cycle is silent; empty polls, elapsed time, and no-change updates are not boss-facing progress.
 Never broadly kill watchers; a forced repair must use the home-scoped restart path in `docs/supervision.md`.
 
-Every home activates itself: when its wake queue has sat unattended, its own monitor prompts its own agent through `bin/cs-activate.sh`, so a capo no longer depends on a parent injecting into its pane.
-Scope is `host/activation.conf` - capo homes are `always`, everywhere else is `afk-only` by default, because the main pane is the one the boss types in.
+Every home activates itself: when its wake queue has sat unattended, its own monitor prompts its own agent through `bin/cs-activate.sh`, so a queue is picked up without anyone injecting into that pane.
+Scope is `host/activation.conf`, which defaults to `always` everywhere because an ended turn now depends on it.
 A `state/.activation-stalled` marker means that home cannot start its own turns and needs recovery; treat it as a blocker, not a warning.
 
 Guard warnings do not replace the contract.

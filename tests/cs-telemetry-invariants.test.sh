@@ -17,7 +17,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 TMP_ROOT=$(cs_test_tmproot cs-telemetry-invariants)
-BLOCK_BANNER='TURN WOULD END BLIND - SUPERVISION IS OFF'
+BLOCK_BANNER='THIS HOME CANNOT WAKE ITSELF'
 GUARD_HARNESS_RE='sleep|bash|zsh|codex|claude'
 # Breadcrumbs are keyed by the session identity, which is the harness process in
 # this process's ancestry. A test runs under its own shell, not under codex or
@@ -68,6 +68,7 @@ run_guard() {
     CS_HOME="$home" \
     CS_GUARD_GRACE=999 \
     CS_LOCK_HARNESS_RE="$GUARD_HARNESS_RE" \
+    CS_MONITOR_BIN="$home/no-such-monitor" \
     CS_TELEMETRY_DISABLE='' \
     "$ROOT/bin/cs-turnend-guard.sh" 2>&1
 }

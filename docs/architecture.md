@@ -38,7 +38,8 @@ The absorb policy is absorb-only-when-provably-working: a no-verb signal or fres
 Native herdr `blocked` surfaces immediately - sub-second via the socket event splice (`bin/cs-herdr-events.py`, `pane.agent_status_changed`) and on the next poll without it; the poll loop is the permanent fail-closed backstop.
 `bin/cs-classify-lib.sh` is the one owner of the status-verb vocabulary and the keyed decision/activity folds, shared by the watcher and the away-mode daemon, and consumes operational-input types from `bin/cs-operational-input.sh`.
 Who writes a decision's closing line lives with each writer: consigliere closes at answer time through `bin/cs-send.sh`'s `--resolve-key`, `bin/cs-pending-reply-lib.sh` closes its own capo escalations when the request resolves, and a soldier self-closes only a blocker that cleared without an answer.
-The supervision wait shape is the bounded foreground checkpoint ([`docs/supervision.md`](supervision.md)); the harness Stop hook (`bin/cs-turnend-guard.sh`, registered per-harness) is the structural backstop.
+The supervision wait shape is the bounded foreground checkpoint, one per turn ([`docs/supervision.md`](supervision.md)); supervision then outlives the turn through `bin/cs-monitor.sh`, and `bin/cs-activate.sh` starts the next one.
+The harness Stop hook (`bin/cs-turnend-guard.sh`, registered per-harness) is the structural backstop, and blocks a turn end only when that wake-up path is broken.
 
 ## Authenticated checks
 

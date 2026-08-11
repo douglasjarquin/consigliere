@@ -4,10 +4,22 @@
 # exactly like the main primary; only child soldier/scout worktrees are exempt
 # (see the scoping block below).
 #
-# cs-guard.sh is pull-based: it only warns when some other supervision script
-# happens to run. A primary session that ends a turn without resuming the
-# foreground checkpoint, and then never runs another fleet-touching command
-# itself, can sit blind for hours.
+# WHAT IT GUARDS. Ending a turn is the NORMAL, required thing to do: the harness
+# delivers queued boss input at a turn boundary, so a primary that never ends a
+# turn cannot be spoken to (measured: 6.2 hours across 61 consecutive
+# checkpoints). Supervision does not live in the turn either - bin/cs-monitor.sh
+# keeps watching this home, and bin/cs-activate.sh starts the next turn when a
+# wake lands. So this guard no longer asks "is work under way"; it asks whether
+# this home can still WAKE ITSELF, and blocks only when it cannot: no monitor
+# could be started, no pane is recorded to prompt, the record names a different
+# pane than this one, or state/.activation-stalled says activation already found
+# the target unusable. Those are the states where an ended turn is a lost home.
+#
+# It also clears state/.checkpoint-turn, the per-turn counter that makes
+# bin/cs-watch-checkpoint.sh's one-checkpoint-per-turn limit mechanical rather
+# than a rule an agent can reinterpret. This hook is the one component that
+# observes a turn boundary, so it is the only place that can clear it.
+#
 # This script is push-based: the harness Stop hook invokes it every time the
 # primary is about to end a turn, and blocks the stop by preserving exit status 2
 # and stderr. Registration is harness-specific: codex via .codex/hooks.json;
@@ -30,7 +42,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
 GRACE=${CS_GUARD_GRACE:-300}
-WATCH="$SCRIPT_DIR/cs-watch.sh"
 
 # shellcheck source=bin/cs-supervision-lib.sh
 . "$SCRIPT_DIR/cs-supervision-lib.sh"
@@ -50,21 +61,28 @@ WATCH="$SCRIPT_DIR/cs-watch.sh"
 PAYLOAD=$(cat 2>/dev/null || true)
 [ -n "$PAYLOAD" ] || exit 0
 
+# Scope precisely to a PRIMARY checkout: a genuinely marked capo home is
+# force-included; an unmarked linked task worktree is exempt.
+#
+# This scope test sits ABOVE the stop_hook_active loop guard so the telemetry
+# emitter below sees every primary turn, including a forced continuation's own
+# second stop. It also sits above the jq requirement, so the per-turn counter is
+# cleared even on a host missing jq: a counter that never clears would refuse
+# every later checkpoint in the session. All three tests are side-effect-free
+# reads that exit 0 when they do not match.
+cs_primary_scope_matches "$CS_ROOT" "$STATE" || exit 0
+
+# A turn boundary was reached, so the per-turn checkpoint counter is spent. This
+# runs unconditionally from here on, including on the block path below: a blocked
+# stop continues the turn precisely so the agent can supervise, which needs a
+# checkpoint available to it.
+rm -f "$STATE/.checkpoint-turn" 2>/dev/null || true
+
 # Without jq we cannot safely read the loop-guard field, so we must never
 # block - fail open, not noisy.
 command -v jq >/dev/null 2>&1 || exit 0
 
 STOP_HOOK_ACTIVE=$(printf '%s' "$PAYLOAD" | jq -r '.stop_hook_active // false' 2>/dev/null) || exit 0
-
-# Scope precisely to a PRIMARY checkout: a genuinely marked capo home is
-# force-included; an unmarked linked task worktree is exempt.
-#
-# This scope test moved ABOVE the stop_hook_active loop guard so the telemetry
-# emitter below sees every primary turn, including a forced continuation's own
-# second stop. Both tests are side-effect-free reads that exit 0 when they do not
-# match, so the reordering is observationally identical: the same inputs still
-# produce the same exit status, the same stdout, and the same stderr.
-cs_primary_scope_matches "$CS_ROOT" "$STATE" || exit 0
 
 # TELEMETRY, measurement only. This is the per-turn emitter for role=root and
 # role=capo: the Stop hook fires here on every turn of the main home and of every
@@ -95,8 +113,7 @@ fi
 # acquire, which would take the lock as a side effect. Fail open: only an
 # affirmative live holder that is provably NOT part of this session's process
 # tree adds the defer. A free, stale, or own lock - or any unreadable condition -
-# falls through to the supervision logic so a genuine primary is still guarded
-# when it ends a turn blind.
+# falls through to the wake-up predicate so a genuine primary is still guarded.
 cs_lock_holder_is_foreign() {  # <holder-pid>: 0 only if provably a different session
   local holder=$1 pid=$$ ppid hops=0
   case "$holder" in
@@ -131,22 +148,47 @@ esac
 # --- the actual predicate ----------------------------------------------------
 # shellcheck source=bin/cs-wake-lib.sh
 . "$SCRIPT_DIR/cs-wake-lib.sh"
+# shellcheck source=bin/cs-monitor-lib.sh
+. "$SCRIPT_DIR/cs-monitor-lib.sh"
 
 cs_supervision_status "$STATE" "$GRACE"
 [ "$CS_SUP_SUPERVISED" -gt 0 ] || exit 0
-cs_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$CS_HOME" && exit 0
 
-# While away mode owns supervision, the daemon (not the checkpoint) is the live
-# cycle; its own liveness is guarded separately, so do not block here.
+# While away mode owns supervision, the daemon (not this home's own activation)
+# is what restarts turns; its own liveness is guarded separately, so do not
+# block here.
 [ -e "$STATE/.afk" ] && exit 0
+
+# Can this home wake itself once this turn ends? These are the DURABLE
+# preconditions bin/cs-activate.sh needs before it will prompt anything; that
+# script owns the live revalidation (the pane still exists, still runs an agent,
+# is still rooted here) and writes state/.activation-stalled when it does not.
+# Read only local records here: the Stop hook runs on every turn of the primary,
+# so it must stay cheap and must never hang on a backend.
+PROBLEM=
+FIX=
+if [ -e "$STATE/.activation-stalled" ]; then
+  PROBLEM='this home cannot start its own turns; activation found its recorded pane unusable'
+  FIX="recover the pane (bin/cs-monitor.sh logs the reason in state/.monitor.log), re-record it by running bin/cs-session-start.sh from this home's own pane, then remove state/.activation-stalled"
+elif [ ! -s "$STATE/.home-pane" ]; then
+  PROBLEM='no pane is recorded for this home, so nothing can start its next turn'
+  FIX="run bin/cs-session-start.sh from this home's own pane, which is the one place that can record it"
+elif [ -n "${HERDR_PANE_ID:-}" ] &&
+     [ "$HERDR_PANE_ID" != "$(tr -dc 'A-Za-z0-9:_-' < "$STATE/.home-pane" 2>/dev/null)" ]; then
+  PROBLEM="the recorded home pane is not this one, so a wake would be delivered somewhere else"
+  FIX='run bin/cs-session-start.sh from this pane so the record names it'
+elif ! cs_monitor_ensure "$STATE"; then
+  PROBLEM='no watcher is running for this home and none could be started'
+  FIX='start one with bin/cs-watch-checkpoint.sh, and check state/.monitor.err if it still cannot launch'
+fi
+[ -n "$PROBLEM" ] || exit 0
 
 rule='━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
 GUARD_BODY=$(
   printf '●%s\n' "$rule"
-  printf '●  TURN WOULD END BLIND - SUPERVISION IS OFF\n'
-  printf '●  %s, but no live watcher holds this home lock (last beat: %s).\n' "$(cs_supervision_work_desc)" "$CS_SUP_BEACON_DESC"
-# shellcheck disable=SC2016 # the ${CS_WATCH_CHECKPOINT:-180} is literal advice text for the reading agent
-  printf '●  Drain queued wakes with bin/cs-wake-drain.sh, then start the foreground checkpoint: bin/cs-watch-checkpoint.sh --seconds "${CS_WATCH_CHECKPOINT:-180}". No turn ends blind while work is under way.\n'
+  printf '●  THIS HOME CANNOT WAKE ITSELF - DO NOT END THE TURN YET\n'
+  printf '●  %s, and %s.\n' "$(cs_supervision_work_desc)" "$PROBLEM"
+  printf '●  %s. Ending a turn is otherwise fine: the monitor keeps watching and a queued wake starts the next turn.\n' "$FIX"
   printf '●%s\n' "$rule"
 )
 cs_operational_input_construct turn-end-guard "$GUARD_BODY" GUARD_INPUT

@@ -1084,7 +1084,13 @@ SH
   assert_contains "$out" "source: pane" "timed-out no-mistakes -> pane source"
   [ "$elapsed" -lt 5 ] || fail "perl timeout did not bound no-mistakes calls (elapsed ${elapsed}s)"
   calls=$(awk 'END { print NR + 0 }' "$calls_file" 2>/dev/null || echo 0)
-  [ "$calls" -eq 1 ] || fail "empty no-mistakes status triggered extra lookups ($calls calls)"
+  # The property is that a bounded lookup returning nothing is not RETRIED, so
+  # the ceiling is what matters. Zero is a legitimate outcome of the same bound:
+  # cs_run_timed forks, then alarms after the 1s this case configures, and on a
+  # loaded host that alarm can fire before the forked child has finished exec'ing
+  # the fake, which records its call from inside the exec'd script. Asserting
+  # exactly one made this case fail intermittently under a full suite run.
+  [ "$calls" -le 1 ] || fail "empty no-mistakes status triggered extra lookups ($calls calls)"
   pass "no timeout command uses perl bound"
 }
 

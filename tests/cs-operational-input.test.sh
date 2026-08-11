@@ -96,7 +96,7 @@ test_turnend_guard_stamping() {
   kind=$(printf '%s' "$out" | "$OP" kind) || fail "turn-end guard output is not typed"
   [ "$kind" = turn-end-guard ] || fail "turn-end guard output kind is $kind"
   body=$(printf '%s' "$out" | "$OP" body) || fail "turn-end guard body did not decode"
-  assert_contains "$body" "TURN WOULD END BLIND" "turn-end guard lost its continuation body"
+  assert_contains "$body" "THIS HOME CANNOT WAKE ITSELF" "turn-end guard lost its continuation body"
   pass "turn-end Stop-hook continuation carries the turn-end-guard kind"
 }
 
