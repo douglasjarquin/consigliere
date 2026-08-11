@@ -77,7 +77,8 @@ cs_control_pane_in_dir() { # <pane_id> <dir>
 # and returns 0 only for a verified postcondition:
 #   already-idle   the agent is positively idle AND its process is still on the
 #                  pane; nothing was delivered
-#   stopped        the turn stopped and the agent's process is still on the pane
+#   stopped        the stop was positively observed (idle or done) and the
+#                  agent's process is still on the pane
 #   blocked        native blocked: the agent waits on a human, not on a turn
 #   still-working  the key was delivered and the LAST read still showed a
 #                  running turn
@@ -129,13 +130,16 @@ cs_control_interrupt() { # <pane_id> <harness> -> token
       busy) continue ;;
       blocked) printf 'blocked\n'; return 1 ;;
     esac
-    # Not busy any more. Interrupt must leave the agent in the pane; if the
-    # agent left with the turn, say so instead of reporting a clean interrupt.
-    # An agent that merely cannot be read is neither: keep waiting within the
-    # bound rather than claiming gone without the husk's positive evidence.
-    if cs_control_agent_pid "$pane" >/dev/null 2>&1; then
-      printf 'stopped\n'
-      return 0
+    # `stopped` needs the stop positively OBSERVED (idle or done, never
+    # inferred from an unreadable state) AND the agent's process still on the
+    # pane. `agent-gone` needs the husk's own positive process evidence, which
+    # an agent-get failure alone does not give. Anything less is "cannot tell":
+    # keep waiting within the bound rather than converting it into a claim.
+    if [ "$state" = idle ] || [ "$state" = 'done' ]; then
+      if cs_control_agent_pid "$pane" >/dev/null 2>&1; then
+        printf 'stopped\n'
+        return 0
+      fi
     fi
     if cs_control_agent_gone "$pane"; then
       printf 'agent-gone\n'
@@ -159,6 +163,10 @@ cs_control_interrupt() { # <pane_id> <harness> -> token
 #   already-gone       the pane held no agent when asked (idempotent success)
 #   gone               the exit command was delivered and the agent left
 #   command-not-sent   herdr refused the send
+#   blocked            native blocked: a harness dialog waits on a human, and a
+#                      key or command delivered there would be read as an
+#                      ANSWER (codex's trust dialog reads Enter as consent), so
+#                      nothing was delivered to it
 #   still-running      the pane could not be confirmed agent-free - a turn that
 #                      would not cancel, an agent that stayed after the command,
 #                      or a process table that could not be read
@@ -195,12 +203,16 @@ cs_control_exit() { # <pane_id> <harness> -> token
   # and type the command once more.
   while [ "$attempt" -lt 2 ]; do
     attempt=$((attempt + 1))
-    # Never type into a running turn.
+    # Never type into a running turn, and never deliver ANYTHING to a natively
+    # blocked pane: a harness dialog waiting on a human reads a keystroke as an
+    # answer, so a blocked reading anywhere in an attempt withholds the command.
     state=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || state=unknown
+    [ "$state" = blocked ] && { printf 'blocked\n'; return 1; }
     if [ "$state" = busy ]; then
       cs_control_interrupt "$pane" "$harness" >/dev/null || true
       state=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || state=unknown
       [ "$state" = busy ] && { printf 'still-running\n'; return 1; }
+      [ "$state" = blocked ] && { printf 'blocked\n'; return 1; }
     fi
     composer=$(cs_composer_state "$pane" 2>/dev/null) || composer=unknown
     if [ "$composer" = pending ]; then
@@ -209,7 +221,9 @@ cs_control_exit() { # <pane_id> <harness> -> token
       state=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || state=unknown
       if [ "$state" = busy ]; then
         cs_control_interrupt "$pane" "$harness" >/dev/null || true
+        state=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || state=unknown
       fi
+      [ "$state" = blocked ] && { printf 'blocked\n'; return 1; }
     fi
     # The agent may have left since this attempt began - died with the turn the
     # interrupt above cancelled, or exited on the flush - and its husk's bare

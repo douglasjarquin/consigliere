@@ -32,9 +32,13 @@
 #                  process even while `agent get` still reports one - the
 #                  stale-belief husk shape a real exited agent can leave behind
 #   on_esc         `idle` sets status=idle when Escape arrives; `gone` removes
-#                  the agent; absent leaves the state alone
+#                  the agent; `unknown` sets status=unknown (the uncorroborated
+#                  reading a transient herdr failure yields); absent leaves the
+#                  state alone
 #   on_enter       `gone` removes the agent when Enter arrives; `busy` sets
-#                  status=working; absent leaves the state alone
+#                  status=working; `blocked` sets status=blocked (the turn the
+#                  Enter submitted parked on a harness dialog); absent leaves
+#                  the state alone
 #   on_enter_composer  the composer row Enter leaves behind, which is how a
 #                  flushed composer is modelled (an Enter submits the line and
 #                  the composer comes back empty)
@@ -106,6 +110,7 @@ case "$1 $2" in
         case "$(read_state on_esc)" in
           idle) printf 'idle\n' > "$S/status" ;;
           gone) : > "$S/agent" ;;
+          unknown) printf 'unknown\n' > "$S/status" ;;
         esac
         ;;
       Enter)
@@ -120,6 +125,7 @@ case "$1 $2" in
         case "$(read_state on_enter)" in
           gone) : > "$S/agent" ;;
           busy) printf 'working\n' > "$S/status" ;;
+          blocked) printf 'blocked\n' > "$S/status" ;;
         esac
         ;;
     esac

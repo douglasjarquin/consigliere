@@ -12,12 +12,13 @@
 #      blocked is reported as such, a husk pane is reported agent-gone rather
 #      than idle - including the stale-belief shape where `agent get` still
 #      reports an agent whose process has left - an uncorroborated state is
-#      reported state-unknown rather than idle or still-working, and the key is
-#      delivered EXACTLY once in every case.
+#      reported state-unknown rather than idle, stopped, or still-working, and
+#      the key is delivered EXACTLY once in every case.
 #   6. exit: already-gone is idempotent success, the harness's own exit command
 #      is sent verbatim with no operational-input marker, a busy target is
 #      interrupted first, unsent composer text is flushed with exactly one Enter
-#      before the command is typed, and an agent that stays is reported
+#      before the command is typed, a natively blocked pane is never keyed past
+#      wherever the blocked reading appears, and an agent that stays is reported
 #      unconfirmed.
 set -u
 # shellcheck source=tests/control-helpers.sh
@@ -200,6 +201,13 @@ out=$(run_control "$home" "$murky" "$TMP/l-murky" interrupt t1) || rc=$?
 expect_code 1 "$rc" "a stop that cannot be corroborated is not confirmed"
 assert_contains "$out" "cannot be positively read" "an uncorroborated final reading is state-unknown, not still-working"
 [ "$(esc_count "$TMP/l-murky")" -eq 1 ] || fail "the murky case still delivers the key exactly once"
+
+foggy=$(cs_control_state "$TMP/s-foggy" agent=codex status=working on_esc=unknown)
+rc=0
+out=$(run_control "$home" "$foggy" "$TMP/l-foggy" interrupt t1) || rc=$?
+expect_code 1 "$rc" "an unreadable post-key state is never reported as a stopped turn"
+assert_contains "$out" "cannot be positively read" "only an observed idle or done reading may claim stopped"
+[ "$(esc_count "$TMP/l-foggy")" -eq 1 ] || fail "the foggy case still delivers the key exactly once"
 pass "cs-control: every interrupt outcome is verified, and the key is sent once"
 
 # --- 6. exit postconditions -------------------------------------------------
@@ -282,6 +290,25 @@ case "$order" in
   "pane send-keys w1:p1 esc --session default|pane send-text w1:p1 /quit --session default|") : ;;
   *) fail "a busy target must be interrupted BEFORE the exit command, got: $order" ;;
 esac
+
+# A flush Enter can submit a queued steer whose turn parks on a harness dialog
+# (native blocked); a key or command delivered there is read as an ANSWER, so
+# the exit command is withheld and the blocked pane is reported.
+fblocked=$(cs_control_state "$TMP/s-fblocked" agent=codex status=idle \
+  composer='❯ queued steer' on_enter=blocked)
+rc=0
+out=$(run_control "$home" "$fblocked" "$TMP/l-fblocked" exit t1) || rc=$?
+expect_code 1 "$rc" "a flush that ends on a dialog blocks the exit"
+assert_contains "$out" "waiting on a human" "the blocked pane is reported, never keyed past"
+assert_no_line "$(cat "$TMP/l-fblocked")" 'send-text' "no exit command is delivered into a dialog"
+
+qblocked=$(cs_control_state "$TMP/s-qblocked" agent=codex status=idle on_enter=blocked)
+rc=0
+out=$(run_control "$home" "$qblocked" "$TMP/l-qblocked" exit t1) || rc=$?
+expect_code 1 "$rc" "a command whose turn ends on a dialog is not retyped into it"
+assert_contains "$out" "waiting on a human" "the blocked pane is reported on the second attempt"
+[ "$(grep -c -- 'send-text' "$TMP/l-qblocked")" -eq 1 ] ||
+  fail "the exit command must not be typed a second time into a blocked pane"
 
 nostop=$(cs_control_state "$TMP/s-nostop" agent=codex status=working on_enter=gone)
 rc=0

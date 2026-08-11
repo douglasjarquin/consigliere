@@ -247,6 +247,9 @@ if [ "$VERB" = exit ]; then
     command-not-sent)
       report "exit $ID: NOT stopped - herdr refused to deliver the exit command to pane $PANE (interrupt $itok)"
       ;;
+    blocked)
+      report "exit $ID: NOT stopped - the agent is waiting on a human (native blocked), and a key or command delivered there would be read as an answer, so the exit command was withheld (pane $PANE, interrupt $itok)"
+      ;;
     exit-not-attempted)
       case "$itok" in
         blocked)
@@ -400,12 +403,15 @@ if [ "$rc" -ne 0 ]; then
   journal_fail stopping "$tokens"
   itok=${tokens%% *}
   etok=${tokens##* }
-  case "$itok" in
-    blocked)       stop_reason="the agent is waiting on a human (native blocked)" ;;
-    still-working) stop_reason="the running turn could not be cancelled" ;;
-    state-unknown) stop_reason="the agent's state cannot be positively read" ;;
-    *)             stop_reason="the agent could not be confirmed stopped" ;;
-  esac
+  if [ "$itok" = blocked ] || [ "$etok" = blocked ]; then
+    stop_reason="the agent is waiting on a human (native blocked), which no key may answer"
+  else
+    case "$itok" in
+      still-working) stop_reason="the running turn could not be cancelled" ;;
+      state-unknown) stop_reason="the agent's state cannot be positively read" ;;
+      *)             stop_reason="the agent could not be confirmed stopped" ;;
+    esac
+  fi
   echo "error: relaunch $ID: $stop_reason (interrupt $itok, exit $etok); NOTHING was relaunched." >&2
   echo "No stop was confirmed on pane $PANE, the work is untouched at $WT_REAL, and the progress note is in $BRIEF." >&2
   exit 1

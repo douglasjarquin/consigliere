@@ -59,10 +59,10 @@ Escalate in order:
    The worktree, its commits, and its uncommitted changes persist across a relaunch, so it is cheap.
    The note is required because the replacement inherits the local copy and none of the conversation.
    Read the reported result rather than assuming it: the relaunch names which path it took (`resume` keeps the soldier's own context, `cold` re-reads the brief), proves a different agent process now owns the pane, and reports a failure plainly instead of claiming a running agent.
-   If it refuses before stopping the old agent, nothing changed and the refusal names what to fix; if it fails after stopping it, no agent is running and the message names where the work is preserved.
+   If it refuses before stopping the old agent, nothing changed and the refusal names what to fix; if it fails after stopping it, no replacement was confirmed and the message names where the work is preserved.
    When herdr's own reading disagrees with what the pane appears to be doing, `cs_herdr_agent_explain` (`bin/cs-herdr-lib.sh`) names the detection rule that decided it, so the disagreement is explained rather than guessed at.
 5. If `exit` or `relaunch` reports that it could not stop the agent, do not force it and do not tear the task down to get past it.
-   Read the concrete state it reported (a turn that would not cancel, an agent that stayed after the exit command, an unreadable process table), clear that specific obstacle, and try the verb again.
+   Read the concrete state it reported (a turn that would not cancel, an agent that stayed after the exit command, a dialog waiting on a human that no key may answer, an unreadable process table), clear that specific obstacle, and try the verb again.
    Unsent composer text is never a refusal: the verb submits it with one Enter, cancels whatever turn that starts, and types the exit command regardless of what the composer classifier still says, so only the verified postcondition decides the outcome.
    If the verb still reports the agent running after that, read the pane with `bin/cs-peek.sh <id>` and settle what is actually sitting there before trying again.
    A pane whose agent cannot be stopped at all is recovered by closing the pane and reopening the surviving worktree with `herdr worktree open --path`, which is endpoint replacement, not work discard.
