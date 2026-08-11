@@ -8,6 +8,16 @@
 # The fold is cursor-backed (scan_open_decisions_incremental), so each drain
 # reads only bytes appended since the previous drain, not every task's whole
 # lifetime status log.
+#
+# The rotation itself is durable. A drain moves the queue into a batch file
+# (CS_WAKE_BATCH_PREFIX, cs-wake-lib.sh) AFTER taking the queue lock and removes
+# that batch BEFORE releasing it, so any batch still on disk while this drain
+# holds the lock belongs to a drain that never committed: the turn died between
+# the rotation and handling. Those records are otherwise unreachable - the queue
+# is already empty and nothing else ever reads a batch file - so this drain
+# adopts every orphan it finds, replays its records once under a labeled
+# "wake replay:" line, and retires it in the same committed step. See
+# docs/supervision.md for the placement of that adoption in the cycle.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,6 +34,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRAIN_TMP=
 DRAIN_LOCK_HELD=false
 RAW_ROWS=
+ORPHANS=()
+REPLAYED_RECORDS=0
 
 # Defense in depth for the supervision chain: this script runs at the top of
 # every wake-handling and recovery turn, so assert watcher liveness here too. A
@@ -88,6 +100,9 @@ EOF
 }
 
 # shellcheck disable=SC2317,SC2329 # Invoked by trap handlers below.
+# Any batch this run adopted is deliberately left where it is: an orphan is only
+# retired by the committed print below, so a failed drain leaves every adopted
+# record exactly as reachable as it was when this run started.
 cleanup() {
   local status=$?
   if [ "$status" -ne 0 ] && [ "$DRAIN_LOCK_HELD" = true ] && [ -n "$DRAIN_TMP" ] && [ -e "$DRAIN_TMP" ]; then
@@ -106,7 +121,21 @@ trap 'exit 143' TERM
 cs_lock_acquire_wait "$CS_WAKE_QUEUE_LOCK"
 DRAIN_LOCK_HELD=true
 
-if [ ! -s "$CS_WAKE_QUEUE" ]; then
+# Adopt every orphaned batch (see the header): while this lock is held, a batch
+# on disk can only belong to a drain that never committed.
+for orphan in "$CS_WAKE_BATCH_PREFIX"*; do
+  [ -f "$orphan" ] || continue
+  ORPHANS+=("$orphan")
+done
+# A restore temp is only ever written under this lock, and it is written from a
+# batch that is still on disk plus a queue that is still intact, so one left
+# here is pure litter from an interrupted restore rather than reachable records.
+for stale_restore in "$CS_WAKE_RESTORE_PREFIX"*; do
+  [ -f "$stale_restore" ] || continue
+  rm -f "$stale_restore" || true
+done
+
+if [ ! -s "$CS_WAKE_QUEUE" ] && [ "${#ORPHANS[@]}" -eq 0 ]; then
   : > "$CS_WAKE_QUEUE"
   cs_lock_release "$CS_WAKE_QUEUE_LOCK"
   DRAIN_LOCK_HELD=false
@@ -115,23 +144,44 @@ if [ ! -s "$CS_WAKE_QUEUE" ]; then
   exit 0
 fi
 
-DRAIN_TMP="$STATE/.wake-queue.drain.$(cs_current_pid)"
-rm -f "$DRAIN_TMP"
-mv "$CS_WAKE_QUEUE" "$DRAIN_TMP" || exit 1
+DRAIN_TMP=$(cs_wake_new_batch) || exit 1
+if [ -e "$CS_WAKE_QUEUE" ]; then
+  mv "$CS_WAKE_QUEUE" "$DRAIN_TMP" || exit 1
+fi
 : > "$CS_WAKE_QUEUE" || exit 1
 
-RAW_ROWS=$(cs_wake_print_deduped "$DRAIN_TMP") || exit "$?"
+if [ "${#ORPHANS[@]}" -gt 0 ]; then
+  REPLAYED_RECORDS=$(awk -F '\t' 'NF >= 5 { n++ } END { print n + 0 }' "${ORPHANS[@]}" 2>/dev/null) || REPLAYED_RECORDS=0
+  case "$REPLAYED_RECORDS" in
+    ''|*[!0-9]*) REPLAYED_RECORDS=0 ;;
+  esac
+fi
+# Adopted records come first because they are older; dedupe over the union then
+# gives a key carried by both its earliest position and its latest payload.
+RAW_ROWS=$(cs_wake_print_deduped ${ORPHANS[@]+"${ORPHANS[@]}"} "$DRAIN_TMP") || exit "$?"
 case "${CS_WAKE_DRAIN_TEST_DELAY_BEFORE_COMMIT:-0}" in
   0) ;;
   ''|*[!0-9]*) ;;
   *) sleep "$CS_WAKE_DRAIN_TEST_DELAY_BEFORE_COMMIT" ;;
 esac
+if [ "$REPLAYED_RECORDS" -gt 0 ]; then
+  # Label the replay so the reading agent can tell recovered records from fresh
+  # ones. They are handled identically - the rows below keep the canonical raw
+  # shape - but a record that surfaces a second time reads as a duplicate wake
+  # unless the drain says where it came from.
+  printf 'wake replay: recovered %s wake record(s) from %s interrupted drain(s); an earlier turn emptied the queue but ended before handling them. They are deduped into the records below and will not be replayed again.\n' \
+    "$REPLAYED_RECORDS" "${#ORPHANS[@]}" || exit "$?"
+fi
 if [ -n "$RAW_ROWS" ]; then
   # Print-before-delete is the deliberate at-least-once no-loss boundary: a
   # crash in this micro-gap may replay a wake, and annotations stay outside it.
   printf '%s\n' "$RAW_ROWS" || exit "$?"
 fi
-rm -f "$DRAIN_TMP" || exit "$?"
+# Retiring the adopted orphans here, in the same committed step that printed
+# them, is the whole loop guard: nothing is ever re-promoted into a new pending
+# batch, so a drain that commits always ends the chain. Only a drain that dies
+# before this point leaves a batch behind, and its records stay reachable in it.
+rm -f ${ORPHANS[@]+"${ORPHANS[@]}"} "$DRAIN_TMP" || exit "$?"
 DRAIN_TMP=
 cs_lock_release "$CS_WAKE_QUEUE_LOCK"
 DRAIN_LOCK_HELD=false
