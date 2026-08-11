@@ -51,8 +51,8 @@ Escalate in order:
    When that question is an open keyed decision or blocker in its status ledger, add `--resolve-key <key>` before the answer so the delivered answer also closes it (`bin/cs-send.sh`'s header owns that contract).
 3. If the soldier is confused or looping, stop the turn with `CS_HOME=<this-home> bin/cs-control.sh interrupt <id>`, then redirect with a single `cs-send` steer.
    The interrupt reports whether the turn actually stopped and whether the composer is clear; a steer sent into a composer that still holds text would be submitted as part of that text.
-   Steer only after the interrupt confirms an agent is still in the pane: it reports `already-idle` and `stopped` only for a positively present agent.
-   An `agent-gone` report means the pane holds no agent to steer, so skip straight to the relaunch step below; a `state-unknown` report means the state could not be read, so inspect the pane with `bin/cs-crew-state.sh <id>` before doing anything else.
+   Steer only after the interrupt confirms an agent is still in the pane: it reports `already-idle` and `stopped` only when the agent's process is positively still there, not merely when herdr believes it is.
+   An `agent-gone` report means the pane holds no agent to steer, so skip straight to the relaunch step below; a `state-unknown` report means the state could not be corroborated either way, so inspect the pane with `bin/cs-crew-state.sh <id>` before doing anything else.
 4. If the soldier is genuinely wedged after redirection, relaunch it: `CS_HOME=<this-home> bin/cs-control.sh relaunch <id> --note '<one line of progress so far>'`.
    Genuine wedging means looping, unresponsive, repeating the same obstacle, or truly dead.
    A low context reading is not wedging; both harnesses auto-compact and keep going.

@@ -75,16 +75,22 @@ cs_control_pane_in_dir() { # <pane_id> <dir>
 
 # Cancel the running turn and leave the agent running. Prints one result token
 # and returns 0 only for a verified postcondition:
-#   already-idle   the agent is positively idle AND still in the pane; nothing
-#                  was delivered
-#   stopped        the turn stopped and the agent is still in the pane
+#   already-idle   the agent is positively idle AND its process is still on the
+#                  pane; nothing was delivered
+#   stopped        the turn stopped and the agent's process is still on the pane
 #   blocked        native blocked: the agent waits on a human, not on a turn
-#   still-working  the key was delivered and the turn did not stop
+#   still-working  the key was delivered and the LAST read still showed a
+#                  running turn
 #   agent-gone     the pane holds no agent - a husk found before the key, or an
 #                  agent that left with the turn; either way there is nothing
 #                  running to interrupt or to steer afterwards
-#   state-unknown  the agent's state could not be read; "cannot tell" is
-#                  reported, never converted into an idle agent
+#   state-unknown  the state cannot be positively read, before the key or after
+#                  it; "cannot tell" is reported, never converted into an idle,
+#                  stopped, or still-running agent
+# "Still in the pane" is PROCESS evidence (cs_control_agent_pid), not herdr's
+# belief from `agent get`: an exited agent can leave a pane whose agent_status
+# still reads idle (bin/cs-herdr-lib.sh, verified live), and only the process
+# table tells that husk apart from an idle agent.
 # The key is delivered exactly ONCE. Codex reads a second Escape as "edit the
 # previous message" and would leave the composer in a different mode, so an
 # unconfirmed interrupt is reported rather than mashed.
@@ -95,12 +101,12 @@ cs_control_interrupt() { # <pane_id> <harness> -> token
     blocked) printf 'blocked\n'; return 1 ;;
     busy) ;;
     *)
-      # Not busy is only idempotent success when an agent is provably still
-      # there to be idle. A husk pane and an unreadable state both land here,
-      # and reporting either as "no turn was running" would send the caller
-      # steering into an empty pane.
+      # Not busy is only idempotent success when an agent process is provably
+      # still there to be idle. A husk pane and an unreadable state both land
+      # here, and reporting either as "no turn was running" would send the
+      # caller steering into an empty pane.
       if [ "$state" = idle ] || [ "$state" = 'done' ]; then
-        if cs_herdr_agent_alive "$pane"; then
+        if cs_control_agent_pid "$pane" >/dev/null 2>&1; then
           printf 'already-idle\n'
           return 0
         fi
@@ -127,7 +133,7 @@ cs_control_interrupt() { # <pane_id> <harness> -> token
     # agent left with the turn, say so instead of reporting a clean interrupt.
     # An agent that merely cannot be read is neither: keep waiting within the
     # bound rather than claiming gone without the husk's positive evidence.
-    if cs_herdr_agent_alive "$pane"; then
+    if cs_control_agent_pid "$pane" >/dev/null 2>&1; then
       printf 'stopped\n'
       return 0
     fi
@@ -136,7 +142,14 @@ cs_control_interrupt() { # <pane_id> <harness> -> token
       return 1
     fi
   done
-  printf 'still-working\n'
+  # The wait is exhausted. Only a turn that was actually OBSERVED running at
+  # the last read is reported as such; a final reading that could not be
+  # corroborated either way stays "cannot tell".
+  if [ "$state" = busy ]; then
+    printf 'still-working\n'
+  else
+    printf 'state-unknown\n'
+  fi
   return 1
 }
 

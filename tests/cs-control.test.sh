@@ -8,10 +8,12 @@
 #      scout refuses every verb.
 #   4. An endpoint herdr cannot positively confirm is refused, dead or unknown.
 #   5. interrupt: a positively idle agent is idempotent success, a stopped turn
-#      is success, a turn that will not stop is reported unconfirmed, native
+#      is success, a turn observed still running is reported unconfirmed, native
 #      blocked is reported as such, a husk pane is reported agent-gone rather
-#      than idle, an unreadable state is reported state-unknown rather than
-#      idle, and the key is delivered EXACTLY once in every case.
+#      than idle - including the stale-belief shape where `agent get` still
+#      reports an agent whose process has left - an uncorroborated state is
+#      reported state-unknown rather than idle or still-working, and the key is
+#      delivered EXACTLY once in every case.
 #   6. exit: already-gone is idempotent success, the harness's own exit command
 #      is sent verbatim with no operational-input marker, a busy target is
 #      interrupted first, unsent composer text is flushed with exactly one Enter
@@ -182,8 +184,22 @@ unreadable=$(cs_control_state "$TMP/s-unreadable" agent= status=idle procinfo_fa
 rc=0
 out=$(run_control "$home" "$unreadable" "$TMP/l-unreadable" interrupt t1) || rc=$?
 expect_code 1 "$rc" "an unreadable agent state is not an idle agent"
-assert_contains "$out" "could not be read" "cannot-tell is reported as state-unknown, not idle"
+assert_contains "$out" "cannot be positively read" "cannot-tell is reported as state-unknown, not idle"
 [ "$(esc_count "$TMP/l-unreadable")" -eq 0 ] || fail "an unreadable state must not be sent the interrupt key"
+
+stale=$(cs_control_state "$TMP/s-stale" agent=codex status=idle proc_absent=1)
+rc=0
+out=$(run_control "$home" "$stale" "$TMP/l-stale" interrupt t1) || rc=$?
+expect_code 1 "$rc" "herdr's belief without an agent process is not an idle agent"
+assert_contains "$out" "no longer holds an agent" "a stale-belief husk is reported agent-gone, not idle"
+[ "$(esc_count "$TMP/l-stale")" -eq 0 ] || fail "a stale-belief husk must not be sent the interrupt key"
+
+murky=$(cs_control_state "$TMP/s-murky" agent=codex status=working on_esc=idle procinfo_fail=1)
+rc=0
+out=$(run_control "$home" "$murky" "$TMP/l-murky" interrupt t1) || rc=$?
+expect_code 1 "$rc" "a stop that cannot be corroborated is not confirmed"
+assert_contains "$out" "cannot be positively read" "an uncorroborated final reading is state-unknown, not still-working"
+[ "$(esc_count "$TMP/l-murky")" -eq 1 ] || fail "the murky case still delivers the key exactly once"
 pass "cs-control: every interrupt outcome is verified, and the key is sent once"
 
 # --- 6. exit postconditions -------------------------------------------------
@@ -192,6 +208,12 @@ husk=$(cs_control_state "$TMP/s-husk" agent= status=idle)
 out=$(run_control "$home" "$husk" "$TMP/l-husk" exit t1) || fail "exit on a husk must succeed: $out"
 assert_contains "$out" "agent gone from pane" "an already-stopped agent is idempotent success"
 assert_no_line "$(cat "$TMP/l-husk")" 'send-text' "nothing is typed into a pane with no agent"
+
+stale_husk=$(cs_control_state "$TMP/s-stalehusk" agent=codex status=idle proc_absent=1)
+out=$(run_control "$home" "$stale_husk" "$TMP/l-stalehusk" exit t1) ||
+  fail "exit on a stale-belief husk must succeed - relaunching a husk is the main recovery case: $out"
+assert_contains "$out" "agent gone from pane" "a stale-belief husk is idempotent exit success"
+assert_no_line "$(cat "$TMP/l-stalehusk")" 'send-text' "nothing is typed into a stale-belief husk"
 
 quits=$(cs_control_state "$TMP/s-quits" agent=codex status=idle on_enter=gone)
 out=$(run_control "$home" "$quits" "$TMP/l-quits" exit t1) || fail "exit must succeed when the agent leaves: $out"

@@ -28,6 +28,9 @@
 #                  empty glyph
 #   procinfo_fail  non-empty: `pane process-info` fails (table unreadable), so
 #                  the husk predicate must refuse rather than report a husk
+#   proc_absent    non-empty: the process table is readable but holds NO agent
+#                  process even while `agent get` still reports one - the
+#                  stale-belief husk shape a real exited agent can leave behind
 #   on_esc         `idle` sets status=idle when Escape arrives; `gone` removes
 #                  the agent; absent leaves the state alone
 #   on_enter       `gone` removes the agent when Enter arrives; `busy` sets
@@ -82,11 +85,13 @@ case "$1 $2" in
   "agent wait") echo '{}' ;;
   "pane process-info")
     [ -n "$(read_state procinfo_fail)" ] && exit 1
-    if [ -z "$(read_state agent)" ]; then
+    if [ -z "$(read_state agent)" ] || [ -n "$(read_state proc_absent)" ]; then
       printf '{"result":{"process_info":{"shell_pid":10,"foreground_processes":[]}}}\n'
     else
+      pid=$(read_state pid)
+      case "$pid" in ''|*[!0-9]*) pid=4242 ;; esac
       printf '{"result":{"process_info":{"shell_pid":10,"foreground_processes":[{"pid":%s,"argv0":"%s","cwd":"%s"}]}}}\n' \
-        "$(read_state pid)" "$(read_state agent)" "$(read_state cwd)"
+        "$pid" "$(read_state agent)" "$(read_state cwd)"
     fi
     ;;
   "pane read")

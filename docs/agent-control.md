@@ -22,7 +22,7 @@ There is no backend matrix to consult: consigliere has one runtime (herdr) and t
 
 | Verb | Effect | Postcondition |
 | --- | --- | --- |
-| `interrupt` | Deliver the harness's interrupt key (Escape on both) and leave the agent running. | The turn is no longer running and an agent is still in the pane. Already idle is idempotent success only for an agent positively still there: a husk pane reports `agent-gone` and an unreadable state reports `state-unknown`, both as failures rather than as an idle agent. |
+| `interrupt` | Deliver the harness's interrupt key (Escape on both) and leave the agent running. | The turn is no longer running and the agent's PROCESS is still on the pane - process evidence, not herdr's belief, because an exited agent can leave a stale idle status behind (docs/herdr.md). Already idle is idempotent success only with that evidence: a husk pane reports `agent-gone`, and a state that cannot be corroborated either way - before the key or at the end of the wait - reports `state-unknown`, both as failures rather than as an idle or still-running agent. |
 | `exit` | Stop the agent, preserving the pane, its shell, the worktree, and every uncommitted change. Unsent composer text is flushed first (see below). | The pane is POSITIVELY agent-free: its process table was read and holds no agent process. Already gone is idempotent success. |
 | `relaunch` | Replace the running agent with a new one in the same pane and worktree, on the recorded profile or an explicitly chosen model and effort. | An agent is alive on the recorded pane under a DIFFERENT process than the one that was stopped. |
 

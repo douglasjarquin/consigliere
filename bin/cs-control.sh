@@ -41,9 +41,12 @@
 #                to resume; its turn end is process exit.
 #
 # EVERY ACTION VERIFIES ITS POSTCONDITION (bin/cs-control-lib.sh owns them):
-#   interrupt  the turn is no longer running and the agent is still in the pane.
-#              Already idle is idempotent success. The interrupt key is sent
-#              exactly once; an unconfirmed interrupt is reported, never mashed.
+#   interrupt  the turn is no longer running and the agent's PROCESS is still on
+#              the pane - process evidence, not herdr's belief, because an exited
+#              agent can leave a stale idle status behind. Already idle is
+#              idempotent success only with that evidence. The interrupt key is
+#              sent exactly once; an unconfirmed interrupt is reported, never
+#              mashed.
 #   exit       the pane is positively agent-free (its process table was read and
 #              holds no agent process). Already gone is idempotent success.
 #              Unsent text in the composer would be submitted together with the
@@ -221,9 +224,9 @@ if [ "$VERB" = interrupt ]; then
     stopped)      report "interrupt $ID: turn stopped, agent still running (pane $PANE, composer $composer)" ;;
     already-idle) report "interrupt $ID: no turn was running (pane $PANE, composer $composer)" ;;
     blocked)      report "interrupt $ID: NOT interrupted - the agent is waiting on a human (native blocked), not on a turn (pane $PANE)" ;;
-    still-working) report "interrupt $ID: NOT confirmed - the interrupt key was delivered and the turn is still running after ${CS_CONTROL_INTERRUPT_WAIT_SECS}s (pane $PANE)" ;;
+    still-working) report "interrupt $ID: NOT confirmed - the interrupt key was delivered and the turn was still observed running after ${CS_CONTROL_INTERRUPT_WAIT_SECS}s (pane $PANE)" ;;
     agent-gone)   report "interrupt $ID: pane $PANE no longer holds an agent; there is no turn to stop and nothing there to steer - recover through the stuck-soldier-recovery playbook" ;;
-    state-unknown) report "interrupt $ID: NOT confirmed - the agent's state on pane $PANE could not be read, so no key was delivered; \"cannot tell\" is never reported as idle" ;;
+    state-unknown) report "interrupt $ID: NOT confirmed - the agent's state on pane $PANE cannot be positively read; \"cannot tell\" is never reported as an idle, stopped, or running agent" ;;
     *)            report "interrupt $ID: NOT confirmed ($token, pane $PANE)" ;;
   esac
   exit "$rc"

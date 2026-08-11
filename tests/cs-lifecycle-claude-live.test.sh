@@ -126,7 +126,7 @@ assert_contains "$out" "no turn was running" "an idle agent is idempotent succes
 
 # Steer only into an agent that is BETWEEN turns: a steer delivered mid-turn is
 # queued into the composer instead, and a queued line is exactly what the exit
-# verb refuses to type onto (docs/claude.md).
+# verb has to flush with one Enter before its command (docs/claude.md).
 wait_not_busy "$PANE" 180 || true
 out=$("$ROOT/bin/cs-send.sh" "$ID" "Count slowly from 1 to 60, one number per line, then stop." 2>&1) ||
   fail "steer for the interrupt case failed: $out"
