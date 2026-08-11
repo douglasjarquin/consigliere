@@ -222,7 +222,8 @@ if [ "$VERB" = interrupt ]; then
     already-idle) report "interrupt $ID: no turn was running (pane $PANE, composer $composer)" ;;
     blocked)      report "interrupt $ID: NOT interrupted - the agent is waiting on a human (native blocked), not on a turn (pane $PANE)" ;;
     still-working) report "interrupt $ID: NOT confirmed - the interrupt key was delivered and the turn is still running after ${CS_CONTROL_INTERRUPT_WAIT_SECS}s (pane $PANE)" ;;
-    agent-gone)   report "interrupt $ID: the turn stopped and the agent LEFT the pane (pane $PANE); it is no longer running" ;;
+    agent-gone)   report "interrupt $ID: pane $PANE no longer holds an agent; there is no turn to stop and nothing there to steer - recover through the stuck-soldier-recovery playbook" ;;
+    state-unknown) report "interrupt $ID: NOT confirmed - the agent's state on pane $PANE could not be read, so no key was delivered; \"cannot tell\" is never reported as idle" ;;
     *)            report "interrupt $ID: NOT confirmed ($token, pane $PANE)" ;;
   esac
   exit "$rc"
@@ -278,6 +279,17 @@ WT_TOP=$(git -C "$WT_REAL" rev-parse --show-toplevel 2>/dev/null || true)
 WT_TOP_REAL=$(cd "${WT_TOP:-/nonexistent}" 2>/dev/null && pwd -P) || WT_TOP_REAL=
 [ -n "$WT_TOP_REAL" ] && [ "$WT_TOP_REAL" = "$WT_REAL" ] ||
   die "recorded worktree $WT_REAL is not its own git worktree root (git reports '${WT_TOP:-none}'); refusing to relaunch into it"
+# The launch owner (bin/cs-spawn.sh --relaunch) refuses a pane whose shell is
+# not sitting in the recorded worktree; checked here too, BEFORE the agent is
+# stopped, so that drift is a byte-identical refusal instead of a post-stop
+# failure with the agent already down.
+cwd_rc=0
+cs_control_pane_in_dir "$PANE" "$WT_REAL" || cwd_rc=$?
+case "$cwd_rc" in
+  0) ;;
+  1) die "pane $PANE's shell is not in the recorded worktree $WT_REAL; a replacement launched there would run outside the copy holding the work. Reconcile the pane with the stuck-soldier-recovery playbook before relaunching" ;;
+  *) die "herdr did not report a working directory for pane $PANE; refusing to relaunch into an unverified location" ;;
+esac
 
 JOURNAL=$(cs_control_journal_path "$STATE" "$ID")
 if [ -e "$JOURNAL" ]; then

@@ -111,6 +111,17 @@ dead=$(cs_control_state "$TMP/s-dead" agent= pane_absent=1 cwd="$home/wt")
 rc=0; out=$(run_relaunch "$home" "$dead" "$TMP/l" t1 --note n) || rc=$?
 expect_code 1 "$rc" "a dead endpoint refuses"
 
+drifted=$(cs_control_state "$TMP/s-drifted" agent=codex status=idle cwd="$TMP")
+rc=0; out=$(run_relaunch "$home" "$drifted" "$TMP/l" t1 --note n) || rc=$?
+expect_code 1 "$rc" "a pane sitting outside the recorded worktree refuses BEFORE the stop"
+assert_contains "$out" "is not in the recorded worktree" "the refusal names the drift"
+assert_no_line "$(cat "$TMP/l")" 'send-text' "no agent is stopped on a drifted pane"
+
+nodircwd=$(cs_control_state "$TMP/s-nodircwd" agent=codex status=idle cwd=)
+rc=0; out=$(run_relaunch "$home" "$nodircwd" "$TMP/l" t1 --note n) || rc=$?
+expect_code 1 "$rc" "an unreportable pane cwd refuses BEFORE the stop"
+assert_contains "$out" "did not report a working directory" "the refusal distinguishes unknown from mismatched"
+
 [ "$(manifest "$home")" = "$before" ] || {
   printf -- '--- before ---\n%s\n--- after ---\n%s\n' "$before" "$(manifest "$home")" >&2
   fail "every refusal must leave this home's records and the brief byte-identical"
@@ -227,7 +238,6 @@ pass "cs-control relaunch: a failure after the stop reports the concrete state"
 home=$(setup_home killed)
 state=$(cs_control_state "$TMP/s-killed" agent=codex status=idle pid=700 cwd="$home/wt" \
   on_enter=gone on_run=up)
-cs_meta_write() { :; }  # not used here; the journal is written by hand on purpose
 printf 'phase=stopped\ntask=t1\npane=w1:p1\npre_pid=699\n' > "$home/state/t1.control-relaunch"
 rc=0
 out=$(run_relaunch "$home" "$state" "$TMP/l-killed" t1 --note n) || rc=$?

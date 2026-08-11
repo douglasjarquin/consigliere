@@ -51,6 +51,8 @@ Escalate in order:
    When that question is an open keyed decision or blocker in its status ledger, add `--resolve-key <key>` before the answer so the delivered answer also closes it (`bin/cs-send.sh`'s header owns that contract).
 3. If the soldier is confused or looping, stop the turn with `CS_HOME=<this-home> bin/cs-control.sh interrupt <id>`, then redirect with a single `cs-send` steer.
    The interrupt reports whether the turn actually stopped and whether the composer is clear; a steer sent into a composer that still holds text would be submitted as part of that text.
+   Steer only after the interrupt confirms an agent is still in the pane: it reports `already-idle` and `stopped` only for a positively present agent.
+   An `agent-gone` report means the pane holds no agent to steer, so skip straight to the relaunch step below; a `state-unknown` report means the state could not be read, so inspect the pane with `bin/cs-crew-state.sh <id>` before doing anything else.
 4. If the soldier is genuinely wedged after redirection, relaunch it: `CS_HOME=<this-home> bin/cs-control.sh relaunch <id> --note '<one line of progress so far>'`.
    Genuine wedging means looping, unresponsive, repeating the same obstacle, or truly dead.
    A low context reading is not wedging; both harnesses auto-compact and keep going.
@@ -60,7 +62,8 @@ Escalate in order:
    If it refuses before stopping the old agent, nothing changed and the refusal names what to fix; if it fails after stopping it, no agent is running and the message names where the work is preserved.
    When herdr's own reading disagrees with what the pane appears to be doing, `cs_herdr_agent_explain` (`bin/cs-herdr-lib.sh`) names the detection rule that decided it, so the disagreement is explained rather than guessed at.
 5. If `exit` or `relaunch` reports that it could not stop the agent, do not force it and do not tear the task down to get past it.
-   Read the concrete state it reported (unsent text in the composer, a turn that would not cancel, an unreadable process table), clear that specific obstacle, and try the verb again.
-   Unsent composer text already gets one submit-and-cancel attempt inside the verb, so a `composer` refusal means the text survived that: read the pane with `bin/cs-peek.sh <id>` and settle what is actually sitting there before trying again.
+   Read the concrete state it reported (a turn that would not cancel, an agent that stayed after the exit command, an unreadable process table), clear that specific obstacle, and try the verb again.
+   Unsent composer text is never a refusal: the verb submits it with one Enter, cancels whatever turn that starts, and types the exit command regardless of what the composer classifier still says, so only the verified postcondition decides the outcome.
+   If the verb still reports the agent running after that, read the pane with `bin/cs-peek.sh <id>` and settle what is actually sitting there before trying again.
    A pane whose agent cannot be stopped at all is recovered by closing the pane and reopening the surviving worktree with `herdr worktree open --path`, which is endpoint replacement, not work discard.
 6. If a second relaunch fails too, write `failed` to the backlog and tell the boss the plain failure, preserved work, and consequence using `AGENTS.md` section 9; do not mention metadata, pane, or worktree unless the path itself is needed for action.

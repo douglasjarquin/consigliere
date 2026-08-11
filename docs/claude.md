@@ -224,7 +224,7 @@ The mechanics `bin/cs-control.sh` drives, measured the same way as the codex sid
   queued-after-second-esc:  state=pending busy=idle     # a second esc does NOT clear it
   ```
 
-  Typing the exit command onto it submits the concatenation as a prompt, and the agent reasons about it instead of exiting: `⏺ No task in message. /exit is CLI built-in - type it directly in terminal to quit session.` Cancelling a turn with NOTHING queued leaves the composer empty, measured repeatedly over 15s. Since herdr has no key that clears a composer (docs/herdr.md), `bin/cs-control-lib.sh` submits the line with one Enter, cancels the turn it starts, and only then types the exit command; a composer still non-empty after that refuses.
+  Typing the exit command onto it submits the concatenation as a prompt, and the agent reasons about it instead of exiting: `⏺ No task in message. /exit is CLI built-in - type it directly in terminal to quit session.` Cancelling a turn with NOTHING queued leaves the composer empty, measured repeatedly over 15s. Since herdr has no key that clears a composer (docs/herdr.md), `bin/cs-control-lib.sh` submits the line with one Enter, cancels the turn it starts, and then types the exit command regardless of what the classifier still says - the verified postcondition decides the outcome, because a row that survives the flush is not unsent input (the shell-prompt collision below is what it usually is).
 - **The zsh prompt glyph collides with claude's composer glyph, and the collision is visible in a real soldier pane.** Sampled from a live `cs-spawn`ed soldier at mode `--format ansi`, the row `cs_composer_state` matched immediately after launch was the pane's SHELL prompt, not claude's composer:
 
   ```text

@@ -9,7 +9,8 @@
 # Requires, sourced first by the caller (the same contract bin/cs-prompt-lib.sh
 # uses): bin/cs-herdr-lib.sh and bin/cs-harness-lib.sh for every function,
 # bin/cs-meta-lib.sh for the journal, and bin/cs-composer-lib.sh for
-# cs_control_exit (which refuses to type into a composer holding unsent text).
+# cs_control_exit (which flushes a composer holding unsent text with one Enter
+# before typing its command; the flush comment below owns why).
 #
 # What this library deliberately does NOT do: remove a worktree, close a pane,
 # delete a branch, or discard a change. Stopping an agent and destroying its work
@@ -74,11 +75,16 @@ cs_control_pane_in_dir() { # <pane_id> <dir>
 
 # Cancel the running turn and leave the agent running. Prints one result token
 # and returns 0 only for a verified postcondition:
-#   already-idle   the agent was not mid-turn; nothing was delivered
+#   already-idle   the agent is positively idle AND still in the pane; nothing
+#                  was delivered
 #   stopped        the turn stopped and the agent is still in the pane
 #   blocked        native blocked: the agent waits on a human, not on a turn
 #   still-working  the key was delivered and the turn did not stop
-#   agent-gone     the pane no longer holds an agent, which interrupt must not do
+#   agent-gone     the pane holds no agent - a husk found before the key, or an
+#                  agent that left with the turn; either way there is nothing
+#                  running to interrupt or to steer afterwards
+#   state-unknown  the agent's state could not be read; "cannot tell" is
+#                  reported, never converted into an idle agent
 # The key is delivered exactly ONCE. Codex reads a second Escape as "edit the
 # previous message" and would leave the composer in a different mode, so an
 # unconfirmed interrupt is reported rather than mashed.
@@ -88,7 +94,24 @@ cs_control_interrupt() { # <pane_id> <harness> -> token
   case "$state" in
     blocked) printf 'blocked\n'; return 1 ;;
     busy) ;;
-    *) printf 'already-idle\n'; return 0 ;;
+    *)
+      # Not busy is only idempotent success when an agent is provably still
+      # there to be idle. A husk pane and an unreadable state both land here,
+      # and reporting either as "no turn was running" would send the caller
+      # steering into an empty pane.
+      if [ "$state" = idle ] || [ "$state" = 'done' ]; then
+        if cs_herdr_agent_alive "$pane"; then
+          printf 'already-idle\n'
+          return 0
+        fi
+      fi
+      if cs_control_agent_gone "$pane"; then
+        printf 'agent-gone\n'
+      else
+        printf 'state-unknown\n'
+      fi
+      return 1
+      ;;
   esac
   key=$(cs_harness_interrupt_key "$harness") || { printf 'unknown-harness\n'; return 1; }
   cs_herdr_send_keys "$pane" "$key" >/dev/null 2>&1 || { printf 'key-not-delivered\n'; return 1; }
@@ -102,12 +125,16 @@ cs_control_interrupt() { # <pane_id> <harness> -> token
     esac
     # Not busy any more. Interrupt must leave the agent in the pane; if the
     # agent left with the turn, say so instead of reporting a clean interrupt.
+    # An agent that merely cannot be read is neither: keep waiting within the
+    # bound rather than claiming gone without the husk's positive evidence.
     if cs_herdr_agent_alive "$pane"; then
       printf 'stopped\n'
       return 0
     fi
-    printf 'agent-gone\n'
-    return 1
+    if cs_control_agent_gone "$pane"; then
+      printf 'agent-gone\n'
+      return 1
+    fi
   done
   printf 'still-working\n'
   return 1
@@ -200,7 +227,10 @@ cs_control_stop() { # <pane_id> <harness> -> "<interrupt-token> <exit-token>"
   case "$itok" in
     already-idle|stopped) ;;
     agent-gone)
-      # The agent left with the turn: the exit postcondition is already met.
+      # The pane holds no agent - a husk, or an agent that left with the turn.
+      # The exit postcondition is already met, and relaunching a husk is the
+      # main recovery case this plane exists for, so the exit verb still runs
+      # and confirms it rather than reporting exit-not-attempted.
       etok=$(cs_control_exit "$pane" "$harness") || true
       printf '%s %s\n' "$itok" "$etok"
       case "$etok" in already-gone|gone) return 0 ;; *) return 1 ;; esac

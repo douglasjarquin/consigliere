@@ -22,7 +22,7 @@ There is no backend matrix to consult: consigliere has one runtime (herdr) and t
 
 | Verb | Effect | Postcondition |
 | --- | --- | --- |
-| `interrupt` | Deliver the harness's interrupt key (Escape on both) and leave the agent running. | The turn is no longer running and an agent is still in the pane. Already idle is idempotent success. |
+| `interrupt` | Deliver the harness's interrupt key (Escape on both) and leave the agent running. | The turn is no longer running and an agent is still in the pane. Already idle is idempotent success only for an agent positively still there: a husk pane reports `agent-gone` and an unreadable state reports `state-unknown`, both as failures rather than as an idle agent. |
 | `exit` | Stop the agent, preserving the pane, its shell, the worktree, and every uncommitted change. Unsent composer text is flushed first (see below). | The pane is POSITIVELY agent-free: its process table was read and holds no agent process. Already gone is idempotent success. |
 | `relaunch` | Replace the running agent with a new one in the same pane and worktree, on the recorded profile or an explicitly chosen model and effort. | An agent is alive on the recorded pane under a DIFFERENT process than the one that was stopped. |
 
@@ -79,7 +79,7 @@ That is the same evidence the transaction verifies afterwards, so the launch own
 - **A capo is refused for `exit` and `relaunch`.** A capo is a persistent home with its own state, backlog, and child tree; the `capo-provisioning` skill owns that lifecycle. `interrupt` is allowed, because cancelling a turn changes nothing durable.
 - **A headless scout is refused for every verb.** It is a plain `codex exec` / `claude -p` process with no composer to type into and no interactive agent to resume; its turn end is process exit.
 - **The harness is not switchable.** A soldier inherits the root session's harness (`AGENTS.md` section 4), so moving one soldier alone would break that inheritance. Model and effort are switchable per relaunch and are recorded only once an agent is confirmed.
-- **`bin/cs-spawn.sh --relaunch` refuses independently** unless the recorded pane is positively agent-free AND its shell is sitting in the recorded worktree, so a replacement can never join a live agent or start outside the copy holding the work. It also refuses the dispatch policy: a relaunch keeps the profile the task was dispatched on, so a policy edited since then never silently moves a running task's model.
+- **`bin/cs-spawn.sh --relaunch` refuses independently** unless the recorded pane is positively agent-free AND its shell is sitting in the recorded worktree, so a replacement can never join a live agent or start outside the copy holding the work. `bin/cs-control.sh` makes the same worktree check before stopping the old agent, so a drifted pane is a byte-identical refusal instead of a post-stop failure. It also refuses the dispatch policy: a relaunch keeps the profile the task was dispatched on, so a policy edited since then never silently moves a running task's model.
 
 ## Verification
 

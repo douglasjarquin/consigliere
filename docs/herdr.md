@@ -80,7 +80,7 @@ $ herdr pane send-keys --help
 Use esc as the canonical Escape key name; escape is also accepted.
 ```
 
-Consequence for the agent-control plane: there is no way to CLEAR a composer through herdr, so a lifecycle command can never be typed safely into a composer that already holds unsent text; `bin/cs-control-lib.sh` refuses that case instead of clearing it (docs/agent-control.md).
+Consequence for the agent-control plane: there is no way to CLEAR a composer through herdr, so `bin/cs-control-lib.sh` gets past unsent text by SUBMITTING it - one flush Enter, cancel the turn that starts, then type the exit command regardless of what the classifier still says, with the verified postcondition deciding the outcome (docs/agent-control.md).
 
 `pane get` reports the pane's own working directory beside the foreground process's, both physically resolved:
 

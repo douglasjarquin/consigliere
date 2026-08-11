@@ -7,9 +7,11 @@
 #   3. A capo target refuses exit and relaunch and allows interrupt; a headless
 #      scout refuses every verb.
 #   4. An endpoint herdr cannot positively confirm is refused, dead or unknown.
-#   5. interrupt: idle is idempotent success, a stopped turn is success, a turn
-#      that will not stop is reported unconfirmed, native blocked is reported as
-#      such, and the key is delivered EXACTLY once in every case.
+#   5. interrupt: a positively idle agent is idempotent success, a stopped turn
+#      is success, a turn that will not stop is reported unconfirmed, native
+#      blocked is reported as such, a husk pane is reported agent-gone rather
+#      than idle, an unreadable state is reported state-unknown rather than
+#      idle, and the key is delivered EXACTLY once in every case.
 #   6. exit: already-gone is idempotent success, the harness's own exit command
 #      is sent verbatim with no operational-input marker, a busy target is
 #      interrupted first, unsent composer text is flushed with exactly one Enter
@@ -167,7 +169,21 @@ vanished=$(cs_control_state "$TMP/s-vanished" agent=codex status=working on_esc=
 rc=0
 out=$(run_control "$home" "$vanished" "$TMP/l-vanished" interrupt t1) || rc=$?
 expect_code 1 "$rc" "an agent that left with the turn is not a clean interrupt"
-assert_contains "$out" "LEFT the pane" "interrupt never reports an exit as an interrupt"
+assert_contains "$out" "no longer holds an agent" "interrupt never reports an exit as an interrupt"
+
+huski=$(cs_control_state "$TMP/s-huski" agent= status=idle)
+rc=0
+out=$(run_control "$home" "$huski" "$TMP/l-huski" interrupt t1) || rc=$?
+expect_code 1 "$rc" "a husk pane is not an idle agent"
+assert_contains "$out" "no longer holds an agent" "a husk is reported as agent-gone, not idle"
+[ "$(esc_count "$TMP/l-huski")" -eq 0 ] || fail "a husk must not be sent the interrupt key"
+
+unreadable=$(cs_control_state "$TMP/s-unreadable" agent= status=idle procinfo_fail=1)
+rc=0
+out=$(run_control "$home" "$unreadable" "$TMP/l-unreadable" interrupt t1) || rc=$?
+expect_code 1 "$rc" "an unreadable agent state is not an idle agent"
+assert_contains "$out" "could not be read" "cannot-tell is reported as state-unknown, not idle"
+[ "$(esc_count "$TMP/l-unreadable")" -eq 0 ] || fail "an unreadable state must not be sent the interrupt key"
 pass "cs-control: every interrupt outcome is verified, and the key is sent once"
 
 # --- 6. exit postconditions -------------------------------------------------
