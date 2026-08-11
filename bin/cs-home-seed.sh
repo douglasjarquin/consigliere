@@ -85,6 +85,11 @@ esac
 . "$SCRIPT_DIR/cs-inherit-lib.sh"
 # shellcheck source=bin/cs-herdr-lib.sh
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
+# The two sweep halves below, and each capo inside them, carry one elapsed-time
+# record. Inert unless the run that launched this one asked for recording
+# (bin/cs-timing-lib.sh).
+# shellcheck source=bin/cs-timing-lib.sh
+. "$SCRIPT_DIR/cs-timing-lib.sh"
 
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
@@ -889,33 +894,44 @@ sweep_activation_home() {  # <id> <home>  - CAPO_SYNC line only when it acts
   fi
 }
 
+# One registry row's convergence. This is the loop body of sweep_sync, lifted
+# into a function so it can be bracketed by one elapsed-time record per capo:
+# each former `continue` is a `return 0` here and means exactly what it did, and
+# the already-converged set it consults across rows is the one piece of state
+# that has to outlive a single call.
+sweep_sync_home() {  # <status> <id> <home> <raw>
+  local status=$1 id=$2 home=$3 raw=$4 abs_home result
+  if [ "$status" != ok ]; then
+    echo "CAPO_SYNC: skipped: malformed capo registry entry: $raw"
+    return 0
+  fi
+  if result=$(sweep_validate_home "$id" "$home"); then
+    abs_home=$result
+  else
+    echo "CAPO_SYNC: capo $id: skipped: ${result:-unsafe home}"
+    return 0
+  fi
+  case " $SWEEP_SYNC_SEEN " in
+    *" $abs_home "*) return 0 ;;
+  esac
+  SWEEP_SYNC_SEEN="$SWEEP_SYNC_SEEN $abs_home"
+  sweep_ff_home "$id" "$abs_home"
+  sweep_activation_home "$id" "$abs_home"
+  cs_inherit_converge "$CS_HOME" "$abs_home" "$id" || {
+    echo "CAPO_SYNC: capo $id: skipped: inheritance failed"
+  }
+}
+
 sweep_sync() {
-  local status id home scope raw abs_home result seen=""
+  local status id home scope raw
   load_registry_records || {
     echo "CAPO_SYNC: skipped: $REGISTRY_RECORDS_ERROR"
     return 0
   }
   [ -n "$REGISTRY_RECORDS" ] || return 0
+  SWEEP_SYNC_SEEN=""
   while IFS=$'\t' read -r status id home scope raw; do
-    if [ "$status" != ok ]; then
-      echo "CAPO_SYNC: skipped: malformed capo registry entry: $raw"
-      continue
-    fi
-    if result=$(sweep_validate_home "$id" "$home"); then
-      abs_home=$result
-    else
-      echo "CAPO_SYNC: capo $id: skipped: ${result:-unsafe home}"
-      continue
-    fi
-    case " $seen " in
-      *" $abs_home "*) continue ;;
-    esac
-    seen="$seen $abs_home"
-    sweep_ff_home "$id" "$abs_home"
-    sweep_activation_home "$id" "$abs_home"
-    cs_inherit_converge "$CS_HOME" "$abs_home" "$id" || {
-      echo "CAPO_SYNC: capo $id: skipped: inheritance failed"
-    }
+    cs_timed capo-sync "$id" sweep_sync_home "$status" "$id" "$home" "$raw"
   done <<< "$REGISTRY_RECORDS"
 }
 
@@ -935,8 +951,55 @@ sweep_probe_agent() {  # <pane> -> alive|dead|unknown
   fi
 }
 
+# One capo's liveness probe and, when it is dead, its respawn. Lifted out of
+# sweep_liveness's loop for the same reason sweep_sync_home was: each former
+# `continue` is a `return 0` with the same meaning, and the whole body is now one
+# timed unit, so a slow probe or a slow respawn names the capo it belongs to.
+sweep_liveness_meta() {  # <meta> <id> <herdr-ok>
+  local meta=$1 id=$2 herdr_ok=$3 pane home verdict out meta_backup
+  pane=$(grep '^pane=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  # A meta with no recorded pane is left to the recovery path (AGENTS.md
+  # section 5 / capo-provisioning); there is no endpoint here to probe. It is
+  # reported rather than skipped silently so the accounting stays complete.
+  if [ -z "$pane" ]; then
+    echo "CAPO_LIVENESS: capo $id: skipped: local record has no endpoint (recover via capo-provisioning)"
+    return 0
+  fi
+  if [ "$herdr_ok" != 1 ]; then
+    echo "CAPO_LIVENESS: capo $id: skipped: herdr unreachable"
+    return 0
+  fi
+  home=$(grep '^home=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  [ -n "$home" ] || home=$(cs_capo_registry_field "$REG" "$id" home 2>/dev/null || true)
+  verdict=$(sweep_probe_agent "$pane")
+  case "$verdict" in
+    alive) ;;
+    dead)
+      if [ -z "$home" ]; then
+        echo "CAPO_LIVENESS: capo $id: skipped: dead endpoint but no recorded home"
+        return 0
+      fi
+      cs_herdr_pane_close "$pane" >/dev/null 2>&1 || true
+      # cs-spawn refuses a pre-existing meta, so move the stale record
+      # aside and restore it if the respawn fails.
+      meta_backup="$meta.pre-respawn"
+      mv "$meta" "$meta_backup"
+      if out=$("$SPAWN_BIN" "$id" "$home" --capo 2>&1); then
+        rm -f "$meta_backup"
+      else
+        mv "$meta_backup" "$meta" 2>/dev/null || true
+        echo "CAPO_LIVENESS: capo $id: respawn failed: $(first_line "$out")"
+      fi
+      ;;
+    *)
+      echo "CAPO_LIVENESS: capo $id: skipped: liveness probe inconclusive"
+      ;;
+  esac
+  return 0
+}
+
 sweep_liveness() {
-  local meta id pane home verdict out meta_backup herdr_ok=1
+  local meta id herdr_ok=1
   [ -d "$STATE" ] || return 0
   cs_herdr_require >/dev/null 2>&1 || herdr_ok=0
   if [ "$herdr_ok" = 1 ]; then
@@ -946,51 +1009,14 @@ sweep_liveness() {
     [ -f "$meta" ] || continue
     grep -q '^kind=capo$' "$meta" 2>/dev/null || continue
     id=$(basename "$meta" .meta)
-    pane=$(grep '^pane=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
-    # A meta with no recorded pane is left to the recovery path (AGENTS.md
-    # section 5 / capo-provisioning); there is no endpoint here to probe. It is
-    # reported rather than skipped silently so the accounting stays complete.
-    if [ -z "$pane" ]; then
-      echo "CAPO_LIVENESS: capo $id: skipped: local record has no endpoint (recover via capo-provisioning)"
-      continue
-    fi
-    if [ "$herdr_ok" != 1 ]; then
-      echo "CAPO_LIVENESS: capo $id: skipped: herdr unreachable"
-      continue
-    fi
-    home=$(grep '^home=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2- || true)
-    [ -n "$home" ] || home=$(cs_capo_registry_field "$REG" "$id" home 2>/dev/null || true)
-    verdict=$(sweep_probe_agent "$pane")
-    case "$verdict" in
-      alive) ;;
-      dead)
-        if [ -z "$home" ]; then
-          echo "CAPO_LIVENESS: capo $id: skipped: dead endpoint but no recorded home"
-          continue
-        fi
-        cs_herdr_pane_close "$pane" >/dev/null 2>&1 || true
-        # cs-spawn refuses a pre-existing meta, so move the stale record
-        # aside and restore it if the respawn fails.
-        meta_backup="$meta.pre-respawn"
-        mv "$meta" "$meta_backup"
-        if out=$("$SPAWN_BIN" "$id" "$home" --capo 2>&1); then
-          rm -f "$meta_backup"
-        else
-          mv "$meta_backup" "$meta" 2>/dev/null || true
-          echo "CAPO_LIVENESS: capo $id: respawn failed: $(first_line "$out")"
-        fi
-        ;;
-      *)
-        echo "CAPO_LIVENESS: capo $id: skipped: liveness probe inconclusive"
-        ;;
-    esac
+    cs_timed capo-liveness "$id" sweep_liveness_meta "$meta" "$id" "$herdr_ok"
   done
   return 0
 }
 
 sweep() {
-  sweep_sync
-  sweep_liveness
+  cs_timed capo-sync '' sweep_sync
+  cs_timed capo-liveness '' sweep_liveness
   return 0
 }
 

@@ -37,6 +37,11 @@ cs_resolve_root
 PROJECTS="${CS_PROJECTS_OVERRIDE:-$CS_HOME/projects}"
 # shellcheck source=bin/cs-lock-lib.sh
 . "$SCRIPT_DIR/cs-lock-lib.sh"
+# One elapsed-time record per clone, so a sweep that took a minute names the
+# clone that held it. Inert unless the run that launched this one asked for
+# recording (bin/cs-timing-lib.sh).
+# shellcheck source=bin/cs-timing-lib.sh
+. "$SCRIPT_DIR/cs-timing-lib.sh"
 CS_LOCK_LOG_PREFIX=fleet-sync
 "$CS_ROOT/bin/cs-guard.sh" || true
 
@@ -420,7 +425,8 @@ sync_project() {
 }
 
 if [ $# -eq 1 ] && [ "$1" != "--all" ]; then
-  sync_project "$(resolve_project_arg "$1")"
+  ONE_PROJ=$(resolve_project_arg "$1")
+  cs_timed clone-refresh "$(basename "$ONE_PROJ")" sync_project "$ONE_PROJ"
   exit 0
 fi
 
@@ -429,5 +435,5 @@ fi
 for proj in "$PROJECTS"/*; do
   [ -e "$proj" ] || continue
   [ -d "$proj" ] || continue
-  sync_project "$proj"
+  cs_timed clone-refresh "$(basename "$proj")" sync_project "$proj"
 done

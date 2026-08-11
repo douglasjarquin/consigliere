@@ -113,7 +113,7 @@ state/               volatile runtime signals; gitignored
   <id>.check.sh      authenticated slow poll; watcher runs registered checks from hash-validated snapshots only
   .home-pane         this home's own agent pane, recorded at session start; revalidated before any activation
   .session-start-complete  completion proof gating the session-open re-emit; bin/cs-sessionstart-run.sh
-  .startup-network.*  the deferred network stage's status, current result, pending unread results, claim, delivery proof, and lock; bin/cs-startup-network.sh
+  .startup-network.*  the deferred network stage's status, current result, pending unread results, claim, delivery proof, elapsed-time timeline, and lock; bin/cs-startup-network.sh
   .activation-stalled  present when this home cannot self-activate (pane gone or agent dead); needs recovery
   <id>.check-trust   content binding created by cs-check-register.sh
   <id>.pr-poll       validated data sidecar for the byte-static PR merge poll

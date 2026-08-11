@@ -90,8 +90,19 @@ git -C "$FIX_ROOT" commit -q --allow-empty -m init
 # clone, so the fixture root carries a no-op copy. Without it the sweep's own
 # "No such file or directory" lands in every locked result, which would make a
 # genuinely clean run indistinguishable from a noisy one.
+# It is also the one place a case can hold the CLONE REFRESH open: fleet sync
+# runs it before it touches a clone, so a case that creates CS_TEST_GUARD_GATE
+# blocks that sweep and nothing else. With no gate named it is the no-op it has
+# always been.
 mkdir -p "$FIX_ROOT/bin"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$FIX_ROOT/bin/cs-guard.sh"
+cat > "$FIX_ROOT/bin/cs-guard.sh" <<SH
+#!/usr/bin/env bash
+gate=\${CS_TEST_GUARD_GATE:-}
+if [ -n "\$gate" ]; then
+  while [ -e "\$gate" ] && [ -d "$TMP" ]; do sleep 0.1; done
+fi
+exit 0
+SH
 chmod +x "$FIX_ROOT/bin/cs-guard.sh"
 # Every remedy the section prints is rooted at CS_ROOT, so the fixture root
 # carries a runnable forwarder. A case cannot prove a named remedy works if the
@@ -759,5 +770,77 @@ done
 assert_grep 'NEEDS_GH_AUTH:' "$HOME_DIR/state/.startup-network.report" \
   "the deferred stage published no gh auth verdict"
 pass "a result the digest could not wait for still reaches the agent as a wake"
+
+# --- the stage publishes a timeline of where it spent its time ---------------
+# One aggregate started/finished pair cannot say WHICH check held a slow run, so
+# each owner and each item inside it carries its own elapsed-time record, all
+# counted from one origin.
+HOME_DIR=$(fresh_home timings)
+FB=$(fakebin "$TMP/fb-timings")
+printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
+snet "$HOME_DIR" "$FB" run --locked 1 || fail "an owned mutating run must succeed"
+
+TIMINGS="$HOME_DIR/state/.startup-network.timings"
+assert_present "$TIMINGS" "a finished run published no timeline"
+assert_grep 'gh-auth' "$TIMINGS" "the timeline does not account for the gh auth probe"
+assert_grep 'clone-refresh' "$TIMINGS" "the timeline does not account for the clone refresh"
+assert_grep 'plainproj' "$TIMINGS" "the timeline does not account for the individual clone"
+# Offsets are comparable because they share one origin: the probe starts first,
+# and the clone that the refresh swept ran inside the refresh's own window.
+awk -F'\t' '
+  $1 < 0 || $2 < 0 { print "negative column: " $0 > "/dev/stderr"; bad = 1 }
+  $3 == "gh-auth" { probe = $1 }
+  $3 == "clone-refresh" && $4 == "-" { start = $1; end = $1 + $2; owner = 1 }
+  $3 == "clone-refresh" && $4 == "plainproj" { item = $1; item_end = $1 + $2 }
+  END {
+    if (bad) exit 1
+    if (!owner) { print "no clone-refresh owner record" > "/dev/stderr"; exit 1 }
+    if (probe > start) { print "the probe started after the refresh it precedes" > "/dev/stderr"; exit 1 }
+    if (item < start || item_end > end) { print "the clone ran outside the refresh that contains it" > "/dev/stderr"; exit 1 }
+  }' "$TIMINGS" || fail "the timeline offsets do not come from one origin"
+
+# The digest's own section must not move a byte for this: harvest is what
+# composes it, so its output has to be the same with the timeline beside the
+# report and without it.
+with_timings=$(snet "$HOME_DIR" "$FB" harvest --pid $$)
+rm -f "$HOME_DIR/state/.startup-network.delivered" "$TIMINGS"
+without_timings=$(snet "$HOME_DIR" "$FB" harvest --pid $$)
+[ "$with_timings" = "$without_timings" ] \
+  || fail "harvest changed with a timeline beside the report"$'\n'"--- with ---"$'\n'"$with_timings"$'\n'"--- without ---"$'\n'"$without_timings"
+assert_not_contains "$with_timings" 'Where this stage spent its time' \
+  "the digest section printed the operator timeline"
+
+snet "$HOME_DIR" "$FB" run --locked 1 || fail "a second owned run must succeed"
+out=$(snet "$HOME_DIR" "$FB" report)
+assert_contains "$out" 'Where this stage spent its time' \
+  "the on-demand report withheld the timeline"
+assert_line "$out" '^ +\+[0-9]+ms  took [0-9]+ms  gh-auth$' \
+  "the report did not print the probe as one timed step"
+assert_contains "$out" 'clone-refresh plainproj' \
+  "the report did not attribute time to the individual clone"
+pass "a finished stage publishes a timeline only its on-demand report prints"
+
+# --- a run that hits the bound publishes what it had recorded so far ----------
+# The partial record IS the answer here: the step still running when the bound
+# hit is the one with no record, which is exactly what a re-run by hand under
+# manual tracing used to be needed for.
+HOME_DIR=$(fresh_home timings-timeout)
+FB=$(fakebin "$TMP/fb-timings-timeout" '' 0)
+printf '%s\n' "$FIXTURE_PID" > "$HOME_DIR/state/.lock"
+GUARD_GATE="$TMP/guard-gate"
+: > "$GUARD_GATE"
+export CS_TEST_GUARD_GATE="$GUARD_GATE" CS_STARTUP_NETWORK_TIMEOUT=2
+snet "$HOME_DIR" "$FB" run --locked 1 || fail "a run that hits the bound must still publish"
+rm -f "$GUARD_GATE"
+unset CS_TEST_GUARD_GATE CS_STARTUP_NETWORK_TIMEOUT
+
+assert_grep 'state=timeout' "$HOME_DIR/state/.startup-network.status" \
+  "the fixture did not actually hit the stage bound"
+TIMINGS="$HOME_DIR/state/.startup-network.timings"
+assert_present "$TIMINGS" "a run that hit the bound published no partial timeline"
+assert_grep 'gh-auth' "$TIMINGS" "the partial timeline lost the check that did finish"
+assert_no_grep 'plainproj' "$TIMINGS" \
+  "the partial timeline recorded a clone the bound never let it reach"
+pass "a run that hits the bound publishes the partial timeline that names where it stopped"
 
 pass "cs-startup-network deferred stage"
