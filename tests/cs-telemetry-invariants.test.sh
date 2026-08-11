@@ -260,7 +260,7 @@ launch() { # <harness> [telemetry-cmd]
   CS_HARNESS_OVERRIDE="$1" bash -c "
 set -eu
 . '$ROOT/bin/cs-harness-lib.sh'
-cs_harness_soldier_launch '$1' default default \"'/op'\" \"'/brief'\" \"'/turnend'\" \"'/settings'\" '${2:-}'"
+cs_harness_soldier_launch '$1' \"'/op'\" \"'/brief'\" \"'/turnend'\" \"'/settings'\" '${2:-}'"
 }
 
 test_launch_wiring_is_byte_identical_with_telemetry_off() {
@@ -291,7 +291,7 @@ test_worker_turn_end_signal_survives_a_failing_telemetry_command() {
   line=$(CS_HARNESS_OVERRIDE=codex bash -c "
 set -eu
 . '$ROOT/bin/cs-harness-lib.sh'
-cs_harness_soldier_launch codex default default \"'/op'\" \"'/brief'\" \"'$dir/turn-ended'\" \"''\" '$tele'")
+cs_harness_soldier_launch codex \"'/op'\" \"'/brief'\" \"'$dir/turn-ended'\" \"''\" '$tele'")
   assert_contains "$line" "$notify" \
     "the codex notify command must touch first and only then run telemetry"
   # Run exactly what codex would run in the pane.

@@ -57,7 +57,7 @@ s = open(p).read().replace("{TASK}", "Do nothing else: this is a plumbing test. 
 open(p, "w").write(s)
 PY
 
-out=$("$ROOT/bin/cs-spawn.sh" "$ID" "$TMP/$REPO" --mode local-only --yolo off --effort low 2>&1) || fail "spawn failed: $out"
+out=$("$ROOT/bin/cs-spawn.sh" "$ID" "$TMP/$REPO" --mode local-only --yolo off 2>&1) || fail "spawn failed: $out"
 assert_contains "$out" "spawned $ID" "spawn reports success"
 pass "spawn creates isolated worktree and launches claude"
 

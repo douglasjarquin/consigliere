@@ -3,7 +3,7 @@
 #
 # Usage: cs-control.sh interrupt <task-id>
 #        cs-control.sh exit <task-id>
-#        cs-control.sh relaunch <task-id> --note <text> [--model <name>] [--effort <level>] [--clear-journal]
+#        cs-control.sh relaunch <task-id> --note <text> [--clear-journal]
 #
 # This is the control plane. bin/cs-send.sh is the data plane: conversational
 # text for the agent to READ, routing-marked for a capo target. That marking is
@@ -68,8 +68,6 @@
 #   phase=            prepared -> noted -> stopped -> launching -> done, or failed
 #   started_utc=      when this transaction began
 #   task= pane= worktree= project= kind= harness=
-#   prior_model= prior_effort=   the recorded profile before this relaunch
-#   model= effort=    the profile the replacement is launched on
 #   head= dirty=      the work being preserved: HEAD and the uncommitted count
 #   pre_pid= pre_session=        the agent that was running
 #   stopped_pid=      the agent this transaction stopped
@@ -102,11 +100,10 @@
 # has it; on a resume it is also delivered as one steer through bin/cs-send.sh,
 # because a resumed session does not re-read the brief.
 #
-# --model and --effort override the profile recorded in state/<id>.meta for this
-# relaunch; bin/cs-spawn.sh --relaunch records the change once an agent is
-# confirmed. The harness is NOT switchable here: a soldier inherits the root
-# session's harness (AGENTS.md section 4), so moving one soldier alone would
-# break that inheritance.
+# The model and reasoning level are the harness's own (AGENTS.md section 4), so
+# there is nothing to carry across or override here. The harness itself is NOT
+# switchable either: a soldier inherits the root session's harness, so moving one
+# soldier alone would break that inheritance.
 #
 # Exit status: 0 verified success; 1 refusal or unverified postcondition;
 # 2 usage error.
@@ -163,22 +160,16 @@ case "$ID" in
 esac
 
 NOTE=
-MODEL=
-EFFORT=
 CLEAR_JOURNAL=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --note) NOTE=${2:?--note requires a value}; shift 2 ;;
-    --model) MODEL=${2:?--model requires a value}; shift 2 ;;
-    --effort) EFFORT=${2:?--effort requires a value}; shift 2 ;;
     --clear-journal) CLEAR_JOURNAL=1; shift ;;
     *) usage_die "unknown argument '$1'" ;;
   esac
 done
 if [ "$VERB" != relaunch ]; then
   [ -z "$NOTE" ] || usage_die "--note applies only to relaunch"
-  [ -z "$MODEL" ] || usage_die "--model applies only to relaunch"
-  [ -z "$EFFORT" ] || usage_die "--effort applies only to relaunch"
   [ "$CLEAR_JOURNAL" -eq 0 ] || usage_die "--clear-journal applies only to relaunch"
 fi
 
@@ -279,15 +270,6 @@ fi
 case "$NOTE" in
   *$'\n'*) usage_die "--note must be a single line; put longer instructions in the brief" ;;
 esac
-if [ -n "$MODEL" ]; then
-  case "$MODEL" in
-    default|*[!A-Za-z0-9._:-]*) usage_die "--model must be a plain model identifier, got '$MODEL'" ;;
-  esac
-fi
-if [ -n "$EFFORT" ]; then
-  cs_harness_effort_valid "$HARNESS" "$EFFORT" ||
-    usage_die "'$EFFORT' is not a $HARNESS effort level (default|low|medium|high|xhigh|max, plus ultra on codex)"
-fi
 
 BRIEF="$DATA/$ID/brief.md"
 [ -f "$BRIEF" ] || die "task '$ID' has no brief at $BRIEF; a relaunch needs it as the replacement's instructions"
@@ -310,17 +292,9 @@ case "$cwd_rc" in
   *) die "herdr did not report a working directory for pane $PANE; refusing to relaunch into an unverified location" ;;
 esac
 
-PRIOR_MODEL=$(cs_meta_get "$META" model 2>/dev/null || true)
-PRIOR_EFFORT=$(cs_meta_get "$META" effort 2>/dev/null || true)
-[ -n "$PRIOR_MODEL" ] || PRIOR_MODEL=default
-[ -n "$PRIOR_EFFORT" ] || PRIOR_EFFORT=default
-LAUNCH_MODEL=${MODEL:-$PRIOR_MODEL}
-LAUNCH_EFFORT=${EFFORT:-$PRIOR_EFFORT}
-cs_harness_effort_valid "$HARNESS" "$LAUNCH_EFFORT" ||
-  die "task '$ID' records effort '$LAUNCH_EFFORT', which $HARNESS does not accept; pass --effort to choose a usable level"
-# Mirrors the launch owner's own permission-mode validation, like the effort and
-# pane-cwd checks above: a malformed config/permission-mode.conf must refuse
-# here, with the agent still running, not after bin/cs-spawn.sh has it stopped.
+# Mirrors the launch owner's own permission-mode validation, like the pane-cwd
+# check above: a malformed config/permission-mode.conf must refuse here, with the
+# agent still running, not after bin/cs-spawn.sh has it stopped.
 cs_harness_permission_mode "$HARNESS" >/dev/null ||
   die "config/permission-mode.conf is malformed (details above); fix it before relaunching - the launch owner would refuse it only after the agent was stopped"
 
@@ -372,10 +346,6 @@ cs_meta_write "$JOURNAL" \
   "project=${PROJECT:-}" \
   "kind=$KIND" \
   "harness=$HARNESS" \
-  "prior_model=$PRIOR_MODEL" \
-  "prior_effort=$PRIOR_EFFORT" \
-  "model=$LAUNCH_MODEL" \
-  "effort=$LAUNCH_EFFORT" \
   "head=$HEAD" \
   "dirty=$DIRTY" \
   "pre_pid=${PRE_PID:-}" \
@@ -425,11 +395,8 @@ journal_set stopped_pid "${PRE_PID:-}"
 journal_set phase stopped
 
 journal_set phase launching
-LAUNCH_ARGS=(--relaunch "$ID")
-[ -n "$MODEL" ] && LAUNCH_ARGS+=(--model "$MODEL")
-[ -n "$EFFORT" ] && LAUNCH_ARGS+=(--effort "$EFFORT")
 spawn_rc=0
-spawn_out=$("$SCRIPT_DIR/cs-spawn.sh" "${LAUNCH_ARGS[@]}" 2>&1) || spawn_rc=$?
+spawn_out=$("$SCRIPT_DIR/cs-spawn.sh" --relaunch "$ID" 2>&1) || spawn_rc=$?
 if [ "$spawn_rc" -ne 0 ]; then
   journal_fail launching "cs-spawn --relaunch exited $spawn_rc"
   echo "error: relaunch $ID: the previous agent was stopped (pid ${PRE_PID:-unknown}) and the replacement did NOT come up." >&2
@@ -495,7 +462,7 @@ fi
 journal_set note_delivery "$NOTE_DELIVERY"
 journal_set phase 'done'
 
-report "relaunch $ID: agent replaced via $LAUNCH_PATH on pane $PANE (pid ${PRE_PID:-unknown} -> $POST_PID, state $POST_STATE, $HARNESS model $LAUNCH_MODEL effort $LAUNCH_EFFORT); work preserved at $WT_REAL (commit $HEAD, $DIRTY uncommitted file(s)); progress note $NOTE_DELIVERY"
+report "relaunch $ID: agent replaced via $LAUNCH_PATH on pane $PANE (pid ${PRE_PID:-unknown} -> $POST_PID, state $POST_STATE, $HARNESS); work preserved at $WT_REAL (commit $HEAD, $DIRTY uncommitted file(s)); progress note $NOTE_DELIVERY"
 if [ "$POST_STATE" = blocked ]; then
   echo "warn: the replacement came up waiting on a human (native blocked) - it is running but will not work until that is answered; inspect pane $PANE" >&2
 fi

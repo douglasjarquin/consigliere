@@ -50,16 +50,6 @@ cs_harness_valid gpt && fail "unknown harness must be invalid" || true
 [ "$(cs_harness_binary claude)" = claude ] || fail "claude binary"
 pass "valid and binary"
 
-# --- effort validation ------------------------------------------------------
-for e in default low medium high xhigh max; do
-  cs_harness_effort_valid codex "$e" || fail "codex must accept $e"
-  cs_harness_effort_valid claude "$e" || fail "claude must accept $e"
-done
-cs_harness_effort_valid codex ultra || fail "codex must accept ultra"
-cs_harness_effort_valid claude ultra && fail "claude must reject ultra" || true
-cs_harness_effort_valid codex bogus && fail "codex must reject bogus" || true
-pass "effort validation (codex accepts max and ultra, claude rejects ultra)"
-
 # --- flags ------------------------------------------------------------------
 # The autonomy flag reads config/permission-mode.conf from the active home, so every
 # assertion below is pinned to a config dir that does not exist. Without this a
@@ -67,16 +57,9 @@ pass "effort validation (codex accepts max and ultra, claude rejects ultra)"
 export CS_CONFIG_OVERRIDE="$TMP/no-such-config"
 export CS_HOST_OVERRIDE="$TMP/no-such-host"
 
-[ -z "$(cs_harness_model_flag codex default)" ] || fail "default model -> empty flag"
-[ "$(cs_harness_model_flag codex gpt-5)" = "--model 'gpt-5' " ] || fail "codex model flag"
-[ "$(cs_harness_model_flag claude sonnet)" = "--model 'sonnet' " ] || fail "claude model flag"
-[ "$(cs_harness_effort_flag codex high)" = "-c 'model_reasoning_effort=\"high\"' " ] || fail "codex effort flag"
-[ "$(cs_harness_effort_flag codex max)" = "-c 'model_reasoning_effort=\"max\"' " ] || fail "codex max effort flag"
-[ "$(cs_harness_effort_flag codex ultra)" = "-c 'model_reasoning_effort=\"ultra\"' " ] || fail "codex ultra effort flag"
-[ "$(cs_harness_effort_flag claude high)" = "--effort 'high' " ] || fail "claude effort flag"
 [ "$(cs_harness_autonomy_flag codex)" = "--dangerously-bypass-approvals-and-sandbox" ] || fail "codex autonomy"
 [ "$(cs_harness_autonomy_flag claude)" = "--dangerously-skip-permissions" ] || fail "claude autonomy"
-pass "model/effort/autonomy flags per harness"
+pass "the autonomy flag per harness"
 
 # --- config/permission-mode.conf -------------------------------------------------
 # A claude home whose org policy forbids bypassPermissions selects a narrower
@@ -130,39 +113,39 @@ st=$(cs_harness_shell_quote /home/state/t.status)
 hm=$(cs_harness_shell_quote /home/capo)
 se=$(cs_harness_shell_quote /home/state/t.claude-settings.json)
 
-soldier_codex=$(cs_harness_soldier_launch codex gpt-5 high "$op" "$br" "$te" "")
-assert_contains "$soldier_codex" "codex --model 'gpt-5' " "codex soldier names the binary and model"
+soldier_codex=$(cs_harness_soldier_launch codex "$op" "$br" "$te" "")
+assert_contains "$soldier_codex" "codex --dangerously" "codex soldier names the binary, then its own flags"
 assert_contains "$soldier_codex" "--dangerously-bypass-approvals-and-sandbox" "codex soldier autonomy"
 assert_contains "$soldier_codex" 'notify=' "codex soldier wires turn-end via notify"
 assert_contains "$soldier_codex" 'encode launch-brief' "codex soldier stamps launch-brief"
 assert_not_contains "$soldier_codex" '--settings' "codex soldier does not use --settings"
 
-soldier_claude=$(cs_harness_soldier_launch claude sonnet high "$op" "$br" "$te" "$se")
-assert_contains "$soldier_claude" "claude --model 'sonnet' --effort 'high' " "claude soldier names binary/model/effort"
+soldier_claude=$(cs_harness_soldier_launch claude "$op" "$br" "$te" "$se")
+assert_contains "$soldier_claude" "claude --dangerously" "claude soldier names the binary, then its own flags"
 assert_contains "$soldier_claude" "--dangerously-skip-permissions" "claude soldier autonomy"
 assert_contains "$soldier_claude" "--settings '/home/state/t.claude-settings.json'" "claude soldier wires turn-end via --settings"
 assert_not_contains "$soldier_claude" 'notify=' "claude soldier does not use codex notify"
 assert_contains "$soldier_claude" 'encode launch-brief' "claude soldier stamps launch-brief"
 
-scout_codex=$(cs_harness_scout_launch codex default default "$op" "$br" "$st")
+scout_codex=$(cs_harness_scout_launch codex "$op" "$br" "$st")
 assert_contains "$scout_codex" 'codex exec ' "codex scout uses codex exec"
-scout_claude=$(cs_harness_scout_launch claude default default "$op" "$br" "$st")
+scout_claude=$(cs_harness_scout_launch claude "$op" "$br" "$st")
 assert_contains "$scout_claude" 'claude -p ' "claude scout uses claude -p"
 assert_contains "$scout_claude" 'done: headless scout finished' "scout appends terminal status"
 
 # The relaunch shape: identical flags and turn-end wiring, the harness's own
 # cwd-keyed resume command in place of the brief prompt.
-resume_codex=$(cs_harness_soldier_resume codex gpt-5 high "$te" "" "")
-assert_contains "$resume_codex" "codex resume --last --model 'gpt-5' " "codex resume names the subcommand, then the flags"
+resume_codex=$(cs_harness_soldier_resume codex "$te" "" "")
+assert_contains "$resume_codex" "codex resume --last --dangerously" "codex resume names the subcommand, then the flags"
 assert_contains "$resume_codex" "--dangerously-bypass-approvals-and-sandbox" "codex resume keeps autonomy"
 assert_contains "$resume_codex" 'notify=' "codex resume keeps the turn-end wiring"
 assert_not_contains "$resume_codex" 'encode launch-brief' "a resume carries no brief prompt"
-resume_claude=$(cs_harness_soldier_resume claude sonnet high "$te" "$se" "")
-assert_contains "$resume_claude" "claude --continue --model 'sonnet' --effort 'high' " "claude resume names the flag, then the flags"
+resume_claude=$(cs_harness_soldier_resume claude "$te" "$se" "")
+assert_contains "$resume_claude" "claude --continue --dangerously" "claude resume names the flag, then the flags"
 assert_contains "$resume_claude" "--settings '/home/state/t.claude-settings.json'" "claude resume keeps the turn-end wiring"
 assert_not_contains "$resume_claude" 'encode launch-brief' "a claude resume carries no brief prompt"
 
-capo_claude=$(cs_harness_capo_launch claude default default "$op" "$br" "$hm")
+capo_claude=$(cs_harness_capo_launch claude "$op" "$br" "$hm")
 assert_contains "$capo_claude" "CS_HOME='/home/capo' claude " "capo prefixes CS_HOME and names the harness"
 assert_not_contains "$capo_claude" '--settings' "capo has no turn-end wiring"
 assert_not_contains "$capo_claude" 'notify=' "capo has no turn-end wiring"
@@ -173,9 +156,9 @@ pass "launch strings per harness and role"
 printf 'claude auto\n' > "$PM/permission-mode.conf"
 for role in soldier scout capo; do
   case $role in
-    soldier) line=$(CS_CONFIG_OVERRIDE="$PM" cs_harness_soldier_launch claude default default "$op" "$br" "$te" "$se") ;;
-    scout) line=$(CS_CONFIG_OVERRIDE="$PM" cs_harness_scout_launch claude default default "$op" "$br" "$st") ;;
-    capo) line=$(CS_CONFIG_OVERRIDE="$PM" cs_harness_capo_launch claude default default "$op" "$br" "$hm") ;;
+    soldier) line=$(CS_CONFIG_OVERRIDE="$PM" cs_harness_soldier_launch claude "$op" "$br" "$te" "$se") ;;
+    scout) line=$(CS_CONFIG_OVERRIDE="$PM" cs_harness_scout_launch claude "$op" "$br" "$st") ;;
+    capo) line=$(CS_CONFIG_OVERRIDE="$PM" cs_harness_capo_launch claude "$op" "$br" "$hm") ;;
   esac
   assert_contains "$line" "--permission-mode 'auto'" "claude $role honors config/permission-mode.conf"
   assert_not_contains "$line" '--dangerously-skip-permissions' "claude $role drops the bypass flag"
@@ -185,9 +168,9 @@ done
 printf 'claude plan\n' > "$PM/permission-mode.conf"
 for role in soldier scout capo; do
   case $role in
-    soldier) CS_CONFIG_OVERRIDE="$PM" cs_harness_soldier_launch claude default default "$op" "$br" "$te" "$se" 2>/dev/null ;;
-    scout) CS_CONFIG_OVERRIDE="$PM" cs_harness_scout_launch claude default default "$op" "$br" "$st" 2>/dev/null ;;
-    capo) CS_CONFIG_OVERRIDE="$PM" cs_harness_capo_launch claude default default "$op" "$br" "$hm" 2>/dev/null ;;
+    soldier) CS_CONFIG_OVERRIDE="$PM" cs_harness_soldier_launch claude "$op" "$br" "$te" "$se" 2>/dev/null ;;
+    scout) CS_CONFIG_OVERRIDE="$PM" cs_harness_scout_launch claude "$op" "$br" "$st" 2>/dev/null ;;
+    capo) CS_CONFIG_OVERRIDE="$PM" cs_harness_capo_launch claude "$op" "$br" "$hm" 2>/dev/null ;;
   esac && fail "claude $role must refuse an unusable permission mode"
 done
 rm -f "$PM/permission-mode.conf"
@@ -202,9 +185,9 @@ pass "configured permission mode reaches every claude launch role and fails clos
 # CLAUDE_CONFIG_DIR on the launch line itself.
 build_launch() {  # <role> -> launch string for that role
   case $1 in
-    soldier) cs_harness_soldier_launch claude default default "$op" "$br" "$te" "$se" ;;
-    scout) cs_harness_scout_launch claude default default "$op" "$br" "$st" ;;
-    capo) cs_harness_capo_launch claude default default "$op" "$br" "$hm" ;;
+    soldier) cs_harness_soldier_launch claude "$op" "$br" "$te" "$se" ;;
+    scout) cs_harness_scout_launch claude "$op" "$br" "$st" ;;
+    capo) cs_harness_capo_launch claude "$op" "$br" "$hm" ;;
   esac
 }
 
@@ -225,7 +208,7 @@ assert_contains "$(build_launch capo)" \
 
 # codex selects no credential store by environment here, so it gets no prefix
 # even when the claude variable is set.
-codex_line=$(cs_harness_soldier_launch codex default default "$op" "$br" "$te" "")
+codex_line=$(cs_harness_soldier_launch codex "$op" "$br" "$te" "")
 assert_not_contains "$codex_line" 'CLAUDE_CONFIG_DIR' "codex launch is unaffected"
 
 # Unset is the single-store default and must add nothing.

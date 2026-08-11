@@ -870,13 +870,14 @@ cs_telemetry_turn_end() {
 
 # cs_telemetry_worker_turn_end <task-id> [payload] - the worker turn-end emitter,
 # called from the harness turn-end wiring of a ship or scout soldier. Role, kind,
-# project, harness, model, and effort come from the authoritative
-# state/<id>.meta that cs-spawn.sh wrote; nothing is re-derived and nothing is
-# invented. A worker turn records no breadcrumbs and no supervision outcome: a
+# project, and harness come from the authoritative state/<id>.meta that
+# cs-spawn.sh wrote; the model and the effort come only from the harness session
+# itself, because consigliere selects neither. Nothing is re-derived and nothing
+# is invented. A worker turn records no breadcrumbs and no supervision outcome: a
 # soldier does not supervise, and its purpose follows from its task kind.
 # Always rc 0.
 cs_telemetry_worker_turn_end() {
-  local id=${1:-} payload=${2:-} meta kind harness model effort project purpose
+  local id=${1:-} payload=${2:-} meta kind harness project purpose
   [ -n "$id" ] || return 0
   case "$id" in *[!A-Za-z0-9._-]*) return 0 ;; esac
   cs_telemetry_on || return 0
@@ -886,24 +887,16 @@ cs_telemetry_worker_turn_end() {
     [ -f "$meta" ] || return 0
     kind=$(awk -F= '$1 == "kind" { v = $2 } END { print v }' "$meta" 2>/dev/null)
     harness=$(awk -F= '$1 == "harness" { v = $2 } END { print v }' "$meta" 2>/dev/null)
-    model=$(awk -F= '$1 == "model" { v = $2 } END { print v }' "$meta" 2>/dev/null)
-    effort=$(awk -F= '$1 == "effort" { v = $2 } END { print v }' "$meta" 2>/dev/null)
     project=$(awk '/^project=/ { v = substr($0, 9) } END { print v }' "$meta" 2>/dev/null)
     if [ -n "$project" ]; then
       project=$(basename "$project")
     fi
-    # `default` in meta means "the harness default was used", which is not a
-    # model or effort identity; record null rather than the placeholder.
-    [ "$model" = default ] && model=''
-    [ "$effort" = default ] && effort=''
     case "$kind" in
       ship) purpose=implementation ;;
       scout) purpose=research ;;
       *) purpose=unknown ;;
     esac
     cs_telemetry_usage "$harness" "$payload"
-    [ -n "$CS_TELEMETRY_MODEL" ] && model=$CS_TELEMETRY_MODEL
-    [ -n "$CS_TELEMETRY_EFFORT" ] && effort=$CS_TELEMETRY_EFFORT
     cs_telemetry_emit \
       "role=$kind" \
       "kind=$kind" \
@@ -911,8 +904,8 @@ cs_telemetry_worker_turn_end() {
       "project=$project" \
       "task_id=$id" \
       "harness=$harness" \
-      "model=$model" \
-      "effort=$effort" \
+      "model=$CS_TELEMETRY_MODEL" \
+      "effort=$CS_TELEMETRY_EFFORT" \
       "purpose=$purpose" \
       "duration_ms=$CS_TELEMETRY_DURATION_MS" \
       "session_id=$CS_TELEMETRY_SESSION_ID" \

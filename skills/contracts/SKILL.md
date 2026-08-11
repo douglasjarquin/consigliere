@@ -43,7 +43,7 @@ This is ordinary section-7 ship lifecycle with a board front door - the safety c
       The scaffold and the spawn must state the same mode, or the spawn refuses.
    c. Scaffold the brief WITH the issue link: `bin/cs-brief.sh <task-id> <project> --mode <mode> --issue <n>`, then replace `{TASK}` with the issue's scope, acceptance criteria, and context.
       The `--issue` flag bakes in the hard `Closes #<n>` PR requirement; do not remove it.
-   d. Spawn: `bin/cs-spawn.sh <task-id> <project-dir> --mode <mode> --yolo <on|off> --issue <n> [--model .. --effort ..]` (section 4 chooses model/effort).
+   d. Spawn: `bin/cs-spawn.sh <task-id> <project-dir> --mode <mode> --yolo <on|off> --issue <n>`.
       Use a stable task id derived from the issue, e.g. `<project>-<n>`.
    e. Record the work item in the backlog with the issue link; note any dependents gated by a concrete condition as queued/blocked.
 6. Supervise every lane under section 8 (the foreground checkpoint). As a lane finishes and tears down, pull the next Ready/queued issue into it and repeat from step 5 until the column is empty or the boss says stop.
