@@ -175,14 +175,24 @@ wait_for_exit() {
 
 reap() { kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
 
-# Wait up to <limit> 0.1s ticks for <file> to hold a purely numeric value.
-wait_numeric_file() {
-  local file=$1 limit=${2:-$CS_WATCH_TEST_TICKS} i=0 value
+# wait_mtime_after <file> <epoch> [limit-ticks]: poll until <file>'s mtime is
+# strictly newer than <epoch>; 0 the instant it is, 1 after <limit> ticks.
+#
+# This is how to assert that a periodically-touched file (the watcher's liveness
+# beacon) KEEPS BEING TOUCHED. Do not express that as `now - mtime < N`: comparing
+# `date +%s` in this shell against an mtime stamped by another process measures
+# absolute wall clock, so anything that advances the clock while that process is
+# not scheduled - a system sleep, a suspended process group, swap thrash - fails a
+# perfectly healthy watcher. Waiting for the mtime to ADVANCE proves the same
+# property (and more: that another cycle actually ran) with no wall-clock cliff.
+wait_mtime_after() {
+  local file=$1 after=$2 limit=${3:-$CS_WATCH_TEST_TICKS} i=0 now
+  case "$after" in ''|*[!0-9]*) return 1 ;; esac
   while [ "$i" -lt "$limit" ]; do
-    value=$(cat "$file" 2>/dev/null || true)
-    case "$value" in
+    now=$(file_mtime "$file")
+    case "$now" in
       ''|*[!0-9]*) ;;
-      *) return 0 ;;
+      *) [ "$now" -gt "$after" ] && return 0 ;;
     esac
     sleep 0.1
     i=$((i + 1))

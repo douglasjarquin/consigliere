@@ -5,18 +5,30 @@
 # raised with nobody waiting still lands in the durable queue.
 #
 # Hermetic: reuses the offline cs-watch fixtures (fake herdr + fake
-# cs-crew-state.sh). Every wait is a poll for a positive condition, never a
-# fixed sleep, and every monitor started here is stopped through its own marker
-# so no detached process outlives the test.
+# cs-crew-state.sh), and every monitor started here is stopped through its own
+# marker so no detached process outlives the test.
+#
+# Every wait FOR something is a poll for that positive condition, never a fixed
+# sleep. The three fixed sleeps below are the opposite shape and are deliberate:
+# each one asserts that something did NOT happen across a window of several
+# monitor cycles (a standing event not re-queued, a stood-down monitor not running
+# a watcher, a torn script not exec'd). A window is the assertion there, so those
+# must not be converted into polls - a slow machine runs fewer cycles inside them,
+# which makes them weaker, never falsely red.
 set -u
 # shellcheck source=tests/cs-watch-helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/cs-watch-helpers.sh"
-# cs_path_mtime, for the beacon-freshness assertions.
-# shellcheck source=bin/cs-wake-lib.sh
-CS_STATE_OVERRIDE="${TMPDIR:-/tmp}" . "$ROOT/bin/cs-wake-lib.sh"
 
 MONITOR="$ROOT/bin/cs-monitor.sh"
 TMP_ROOT=$(cs_test_tmproot cs-monitor)
+
+# cs_path_mtime, for the beacon-freshness assertions. The override is this suite's
+# OWN temp root, never the shared temp base: pointing a state override at the base
+# aims a whole home's worth of machinery at a directory every other suite and the
+# boss's live fleet also use, and this exact line is what failed CI on 2026-07-29
+# when it read a bare $TMPDIR under `set -u` on a runner that has none.
+# shellcheck source=bin/cs-wake-lib.sh
+CS_STATE_OVERRIDE="$TMP_ROOT" . "$ROOT/bin/cs-wake-lib.sh"
 
 # Start a monitor detached, exactly as a checkpoint would.
 monitor_bg() {  # <state> <fakebin> [env...]

@@ -106,10 +106,16 @@ test_spawn_launch_brief_stamping() {
   repo="$TMP/project"
   fakebin="$TMP/fakebin"
   worktree="$TMP/spawn-worktree"
-  mkdir -p "$home/data/task" "$home/state" "$fakebin"
+  mkdir -p "$home/data/task" "$home/state" "$home/config" "$fakebin"
   cs_git_init_commit "$repo"
   printf -- '- project [local-only] - fixture\n' > "$home/config/projects.md"
   printf 'implement the fixture\nDelivery contract: mode=local-only\n' > "$home/data/task/brief.md"
+  # This file's redirect used to land in a config/ nobody created, so the registry
+  # fixture was never written and the case passed on a home it never built. These
+  # suites run under `set -u` without `set -e`, so a failed redirect is one line of
+  # stderr and nothing more - assert the fixture instead of trusting the redirect.
+  [ -s "$home/config/projects.md" ] || fail "the project registry fixture was not written"
+  [ -s "$home/data/task/brief.md" ] || fail "the brief fixture was not written"
 
   cat > "$fakebin/herdr" <<'SH'
 #!/usr/bin/env bash

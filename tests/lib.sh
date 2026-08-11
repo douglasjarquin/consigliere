@@ -68,26 +68,58 @@ cs_git_disable_commit_signing
 # --- self-cleaning temp root ------------------------------------------------
 #
 # cs_test_tmproot <prefix> echoes a fresh temp dir and registers it for removal
-# on EXIT. The first call installs the cleanup trap. A test file that needs
-# extra teardown (e.g. killing a daemon) should define its own EXIT trap and
-# call cs_test_cleanup from inside it so registered dirs are still removed.
+# on EXIT. A test file that needs extra teardown (e.g. killing a daemon) should
+# define its own EXIT trap and call cs_test_cleanup from inside it, so registered
+# dirs are still removed after its own teardown has run.
+#
+# WHY A FILE AND NOT AN ARRAY. The registry used to be a shell array that
+# cs_test_tmproot appended to, with the EXIT trap installed by its first call.
+# Both were dead code. Every caller uses the function as
+# `TMP_ROOT=$(cs_test_tmproot foo)`, so its body runs in a command-substitution
+# SUBSHELL: neither the append nor the `trap` ever reached the caller, and every
+# suite leaked its whole fixture tree on every run. A file survives the subshell,
+# and `$$` stays the invoking shell's pid inside one (BASHPID is what changes), so
+# parent and subshell agree on the registry path with nothing passed between them.
+CS_TEST_TMPBASE="${TMPDIR:-/tmp}"
+CS_TEST_TMPBASE="${CS_TEST_TMPBASE%/}"
+CS_TEST_REGISTRY="$CS_TEST_TMPBASE/cs-test-reg.$$"
+# Start from an empty registry: pids recycle, so a registry file left by a dead
+# run must not be inherited as if this suite had created those dirs.
+: > "$CS_TEST_REGISTRY"
 
-CS_TEST_CLEANUP_DIRS=()
+# The trap is installed HERE, at source time, in the caller's own shell - never
+# from inside cs_test_tmproot, where the subshell would swallow it. The suites
+# that install their own EXIT trap override this one and call cs_test_cleanup from
+# their handler, which is what keeps that override correct.
+trap cs_test_cleanup EXIT
 
+# Safe to call more than once: a suite's own handler may call it and then EXIT
+# fires again. The registry is consumed, so the second pass finds nothing.
 cs_test_cleanup() {
-  local d
-  for d in "${CS_TEST_CLEANUP_DIRS[@]:-}"; do
-    [ -n "$d" ] && rm -rf "$d"
-  done
+  local d leaf
+  [ -f "$CS_TEST_REGISTRY" ] || return 0
+  while IFS= read -r d; do
+    # Only ever remove what this library can actually have minted: an IMMEDIATE
+    # child of the temp base. mktemp -d always produces exactly that, so anything
+    # deeper, anything outside the base, the bare base itself, and any traversal
+    # are all refusals - a corrupted or hand-edited registry must not turn into an
+    # rm -rf somewhere else.
+    case "$d" in
+      "$CS_TEST_TMPBASE"/?*) leaf=${d#"$CS_TEST_TMPBASE"/} ;;
+      *) continue ;;
+    esac
+    case "$leaf" in
+      */*|.|..) continue ;;
+    esac
+    rm -rf "$d"
+  done < "$CS_TEST_REGISTRY"
+  rm -f "$CS_TEST_REGISTRY"
 }
 
 cs_test_tmproot() {
   local prefix=${1:-cs-test} root
-  root=$(mktemp -d "${TMPDIR:-/tmp}/${prefix}.XXXXXX")
-  if [ "${#CS_TEST_CLEANUP_DIRS[@]}" -eq 0 ]; then
-    trap cs_test_cleanup EXIT
-  fi
-  CS_TEST_CLEANUP_DIRS+=("$root")
+  root=$(mktemp -d "$CS_TEST_TMPBASE/${prefix}.XXXXXX")
+  printf '%s\n' "$root" >> "$CS_TEST_REGISTRY"
   printf '%s\n' "$root"
 }
 
