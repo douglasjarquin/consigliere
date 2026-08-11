@@ -120,6 +120,12 @@ network_sweep_authorized() {  # <label>
 . "$SCRIPT_DIR/cs-harness-lib.sh"
 # shellcheck source=bin/cs-deps-lib.sh
 . "$SCRIPT_DIR/cs-deps-lib.sh"
+# Each sweep below is bracketed by one elapsed-time record, so a slow run is
+# attributable to a step rather than only to the run as a whole. Recording is
+# inert unless the run that launched this one asked for it (bin/cs-timing-lib.sh),
+# so an ordinary bootstrap pays nothing for the instrumentation.
+# shellcheck source=bin/cs-timing-lib.sh
+. "$SCRIPT_DIR/cs-timing-lib.sh"
 
 # cs_bootstrap_axi_gap <tool> - the session-start wording for the below-floor
 # classification cs-deps-lib.sh owns: print "<version> below floor <floor> -
@@ -184,6 +190,7 @@ EOF
 
 # --- gh auth -------------------------------------------------------------------
 # The one detect-only step that leaves this machine.
+# shellcheck disable=SC2329  # Invoked through cs_timed, which brackets it with one record.
 detect_gh_auth() {
   if command -v gh >/dev/null 2>&1; then
     gh auth status >/dev/null 2>&1 || printf 'NEEDS_GH_AUTH: gh is not authenticated; run gh auth login before dispatching PR-based work.\n'
@@ -210,14 +217,14 @@ detect_local_config() {
 # `skip` run is the same output with the network lines removed rather than a
 # reshuffle, and `gh auth status` keeps the position it has always had.
 local_phase && detect_local_tools
-network_phase && detect_gh_auth
+network_phase && cs_timed gh-auth '' detect_gh_auth
 local_phase && detect_local_config
 
 # --- mutating sweeps ----------------------------------------------------------
 if [ "$DETECT_ONLY" != 1 ]; then
   if network_phase && [ -x "$SCRIPT_DIR/cs-fleet-sync.sh" ] && [ -d "$PROJECTS" ] \
     && network_sweep_authorized 'project clone refresh'; then
-    sync_out=$("$SCRIPT_DIR/cs-fleet-sync.sh" --all 2>&1) || true
+    sync_out=$(cs_timed clone-refresh '' "$SCRIPT_DIR/cs-fleet-sync.sh" --all 2>&1) || true
     [ -z "$sync_out" ] || printf '%s\n' "$sync_out" | sed 's/^/FLEET_SYNC: /'
   fi
   # Local: capo homes are detached worktrees of this repo on this machine, and

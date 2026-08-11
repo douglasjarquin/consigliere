@@ -73,7 +73,11 @@
 #          ends the result's life as an unread one.
 #        cs-startup-network.sh report
 #          Print the current state and change nothing at all - no acknowledgement
-#          and no drain. For an operator who wants to look without consuming.
+#          and no drain, plus this stage's elapsed-time timeline. For an operator
+#          who wants to look without consuming. It is the ONLY reader that prints
+#          the timeline: `harvest` composes the session-start digest, whose bytes
+#          this instrumentation must not change, and the wake reader `read` prints
+#          what the digest would have.
 #        cs-startup-network.sh wait [<seconds>]
 #          Block until the report is published, up to <seconds> (default 120).
 #          For operators and tests only; a session start never waits.
@@ -113,6 +117,14 @@
 #                             results; a publish that exceeds that drops the
 #                             oldest and counts the drop in .pending/.dropped,
 #                             which every harvest discloses by number.
+#   .startup-network.timings  where this stage spent its time: one elapsed-time
+#                             record per check owner and per item inside it, in
+#                             bin/cs-timing-lib.sh's format, published beside the
+#                             report by the same publish. A run that timed out or
+#                             failed publishes what it had recorded so far, which
+#                             is exactly the case the timeline exists to answer:
+#                             the step still running when the bound hit is the one
+#                             with no record.
 #   .startup-network.claim    the generation and pid of a session start that
 #                             intends to print the result inline; a matching
 #                             live claimant gives harvest a bounded chance to
@@ -143,11 +155,16 @@ cs_resolve_root
 . "$SCRIPT_DIR/cs-wake-lib.sh"
 # shellcheck source=bin/cs-timeout-lib.sh
 . "$SCRIPT_DIR/cs-timeout-lib.sh"
+# cs-timing-lib.sh owns the elapsed-time record this stage asks its checks to
+# write; nothing here knows the format.
+# shellcheck source=bin/cs-timing-lib.sh
+. "$SCRIPT_DIR/cs-timing-lib.sh"
 
 STATUS_FILE="$STATE/.startup-network.status"
 REPORT_FILE="$STATE/.startup-network.report"
 PENDING_DIR="$STATE/.startup-network.pending"
 DROPPED_FILE="$PENDING_DIR/.dropped"
+TIMINGS_FILE="$STATE/.startup-network.timings"
 CLAIM_FILE="$STATE/.startup-network.claim"
 DELIVERED_FILE="$STATE/.startup-network.delivered"
 PUBLISH_LOCK="$STATE/.startup-network.lock"
@@ -508,13 +525,22 @@ EOF
   cs_lock_release "$PUBLISH_LOCK"
 }
 
-publish() {  # <generation> <state> <phases> <locked> <started> <rc> <output-file>
-  local generation=$1 state=$2 phases=$3 locked=$4 started=$5 rc=$6 out=$7 report_published=1
+publish() {  # <generation> <state> <phases> <locked> <started> <rc> <output-file> <timings-file>
+  local generation=$1 state=$2 phases=$3 locked=$4 started=$5 rc=$6 out=$7 timings=${8:-} report_published=1
   local requested
   cs_lock_acquire_wait "$PUBLISH_LOCK"
   if [ "$(status_get generation)" != "$generation" ]; then
     cs_lock_release "$PUBLISH_LOCK"
     return 0
+  fi
+  # The timeline belongs to the run that just ended, so a run that recorded
+  # nothing REMOVES the previous one rather than leaving it to be read as this
+  # run's. It is published for every outcome, including timeout and failure,
+  # where the partial record is the answer.
+  if [ -n "$timings" ] && [ -s "$timings" ]; then
+    write_atomic "$TIMINGS_FILE" < "$timings" || true
+  else
+    rm -f "$TIMINGS_FILE" 2>/dev/null || true
   fi
   requested=$(phases_union "$(status_get requested)" "$phases")
   # An unread result is MOVED aside before this one is written, never merged with
@@ -556,7 +582,7 @@ EOF
 }
 
 cmd_run() {  # <locked> <lock-pid> <generation>
-  local locked=$1 lock_pid=$2 generation=$3 phases started budget out rc
+  local locked=$1 lock_pid=$2 generation=$3 phases started budget out rc timings=
   local sweep_locked=0 downgraded=0 internal=0
   # `run` is the command every printed remedy in this stage names, so each of its
   # refusals says why on the way out. A remedy that exits nonzero in silence is
@@ -639,6 +665,16 @@ EOF
       "${TMPDIR:-/tmp}" "$(phase_label "$phases")" "$CS_ROOT" "$sweep_locked"
     return 1
   fi
+  # Ask this pass to record where it spends its time. Recorded into a temp file
+  # for the same reason the output is: a killed run must not leave a half-written
+  # artifact where the previous run's complete one was. Recording is best-effort -
+  # a temp file that cannot be created leaves the checks uninstrumented rather
+  # than unrun.
+  if timings=$(mktemp "${TMPDIR:-/tmp}/cs-startup-network-timings.XXXXXX" 2>/dev/null); then
+    cs_timing_begin "$timings" || timings=
+  else
+    timings=
+  fi
   rc=0
   if [ "$sweep_locked" -eq 1 ]; then
     cs_run_timed "$budget" env CS_BOOTSTRAP_NETWORK=only \
@@ -653,24 +689,25 @@ EOF
     printf 'NETWORK_CHECKS: the fleet lock was no longer held by the session that requested these, so the project clone refresh was skipped; it belongs to whichever session holds the lock now\n' >> "$out"
   fi
   case "$rc" in
-    0) publish "$generation" 'done' "$phases" "$sweep_locked" "$started" "$rc" "$out" ;;
+    0) publish "$generation" 'done' "$phases" "$sweep_locked" "$started" "$rc" "$out" "$timings" ;;
     "$CS_TIMEOUT_UNAVAILABLE")
       printf 'NETWORK_CHECKS: the runtime bound could not be established, so %s never ran; fix TMPDIR and rerun %s/bin/cs-startup-network.sh run --locked %s\n' \
         "$(phase_label "$phases")" "$CS_ROOT" "$sweep_locked" >> "$out"
-      publish "$generation" failed "$phases" "$sweep_locked" "$started" "$rc" "$out"
+      publish "$generation" failed "$phases" "$sweep_locked" "$started" "$rc" "$out" "$timings"
       ;;
     124)
       printf 'NETWORK_CHECKS: hit the %ss bound before finishing, so %s may be incomplete; rerun %s/bin/cs-startup-network.sh run --locked %s\n' \
         "$budget" "$(phase_label "$phases")" "$CS_ROOT" "$sweep_locked" >> "$out"
-      publish "$generation" timeout "$phases" "$sweep_locked" "$started" "$rc" "$out"
+      publish "$generation" timeout "$phases" "$sweep_locked" "$started" "$rc" "$out" "$timings"
       ;;
     *)
       printf 'NETWORK_CHECKS: the deferred check worker exited %s, so %s may be incomplete; rerun %s/bin/cs-startup-network.sh run --locked %s\n' \
         "$rc" "$(phase_label "$phases")" "$CS_ROOT" "$sweep_locked" >> "$out"
-      publish "$generation" failed "$phases" "$sweep_locked" "$started" "$rc" "$out"
+      publish "$generation" failed "$phases" "$sweep_locked" "$started" "$rc" "$out" "$timings"
       ;;
   esac
   rm -f "$out" 2>/dev/null || true
+  [ -z "$timings" ] || rm -f "$timings" 2>/dev/null || true
   return 0
 }
 
@@ -800,6 +837,18 @@ print_state() {
   print_uncovered
 }
 
+# Where the last published pass spent its time. Deliberately NOT part of
+# print_state: print_state is what composes the digest's NETWORK CHECKS section
+# and what the wake reader prints, and a timeline is operator material rather
+# than something the agent has to act on. Keeping it out of that function is what
+# makes "harvest is byte-for-byte unchanged" a property of the code rather than a
+# claim about how it is called.
+print_timings() {
+  [ -s "$TIMINGS_FILE" ] || return 0
+  printf 'Where this stage spent its time, offsets from one shared origin:\n'
+  cs_timing_print "$TIMINGS_FILE" || true
+}
+
 # Did print_state print the CURRENT result? A terminal record that published one
 # always prints it, INCLUDING the empty-bodied result of a clean run, whose
 # "(silent - no problems found)" line is that result being delivered rather than
@@ -905,7 +954,7 @@ case "$MODE" in
   run) cmd_run "$LOCKED" "$LOCK_PID" "$GENERATION" || RC=$? ;;
   harvest) cmd_harvest "${HARVEST_PID:-}" ;;
   read) cmd_read ;;
-  report) print_state ;;
+  report) print_state; print_timings ;;
   wait) cmd_wait "${1:-120}" || RC=$? ;;
   -h|--help) usage ;;
   *)
