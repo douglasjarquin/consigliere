@@ -28,6 +28,26 @@ The monitor learned this on 2026-07-30 (213 revivals in seven hours); the away d
 A monitor that dies is revived by the next checkpoint, so an unexplained death costs one checkpoint interval rather than a session; if no monitor can be started at all, the checkpoint says so and watches inline for that bound.
 Wakes are appended durably to `state/.wake-queue` before detector state advances, so a missed process exit is recovered by the next drain.
 
+## Drain durability
+
+The queue only covers wakes that are still queued.
+The window the queue cannot cover on its own runs from the moment a drain rotates records out of it to the moment the agent has handled them: a turn that dies in there (crash, context loss, kill) leaves an empty queue and records nothing would ever read again.
+The drain closes that window with the rotation batch itself.
+
+A drain moves the queue into a batch file (`state/.wake-queue.drain.*`) after taking the queue lock and removes that batch before releasing it.
+So while a drain holds the lock, any batch it finds on disk belongs to a drain that never committed, with no liveness check needed to prove it.
+The drain adopts every such orphan, deduping its records into the same view as the freshly rotated queue - oldest file first, so a key carried by both keeps its earliest position and its latest payload - and prints a `wake replay:` line naming how many records came back and from how many interrupted drains.
+The replayed rows keep the canonical raw shape and are handled exactly like fresh ones; the label exists so a record that surfaces a second time does not read as a duplicate wake of unknown origin.
+
+Acknowledgement is the committed print, not a later signal.
+A drain that prints its records has put them in front of the agent, and it retires every adopted orphan in that same step; a drain that dies before printing retires nothing, so its batch - including anything it had adopted - is still there for the next drain.
+This is deliberately not a turn-level or checkpoint-level acknowledgement.
+The checkpoint is the obvious alternative acknowledger, since it structurally runs after handling, but a turn is free to drain twice with a checkpoint between and free to end without one at all, so keying retirement to it would replay handled records in the ordinary case and delete unhandled ones when a turn starts with a checkpoint instead of a drain.
+Keying it to the print is the one boundary the drain can observe by itself.
+
+Nothing is ever re-promoted into a new pending batch, which is what keeps repeated adoption from feeding itself: a drain that commits ends the chain outright, and consecutive dying drains accumulate batches whose contents dedupe away the moment one of them commits.
+Restoring an interrupted drain's queue removes the batch it restored from, because those records are back in the queue and a leftover copy would be adopted as a loss that never happened.
+
 ## Wake vocabulary
 
 - `signal: <files>` - status/turn-end signals; surfaced when a listed status has a boss-relevant verb OR a no-verb signal's soldier is not provably working.

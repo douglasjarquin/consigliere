@@ -170,6 +170,11 @@ test_interruption_before_and_after_raw_commit() {
   rc=$?
   set -e
   [ "$rc" -ne 0 ] || fail "pre-commit interruption unexpectedly succeeded"
+  # The restore put the row back in the queue, so the batch it came from is now
+  # a duplicate copy. It must be gone: left behind, the next drain would adopt it
+  # as an orphan and replay a record that was never lost.
+  compgen -G "$state/.wake-queue.drain.*" >/dev/null \
+    && fail "restoring the queue left its batch behind for the next drain to re-adopt"
   CS_STATE_OVERRIDE="$state" "$DRAIN" > "$replay_out" || fail "restored pre-commit wake did not drain"
   count=$(awk -F '\t' 'NF == 5 { count++ } END { print count + 0 }' "$replay_out")
   [ "$count" -eq 1 ] || fail "pre-commit interruption lost or duplicated the restored row"
@@ -189,8 +194,96 @@ test_interruption_before_and_after_raw_commit() {
   pass "interruptions restore before commitment and never replay after raw commitment"
 }
 
+# write_batch <path> <seq> <kind> <key> <payload>: append one canonical wake
+# record to a batch file, standing in for what a drain rotated out of the queue.
+write_batch() {
+  local path=$1 seq=$2 kind=$3 key=$4 payload=$5
+  printf '%s\t%s\t%s\t%s\t%s\n' "$((1700000000 + seq))" "$seq" "$kind" "$key" "$payload" >> "$path"
+}
+
+# The turn can die between the queue rotation and handling: the drain moved the
+# queue into its batch file and was then killed hard enough that its trap never
+# ran (SIGKILL, harness teardown, host loss). The queue is empty, the records
+# sit in a batch nothing else reads, and before orphan adoption they were gone
+# for good. The next drain must resurface them exactly once and never again.
+test_orphaned_batch_is_replayed_exactly_once() {
+  local dir state orphan first second count
+  dir=$(make_case orphan-replay)
+  state="$dir/state"
+  orphan="$state/.wake-queue.drain.99999"
+  first="$dir/first.out"
+  second="$dir/second.out"
+  write_batch "$orphan" 1 signal task.status 'signal: task'
+  write_batch "$orphan" 2 stale 's:cs-task' 'stale: s:cs-task'
+
+  CS_STATE_OVERRIDE="$state" "$DRAIN" > "$first" || fail "drain with an orphaned batch failed"
+  count=$(awk -F '\t' 'NF == 5 { count++ } END { print count + 0 }' "$first")
+  [ "$count" -eq 2 ] || fail "expected the orphaned batch's 2 records replayed, got $count"
+  grep -F 'wake replay:' "$first" >/dev/null || fail "replayed records were not labeled as a replay"
+  [ ! -e "$orphan" ] || fail "the adopted batch was not retired by the drain that printed it"
+  compgen -G "$state/.wake-queue.drain.*" >/dev/null \
+    && fail "the drain left a batch behind for the next drain to re-adopt"
+
+  CS_STATE_OVERRIDE="$state" "$DRAIN" > "$second" || fail "second drain failed"
+  count=$(awk -F '\t' 'NF == 5 { count++ } END { print count + 0 }' "$second")
+  [ "$count" -eq 0 ] || fail "second drain replayed the adopted batch again; got $count"
+  if grep -F 'wake replay:' "$second" >/dev/null; then
+    fail "second drain claimed a replay with nothing left to replay"
+  fi
+  pass "an orphaned batch from a turn that died mid-drain is replayed exactly once"
+}
+
+# Adoption folds into the ordinary drain rather than running beside it: the
+# orphan's records and the queue's records come out of one deduped view, so a
+# key carried by both collapses to the newest payload instead of surfacing twice.
+test_orphaned_batch_folds_into_the_fresh_queue() {
+  local dir state orphan out count
+  dir=$(make_case orphan-fold)
+  state="$dir/state"
+  orphan="$state/.wake-queue.drain.99998"
+  out="$dir/drain.out"
+  write_batch "$orphan" 1 signal task.status 'signal: stale payload'
+  write_batch "$orphan" 2 stale 's:cs-other' 'stale: s:cs-other'
+  append_wake "$state" signal task.status 'signal: fresh payload' || fail "fresh append failed"
+
+  CS_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain folding an orphan into the queue failed"
+  count=$(awk -F '\t' 'NF == 5 { count++ } END { print count + 0 }' "$out")
+  [ "$count" -eq 2 ] || fail "expected 2 deduped records across the orphan and the queue, got $count"
+  grep -F 'signal: fresh payload' "$out" >/dev/null || fail "the newest payload for the shared key was lost"
+  if grep -F 'signal: stale payload' "$out" >/dev/null; then
+    fail "the superseded payload surfaced alongside the newest one"
+  fi
+  grep -F 'stale: s:cs-other' "$out" >/dev/null || fail "the orphan-only record was lost"
+  pass "an adopted batch is deduped against the fresh queue, not printed beside it"
+}
+
+# The successor-drain loop the adoption must not create: a drain that dies again
+# while adopting keeps the records reachable, and the first drain that commits
+# retires every batch at once instead of handing one forward forever.
+test_repeated_adoption_converges() {
+  local dir state out count leftover
+  dir=$(make_case orphan-converge)
+  state="$dir/state"
+  out="$dir/drain.out"
+  write_batch "$state/.wake-queue.drain.11111" 1 signal a.status 'signal: a'
+  write_batch "$state/.wake-queue.drain.22222" 2 signal b.status 'signal: b'
+  write_batch "$state/.wake-queue.drain.33333" 3 signal a.status 'signal: a again'
+
+  CS_STATE_OVERRIDE="$state" "$DRAIN" > "$out" || fail "drain adopting several orphans failed"
+  count=$(awk -F '\t' 'NF == 5 { count++ } END { print count + 0 }' "$out")
+  [ "$count" -eq 2 ] || fail "expected 2 deduped records across 3 orphaned batches, got $count"
+  compgen -G "$state/.wake-queue.drain.*" >/dev/null \
+    && fail "a committed drain left an orphaned batch behind"
+  leftover=$(CS_STATE_OVERRIDE="$state" "$DRAIN" | awk -F '\t' 'NF == 5 { count++ } END { print count + 0 }')
+  [ "$leftover" -eq 0 ] || fail "adoption fed itself: the next drain replayed the retired batches"
+  pass "adopting several orphaned batches converges in one committed drain"
+}
+
 test_concurrent_append_and_drain
 test_atomic_double_drain
 test_drain_dedupes_obvious_duplicates
 test_drain_asserts_watcher_liveness
 test_interruption_before_and_after_raw_commit
+test_orphaned_batch_is_replayed_exactly_once
+test_orphaned_batch_folds_into_the_fresh_queue
+test_repeated_adoption_converges

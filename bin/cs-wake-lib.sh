@@ -14,6 +14,12 @@ CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
 STATE="${CS_STATE_OVERRIDE:-${STATE:-$CS_HOME/state}}"
 CS_WAKE_QUEUE="${CS_WAKE_QUEUE:-$STATE/.wake-queue}"
 CS_WAKE_QUEUE_LOCK="${CS_WAKE_QUEUE_LOCK:-$STATE/.wake-queue.lock}"
+# One owner for the drain's temporary file names. bin/cs-wake-drain.sh rotates
+# the queue into a batch under CS_WAKE_BATCH_PREFIX and adopts any batch it still
+# finds there, so the name it writes and the name its orphan scan looks for can
+# never drift apart.
+CS_WAKE_BATCH_PREFIX="${CS_WAKE_BATCH_PREFIX:-$STATE/.wake-queue.drain.}"
+CS_WAKE_RESTORE_PREFIX="${CS_WAKE_RESTORE_PREFIX:-$STATE/.wake-queue.restore.}"
 CS_LOCK_STALE_AFTER="${CS_LOCK_STALE_AFTER:-2}"
 mkdir -p "$STATE"
 
@@ -371,18 +377,35 @@ cs_wake_append() {
   return "$status"
 }
 
-cs_wake_restore_queue() {
-  local drained=$1 restore
-  restore="$STATE/.wake-queue.restore.$(cs_current_pid)"
-  if [ -e "$CS_WAKE_QUEUE" ]; then
-    cat "$drained" "$CS_WAKE_QUEUE" > "$restore" && mv "$restore" "$CS_WAKE_QUEUE"
-  else
-    mv "$drained" "$CS_WAKE_QUEUE"
-  fi
+# Create an empty rotation batch and print its path. The name is unique rather
+# than pid-derived, so a fresh batch can never land on an orphaned batch that an
+# interrupted drain left behind and clobber records nothing else can reach.
+cs_wake_new_batch() {
+  mktemp "${CS_WAKE_BATCH_PREFIX}XXXXXX" 2>/dev/null
 }
 
+cs_wake_restore_queue() {
+  local drained=$1 restore
+  restore="${CS_WAKE_RESTORE_PREFIX}$(cs_current_pid)"
+  if [ -e "$CS_WAKE_QUEUE" ]; then
+    if cat "$drained" "$CS_WAKE_QUEUE" > "$restore" && mv "$restore" "$CS_WAKE_QUEUE"; then
+      # The records are back in the queue, so the batch is now a duplicate copy.
+      # Leaving it on disk would make the next drain adopt it as an orphan and
+      # replay records that were never lost in the first place.
+      rm -f "$drained"
+      return 0
+    fi
+    rm -f "$restore"
+    return 1
+  fi
+  mv "$drained" "$CS_WAKE_QUEUE"
+}
+
+# Print one deduped view over one or more queue/batch files, oldest file first.
+# Multiple files are how the drain folds an adopted orphan batch in with the
+# freshly rotated queue: dedupe then runs over the union, so a key carried by
+# both keeps its earliest position and its latest payload.
 cs_wake_print_deduped() {
-  local file=$1
   awk -F '\t' '
     NF >= 5 {
       dedupe = $3 SUBSEP $4
@@ -400,7 +423,7 @@ cs_wake_print_deduped() {
         print line[order[i]]
       }
     }
-  ' "$file"
+  ' "$@"
 }
 
 # Map one structurally valid signal key to its home-local status filename.
