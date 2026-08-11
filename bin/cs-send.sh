@@ -55,7 +55,14 @@
 # to resurface, which is the safe direction. A send without the flag closes
 # nothing at all: a routine steer, a working: line, or a done: line still never
 # clears a boss decision. The flag is refused with --key, with an explicit pane
-# target (no task ledger in this home), and with an empty message.
+# target (no task ledger in this home), and with an empty message. The answer
+# note is capped to the shared per-line bound with the structural prefix kept
+# intact so the fold can always parse the appended line, and any corr=<16hex>
+# token in it is replaced with a neutral placeholder (the corr vocabulary lives
+# in bin/cs-pending-reply-lib.sh) so a parent-written closing line can never
+# read as a capo acknowledgement. A key longer than the bound below is refused
+# up front like any other invalid key, so a pathological key is loud rather
+# than silently unclosable.
 #
 # After a successful submit cs-send pauses CS_SEND_SETTLE seconds (default 1,
 # 0 disables) before returning, so an immediate peek catches the receiving
@@ -105,6 +112,7 @@ shift
 # precede --key or the message text, so everything left after the last flag is
 # the message exactly as before and an ordinary send stays byte-identical.
 RESOLVE_KEYS=
+CS_SEND_RESOLVE_KEY_MAX=128
 cs_send_add_resolve_key() {  # <key>
   local k=$1
   case "$k" in
@@ -113,6 +121,10 @@ cs_send_add_resolve_key() {  # <key>
       return 1
       ;;
   esac
+  if [ "${#k}" -gt "$CS_SEND_RESOLVE_KEY_MAX" ]; then
+    echo "error: --resolve-key '$k' is longer than the ${CS_SEND_RESOLVE_KEY_MAX}-character bound for a decision key" >&2
+    return 1
+  fi
   case " $RESOLVE_KEYS " in
     *" $k "*)
       echo "error: duplicate --resolve-key '$k'" >&2
@@ -196,12 +208,13 @@ fi
 # confirmed. An append failure exits nonzero with the manual close command, so
 # the decision stays open and resurfaces instead of vanishing silently.
 cs_send_close_resolved_keys() {  # <answer-text>
-  local note=$1 k line
-  note=$(printf '%s' "$note" | tr '\n\r\t' '   ' | LC_ALL=C tr -d '\000-\037\177')
+  local note=$1 k prefix
+  note=$(printf '%s' "$note" | tr '\n\r\t' '   ' | LC_ALL=C tr -d '\000-\037\177' \
+    | LC_ALL=C sed -E "s/${CS_PENDING_REPLY_CORR_RE}/[corr redacted]/g")
   for k in $RESOLVE_KEYS; do
-    line="resolved [key=$k]: answered via cs-send: $note"
-    cs_cap_line_var "$line"
-    if ! printf '%s\n' "$CS_LINE_CAP_LINE" >> "$RESOLVE_STATUS_FILE"; then
+    prefix="resolved [key=$k]: answered via cs-send: "
+    cs_cap_line_var "$note" "$((CS_LINE_CAP_DEFAULT - ${#prefix}))"
+    if ! printf '%s\n' "$prefix$CS_LINE_CAP_LINE" >> "$RESOLVE_STATUS_FILE"; then
       echo "error: the answer was delivered to '$RAW' ($PANE), but decision key '$k' could not be closed in $RESOLVE_STATUS_FILE. Close it manually with: echo 'resolved [key=$k]: <how it was answered>' >> $RESOLVE_STATUS_FILE - do not resend the answer." >&2
       return 1
     fi

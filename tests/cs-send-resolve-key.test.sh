@@ -17,6 +17,8 @@ set -u
 . "$ROOT/bin/cs-classify-lib.sh"
 # shellcheck source=bin/cs-line-cap-lib.sh
 . "$ROOT/bin/cs-line-cap-lib.sh"
+# shellcheck source=bin/cs-pending-reply-lib.sh
+. "$ROOT/bin/cs-pending-reply-lib.sh"
 
 TMP=$(cs_test_tmproot cs-send-resolve-key)
 mkdir -p "$TMP"
@@ -218,5 +220,56 @@ assert_grep 'resolved [key=impl]: answered via cs-send: reviewed, run the pipeli
   "$home/state/build.status" "a queued answer must close its decision too"
 assert_not_contains "$(open_keys "$home")" impl "the review must leave the fold once answered"
 pass "cs-send: a queued mid-turn answer closes its decision"
+
+# 11. a corr=<16hex> token quoted in the answer is replaced before the close
+#     lands, so a parent-written closing line can never read as a capo
+#     acknowledgement (per the one-owner corr vocabulary, not a second regex)
+home=$(setup_home corrstrip 'blocked [key=creds]: need the deploy token')
+log="$TMP/corrstrip.log"; err="$TMP/corrstrip.err"
+rc=$(run_send "$home" "$log" "$err" build --resolve-key creds \
+  "resend it, corr=0123456789abcdef was never answered")
+expect_code 0 "$rc" "an answer quoting a corr token should still succeed"
+assert_contains "$(cat "$log")" "corr=0123456789abcdef" \
+  "the delivered answer must keep the quoted corr token"
+line=$(grep -F 'resolved [key=creds]' "$home/state/build.status")
+[ -z "$(cs_pending_reply_extract_corr "$line")" ] \
+  || fail "the closing line still carries a corr token: $line"
+assert_contains "$line" "[corr redacted]" \
+  "the stripped token must leave a placeholder so the ledger still reads as answered"
+assert_not_contains "$(open_keys "$home")" creds "the decision must still close"
+pass "cs-send: a quoted corr token never lands in the parent-written closing line"
+
+# 12. the cap cuts the note only: a maximum-length key's structural prefix
+#     survives intact, so the fold still parses and closes the appended line
+longkey=$(awk 'BEGIN { while (i++ < 128) printf "k" }')
+home=$(setup_home longkey "needs-decision [key=$longkey]: pick one")
+log="$TMP/longkey.log"; err="$TMP/longkey.err"
+answer="REST$(awk 'BEGIN { while (i++ < 40) printf " and-then-some" }')"
+rc=$(run_send "$home" "$log" "$err" build --resolve-key "$longkey" "$answer")
+expect_code 0 "$rc" "a maximum-length key should still be answerable"
+line=$(grep -F "resolved [key=$longkey]" "$home/state/build.status") \
+  || fail "the closing line lost its structural prefix"
+case "$line" in
+  "resolved [key=$longkey]: answered via cs-send: REST"*' [truncated]') : ;;
+  *) fail "the cap must cut the note only, with one truncation marker: $line" ;;
+esac
+[ "${#line}" -le "$CS_LINE_CAP_DEFAULT" ] \
+  || fail "the closing line ran ${#line} characters past the ${CS_LINE_CAP_DEFAULT}-character cap"
+assert_not_contains "$(open_keys "$home")" "$longkey" \
+  "the fold must parse the capped line and close the decision"
+pass "cs-send: the cap cuts the note only and a long key's close still parses"
+
+# 13. an over-long key is refused before sending, like any other invalid key
+overkey=$(awk 'BEGIN { while (i++ < 129) printf "k" }')
+home=$(setup_home overkey "needs-decision [key=$overkey]: pick one")
+log="$TMP/overkey.log"; err="$TMP/overkey.err"
+rc=$(run_send "$home" "$log" "$err" build --resolve-key "$overkey" "go with REST")
+[ "$rc" != 0 ] || fail "an over-long key must be refused"
+assert_contains "$(cat "$err")" "longer than the 128-character bound" \
+  "the over-long-key refusal must name the bound"
+[ ! -s "$log" ] || fail "a refused over-long key must deliver no text: $(cat "$log")"
+assert_no_grep 'resolved [key=' "$home/state/build.status" \
+  "a refused over-long key must close nothing"
+pass "cs-send: an over-long key is refused before the send"
 
 pass "cs-send --resolve-key answerer-closes contract"

@@ -82,7 +82,7 @@ the reader-facing marker is an LLM, which cannot compute a cryptographic check
 | `launch-brief` | bin/cs-harness-lib.sh:233,238,260,274 (via `cs-operational-input.sh encode launch-brief`) | `data/<id>/brief.md`, consigliere-authored | No — boss/consigliere-authored brief |
 | `session-start` | bin/cs-session-start.sh:538 | generated digest of local state, plus the deferred network stage's own published result | No — consigliere-generated |
 | `session-start` | bin/cs-sessionstart-run.sh:137 | static resume/reload/fork nudge line | No — fixed consigliere text |
-| `watcher` | bin/cs-send.sh:254 | `cs-send` argv (consigliere steer) | No — consigliere-authored argv |
+| `watcher` | bin/cs-send.sh:267 | `cs-send` argv (consigliere steer) | No — consigliere-authored argv |
 | `turn-end-guard` | bin/cs-turnend-guard.sh:123 | static continuation banner | No — fixed consigliere text |
 | `away-supervisor` | bin/cs-daemon.sh:771 | `_collapse_newlines "$msg"`, where `msg` is the escalation digest | **YES — the digest is distilled from soldier-appended status lines (§3)** |
 | `from-consigliere` | bin/cs-marker-lib.sh:26 (`cs_message_mark_from_consigliere`), called from bin/cs-pending-reply-lib.sh:245 | `cs-send` argv / recovery message | No — consigliere-authored; but delivered to a capo agent (see §5) |
@@ -129,8 +129,8 @@ the reader-facing marker is an LLM, which cannot compute a cryptographic check
   marker.** The capo path embeds a `corr=<16hex>` token
   (bin/cs-pending-reply-lib.sh:241-256) and resolves the expectation **only** from
   a correlated line in the *parent's own* status file
-  (`cs_pending_reply_line_resolves`, :389-396; `cs_pending_reply_try_resolve`,
-  :443-485). Delivery success never resolves; the capo's conversation is never
+  (`cs_pending_reply_line_resolves`, :445-452; `cs_pending_reply_try_resolve`,
+  :499-545). Delivery success never resolves; the capo's conversation is never
   scraped. The `from-consigliere` marker is a *reader-facing* framing for the capo
   agent plus a carrier for the corr token — routing safety is corr-token-based,
   not marker-classification-based. `cs_message_from_consigliere` (the classify
