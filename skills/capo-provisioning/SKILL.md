@@ -3,7 +3,7 @@ name: capo-provisioning
 description: >-
   Agent-only reference for persistent capo setup and retirement.
   Use when creating, seeding, validating, launching, recovering, handing backlog to, pushing inherited local material into, or retiring a capo home, or when editing host/capos.md.
-  Covers detached-worktree homes, transactional seeding, project clone restrictions, inherited local-material push, idle charter, handoff helper, and teardown safety.
+  Covers detached-worktree homes, transactional seeding, inherited-domain record intake, project clone restrictions, inherited local-material push, idle charter, handoff helper, and teardown safety.
 user-invocable: false
 ---
 
@@ -79,6 +79,22 @@ bin/cs-spawn.sh <id> <home> --capo [--model <name>] [--effort <level>]
 
 It validates the `.cs-capo-home` marker, ensures the `capo-<id>` home workspace, and launches the root harness there (via `bin/cs-harness-lib.sh`) with `CS_HOME` pointing at the home.
 
+## Record intake
+
+Seeding carries a charter, inherited configuration, shared boss preferences, project clones, and queued backlog rows into the new home, but none of that tells the capo what its domain has already shipped.
+Before the capo takes its first work, classify the domain.
+
+A greenfield domain has no shipped history, no live deployment, and no inherited plans; it needs nothing from this section and intake is done.
+
+An existing or inherited domain has shipped history, so reconcile the inherited record against reality before the capo treats any of it as open work:
+
+- Reconcile every inherited plan, proposal, and queued row against `origin/main` in the relevant project clones and against the live deployment or running system, not against the plan's own prose.
+- Carry over only genuinely open work, and only durable knowledge that is still live.
+- Never carry a plan row for work that has already shipped; a live backlog retains only the configured recent Done entries, so an inherited queue structurally over-represents plans and under-represents deliveries, and shipped work looks open unless it is checked against the code and the deployment.
+- Record what could not be reconciled - a plan whose shipped state is genuinely undeterminable - as an explicit open question in the capo home rather than silently dropping it or silently importing it as open work.
+
+The result is the capo's starting picture of its domain: what is live, what is genuinely open, and what remains unknown.
+
 ## Sync and inherited local material
 
 This section is the single owner of the capo sync and inherited-local-material propagation contract; `AGENTS.md` points here.
@@ -112,6 +128,7 @@ Do not read a capo's chat to check on a request; the correlated status channel i
 Apply `AGENTS.md` section 10's work-items-only backlog contract before creation or handoff.
 When a capo is created for a domain, existing main-backlog items that fall under its scope should become its work instead of staying stranded in the main backlog.
 Scope-matching is consigliere's judgment against the capo's natural-language scope, not a keyword rule.
+For an existing or inherited domain, reconcile each selected item against shipped reality per the record-intake step above before moving it; a row for already-shipped work must not be handed off.
 Read `config/backlog.md`, pick queued items that fit the new scope, and move them with:
 
 ```sh
