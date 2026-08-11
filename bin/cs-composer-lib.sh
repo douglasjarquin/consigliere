@@ -10,7 +10,7 @@
 # rules with NO ghost text, so the ghost strip is a no-op there and harmless.
 #
 # WHY: the daemon injects an escalation digest into consigliere's own pane, so
-# it must know the codex composer is AFFIRMATIVELY empty first. Typing into a
+# it must know the agent composer is AFFIRMATIVELY empty first. Typing into a
 # half-typed boss line merges two messages; typing into a dead shell could
 # EXECUTE the digest. Only 'empty' authorizes injection; 'pending' and
 # 'unknown' both defer (the buffered escalation survives for the next tick).
@@ -43,13 +43,37 @@
 # empty row read empty: an NBSP that separates real typed content still leaves
 # that content behind, so the row stays 'pending'.
 #
-# SAFETY RULE for prompt glyphs (one owner, ported from upstream
-# fm-composer-lib): an agent glyph (codex `›`, claude `❯`) is a genuine empty
-# agent composer, bordered or bare. A bare SHELL glyph (`>`, `$`, `%`, `#`) is what a
-# pane shows once its agent exited to a login shell; it is 'empty' ONLY inside
-# a real bordered composer box (the harness drawing its own prompt) and never
-# on an unstructured row - structurally, a bare shell-glyph row is not even
-# recognized as a composer here, so it stays 'unknown'.
+# SAFETY RULE for prompt glyphs (one owner). A GLYPH NEVER PROVES AN AGENT.
+# Claude's `❯` (U+276F) is also the prompt character of common shell themes
+# (pure, starship, p10k), so the glyph sets are NOT disjoint: a pane whose agent
+# exited to a login shell draws the very same `❯`, and reading it as an empty
+# agent composer is what would let the daemon type a digest into a dead shell
+# and EXECUTE it (reproduced from real bytes, docs/claude.md).
+#
+# What proves a composer is the SHAPE THE HARNESS DRAWS, per harness:
+#   bordered box (`│ … │`)  - the harness drawing its own prompt; a shell cannot
+#                             draw it, so a shell glyph inside one is 'empty'.
+#   claude, bare `❯`        - claude draws its composer BETWEEN horizontal rule
+#                             rows (`───`, verified 2.1.227), so only a `❯` row
+#                             with a rule immediately above it is PROVEN to be a
+#                             composer.
+#   codex, bare `›`         - codex draws no box; the bare row is the composer.
+#   bare shell glyph (`>`, `$`, `%`, `#`) - never a composer shape at all.
+# The proof gates 'empty' ONLY. An unproven `❯` row still classifies its content
+# normally, so a row carrying leftover text stays 'pending' and the callers that
+# act on that (bin/cs-control-lib.sh's pre-exit flush) keep working; it is the
+# EMPTY verdict - the one that authorizes typing - that degrades to 'unknown'.
+# That also settles the nastiest layout: a stale composer still in scrollback
+# above a live shell prompt. The shell prompt is the LAST match, it is unproven,
+# and it is empty, so the capture reads 'unknown' instead of inheriting the dead
+# composer's verdict.
+# On top of the shape, an 'empty' verdict from a BARE row is corroborated
+# against the pane's process table: an agent process must actually be running
+# there (cs_herdr_pane_agent_process). That covers what the shape alone cannot -
+# a prompt theme that draws its own rule above the prompt. Unreadable process
+# info therefore costs availability, never correctness: it defers.
+# Both checks fail toward DEFER: anything not positively proven to be an empty
+# AGENT composer is 'unknown'. 'empty' is never widened.
 
 # Lines of pane bottom scanned for the composer row.
 CS_COMPOSER_LINES=${CS_COMPOSER_LINES:-20}
@@ -161,6 +185,23 @@ _cs_composer_normalize_spaces() {  # <text>
   printf '%s' "$s"
 }
 
+# _cs_composer_is_rule: is this trimmed, ANSI-stripped row one of the horizontal
+# rules claude draws above and below its composer? True only when the row is
+# NOTHING but rule characters and carries a run of at least three, so a line of
+# prose that happens to contain one `─` is not mistaken for the composer's
+# frame. Matches raw UTF-8 bytes (U+2500, U+2501) for the same locale
+# independence _cs_composer_normalize_spaces needs.
+_cs_composer_is_rule() {  # <trimmed-row>
+  local s=$1
+  case "$s" in
+    *$'\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80'*|*$'\xe2\x94\x81\xe2\x94\x81\xe2\x94\x81'*) ;;
+    *) return 1 ;;
+  esac
+  s=${s//$'\xe2\x94\x80'/}
+  s=${s//$'\xe2\x94\x81'/}
+  [ -z "$s" ]
+}
+
 # _cs_composer_trim: normalize Unicode spaces, then strip leading and trailing
 # whitespace. Every trim in this file goes through here, so normalization
 # happens once, before any structural match or emptiness verdict.
@@ -204,14 +245,20 @@ cs_composer_classify_content() {  # <bordered> <content>
 # structurally on the ANSI-stripped rows - keeping the LAST match so a
 # decorative box earlier in the window never outranks the live bottom composer:
 #   bordered - trimmed row both starts and ends with a border glyph (│ ┃ |)
-#   bare     - trimmed row starts with an agent glyph (codex `›`, claude `❯`; a
-#              bare shell glyph is deliberately NOT a composer shape: unknown)
-# then extracts real typed content from the RAW styled row with
-# cs_composer_strip_ghost and hands the verdict to
-# cs_composer_classify_content. No composer row found, or an unreadable pane,
-# is 'unknown' (defer).
+#   bare     - trimmed row starts with codex's `›`, or with claude's `❯` when
+#              the previous non-blank row is one of claude's composer rules
+# A `❯` row WITHOUT that rule is most likely a login shell's prompt (the glyph
+# sets are not disjoint - see the safety rule above), so it still matches but is
+# UNPROVEN, which forbids only the 'empty' verdict. A bare shell glyph is not a
+# composer shape at all. Real typed content is then extracted from the RAW
+# styled row with cs_composer_strip_ghost and handed to
+# cs_composer_classify_content, and an
+# 'empty' verdict off a bare row must still be corroborated by an agent process
+# actually running in the pane. No composer row found, an unreadable pane, and
+# an uncorroborated bare row are all 'unknown' (defer).
 cs_composer_state() {  # <pane_id>
   local pane=$1 cap line trimmed found=0 bordered=0 raw_match="" stripped
+  local prev_rule=0 proven=0 verdict
   cap=$(cs_herdr_capture "$pane" "$CS_COMPOSER_LINES" ansi 2>/dev/null) \
     || { printf 'unknown'; return 0; }
   while IFS= read -r line; do
@@ -220,10 +267,13 @@ cs_composer_state() {  # <pane_id>
     [ -n "$trimmed" ] || continue
     case "$trimmed" in
       '│'*'│'|'┃'*'┃'|'|'*'|')
-        bordered=1; raw_match=$line; found=1 ;;
-      '›'*|'❯'*)
-        bordered=0; raw_match=$line; found=1 ;;
+        bordered=1; raw_match=$line; found=1; proven=1 ;;
+      '›'*)
+        bordered=0; raw_match=$line; found=1; proven=1 ;;
+      '❯'*)
+        bordered=0; raw_match=$line; found=1; proven=$prev_rule ;;
     esac
+    if _cs_composer_is_rule "$trimmed"; then prev_rule=1; else prev_rule=0; fi
   done <<EOF
 $cap
 EOF
@@ -236,5 +286,13 @@ EOF
     stripped=${stripped//|/}
     stripped=$(_cs_composer_trim "$stripped")
   fi
-  cs_composer_classify_content "$bordered" "$stripped"
+  verdict=$(cs_composer_classify_content "$bordered" "$stripped")
+  if [ "$verdict" = empty ]; then
+    [ "$proven" = 1 ] || verdict=unknown
+  fi
+  if [ "$verdict" = empty ] && [ "$bordered" != 1 ] \
+    && ! cs_herdr_pane_agent_process "$pane" >/dev/null 2>&1; then
+    verdict=unknown
+  fi
+  printf '%s' "$verdict"
 }

@@ -17,6 +17,7 @@
 > Refreshed again for the `bin/cs-session-start.sh` row when the digest's external-network checks moved off the blocking path into `bin/cs-startup-network.sh`, which moved the mint site and added that worker's published result to the digest body.
 > That result is written by a consigliere-owned detached process and never by an agent, so the row's answer is unchanged.
 > Refreshed again for the composer-emptiness line reference in §2d when bin/cs-composer-lib.sh gained Unicode-space normalization before its trim, which shifted the capture call; the structural fact (capture never feeds marker classification) is unchanged.
+> Refreshed again for the composer-emptiness line reference in §2d when bin/cs-composer-lib.sh gained the claude-glyph rule-proof and agent-process corroboration (dead-shell `❯` fix), which shifted the capture call again; the structural fact is unchanged.
 
 ## 1. Threat model
 

@@ -165,14 +165,64 @@ A fresh clone WITHOUT `state/` stays silent by design (`cs_primary_scope_matches
 requires it); the first session of a brand-new home runs `bin/cs-session-start.sh`
 by hand per AGENTS.md section 3.
 
-## Away-mode composer
+## Away-mode composer (re-verified live 2026-08-11, claude 2.1.227, isolated herdr lab)
 
 `bin/cs-composer-lib.sh` recognizes claude's empty-composer glyph `❯` (U+276F)
-alongside codex's `›`. Claude's empty composer (verified 2.1.218) is a bare `❯`
-between horizontal rules with no ghost/placeholder text, so the codex ghost strip
-is a harmless no-op; a bare `❯` reads `empty`, `❯ <text>` reads `pending`. The
-away-mode daemon can therefore inject escalation digests into a claude composer,
-same as codex.
+alongside codex's `›`, and claude's empty composer carries no ghost/placeholder
+text, so the codex ghost strip is a harmless no-op.
+
+The glyph alone is NOT enough, because `❯` is also the prompt character of common
+zsh themes.
+Captured with `pane read --lines 20 --format ansi` in a named non-`default` lab,
+these are the two rows that collide (long runs abbreviated `{x53}`):
+
+```text
+live claude, empty composer          dead shell, agent exited via /exit
+\033[0m\033[38;2;136;136;136m─{x53}\033[0m\r   \033[0m\033[38;5;4m<cwd>\033[0m \033[0m\033[38;5;3m14s\033[0m \r
+❯\xa0\r                                        \033[0m\033[38;5;5m❯\033[0m
+\033[0m\033[38;2;136;136;136m─{x53}\033[0m\r
+```
+
+Three facts the bytes settle:
+
+- Claude's composer row is `❯` followed by U+00A0 (NBSP), NOT a plain space, and
+  it carries no SGR of its own.
+  The NBSP normalization is what makes it read empty.
+- Claude draws the composer BETWEEN 53-column `─` rules (truecolour
+  `38;2;136;136;136`).
+  The dead shell's `❯` has the zsh path/duration row above it and no rule.
+- Colour cannot separate them: the shell's `❯` is 256-colour `38;5;5` and the
+  agent's is plain here, but both are theme-dependent and neither is proof.
+
+Verdicts from the fixed classifier, run against those exact capture files:
+
+```
+                                 agent process present   agent process gone
+live claude, empty composer      empty                   unknown
+live claude, typed text          pending                 pending
+dead shell after /exit           unknown                 unknown
+```
+
+Before the fix the dead-shell capture read `empty`, which is the verdict that
+authorizes the away-mode daemon to type its escalation digest into the pane - a
+login shell would have EXECUTED it.
+`bin/cs-composer-lib.sh`'s header owns the resulting rule; `tests/cs-afk-daemon.test.sh` pins these captures as regressions.
+
+Corroborating signals recorded from the same run, after `/exit`:
+
+```
+$ herdr agent get w1:p1 --session <lab>
+{"error":{"code":"agent_not_found","message":"agent target w1:p1 not found"},"id":"cli:agent:get"}
+$ herdr pane process-info --pane w1:p1 --session <lab> | jq -r '.result.process_info.foreground_processes[].argv0'
+zsh
+```
+
+NOT re-verified here: whether `--dangerously-skip-permissions` suppresses the
+one-time folder-trust dialog.
+In a brand-new cwd on 2.1.227 the interactive TUI
+showed "Quick safety check: Is this a project you created or one you trust?"
+despite that flag, and the capture run had to accept it before claude drew a
+composer.
 
 ## Permission modes (verified 2026-07-28, claude 2.1.220)
 
@@ -229,7 +279,7 @@ The mechanics `bin/cs-control.sh` drives, measured the same way as the codex sid
   \033[0m\033[38;5;5m❯\033[0m \033[38;5;2mclaude\033[0m --dangerously-skip-permissions --settings \033[38;5;3m'/…
   ```
 
-  A 256-colour foreground (`38;5;n`) is deliberately KEPT by `cs_composer_strip_ghost`, so that row classified `pending` while the agent's own composer (a truecolour `38;2;153;153;153` `❯` with nothing after it) classifies `empty` correctly once claude has drawn it. Consequence for this plane: the flush above exists partly because `pending` is not always real typed text. Consequence NOT addressed here, and worth its own change: a pane whose agent has EXITED shows this same `❯` shell prompt, and `bin/cs-composer-lib.sh` treats `❯` as an agent glyph, so an empty shell prompt can read `empty` - the away-mode daemon's injection guard is what that classification protects.
+  A 256-colour foreground (`38;5;n`) is deliberately KEPT by `cs_composer_strip_ghost`, so that row classified `pending` while the agent's own composer classifies `empty` correctly once claude has drawn it. Consequence for this plane: the flush above exists partly because `pending` is not always real typed text. The worse consequence - a pane whose agent has EXITED shows a BARE `❯` shell prompt that read `empty` - was fixed separately; the away-mode composer section above owns the evidence and the rule.
 - **`claude --continue` with nothing to resume fails cleanly, but not instantly.** In a fresh directory it printed `No conversation found to continue`, exited rc 1, and left the pane at its shell with no agent process - the positively-agent-free signal `bin/cs-spawn.sh --relaunch` waits for before falling back to a cold launch. It is a real process while it does that, and herdr's detector reports an agent in the pane for that second, so "an agent appeared" alone is NOT proof a resume took: the relaunch requires the agent to still be there, with a readable process, after a settle.
 - **A resumed session keeps its id.** `agent_session.value` was byte-identical before the exit and after the resume, so it cannot be used as relaunch evidence (docs/herdr.md owns that conclusion).
 - **A finished claude turn does not necessarily read `idle`.** `herdr agent wait <pane> --until idle` timed out against a live claude soldier whose turn had provably ended (its Stop hook had already touched the turn-end file), because herdr reported native `done`, which the status policy maps to `done` and not to `idle` (docs/herdr.md). Wait on the corroborated busy state (`cs_herdr_agent_busy_state` is not `busy`), which is what every consigliere caller acts on; `tests/cs-lifecycle-claude-live.test.sh` does, after the raw wait failed a healthy agent.
