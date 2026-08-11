@@ -166,7 +166,7 @@ assert_contains "$LIVE_BLOCK" "pane probe for w1:p1 could not answer" "the excep
 
 # A pane that answers without a readable cwd cannot prove it still roots at
 # this home, so the send leg is unproven and the route is an exception.
-OUT=$(FAKE_CWD_w1_p1= "$BIN" 2>&1)
+OUT=$(FAKE_CWD_w1_p1='' "$BIN" 2>&1)
 LIVE_BLOCK=$(printf '%s\n' "$OUT" | awk '/^capo: live$/{f=1;next} /^capo: /{f=0} f')
 assert_line "$LIVE_BLOCK" '^  route: exception$' \
   "a pane with no readable cwd is an unproven root, never a send"
