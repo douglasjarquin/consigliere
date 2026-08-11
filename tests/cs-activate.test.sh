@@ -41,6 +41,14 @@ case "${1:-} ${2:-}" in
     [ "${FAKE_NO_AGENT:-0}" = 1 ] && { printf '{"result":{"agent":{}}}\n'; exit 0; }
     printf '{"result":{"agent":{"agent":"codex","agent_status":"%s"}}}\n' "${FAKE_BUSY:-idle}"
     exit 0 ;;
+  "pane process-info")
+    # The composer classifier corroborates an empty verdict against this table.
+    if [ "${FAKE_NO_AGENT:-0}" = 1 ]; then
+      printf '{"result":{"process_info":{"shell_pid":10,"foreground_processes":[{"pid":10,"argv0":"zsh"}]}}}\n'
+    else
+      printf '{"result":{"process_info":{"shell_pid":10,"foreground_processes":[{"pid":20,"argv0":"codex"}]}}}\n'
+    fi
+    exit 0 ;;
   "agent prompt")
     [ -n "${FAKE_PROMPT_LOG:-}" ] && printf '%s\n' "${4:-}" >> "$FAKE_PROMPT_LOG"
     printf '{"result":{"type":"agent_prompted"}}\n'

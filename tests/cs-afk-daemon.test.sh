@@ -99,6 +99,16 @@ case "${1:-} ${2:-}" in
     printf '{"result":{"agent":{"agent":"codex","agent_status":"%s"}}}\n' \
       "${CS_FAKE_HERDR_AGENT_STATUS:-idle}"
     exit 0 ;;
+  "pane process-info")
+    # Shape verified live (herdr 0.7.5): result.process_info.foreground_processes[]
+    # with argv0. CS_FAKE_HERDR_AGENT_PROC=none is the husk a dead shell leaves.
+    if [ "${CS_FAKE_HERDR_AGENT_PROC:-claude}" = none ]; then
+      printf '{"result":{"process_info":{"shell_pid":100,"foreground_processes":[{"pid":100,"argv0":"zsh"}]}}}\n'
+    else
+      printf '{"result":{"process_info":{"shell_pid":100,"foreground_processes":[{"pid":200,"argv0":"%s"}]}}}\n' \
+        "${CS_FAKE_HERDR_AGENT_PROC:-claude}"
+    fi
+    exit 0 ;;
   "agent wait")
     # Mirror the pinned herdr 0.7.5: reject the pre-0.7.5 --status spelling. A
     # permissive fake is what let the wrong flag ship.
@@ -198,6 +208,19 @@ test_composer_classifier() {
   (
     cd "$dir" || exit 1
     export PATH="$dir/fakebin:$PATH" CS_FAKE_HERDR_CAPTURE="$cap"
+    # Rows captured verbatim from a live claude 2.1.227 pane in an isolated
+    # herdr lab (2026-08-11; the same capture docs/claude.md records). Claude
+    # draws its composer between 53-column rules, and the empty composer row is
+    # `❯` + U+00A0, NOT `❯` + a plain space.
+    RULE=$(printf '\033[0m\033[38;2;136;136;136m%s\033[0m\r' \
+      "$(printf '\342\224\200%.0s' $(seq 1 53))")
+    CLAUDE_EMPTY_ROW=$(printf '\342\235\257\302\240\r')
+    CLAUDE_HINTS=$(printf '  \033[0m\033[38;2;255;193;7m\342\232\240 Transcript saving is off\033[0m\r')
+    # The zsh prompt the same pane showed after the agent exited: a path/duration
+    # row, then `❯` ALONE on its own row - the same U+276F claude uses, at a
+    # 256-colour foreground. Only the path text is substituted; every SGR code,
+    # row split, and glyph is as captured.
+    ZSH_PROMPT=$(printf '\033[0m\033[38;5;4mpane-cwd\033[0m \033[0m\033[38;5;3m14s\033[0m \r\n\033[0m\033[38;5;5m\342\235\257\033[0m ')
     # shellcheck source=bin/cs-herdr-lib.sh
     . "$ROOT/bin/cs-herdr-lib.sh"
     # shellcheck source=bin/cs-composer-lib.sh
@@ -224,14 +247,34 @@ test_composer_classifier() {
     printf '\342\224\202 > \342\224\202\n' > "$cap"
     verdict=$(cs_composer_state w1:p1)
     [ "$verdict" = empty ] || { echo "bordered empty composer read '$verdict', want empty" >&2; exit 1; }
-    # Claude empty composer: a bare ❯ (U+276F) prompt row between horizontal
-    # rules, no ghost text (verified claude 2.1.218). The rule rows are not
-    # composer shapes and are skipped; the ❯ row reads empty.
-    printf '\342\224\200\342\224\200\342\224\200\n\342\235\257 \n\342\224\200\342\224\200\342\224\200\n  hint line\n' > "$cap"
+    # Claude empty composer: the ❯ (U+276F) row between claude's own horizontal
+    # rules, no ghost text. The rules are what prove it is a composer at all.
+    printf '%s\n%s\n%s\n%s\n' "$RULE" "$CLAUDE_EMPTY_ROW" "$RULE" "$CLAUDE_HINTS" > "$cap"
     verdict=$(cs_composer_state w1:p1)
     [ "$verdict" = empty ] || { echo "empty claude composer read '$verdict', want empty" >&2; exit 1; }
-    # Claude typed input after the ❯ prompt is pending.
-    printf '\342\235\257 land the PR now\n\342\224\200\342\224\200\342\224\200\n' > "$cap"
+    # THE BUG (reproduced from real bytes): the agent exited to a login shell,
+    # whose prompt glyph is the same ❯. Nothing here is an agent composer, so
+    # this must NEVER be empty - the daemon would type its digest into a shell
+    # that EXECUTES it.
+    printf '%s\n' "$ZSH_PROMPT" > "$cap"
+    verdict=$(cs_composer_state w1:p1)
+    [ "$verdict" != empty ] \
+      || { echo "dead-shell ❯ read 'empty'; that authorizes injection into a live shell" >&2; exit 1; }
+    [ "$verdict" = unknown ] || { echo "dead-shell ❯ read '$verdict', want unknown" >&2; exit 1; }
+    # Worst case: claude's own composer is STILL in the scrollback above that
+    # shell prompt. The stale composer must not be read as the live one.
+    printf '%s\n%s\n%s\n%s\n' "$RULE" "$CLAUDE_EMPTY_ROW" "$RULE" "$ZSH_PROMPT" > "$cap"
+    verdict=$(cs_composer_state w1:p1)
+    [ "$verdict" = unknown ] \
+      || { echo "stale composer above a dead shell read '$verdict', want unknown" >&2; exit 1; }
+    # Corroboration layer: composer-shaped bytes but no agent process in the
+    # pane (the husk a crashed agent leaves) still defers.
+    printf '%s\n%s\n%s\n' "$RULE" "$CLAUDE_EMPTY_ROW" "$RULE" > "$cap"
+    verdict=$(export CS_FAKE_HERDR_AGENT_PROC=none; cs_composer_state w1:p1)
+    [ "$verdict" = unknown ] \
+      || { echo "empty composer shape with no agent process read '$verdict', want unknown" >&2; exit 1; }
+    # Claude typed input in that same composer is pending.
+    printf '%s\n\342\235\257\302\240land the PR now\r\n%s\n' "$RULE" "$RULE" > "$cap"
     verdict=$(cs_composer_state w1:p1)
     [ "$verdict" = pending ] || { echo "typed claude input read '$verdict', want pending" >&2; exit 1; }
     # Unreadable/blank pane: unknown.
@@ -242,19 +285,19 @@ test_composer_classifier() {
     # composer, and must read empty under a UTF-8 locale AND under LC_ALL=C,
     # where bash's [[:space:]] does not match it.
     utf8loc=$(locale -a 2>/dev/null | grep -iE '^(C|en_US)\.(utf-?8)$' | head -1)
-    printf '\342\235\257\302\240\302\240\n' > "$cap"
+    printf '%s\n\342\235\257\302\240\302\240\r\n%s\n' "$RULE" "$RULE" > "$cap"
     for loc in ${utf8loc:+"$utf8loc"} C; do
       verdict=$(export LC_ALL="$loc"; cs_composer_state w1:p1)
       [ "$verdict" = empty ] \
         || { echo "NBSP-padded empty claude composer read '$verdict' under LC_ALL=$loc, want empty" >&2; exit 1; }
       # NBSP separating real typed content still leaves content: pending.
-      printf '\342\235\257\302\240land\302\240the PR now\n' > "$cap2"
+      printf '%s\n\342\235\257\302\240land\302\240the PR now\r\n%s\n' "$RULE" "$RULE" > "$cap2"
       verdict=$(export LC_ALL="$loc" CS_FAKE_HERDR_CAPTURE="$cap2"; cs_composer_state w1:p1)
       [ "$verdict" = pending ] \
         || { echo "NBSP-separated typed input read '$verdict' under LC_ALL=$loc, want pending" >&2; exit 1; }
     done
   ) || fail "composer classifier verdicts wrong"
-  pass "composer classifier (codex › and claude ❯): ghost-empty, typed-pending, stripped-transport-pending, dead-shell-unknown, bordered-empty, NBSP-padded-empty under UTF-8 and LC_ALL=C"
+  pass "composer classifier (codex › and claude ❯): ghost-empty, typed-pending, stripped-transport-pending, dead-shell-unknown, bordered-empty, NBSP-padded-empty under UTF-8 and LC_ALL=C, and on real claude 2.1.227 bytes - live composer empty, exited-to-shell ❯ never empty, stale composer above a shell unknown, composer shape without an agent process unknown"
 }
 
 # --- 1. a routine wake is self-handled: no model turn, no injection ------------
