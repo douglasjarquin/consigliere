@@ -16,6 +16,7 @@
 > minting site for that kind.
 > Refreshed again for the `bin/cs-session-start.sh` row when the digest's external-network checks moved off the blocking path into `bin/cs-startup-network.sh`, which moved the mint site and added that worker's published result to the digest body.
 > That result is written by a consigliere-owned detached process and never by an agent, so the row's answer is unchanged.
+> Refreshed again for the composer-emptiness line reference in §2d when bin/cs-composer-lib.sh gained Unicode-space normalization before its trim, which shifted the capture call; the structural fact (capture never feeds marker classification) is unchanged.
 
 ## 1. Threat model
 
@@ -119,7 +120,7 @@ the reader-facing marker is an LLM, which cannot compute a cryptographic check
 
 - **No classifier ever re-reads a marker from a pane capture.** `cs_herdr_capture`
   feeds only native busy-state detection (bin/cs-herdr-lib.sh:182,
-  bin/cs-watch.sh:1135) and composer-emptiness (bin/cs-composer-lib.sh:183). Every
+  bin/cs-watch.sh:1135) and composer-emptiness (bin/cs-composer-lib.sh:215). Every
   marker classification runs on an in-process string (a status file read, a
   `cs-send` argv, an afk-exit message), **never on captured pane bytes**. A marker
   round-trips through a TUI pane only when it is *typed in and read by the LLM
