@@ -192,8 +192,9 @@ file_has() { grep -F -- "$1" "$2" >/dev/null 2>&1; }
 # --- composer lib unit coverage (sourced, pure) --------------------------------
 
 test_composer_classifier() {
-  local dir state cap verdict
+  local dir state cap cap2 verdict utf8loc loc
   dir=$(make_case composer-unit); state="$dir/state"; cap="$dir/cap.txt"
+  cap2="$dir/cap2.txt"
   (
     cd "$dir" || exit 1
     export PATH="$dir/fakebin:$PATH" CS_FAKE_HERDR_CAPTURE="$cap"
@@ -237,8 +238,23 @@ test_composer_classifier() {
     : > "$cap"
     verdict=$(cs_composer_state w1:p1)
     [ "$verdict" = unknown ] || { echo "blank pane read '$verdict', want unknown" >&2; exit 1; }
+    # NBSP (U+00A0, bytes C2 A0) padding after a bare ❯ is still an EMPTY claude
+    # composer, and must read empty under a UTF-8 locale AND under LC_ALL=C,
+    # where bash's [[:space:]] does not match it.
+    utf8loc=$(locale -a 2>/dev/null | grep -iE '^(C|en_US)\.(utf-?8)$' | head -1)
+    printf '\342\235\257\302\240\302\240\n' > "$cap"
+    for loc in ${utf8loc:+"$utf8loc"} C; do
+      verdict=$(export LC_ALL="$loc"; cs_composer_state w1:p1)
+      [ "$verdict" = empty ] \
+        || { echo "NBSP-padded empty claude composer read '$verdict' under LC_ALL=$loc, want empty" >&2; exit 1; }
+      # NBSP separating real typed content still leaves content: pending.
+      printf '\342\235\257\302\240land\302\240the PR now\n' > "$cap2"
+      verdict=$(export LC_ALL="$loc" CS_FAKE_HERDR_CAPTURE="$cap2"; cs_composer_state w1:p1)
+      [ "$verdict" = pending ] \
+        || { echo "NBSP-separated typed input read '$verdict' under LC_ALL=$loc, want pending" >&2; exit 1; }
+    done
   ) || fail "composer classifier verdicts wrong"
-  pass "composer classifier (codex › and claude ❯): ghost-empty, typed-pending, stripped-transport-pending, dead-shell-unknown, bordered-empty"
+  pass "composer classifier (codex › and claude ❯): ghost-empty, typed-pending, stripped-transport-pending, dead-shell-unknown, bordered-empty, NBSP-padded-empty under UTF-8 and LC_ALL=C"
 }
 
 # --- 1. a routine wake is self-handled: no model turn, no injection ------------
