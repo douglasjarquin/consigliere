@@ -1,6 +1,0 @@
-Codex CLI 0.147.0, herdr-lab session cs-lab-exec-mode-probe-15902-11715, pane w1:p1 (fresh /new session)
-Candidate string tested: "start-work" (bare word, no prefix)
-Result: ACTIVATES. Pane output included the line:
-  "• I detect execution intent - "start-work" invokes the Prometheus plan runner. I use omo:start-work now..."
-  followed by: "Explored -> Read SKILL.md (omo:start-work skill)"
-Confirmed string for cs_harness_start_work_skill codex: start-work
