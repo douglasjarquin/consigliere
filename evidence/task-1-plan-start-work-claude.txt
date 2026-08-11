@@ -1,0 +1,11 @@
+Claude Code 2.1.228, herdr-lab session cs-lab-exec-mode-probe-15902-11715, pane w2:p1
+Candidate string tested: "omo:planing-prometheustic" (bare, no leading slash)
+Result: ACTIVATES. Pane output: "Skill(omo:planing-prometheustic) -> Successfully loaded skill", then "No task text given. What do you want plan for?"
+Confirmed string for cs_harness_plan_skill claude: omo:planing-prometheustic
+
+Candidate string tested: "omo:start-work" (bare, no leading slash)
+Result: ACTIVATES. Pane output: "Skill(omo:start-work) -> Successfully loaded skill", then began Phase 1 (listed directory, looking for a plan).
+Confirmed string for cs_harness_start_work_skill claude: omo:start-work
+
+Candidate string tested (non-trigger): "just checking in, ignore this"
+Result: does NOT activate. Pane output: "Ack. No action needed." - no skill load line.

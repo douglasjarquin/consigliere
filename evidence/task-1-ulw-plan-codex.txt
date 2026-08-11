@@ -1,0 +1,6 @@
+Codex CLI 0.147.0, herdr-lab session cs-lab-exec-mode-probe-15902-11715, pane w1:p1
+Candidate string tested: "ulw-plan" (bare word, no prefix)
+Result: ACTIVATES. Pane output included the line:
+  "• I detect planning intent - ulw-plan explicitly invoked. I'm loading that workflow now..."
+  followed by banner: "• ULW-PLAN MODE ENABLED!"
+Confirmed string for cs_harness_plan_skill codex: ulw-plan

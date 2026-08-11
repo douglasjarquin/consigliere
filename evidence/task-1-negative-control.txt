@@ -1,0 +1,4 @@
+Codex CLI 0.147.0, herdr-lab session cs-lab-exec-mode-probe-15902-11715, pane w1:p1 (fresh /new session)
+Candidate string tested (non-trigger): "just checking in, ignore this"
+Result: does NOT activate. Pane output: "• Ignored." - no MODE ENABLED banner, no skill exploration.
+Confirms negative control is clean (unlike the earlier-flagged "plan mode" phrase, which IS a listed ulw-plan trigger).

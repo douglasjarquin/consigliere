@@ -505,3 +505,28 @@ cs_harness_instruction_file() {
     *) return 1 ;;
   esac
 }
+
+# cs_harness_plan_skill <h> - the exact text that activates this harness's
+# omo plan-mode skill when it appears in a brief. Live-verified 2026-08-11
+# against codex-cli 0.147.0 and claude 2.1.228 via a herdr-lab probe pane: the
+# bare skill name, with no leading slash or $ prefix, is sufficient on both
+# harnesses (evidence/task-1-ulw-plan-codex.txt, evidence/task-1-plan-start-work-claude.txt).
+cs_harness_plan_skill() {
+  case "$1" in
+    codex) printf 'ulw-plan\n' ;;
+    claude) printf 'omo:planing-prometheustic\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+# cs_harness_start_work_skill <h> - the exact text that activates this
+# harness's omo plan-execution skill. Live-verified 2026-08-11 alongside
+# cs_harness_plan_skill (same evidence files); again the bare skill name
+# activates on both harnesses.
+cs_harness_start_work_skill() {
+  case "$1" in
+    codex) printf 'start-work\n' ;;
+    claude) printf 'omo:start-work\n' ;;
+    *) return 1 ;;
+  esac
+}
