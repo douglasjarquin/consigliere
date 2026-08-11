@@ -38,13 +38,20 @@
 #     the watcher surfaces completion through the ordinary signal path. A
 #     headless scout cannot be steered mid-flight; use the interactive default
 #     when follow-up questions are likely.
-#   --base <ref> bases the task branch on <ref> instead of the current HEAD.
+#   --base <ref> bases the task branch on <ref> instead of the current HEAD, and
+#     skips the base-freshness refresh below (the ref was chosen explicitly).
 #   --issue <n> records issue=<n> in meta for board-driven work (the Closes-#n
 #     contract itself lives in the brief via cs-brief.sh --issue). Correlates
 #     the task to a GitHub issue for the fleet view and the contracts skill.
 #
 # Ship/scout mechanics:
 #   - Requires the brief at data/<id>/brief.md (scaffold with cs-brief.sh first).
+#   - Base freshness (no --base only): refreshes the clone through
+#     cs-fleet-sync.sh - its own safety rules, not a second fast-forward - under a
+#     CS_SPAWN_BASE_FRESHNESS_TIMEOUT_SECS bound (default 25), so the task branch
+#     does not start on a main this home never saw merged. Fail-open: an
+#     unreachable origin, a stuck clone, or an exhausted bound warns loudly to
+#     stderr and the spawn continues on the local HEAD.
 #   - Creates the isolated worktree + task workspace with
 #     `herdr worktree create --cwd <project> --branch cs/<id> --label <id>`;
 #     the root pane is the task pane.
@@ -91,6 +98,8 @@ esac
 . "$SCRIPT_DIR/cs-harness-lib.sh"
 # shellcheck source=bin/cs-delivery-lib.sh
 . "$SCRIPT_DIR/cs-delivery-lib.sh"
+# shellcheck source=bin/cs-timeout-lib.sh
+. "$SCRIPT_DIR/cs-timeout-lib.sh"
 
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
@@ -455,6 +464,60 @@ if git -C "$PROJ_ABS" show-ref --verify --quiet "refs/heads/$BRANCH"; then
   echo "error: branch '$BRANCH' already exists in $PROJ_ABS; a previous task '$ID' was not fully cleaned up" >&2
   exit 1
 fi
+
+# ------------------------------------------------------------ base freshness
+# Without --base, the task branch starts from the clone's current HEAD, and this
+# home refreshes a clone only at session start or after a merged-PR wake IT saw.
+# A merge this home never saw - the boss merging from a phone, another home or a
+# capo landing work - leaves the clone behind origin, so the soldier would build
+# on old main and only find out late, in a rebase or a conflicting PR.
+# cs-fleet-sync.sh already owns every rule for refreshing a clone safely (the
+# fetch guard, the off-default/dirty/diverged STUCK semantics, fast-forward only,
+# never forcing or stashing), so this reuses it whole rather than fast-forwarding
+# a second way here.
+# It is deliberately fail-OPEN and bounded: a dead network must not block
+# dispatch. But a stale base must never be silent, so anything short of a clone
+# confirmed current with origin prints a loud warning and the spawn proceeds on
+# the local HEAD.
+FRESHNESS_TIMEOUT=${CS_SPAWN_BASE_FRESHNESS_TIMEOUT_SECS:-25}
+case "$FRESHNESS_TIMEOUT" in ''|*[!0-9]*|0) FRESHNESS_TIMEOUT=25 ;; esac
+
+warn_stale_base() {  # <reason>
+  echo "warn: could not confirm $PROJECT_NAME is current with origin ($1); '$BRANCH' starts from the local HEAD, which may be behind" >&2
+}
+
+# Refresh the clone's default branch, then report what happened. fleet-sync
+# prints one classification line per project on stdout; cs-guard.sh banners share
+# that stream, so only the recognized classifications are matched, and the last
+# one is the verdict (a packed-refs "recovered:" line precedes the final line).
+refresh_base() {
+  local out rc line
+  out=$(cs_run_timed "$FRESHNESS_TIMEOUT" "$CS_ROOT/bin/cs-fleet-sync.sh" "$PROJ_ABS" 2>/dev/null) && rc=0 || rc=$?
+  case "$rc" in
+    0) ;;
+    124) warn_stale_base "the origin check did not finish within ${FRESHNESS_TIMEOUT}s"; return 0 ;;
+    "$CS_TIMEOUT_UNAVAILABLE") warn_stale_base "the origin check could not be run under a time bound"; return 0 ;;
+    *) warn_stale_base "the refresh exited $rc"; return 0 ;;
+  esac
+  line=$(printf '%s\n' "$out" \
+    | grep -E ': (STUCK: |skipped: |synced |already current|recovered: )' | tail -1)
+  case "$line" in
+    # Nothing to be fresh against: these clones have no origin to compare to.
+    *": skipped: local-only project"*|*": skipped: no origin remote"*) ;;
+    *": STUCK: "*)
+      # fleet-sync left the clone alone on purpose - it may hold real work.
+      warn_stale_base "${line#*: }" ;;
+    *": skipped: "*) warn_stale_base "${line#*: skipped: }" ;;
+    *": synced "*|*": recovered: "*)
+      echo "notice: refreshed $PROJECT_NAME from origin before branching (${line#*: })" >&2 ;;
+    *": already current"*) ;;
+    *) warn_stale_base "the refresh reported no recognizable result" ;;
+  esac
+}
+
+# An explicit --base names the ref the boss/consigliere chose, so there is no
+# implicit current-HEAD base to keep fresh: skip the check entirely.
+[ -n "$BASE" ] || refresh_base
 
 if ! TUPLE=$(cs_herdr_task_create "$PROJ_ABS" "$BRANCH" "$ID" "$BASE"); then
   echo "error: herdr worktree create failed for '$ID' (a pre-existing worktree directory may hold unlanded work; inspect ~/.herdr/worktrees/$PROJECT_NAME/ - never pre-delete it to force the spawn)" >&2
