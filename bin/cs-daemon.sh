@@ -50,7 +50,7 @@
 #     state/.subsuper-target (recorded by cs-afk-start from the primary's own
 #     HERDR_PANE_ID). Refuses to start without one.
 #   - Busy-guard: never inject while native agent state reads busy or blocked.
-#   - Composer-guard: inject ONLY into an affirmatively EMPTY codex composer
+#   - Composer-guard: inject ONLY into an affirmatively EMPTY agent composer
 #     (bin/cs-composer-lib.sh, ANSI ghost-text aware); 'pending' and 'unknown'
 #     both defer, preserving the buffer.
 #   - Submit atomically via `herdr agent prompt` (bin/cs-prompt-lib.sh), which

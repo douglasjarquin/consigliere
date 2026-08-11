@@ -10,7 +10,7 @@
 # rules with NO ghost text, so the ghost strip is a no-op there and harmless.
 #
 # WHY: the daemon injects an escalation digest into consigliere's own pane, so
-# it must know the codex composer is AFFIRMATIVELY empty first. Typing into a
+# it must know the agent composer is AFFIRMATIVELY empty first. Typing into a
 # half-typed boss line merges two messages; typing into a dead shell could
 # EXECUTE the digest. Only 'empty' authorizes injection; 'pending' and
 # 'unknown' both defer (the buffered escalation survives for the next tick).
