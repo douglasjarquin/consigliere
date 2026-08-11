@@ -188,10 +188,11 @@ live claude, empty composer          dead shell, agent exited via /exit
 Three facts the bytes settle:
 
 - Claude's composer row is `❯` followed by U+00A0 (NBSP), NOT a plain space, and
-  it carries no SGR of its own. The NBSP normalization is what makes it read empty.
+  it carries no SGR of its own.
+  The NBSP normalization is what makes it read empty.
 - Claude draws the composer BETWEEN 53-column `─` rules (truecolour
-  `38;2;136;136;136`). The dead shell's `❯` has the zsh path/duration row above it
-  and no rule.
+  `38;2;136;136;136`).
+  The dead shell's `❯` has the zsh path/duration row above it and no rule.
 - Colour cannot separate them: the shell's `❯` is 256-colour `38;5;5` and the
   agent's is plain here, but both are theme-dependent and neither is proof.
 
@@ -206,8 +207,8 @@ dead shell after /exit           unknown                 unknown
 
 Before the fix the dead-shell capture read `empty`, which is the verdict that
 authorizes the away-mode daemon to type its escalation digest into the pane - a
-login shell would have EXECUTED it. `bin/cs-composer-lib.sh`'s header owns the
-resulting rule; `tests/cs-afk-daemon.test.sh` pins these captures as regressions.
+login shell would have EXECUTED it.
+`bin/cs-composer-lib.sh`'s header owns the resulting rule; `tests/cs-afk-daemon.test.sh` pins these captures as regressions.
 
 Corroborating signals recorded from the same run, after `/exit`:
 
@@ -219,7 +220,8 @@ zsh
 ```
 
 NOT re-verified here: whether `--dangerously-skip-permissions` suppresses the
-one-time folder-trust dialog. In a brand-new cwd on 2.1.227 the interactive TUI
+one-time folder-trust dialog.
+In a brand-new cwd on 2.1.227 the interactive TUI
 showed "Quick safety check: Is this a project you created or one you trust?"
 despite that flag, and the capture run had to accept it before claude drew a
 composer.
