@@ -67,7 +67,7 @@ That is the same evidence the transaction verifies afterwards, so the launch own
 
 - A refusal **before** the agent is stopped leaves this home's records and the soldier's instructions byte-identical: nothing is written until every validation has passed.
 - A stop that cannot be confirmed leaves the agent running, reports the concrete obstacle, and marks the journal `failed:stopping`.
-- A launch failure **after** the stop reports plainly that no replacement agent was confirmed and where the work is preserved (worktree, commit, uncommitted count), and marks the journal `failed:launching`. The recorded profile is left describing what the task was dispatched on, because no replacement was confirmed to describe.
+- A launch failure **after** the stop reports plainly that no replacement agent was confirmed and where the work is preserved (worktree, commit, uncommitted count), and marks the journal `failed:launching` - or `failed:verifying` when a launch reported success but the identity proof failed (no agent process, the original pid still owning the pane, or an unchanged session id on a cold launch). The recorded profile is left describing what the task was dispatched on, because no replacement was confirmed to describe.
 - A journal left in a non-terminal phase means the process running the transaction died mid-flight. The next relaunch REFUSES, prints the journal and the live pane state, and requires `--clear-journal` to acknowledge it. That is the difference between reporting a half-finished transaction and launching a second agent into the same pane.
 
 ## Fail-closed boundaries

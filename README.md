@@ -76,7 +76,7 @@ Then talk to it in plain language: describe the work, name the project when it i
 - `bin/` - `cs-*` scripts; read each header before first use (`bin/cs-doctor.sh` for a dependency preflight)
 - `skills/` - agent-loaded procedures (afk, rundown, the-books, vault, capo-provisioning, upstream-review, ...)
 - `docs/` - architecture, configuration schema (owner), supervision protocol, agent lifecycle control, optional turn telemetry, verified herdr/codex/claude/lavish facts
-- `tests/` - colocated behavior tests (`bash tests/<name>.test.sh`, or `bin/cs-test-run.sh --portable`; live suites opt in via `CS_TEST_HERDR_LIVE=1` / `CS_TEST_CODEX_LIVE=1`)
+- `tests/` - colocated behavior tests (`bash tests/<name>.test.sh`, or `bin/cs-test-run.sh --portable`; live suites opt in via `CS_TEST_HERDR_LIVE=1` / `CS_TEST_CODEX_LIVE=1` / `CS_TEST_CLAUDE_LIVE=1`)
 - `config/` - the user-owned tree (settings and durable memory), boss-private and gitignored; back it up wholesale
 - `host/` - machine-local sibling (capo roster, harness pin, activation); never backed up, re-created per machine
 - `data/ state/ projects/` - generated output, volatile runtime state, and clones; boss-private, gitignored, disposable or re-creatable
@@ -118,9 +118,9 @@ Pinned-tool owners: ShellCheck version in `bin/cs-lint.sh`; herdr version in
 in `bin/cs-herdr-lib.sh` (`CS_HERDR_MIN_PROTOCOL`), which the installer reads.
 The axi-family version floors (`gh-axi`, `tasks-axi`, `lavish-axi`, `quota-axi`) and their bump policy live in `bin/cs-deps-lib.sh`, which both `bin/cs-doctor.sh` and session start gate on.
 Every `tests/*.test.sh` belongs to one lane - `portable`, `real-herdr`, or the
-opt-in `live-codex` (`CS_TEST_CODEX_LIVE=1`, never run in hosted CI and reported
-as visibly excluded by the coverage guard). The workflow contract is protected
-by `tests/cs-ci-contract.test.sh`.
+opt-in `live-codex` (`CS_TEST_CODEX_LIVE=1`) / `live-claude` (`CS_TEST_CLAUDE_LIVE=1`),
+never run in hosted CI and reported as visibly excluded by the coverage guard.
+The workflow contract is protected by `tests/cs-ci-contract.test.sh`.
 
 ## Upstream
 
