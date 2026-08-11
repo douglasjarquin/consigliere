@@ -261,6 +261,7 @@ A scout may be spawned `--headless` (`codex exec` / `claude -p`): a cheaper fire
 
 Steer a soldier with short single-line messages through fail-closed `cs-send`; put long instructions in a file.
 When that message answers an open keyed decision, pass `cs-send`'s repeatable `--resolve-key <key>` so the answer closes the decision itself rather than waiting on the soldier.
+Drive a soldier's agent lifecycle only through `bin/cs-control.sh`'s verified `interrupt`, `exit`, and `relaunch` verbs, never by typing lifecycle commands or keys as chat.
 A capo's routed reply returns through status or a document pointer, not by consigliere peeking into its chat.
 For the parent-owned correlation, recovery, and escalation contract on marked capo requests, see `bin/cs-pending-reply-lib.sh`.
 Supervise all live work under section 8.
