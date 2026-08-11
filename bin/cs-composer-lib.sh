@@ -31,6 +31,18 @@
 # wrong injection; a persistent defer is surfaced by the daemon's max-defer
 # wedge alarm (CS_MAX_DEFER_SECS) instead of wedging silently.
 #
+# PIPELINE: capture with ANSI -> locate the composer row structurally on
+# ANSI-stripped rows -> extract real typed content from the raw styled row ->
+# normalize Unicode spaces and trim (_cs_composer_trim, which every trim here
+# goes through) -> classify. Normalization exists because bash's [[:space:]]
+# class is locale-dependent: under LC_ALL=C it does not match U+00A0, so an
+# NBSP-padded empty composer row never trims to empty and classifies 'pending'
+# forever, deferring injection until the max-defer wedge alarm fires.
+# _cs_composer_normalize_spaces matches raw UTF-8 bytes instead, so the verdict
+# is identical under a UTF-8 locale and LC_ALL=C. It only lets a GENUINELY
+# empty row read empty: an NBSP that separates real typed content still leaves
+# that content behind, so the row stays 'pending'.
+#
 # SAFETY RULE for prompt glyphs (one owner, ported from upstream
 # fm-composer-lib): an agent glyph (codex `›`, claude `❯`) is a genuine empty
 # agent composer, bordered or bare. A bare SHELL glyph (`>`, `$`, `%`, `#`) is what a
@@ -133,8 +145,28 @@ cs_composer_strip_ghost() {
   '
 }
 
-_cs_composer_trim() {  # <text>
+# _cs_composer_normalize_spaces: rewrite Unicode space separators to a plain
+# ASCII space so the trim below sees them. Bash's [[:space:]] class is
+# locale-dependent and does NOT match U+00A0 under LC_ALL=C, so an NBSP-padded
+# empty composer row would otherwise never trim to empty. The substitutions
+# match RAW UTF-8 BYTE sequences, verified identical under a UTF-8 locale and
+# LC_ALL=C: U+00A0, U+2000..U+200A, U+202F, U+205F, U+3000.
+_cs_composer_normalize_spaces() {  # <text>
   local s=$1
+  s=${s//$'\xc2\xa0'/ }                     # U+00A0 no-break space
+  s=${s//$'\xe2\x80'[$'\x80'-$'\x8a']/ }    # U+2000..U+200A en/em/thin/etc spaces
+  s=${s//$'\xe2\x80\xaf'/ }                 # U+202F narrow no-break space
+  s=${s//$'\xe2\x81\x9f'/ }                 # U+205F medium mathematical space
+  s=${s//$'\xe3\x80\x80'/ }                 # U+3000 ideographic space
+  printf '%s' "$s"
+}
+
+# _cs_composer_trim: normalize Unicode spaces, then strip leading and trailing
+# whitespace. Every trim in this file goes through here, so normalization
+# happens once, before any structural match or emptiness verdict.
+_cs_composer_trim() {  # <text>
+  local s
+  s=$(_cs_composer_normalize_spaces "$1")
   s="${s#"${s%%[![:space:]]*}"}"
   s="${s%"${s##*[![:space:]]}"}"
   printf '%s' "$s"
