@@ -82,10 +82,10 @@ the reader-facing marker is an LLM, which cannot compute a cryptographic check
 | `launch-brief` | bin/cs-harness-lib.sh:233,238,260,274 (via `cs-operational-input.sh encode launch-brief`) | `data/<id>/brief.md`, consigliere-authored | No — boss/consigliere-authored brief |
 | `session-start` | bin/cs-session-start.sh:538 | generated digest of local state, plus the deferred network stage's own published result | No — consigliere-generated |
 | `session-start` | bin/cs-sessionstart-run.sh:137 | static resume/reload/fork nudge line | No — fixed consigliere text |
-| `watcher` | bin/cs-send.sh:129 | `cs-send` argv (consigliere steer) | No — consigliere-authored argv |
+| `watcher` | bin/cs-send.sh:267 | `cs-send` argv (consigliere steer) | No — consigliere-authored argv |
 | `turn-end-guard` | bin/cs-turnend-guard.sh:123 | static continuation banner | No — fixed consigliere text |
 | `away-supervisor` | bin/cs-daemon.sh:771 | `_collapse_newlines "$msg"`, where `msg` is the escalation digest | **YES — the digest is distilled from soldier-appended status lines (§3)** |
-| `from-consigliere` | bin/cs-marker-lib.sh:29 (`cs_message_mark_from_consigliere`), called from bin/cs-pending-reply-lib.sh:190 | `cs-send` argv / recovery message | No — consigliere-authored; but delivered to a capo agent (see §5) |
+| `from-consigliere` | bin/cs-marker-lib.sh:26 (`cs_message_mark_from_consigliere`), called from bin/cs-pending-reply-lib.sh:245 | `cs-send` argv / recovery message | No — consigliere-authored; but delivered to a capo agent (see §5) |
 
 ### 2b. Classification / consumption sites (where a marker is trusted and acted upon)
 
@@ -93,7 +93,7 @@ the reader-facing marker is an LLM, which cannot compute a cryptographic check
 |---|---|---|---|
 | bin/cs-operational-input.sh:78-99 | `cs_operational_input_kind` | any string | (primitive used by all below) |
 | bin/cs-operational-input.sh:135-143 | `cs_operational_input_classify` | any string | (primitive) |
-| bin/cs-classify-lib.sh:28-34 | `cs_classify_input` / `cs_input_is_boss` | message text | Only as consumed by callers below |
+| bin/cs-classify-lib.sh:33-39 | `cs_classify_input` / `cs_input_is_boss` | message text | Only as consumed by callers below |
 | bin/cs-daemon.sh:181-186 | `message_is_injection` | afk-exit message text | Governs afk exit; ambiguity biases to exit (self-correcting) |
 | bin/cs-daemon.sh:193-201 | `should_exit_afk` | afk-exit message text | Same; **no live caller today** (testable contract only) |
 | bin/cs-daemon.sh:204-206 | `strip_injection_marker` (`cs_operational_input_body`) | typed body | Strips framing after provenance was read |
@@ -127,10 +127,10 @@ the reader-facing marker is an LLM, which cannot compute a cryptographic check
   agent* — the reader-facing contract — not when bash re-classifies it.
 - **Capo reply routing does not depend on classifying the `from-consigliere`
   marker.** The capo path embeds a `corr=<16hex>` token
-  (bin/cs-pending-reply-lib.sh:186-201) and resolves the expectation **only** from
+  (bin/cs-pending-reply-lib.sh:241-256) and resolves the expectation **only** from
   a correlated line in the *parent's own* status file
-  (`cs_pending_reply_line_resolves`, :389-396; `cs_pending_reply_try_resolve`,
-  :443-485). Delivery success never resolves; the capo's conversation is never
+  (`cs_pending_reply_line_resolves`, :445-452; `cs_pending_reply_try_resolve`,
+  :499-545). Delivery success never resolves; the capo's conversation is never
   scraped. The `from-consigliere` marker is a *reader-facing* framing for the capo
   agent plus a carrier for the corr token — routing safety is corr-token-based,
   not marker-classification-based. `cs_message_from_consigliere` (the classify

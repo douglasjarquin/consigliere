@@ -96,6 +96,13 @@ EOF
   if [ "$omitted" -gt 0 ]; then
     printf '  ... %s more open decision(s) omitted (open-decisions cap)\n' "$omitted"
   fi
+  # The answerer-closes hint, printed at exactly the moment an answer gets
+  # written: the send that answers a listed decision also closes it, so closure
+  # never depends on the soldier writing a matching resolved line (contract:
+  # bin/cs-send.sh header). Printed only when the section itself printed.
+  if [ "$printed" = true ]; then
+    printf "  close one by answering it: bin/cs-send.sh <task> --resolve-key <key> '<answer>'\n"
+  fi
   return 0
 }
 

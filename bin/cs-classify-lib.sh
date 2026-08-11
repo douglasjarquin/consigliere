@@ -174,6 +174,13 @@ status_is_paused_or_boss_held() {  # <status-line>
 # transferred away. A later unrelated terminal line never clears an open boss
 # decision.
 #
+# Who WRITES that closing line is owned elsewhere. Consigliere closes at answer
+# time through cs-send's --resolve-key (bin/cs-send.sh header), the pending-reply
+# library closes its own escalations when the request resolves
+# (bin/cs-pending-reply-lib.sh), and a soldier self-closes only a blocker that
+# cleared without an answer (bin/cs-brief.sh rule 6) - so closure never depends
+# on a busy soldier's discipline.
+#
 # Decision key grammar (backward-compatible with the plain "<verb>: <note>"
 # format): an OPTIONAL "[key=<slug>]" token sits between the verb and the colon,
 #   needs-decision [key=api-shape]: <summary>

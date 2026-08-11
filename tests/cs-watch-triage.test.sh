@@ -84,7 +84,7 @@ test_turn_ended_not_working_surfaced() {
   export CS_FAKE_CREW_STATE='state: unknown · source: none · no current-state source available'
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  wait_for_exit "$pid" 60 || fail "watcher did not surface a turn-end whose soldier is not provably working"
+  wait_for_exit "$pid" || fail "watcher did not surface a turn-end whose soldier is not provably working"
   grep -F "signal: $state/task.turn-ended" "$out" >/dev/null || fail "watcher did not print the surfaced turn-end signal"
   grep "$(printf '\tsignal\t')" "$state/.wake-queue" | grep -F "task.turn-ended" >/dev/null \
     || fail "surfaced turn-end was not queued"
@@ -103,7 +103,7 @@ test_working_note_not_working_surfaced() {
   export CS_FAKE_CREW_STATE='state: working · source: status-log · working: compiling step 2'
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  wait_for_exit "$pid" 60 || fail "watcher did not surface a working: note whose soldier has no running pipeline and an idle pane"
+  wait_for_exit "$pid" || fail "watcher did not surface a working: note whose soldier has no running pipeline and an idle pane"
   grep -F "signal: $status_file" "$out" >/dev/null || fail "watcher did not print the surfaced working: signal"
   grep "$(printf '\tsignal\t')" "$state/.wake-queue" | grep -F "task.status" >/dev/null \
     || fail "surfaced working: note was not queued"
@@ -121,7 +121,7 @@ test_actionable_signal_surfaced() {
   printf 'working: setup\nneeds-decision: pick A or B\n' > "$status_file"
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  wait_for_exit "$pid" 60 || fail "watcher did not exit for an actionable needs-decision signal"
+  wait_for_exit "$pid" || fail "watcher did not exit for an actionable needs-decision signal"
   grep -F "signal: $status_file" "$out" >/dev/null || fail "watcher did not print the actionable signal reason"
   grep "$(printf '\tsignal\t')" "$state/.wake-queue" | grep -F "task.status" >/dev/null \
     || fail "actionable signal was not queued"
@@ -142,7 +142,7 @@ test_needs_review_signal_surfaced() {
   printf 'working: setup\nneeds-review: flag retired; awaiting review before validation\n' > "$status_file"
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  wait_for_exit "$pid" 60 || fail "watcher did not exit for an actionable needs-review signal"
+  wait_for_exit "$pid" || fail "watcher did not exit for an actionable needs-review signal"
   grep -F "signal: $status_file" "$out" >/dev/null || fail "watcher did not print the needs-review signal reason"
   grep "$(printf '\tsignal\t')" "$state/.wake-queue" | grep -F "task.status" >/dev/null \
     || fail "needs-review signal was not queued"
@@ -162,7 +162,7 @@ test_boss_verb_signal_takes_the_short_grace() {
   # proves the grace was selected by the verb and not applied unconditionally.
   watch_bg "$state" "$fakebin" "$out" CS_SIGNAL_GRACE=30 CS_SIGNAL_GRACE_ACTIONABLE=1
   pid=$!
-  wait_for_exit "$pid" 60 \
+  wait_for_exit "$pid" \
     || fail "a boss-relevant signal waited the long no-verb grace instead of the short one"
   grep -F "signal: $status_file" "$out" >/dev/null || fail "watcher did not print the actionable signal reason"
   pass "a signal already carrying a boss verb takes the short coalescing grace"
@@ -199,7 +199,7 @@ test_terminal_stale_surfaced() {
   export CS_FAKE_HERDR_CAPTURE="$capture_file"
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  wait_for_exit "$pid" 60 || fail "watcher did not exit for a stale pane on a terminal status"
+  wait_for_exit "$pid" || fail "watcher did not exit for a stale pane on a terminal status"
   grep -Fx "stale: $pane" "$out" >/dev/null || fail "watcher did not print the terminal stale wake: $(cat "$out")"
   [ "$(count_wakes "$state" stale "$pane")" -ge 1 ] || fail "terminal stale was not queued"
   unset CS_FAKE_HERDR_CAPTURE
@@ -253,7 +253,7 @@ test_terminal_headless_scout_surfaced() {
   export CS_FAKE_HERDR_CAPTURE="$capture_file"
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  wait_for_exit "$pid" 60 || fail "watcher did not exit for a terminal headless scout"
+  wait_for_exit "$pid" || fail "watcher did not exit for a terminal headless scout"
   grep -Fx "stale: $pane" "$out" >/dev/null || fail "terminal headless scout not surfaced: $(cat "$out")"
   unset CS_FAKE_HERDR_CAPTURE
   pass "a finished (terminal) headless scout is still surfaced"
@@ -303,7 +303,7 @@ test_stale_terminal_status_overridden_by_active_run() {
   : > "$out"
   watch_bg "$state" "$fakebin" "$out" CS_STALE_ESCALATE_SECS=240
   pid=$!
-  wait_for_exit "$pid" 60 || fail "watcher did not escalate an overridden stale terminal status past the threshold"
+  wait_for_exit "$pid" || fail "watcher did not escalate an overridden stale terminal status past the threshold"
   grep -F "stale: $pane" "$out" >/dev/null || fail "escalation did not print a stale wake"
   grep -F "possible wedge" "$out" >/dev/null || fail "escalation did not flag a possible wedge"
   unset CS_FAKE_CREW_STATE CS_FAKE_HERDR_CAPTURE
@@ -345,7 +345,7 @@ test_nonterminal_stale_provably_working_absorbed_then_escalated() {
   : > "$out"
   watch_bg "$state" "$fakebin" "$out" CS_STALE_ESCALATE_SECS=240
   pid=$!
-  wait_for_exit "$pid" 60 || fail "watcher did not escalate a provably-working non-terminal stale past the threshold"
+  wait_for_exit "$pid" || fail "watcher did not escalate a provably-working non-terminal stale past the threshold"
   grep -F "stale: $pane" "$out" >/dev/null || fail "escalation did not print a stale wake"
   grep -F "possible wedge" "$out" >/dev/null || fail "escalation did not flag a possible wedge"
   [ ! -e "$state/.stale-since-$key" ] || fail "stale-since timer was not cleared after escalation"
@@ -387,7 +387,7 @@ test_wedge_escalation_marks_demand_deep_inspection_after_threshold() {
     : > "$out"
     watch_bg "$state" "$fakebin" "$out" CS_STALE_ESCALATE_SECS=240
     pid=$!
-    wait_for_exit "$pid" 60 || fail "watcher did not escalate on consecutive wedge round $n: $(cat "$out")"
+    wait_for_exit "$pid" || fail "watcher did not escalate on consecutive wedge round $n: $(cat "$out")"
     grep -F "escalation $n" "$out" >/dev/null || fail "round $n did not report escalation count $n: $(cat "$out")"
     if [ "$n" -lt 3 ]; then
       grep -F "demand-deep-inspection" "$out" >/dev/null && fail "round $n escalated to demand-deep-inspection before the threshold: $(cat "$out")"
@@ -421,7 +421,7 @@ test_nonterminal_stale_not_working_surfaced() {
   # Even with a high wedge threshold, a not-provably-working stale surfaces at once.
   watch_bg "$state" "$fakebin" "$out" CS_STALE_ESCALATE_SECS=999
   pid=$!
-  wait_for_exit "$pid" 60 || fail "watcher did not surface a not-provably-working non-terminal stale at once"
+  wait_for_exit "$pid" || fail "watcher did not surface a not-provably-working non-terminal stale at once"
   grep -Fx "stale: $pane" "$out" >/dev/null || fail "watcher did not print the immediate stale wake: $(cat "$out")"
   grep -F "possible wedge" "$out" >/dev/null && fail "an immediate stopped-soldier stale was mislabeled a wedge"
   [ "$(cat "$state/.stale-$key" 2>/dev/null || true)" = "$pane_hash" ] || fail "stale suppressor was not advanced on surface"
@@ -478,7 +478,7 @@ test_nonterminal_stale_paused_absorbed_then_resurfaced() {
   printf 'idle, holding for upstream (token 2)' > "$capture_file"
   watch_bg "$state" "$fakebin" "$out" CS_PAUSE_RESURFACE_SECS=240
   pid=$!
-  wait_for_exit "$pid" 60 || fail "watcher did not re-surface a declared pause past the threshold"
+  wait_for_exit "$pid" || fail "watcher did not re-surface a declared pause past the threshold"
   grep -F "stale: $pane" "$out" >/dev/null || fail "re-surface did not print a stale wake"
   grep -F "awaiting external" "$out" >/dev/null || fail "re-surface was not labeled a paused/awaiting-external recheck"
   grep -F "possible wedge" "$out" >/dev/null && fail "a declared pause was mislabeled a possible wedge"
@@ -508,7 +508,7 @@ test_blocked_pane_surfaces_immediately() {
   # must surface at once, never wait for two identical hashes or a wedge timer.
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  wait_for_exit "$pid" 60 || fail "watcher did not surface a native blocked pane immediately"
+  wait_for_exit "$pid" || fail "watcher did not surface a native blocked pane immediately"
   grep -F "stale: $pane (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)" "$out" >/dev/null \
     || fail "blocked pane did not print the immediate escalation reason: $(cat "$out")"
   [ -e "$state/.herdr-escalated-$key" ] || fail "blocked escalation did not commit its dedupe marker"
@@ -571,7 +571,7 @@ SH
   chmod 0600 "$state/good.check-trust"
   watch_bg "$state" "$fakebin" "$out" CS_CHECK_INTERVAL=1
   pid=$!
-  wait_for_exit "$pid" 80 || fail "watcher did not surface a registered check's output"
+  wait_for_exit "$pid" || fail "watcher did not surface a registered check's output"
   grep -F "check: $check: merge landed" "$out" >/dev/null || fail "registered check output not printed: $(cat "$out")"
   grep "$(printf '\tcheck\t')" "$state/.wake-queue" | grep -F "merge landed" >/dev/null \
     || fail "registered check wake was not queued"
@@ -593,7 +593,7 @@ SH
   # No .check-trust binding: the watcher must refuse WITHOUT executing.
   watch_bg "$state" "$fakebin" "$out" CS_CHECK_INTERVAL=1
   pid=$!
-  wait_for_exit "$pid" 80 || fail "watcher did not surface the unauthenticated-check rejection"
+  wait_for_exit "$pid" || fail "watcher did not surface the unauthenticated-check rejection"
   grep -F "check: rejected unauthenticated state checks: $check" "$out" >/dev/null \
     || fail "rejection reason not printed: $(cat "$out")"
   [ ! -e "$canary" ] || fail "an unauthenticated check WAS EXECUTED (canary present)"
@@ -621,7 +621,7 @@ SH
   chmod 0700 "$check"
   watch_bg "$state" "$fakebin" "$out" CS_CHECK_INTERVAL=1
   pid=$!
-  wait_for_exit "$pid" 80 || fail "watcher did not surface the tampered-check rejection"
+  wait_for_exit "$pid" || fail "watcher did not surface the tampered-check rejection"
   grep -F "check: rejected unauthenticated state checks: $check" "$out" >/dev/null \
     || fail "tampered check was not rejected: $(cat "$out")"
   [ ! -e "$canary" ] || fail "a tampered registered check WAS EXECUTED (canary present)"
@@ -657,7 +657,7 @@ test_heartbeat_backstop_surfaces_unsurfaced_status() {
   sig=$(seen_sig "$state/miss.status"); printf '%s' "$sig" > "$state/.seen-miss_status"
   watch_bg "$state" "$fakebin" "$out" CS_HEARTBEAT=1
   pid=$!
-  wait_for_exit "$pid" 60 || fail "heartbeat backstop did not surface an unsurfaced boss-relevant status"
+  wait_for_exit "$pid" || fail "heartbeat backstop did not surface an unsurfaced boss-relevant status"
   grep -Fx "heartbeat" "$out" >/dev/null || fail "backstop did not exit with a heartbeat wake: $(cat "$out")"
   [ "$(cat "$state/.hb-surfaced-miss" 2>/dev/null || true)" = "done: PR https://example.test/pr/5" ] \
     || fail "backstop did not record the status as surfaced (would re-fire next heartbeat)"
@@ -741,7 +741,7 @@ test_busy_pane_past_the_turn_bound_wedge_escalates() {
   : > "$out"
   watch_bg "$state" "$fakebin" "$out" CS_BUSY_TURN_MAX_SECS=3600 CS_STALE_ESCALATE_SECS=240
   pid=$!
-  wait_for_exit "$pid" 60 ||
+  wait_for_exit "$pid" ||
     fail "watcher did not escalate a busy pane hung past the turn bound"
   grep -F "stale: $pane" "$out" >/dev/null ||
     fail "the busy-turn escalation did not print a stale wake"
@@ -775,7 +775,7 @@ test_completed_turn_resets_the_busy_bound() {
   pid=$!
   # Wait on the condition itself: the beacon is written before the stale loop
   # reaches this pane, so beacon-then-check would race the first cycle.
-  wait_until 50 test ! -e "$state/.busy-turn-since-$key" ||
+  wait_until "$CS_WATCH_TEST_TICKS" test ! -e "$state/.busy-turn-since-$key" ||
     { reap "$pid"; fail "a completed turn must clear the busy-turn wedge timer"; }
   kill -0 "$pid" 2>/dev/null ||
     { fail "watcher exited after a completed turn should have cleared the bound: $(cat "$out")"; }
@@ -832,7 +832,7 @@ test_afk_present_reverts_watcher_to_one_shot() {
   export CS_FAKE_CREW_STATE='state: working · source: run-step · validating (running)'
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  wait_for_exit "$pid" 60 || fail "with .afk present the watcher did not exit one-shot for a benign signal"
+  wait_for_exit "$pid" || fail "with .afk present the watcher did not exit one-shot for a benign signal"
   grep -F "signal: $status_file" "$out" >/dev/null || fail "afk-mode watcher did not surface the signal for the daemon"
   grep "$(printf '\tsignal\t')" "$state/.wake-queue" | grep -F "task.status" >/dev/null \
     || fail "afk-mode benign signal was not queued for the daemon to classify"
@@ -1027,7 +1027,7 @@ test_snapshot_answers_panes_and_absence_falls_back() {
   pid=$!
   # A pane the snapshot reports as working is provably working, so a no-verb
   # signal is absorbed: the watcher keeps running and advances its suppressor.
-  wait_until 60 test -e "$state/.seen-snap_status" \
+  wait_until "$CS_WATCH_TEST_TICKS" test -e "$state/.seen-snap_status" \
     || { kill "$pid" 2>/dev/null; cat "$out"; fail "the snapshot-sourced status never drove a cycle"; }
   wait_live "$pid" 10 || { cat "$out"; fail "a snapshot-working pane must not surface a wake"; }
   kill "$pid" 2>/dev/null || true
@@ -1042,7 +1042,7 @@ test_snapshot_answers_panes_and_absence_falls_back() {
   export CS_FAKE_HERDR_SNAPSHOT_STATUS=working
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  wait_until 60 grep -q '^signal:' "$out" \
+  wait_until "$CS_WATCH_TEST_TICKS" grep -q '^signal:' "$out" \
     || { kill "$pid" 2>/dev/null; cat "$out"; fail "a pane absent from the snapshot must still be evaluated directly"; }
   kill "$pid" 2>/dev/null || true
   unset CS_FAKE_HERDR_SNAPSHOT_PANE CS_FAKE_HERDR_SNAPSHOT_STATUS
@@ -1089,7 +1089,7 @@ test_capo_worker_event_surfaced_without_the_capo_taking_a_turn() {
   cs_write_meta "$state/mycapo.meta" "kind=capo" "home=$capo"
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
-  wait_until 60 grep -q '^capo:' "$out" \
+  wait_until "$CS_WATCH_TEST_TICKS" grep -q '^capo:' "$out" \
     || { kill "$pid" 2>/dev/null; cat "$out"; fail "capo-side worker event was never surfaced"; }
   grep -F 'mycapo/w-546' "$out" >/dev/null || { cat "$out"; fail "the wake must name the capo and its worker"; }
   grep -F 'reverting an approved decision' "$out" >/dev/null || fail "the wake must carry the worker's own line"

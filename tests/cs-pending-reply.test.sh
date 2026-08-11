@@ -105,9 +105,12 @@ cs_pending_reply_mark_turn_completed "$state" "$corr" recovery
 cs_pending_reply_maybe_escalate "$state" "$corr" || fail "escalation should fire"
 [ "$(phase_of "$state" "$corr")" = escalated ] || fail "phase should be escalated"
 status_line=$(tail -1 "$state/capo1.status")
+# The escalation opens a keyed decision under this library's per-request key, so
+# one request's escalation neither masks nor is masked by an unrelated decision
+# on the same task, and only its own close can clear it.
 case "$status_line" in
-  blocked:*pending-reply-missed:*pending-reply-id=$corr*) : ;;
-  *) fail "parent status should carry one blocked missed-report line: $status_line" ;;
+  "blocked [key=pending-reply-$corr]: pending-reply-missed: "*"pending-reply-id=$corr"*) : ;;
+  *) fail "parent status should carry one keyed blocked missed-report line: $status_line" ;;
 esac
 cs_pending_reply_maybe_escalate "$state" "$corr" 2>/dev/null || true
 [ "$(phase_of "$state" "$corr")" = escalated ] || fail "phase must stay escalated"
@@ -251,5 +254,103 @@ cs_pending_reply_tick "$state" || fail "tick failed"
 # shellcheck source=bin/cs-pending-reply-lib.sh
 . "$ROOT/bin/cs-pending-reply-lib.sh"
 pass "status-pointed document resolves through the watcher tick"
+
+# 14. an escalation OPENS a durable keyed decision, and resolving the record
+#     closes it. Reproduces the settled-request-keeps-escalating experience: the
+#     capo answers, the record resolves, and without the close the escalation
+#     stays in every later open-decisions fold forever.
+home=$(setup_parent escalation-close); state="$home/state"
+export CS_PENDING_REPLY_NOW=12000
+corr=$(cs_pending_reply_create "$home" "$state" capo1 "why is the lane idle")
+cs_pending_reply_mark_delivered "$state" "$corr"
+cs_pending_reply_mark_turn_completed "$state" "$corr" request
+cs_pending_reply_send_recovery "$state" "$corr" >/dev/null 2>&1 || true
+cs_pending_reply_mark_turn_completed "$state" "$corr" recovery
+cs_pending_reply_maybe_escalate "$state" "$corr" || fail "escalation should fire"
+escalation_key="pending-reply-$corr"
+assert_contains "$(status_open_decisions "$state/capo1.status")" "$escalation_key" \
+  "the escalation must open a keyed decision in the fold"
+printf 'done [corr=%s]: the lane was waiting on CI\n' "$corr" >> "$state/capo1.status"
+cs_pending_reply_try_resolve "$state" "$corr" || fail "the correlated report should resolve"
+assert_not_contains "$(status_open_decisions "$state/capo1.status")" "$escalation_key" \
+  "a resolved escalation must leave the open-decisions fold"
+rec=$(cs_pending_reply_path "$state" "$corr")
+[ -n "$(cs_pending_reply_get "$rec" escalation_closed_epoch)" ] \
+  || fail "the record must remember that its escalation was closed"
+closes=$(grep -Fc "resolved [key=$escalation_key]" "$state/capo1.status")
+cs_pending_reply_close_escalation "$state" "$corr" || fail "a repeat close should stay successful"
+cs_pending_reply_tick "$state" || fail "tick over a closed escalation should succeed"
+[ "$(grep -Fc "resolved [key=$escalation_key]" "$state/capo1.status")" = "$closes" ] \
+  || fail "the escalation close must never double-close"
+pass "a resolved pending-reply escalation closes its keyed decision exactly once"
+
+# 15. the close never clears an unrelated decision that later took the same key:
+#     an escalation whose own note is no longer what holds the key is left alone.
+home=$(setup_parent escalation-takeover); state="$home/state"
+export CS_PENDING_REPLY_NOW=13000
+corr=$(cs_pending_reply_create "$home" "$state" capo1 "audit the ledger")
+cs_pending_reply_mark_delivered "$state" "$corr"
+cs_pending_reply_mark_turn_completed "$state" "$corr" request
+cs_pending_reply_send_recovery "$state" "$corr" >/dev/null 2>&1 || true
+cs_pending_reply_mark_turn_completed "$state" "$corr" recovery
+cs_pending_reply_maybe_escalate "$state" "$corr" || fail "escalation should fire"
+escalation_key="pending-reply-$corr"
+# The library's own escalation is closed, then an unrelated writer takes the key
+# over with a note this library never wrote.
+{
+  printf 'resolved [key=%s]: closed by hand\n' "$escalation_key"
+  printf 'needs-decision [key=%s]: unrelated decision on the same key\n' "$escalation_key"
+  printf 'done [corr=%s]: ledger clean\n' "$corr"
+} >> "$state/capo1.status"
+cs_pending_reply_try_resolve "$state" "$corr" || fail "the correlated report should resolve"
+assert_contains "$(status_open_decisions "$state/capo1.status")" \
+  "unrelated decision on the same key" \
+  "the close must not clear an unrelated decision that took the key over"
+pass "the escalation close never clears an unrelated decision holding the same key"
+
+# 16. a NUL-bearing record is refused before any field is parsed. bash's read
+#     drops NUL bytes and bash generations disagree on the result (3.2 truncates
+#     at the NUL, 5.x splices the surrounding bytes), so a NUL-bearing
+#     parent_home could resolve to a home the record's bytes never name
+#     contiguously - and which home a recovery send wrote to would depend on the
+#     interpreter. The whole record must fail closed instead.
+home=$(setup_parent nul-record); state="$home/state"
+wrong_home="$TMP/spliced-home-$RANDOM"
+mkdir -p "$wrong_home/state"
+export CS_PENDING_REPLY_NOW=14000
+corr=$(cs_pending_reply_create "$home" "$state" capo1 "needs an answer")
+cs_pending_reply_mark_delivered "$state" "$corr"
+cs_pending_reply_mark_turn_completed "$state" "$corr" request
+rec=$(cs_pending_reply_path "$state" "$corr")
+[ -n "$(cs_pending_reply_get "$rec" parent_home)" ] || fail "the clean record must read back"
+cs_pending_reply_record_intact "$rec" || fail "the clean record must be intact"
+# Splice a NUL mid-path into the recorded parent_home: the surrounding bytes name
+# the wrong home only once an interpreter drops the NUL and joins them.
+spliced_head=${wrong_home%/*}
+spliced_tail=${wrong_home##*/}
+{
+  LC_ALL=C tr -d '\0' < "$rec" | grep -v '^parent_home='
+  printf 'parent_home=%s/' "$spliced_head"
+  printf '\000'
+  printf '%s\n' "$spliced_tail"
+} > "$rec.spliced"
+mv -f "$rec.spliced" "$rec"
+cs_pending_reply_record_intact "$rec" && fail "a NUL-bearing record must not be intact"
+[ -z "$(cs_pending_reply_get "$rec" parent_home)" ] \
+  || fail "a NUL-bearing record must yield no parent_home"
+[ -z "$(cs_pending_reply_get "$rec" phase)" ] \
+  || fail "a NUL-bearing record must yield no field at all"
+cs_pending_reply_set "$rec" phase resolved && fail "a NUL-bearing record must refuse a rewrite"
+unset CS_PENDING_REPLY_SEND_HOOK
+cs_pending_reply_send_recovery "$state" "$corr" 2>/dev/null \
+  && fail "a NUL-bearing record must never drive a recovery send"
+cs_pending_reply_maybe_escalate "$state" "$corr" 2>/dev/null \
+  && fail "a NUL-bearing record must never escalate"
+cs_pending_reply_try_resolve "$state" "$corr" 2>/dev/null \
+  && fail "a NUL-bearing record must never resolve"
+cs_pending_reply_tick "$state" || fail "the tick must survive a corrupt record"
+[ ! -e "$wrong_home/state/capo1.status" ] \
+  || fail "a NUL-bearing record must never write into the spliced-together home"
+pass "a NUL-bearing pending-reply record is refused before field parsing"
 
 pass "cs-pending-reply lifecycle guards"
