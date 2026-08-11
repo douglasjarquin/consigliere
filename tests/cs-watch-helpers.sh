@@ -97,6 +97,20 @@ watch_bg() {
     "$@" "$WATCH" > "$out" &
 }
 
+# ONE OWNER for how patient the poll-until-success waits below are, in 0.1s ticks.
+#
+# Every wait that uses it polls for a POSITIVE signal (a marker file the watcher
+# wrote, the watcher having exited) and returns the instant that signal lands, so
+# a generous budget costs wall-clock ONLY when a case is genuinely failing, while
+# a tight one turns ordinary machine load into a false failure. That is not
+# hypothetical: at the previous 3-5s budgets, cs-watch-triage.test.sh failed on a
+# loaded machine with the watcher healthy and its marker simply landing late, and
+# it passed on the same commit once the machine was idle. Deliberately NOT used
+# by wait_live, which asserts a process STAYS alive for a window and therefore
+# always burns its whole budget.
+# A case that needs a different budget still passes its own <limit>.
+CS_WATCH_TEST_TICKS=${CS_WATCH_TEST_TICKS:-150}
+
 # Wait up to <limit> 0.1s ticks while <pid> stays alive; 0 if still alive, 1 if it died.
 wait_live() {
   local pid=$1 limit=${2:-30} i=0
@@ -129,7 +143,7 @@ wait_until() {
 # (surfacing exits it). Polls for the marker (async, fast) then checks liveness,
 # replacing a blind `wait_live` window. 0 if absorbed-and-alive, 1 otherwise.
 absorbed_alive() {
-  local pid=$1 marker=$2 limit=${3:-50}
+  local pid=$1 marker=$2 limit=${3:-$CS_WATCH_TEST_TICKS}
   wait_until "$limit" test -e "$marker" || return 1
   kill -0 "$pid" 2>/dev/null
 }
@@ -145,7 +159,7 @@ is_live_non_zombie() {
 }
 
 wait_for_exit() {
-  local pid=$1 limit=${2:-50} i=0
+  local pid=$1 limit=${2:-$CS_WATCH_TEST_TICKS} i=0
   while [ "$i" -lt "$limit" ]; do
     if ! is_live_non_zombie "$pid"; then
       wait "$pid"
@@ -163,7 +177,7 @@ reap() { kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
 
 # Wait up to <limit> 0.1s ticks for <file> to hold a purely numeric value.
 wait_numeric_file() {
-  local file=$1 limit=${2:-30} i=0 value
+  local file=$1 limit=${2:-$CS_WATCH_TEST_TICKS} i=0 value
   while [ "$i" -lt "$limit" ]; do
     value=$(cat "$file" 2>/dev/null || true)
     case "$value" in

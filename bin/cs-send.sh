@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Send one line of literal text to a direct report's pane, then Enter.
-# Usage: cs-send.sh <target> <text...>
+# Usage: cs-send.sh <target> [--resolve-key <key>]... <text...>
 #        cs-send.sh <target> --key <Enter|Escape|C-c>
 #   <target> is an exact task id resolved through this home's state/<id>.meta,
 #   or an explicit herdr pane id (w<N>:p<N>). cs-send refuses unresolved
@@ -36,6 +36,27 @@
 # instead of creating a second expectation. A send that cannot be confirmed
 # leaves the durable delivery-attempt marker for the watcher to reconcile.
 #
+# Decision closure (answerer-closes): pass --resolve-key <key> (repeatable, and
+# before the message) when this send answers an open keyed needs-decision:,
+# needs-review:, or blocked: record in the target task's state/<id>.status. Once
+# delivery is confirmed, cs-send itself appends the closing
+# "resolved [key=<key>]: answered via cs-send: <capped answer>" line to that
+# status file, so the boss-facing OPEN DECISIONS record closes at answer time
+# instead of depending on the soldier writing a matching resolved line. When the
+# answer kicks off work, the soldier's next event is working [key=<workstream>]
+# in a different key namespace, so no matching resolved line ever lands and
+# without this the answered decision stayed listed forever. Each named key must
+# be open in that ledger RIGHT NOW per the ONE authoritative fold
+# (status_open_decisions in bin/cs-classify-lib.sh, consulted here and never
+# re-implemented) or cs-send refuses before sending, so a mistyped key cannot
+# deliver an answer while silently orphaning its decision. A failed or
+# unconfirmed send closes nothing; a delivered answer whose closing append fails
+# exits nonzero with the exact manual close command, leaving the decision open
+# to resurface, which is the safe direction. A send without the flag closes
+# nothing at all: a routine steer, a working: line, or a done: line still never
+# clears a boss decision. The flag is refused with --key, with an explicit pane
+# target (no task ledger in this home), and with an empty message.
+#
 # After a successful submit cs-send pauses CS_SEND_SETTLE seconds (default 1,
 # 0 disables) before returning, so an immediate peek catches the receiving
 # turn starting rather than the stale idle pane.
@@ -63,6 +84,13 @@ STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 . "$SCRIPT_DIR/cs-pending-reply-lib.sh"
 # shellcheck source=bin/cs-harness-lib.sh
 . "$SCRIPT_DIR/cs-harness-lib.sh"
+# The authoritative open/resolved status fold, consulted (never re-implemented)
+# by the --resolve-key path below, plus the shared per-line cap that bounds the
+# closing line it appends.
+# shellcheck source=bin/cs-classify-lib.sh
+. "$SCRIPT_DIR/cs-classify-lib.sh"
+# shellcheck source=bin/cs-line-cap-lib.sh
+. "$SCRIPT_DIR/cs-line-cap-lib.sh"
 # Optional turn telemetry (off unless host/telemetry.conf enables it). It reads
 # the CS_HOME this script already resolved above and never touches the layout
 # gate, so a steer keeps behaving exactly as it does with telemetry disabled.
@@ -72,6 +100,41 @@ STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 RAW=${1:?usage: cs-send.sh <target> <text...>}
 shift
 [ "$#" -ge 1 ] || { echo "error: nothing to send" >&2; exit 2; }
+
+# Collect --resolve-key flags (answerer-closes; see the header contract). They
+# precede --key or the message text, so everything left after the last flag is
+# the message exactly as before and an ordinary send stays byte-identical.
+RESOLVE_KEYS=
+cs_send_add_resolve_key() {  # <key>
+  local k=$1
+  case "$k" in
+    ''|*[!A-Za-z0-9._-]*)
+      echo "error: --resolve-key '$k' is not a valid decision key (allowed: A-Z a-z 0-9 . _ -)" >&2
+      return 1
+      ;;
+  esac
+  case " $RESOLVE_KEYS " in
+    *" $k "*)
+      echo "error: duplicate --resolve-key '$k'" >&2
+      return 1
+      ;;
+  esac
+  RESOLVE_KEYS="${RESOLVE_KEYS}${RESOLVE_KEYS:+ }$k"
+}
+while :; do
+  case "${1:-}" in
+    --resolve-key)
+      [ "$#" -ge 2 ] || { echo "error: --resolve-key requires a key" >&2; exit 2; }
+      cs_send_add_resolve_key "$2" || exit 2
+      shift 2
+      ;;
+    --resolve-key=*)
+      cs_send_add_resolve_key "${1#--resolve-key=}" || exit 2
+      shift
+      ;;
+    *) break ;;
+  esac
+done
 
 PANE=""
 KIND=""
@@ -97,7 +160,64 @@ esac
 
 cs_herdr_pane_exists "$PANE" || { echo "error: pane '$PANE' does not exist" >&2; exit 1; }
 
+# Validate the answerer-closes request BEFORE any durable mutation or delivery:
+# the target must own a task status ledger in THIS home, the send must carry an
+# answer message, and every named key must be open right now per the ONE
+# authoritative fold. Refusing here is what keeps a mistyped key loud instead of
+# delivering an answer that silently leaves its decision open.
+RESOLVE_STATUS_FILE=
+if [ -n "$RESOLVE_KEYS" ]; then
+  if [ -z "${META:-}" ]; then
+    echo "error: --resolve-key needs a task id resolved through this home's records; an explicit pane target has no decision ledger here" >&2
+    exit 2
+  fi
+  if [ "${1:-}" = "--key" ]; then
+    echo "error: --resolve-key cannot accompany --key; answering a decision requires a text answer" >&2
+    exit 2
+  fi
+  if [ -z "$*" ]; then
+    echo "error: --resolve-key requires a nonempty answer message" >&2
+    exit 2
+  fi
+  RESOLVE_STATUS_FILE="$STATE/$RAW.status"
+  RESOLVE_OPEN_SET=$(status_open_decisions "$RESOLVE_STATUS_FILE")
+  for resolve_key in $RESOLVE_KEYS; do
+    case "$RESOLVE_OPEN_SET" in
+      "$resolve_key"$'\t'*|*$'\n'"$resolve_key"$'\t'*) ;;
+      *)
+        echo "error: --resolve-key '$resolve_key': no open decision or blocker with that key in $RESOLVE_STATUS_FILE (already closed, mistyped, or transferred). Re-check the open-decisions listing, then resend without that key or with the right one; nothing was sent." >&2
+        exit 1
+        ;;
+    esac
+  done
+fi
+
+# Close each answered decision in this home's ledger, only after delivery is
+# confirmed. An append failure exits nonzero with the manual close command, so
+# the decision stays open and resurfaces instead of vanishing silently.
+cs_send_close_resolved_keys() {  # <answer-text>
+  local note=$1 k line
+  note=$(printf '%s' "$note" | tr '\n\r\t' '   ' | LC_ALL=C tr -d '\000-\037\177')
+  for k in $RESOLVE_KEYS; do
+    line="resolved [key=$k]: answered via cs-send: $note"
+    cs_cap_line_var "$line"
+    if ! printf '%s\n' "$CS_LINE_CAP_LINE" >> "$RESOLVE_STATUS_FILE"; then
+      echo "error: the answer was delivered to '$RAW' ($PANE), but decision key '$k' could not be closed in $RESOLVE_STATUS_FILE. Close it manually with: echo 'resolved [key=$k]: <how it was answered>' >> $RESOLVE_STATUS_FILE - do not resend the answer." >&2
+      return 1
+    fi
+  done
+}
+
 if [ "${1:-}" = "--key" ]; then
+  # A --resolve-key AFTER --key never reached the flag loop above, so refuse it
+  # loudly here: silently ignoring a close request is exactly the orphaned
+  # decision this flag exists to prevent.
+  case " $* " in
+    *" --resolve-key "*|*" --resolve-key="*)
+      echo "error: --resolve-key cannot accompany --key and must precede the message; answering a decision requires a text answer" >&2
+      exit 2
+      ;;
+  esac
   KEY=${2:?--key requires a key name}
   case "$KEY" in
     Enter|Escape|C-c) ;;
@@ -169,8 +289,14 @@ esac
 
 if [ "$pre_status" = busy ]; then
   # Mid-turn steer: the harness queues the input for after the turn; native state
-  # cannot distinguish queued from swallowed, so report queued and succeed.
+  # cannot distinguish queued from swallowed, so report queued and succeed. That
+  # is a confirmed delivery for the decision close too - the same verdict that
+  # commits the pending-reply expectation - because the harness holds the answer
+  # and will process it when the turn ends.
   pending_confirm_delivery
+  if [ -n "$RESOLVE_KEYS" ]; then
+    cs_send_close_resolved_keys "$RAW_TEXT" || exit 1
+  fi
   # TELEMETRY, measurement only: a delivered steer is what turns a supervision
   # turn's outcome from "reviewed, nothing to do" into "messaged the worker".
   cs_telemetry_crumb steer "$KIND" || true
@@ -183,6 +309,9 @@ attempt=0
 while [ "$attempt" -le "$RETRIES" ]; do
   if cs_herdr_submit_confirm "$PANE" 4000; then
     pending_confirm_delivery
+    if [ -n "$RESOLVE_KEYS" ]; then
+      cs_send_close_resolved_keys "$RAW_TEXT" || exit 1
+    fi
     cs_telemetry_crumb steer "$KIND" || true
     echo "submitted"
     [ "$SETTLE" = 0 ] || sleep "$SETTLE"

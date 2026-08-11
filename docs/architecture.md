@@ -32,6 +32,7 @@ A zero-token bash watcher (`bin/cs-watch.sh`) sleeps on the fleet, classifies wa
 The absorb policy is absorb-only-when-provably-working: a no-verb signal or fresh stale pane is absorbed only with positive working evidence (an attributed no-mistakes run step from `bin/cs-crew-state.sh`, or native-busy corroborated per docs/herdr.md), a declared `paused:` idles on a long bounded cadence, and a provably-working stale escalates past the wedge threshold with a `demand-deep-inspection` marker on repetition.
 Native herdr `blocked` surfaces immediately - sub-second via the socket event splice (`bin/cs-herdr-events.py`, `pane.agent_status_changed`) and on the next poll without it; the poll loop is the permanent fail-closed backstop.
 `bin/cs-classify-lib.sh` is the one owner of the status-verb vocabulary and the keyed decision/activity folds, shared by the watcher and the away-mode daemon, and consumes operational-input types from `bin/cs-operational-input.sh`.
+Who writes a decision's closing line lives with each writer: consigliere closes at answer time through `bin/cs-send.sh`'s `--resolve-key`, `bin/cs-pending-reply-lib.sh` closes its own capo escalations when the request resolves, and a soldier self-closes only a blocker that cleared without an answer.
 The supervision wait shape is the bounded foreground checkpoint ([`docs/supervision.md`](supervision.md)); the harness Stop hook (`bin/cs-turnend-guard.sh`, registered per-harness) is the structural backstop.
 
 ## Authenticated checks

@@ -219,8 +219,68 @@ test_over_long_decision_note_is_capped_with_a_marker() {
   pass "an over-long open decision is cut to the shared cap with the shared truncation marker"
 }
 
+# The section is the moment an answer gets written, so it names the command that
+# both answers a listed decision and closes it (bin/cs-send.sh --resolve-key).
+# Without that, closure depends on the soldier appending a matching resolved line,
+# whose next event is normally a key in a different namespace.
+test_section_prints_the_answer_with_close_hint() {
+  local dir state out err
+  dir=$(make_case close-hint); state="$dir/state"
+  out="$dir/out"; err="$dir/err"
+  printf 'needs-decision [key=api]: pick A or B\n' > "$state/t1.status"
+  run_drain "$state" "$out" "$err" || fail "drain failed"
+  assert_grep "bin/cs-send.sh <task> --resolve-key <key>" "$out" \
+    "the section must name the answer-with-close command"
+  printf 'resolved [key=api]: went with A\n' >> "$state/t1.status"
+  run_drain "$state" "$out" "$err" || fail "second drain failed"
+  assert_no_grep "--resolve-key" "$out" \
+    "a drain with no open decisions must not print the hint"
+  pass "the OPEN DECISIONS section prints the answer-with-close hint at the point of use"
+}
+
+# A capo escalation is not just a message: it opens a durable keyed decision here.
+# Before the pending-reply library closed its own escalations, a request the capo
+# had already answered kept surfacing in every later drain.
+test_resolved_pending_reply_escalation_leaves_the_section() {
+  local dir state out err corr
+  dir=$(make_case pending-reply); state="$dir/state"
+  out="$dir/out"; err="$dir/err"
+  corr=$(bash -c '
+    # shellcheck disable=SC1090,SC1091
+    . "$1"
+    export CS_PENDING_REPLY_NOW=1000 CS_PENDING_REPLY_GRACE_SECS=0
+    corr=$(cs_pending_reply_create "$2" "$3" capo1 "why is the lane idle")
+    cs_pending_reply_mark_delivered "$3" "$corr"
+    cs_pending_reply_mark_turn_completed "$3" "$corr" request
+    cs_pending_reply_mark_turn_completed "$3" "$corr" recovery
+    cs_pending_reply_set "$(cs_pending_reply_path "$3" "$corr")" phase recovery_sent
+    cs_pending_reply_maybe_escalate "$3" "$corr" >/dev/null || exit 1
+    printf "%s" "$corr"
+  ' _ "$ROOT/bin/cs-pending-reply-lib.sh" "$dir" "$state") \
+    || fail "escalation fixture failed"
+  [ -n "$corr" ] || fail "escalation fixture produced no correlation id"
+
+  run_drain "$state" "$out" "$err" || fail "drain over an escalation failed"
+  assert_grep "capo1 [key=pending-reply-$corr] blocked: pending-reply-missed" "$out" \
+    "an open capo escalation must surface as a keyed open decision"
+
+  printf 'done [corr=%s]: the lane was waiting on CI\n' "$corr" >> "$state/capo1.status"
+  bash -c '
+    # shellcheck disable=SC1090,SC1091
+    . "$1"; CS_PENDING_REPLY_NOW=2000 cs_pending_reply_try_resolve "$2" "$3"
+  ' _ "$ROOT/bin/cs-pending-reply-lib.sh" "$state" "$corr" \
+    || fail "the correlated capo report should resolve the record"
+
+  run_drain "$state" "$out" "$err" || fail "drain after the resolve failed"
+  assert_no_grep "pending-reply-missed" "$out" \
+    "a settled capo request must stop surfacing as an open decision"
+  pass "a resolved capo escalation leaves the OPEN DECISIONS section"
+}
+
 test_buried_decision_surfaces_on_empty_drain
 test_over_long_decision_note_is_capped_with_a_marker
+test_section_prints_the_answer_with_close_hint
+test_resolved_pending_reply_escalation_leaves_the_section
 test_resolved_decision_absent
 test_nonempty_drain_preserves_raw_and_annotations
 test_unreadable_and_symlink_skipped_without_noise
