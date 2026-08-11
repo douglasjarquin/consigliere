@@ -248,10 +248,23 @@ if [ "$VERB" = exit ]; then
       report "exit $ID: NOT stopped - herdr refused to deliver the exit command to pane $PANE (interrupt $itok)"
       ;;
     exit-not-attempted)
-      report "exit $ID: NOT stopped - the running turn could not be interrupted ($itok), and a composer command is only queued as input mid-turn (pane $PANE)"
+      case "$itok" in
+        blocked)
+          report "exit $ID: NOT stopped - the agent is waiting on a human (native blocked), and a keystroke would answer that dialog, so the exit command was withheld (pane $PANE)"
+          ;;
+        still-working)
+          report "exit $ID: NOT stopped - the running turn could not be interrupted ($itok), and a composer command is only queued as input mid-turn (pane $PANE)"
+          ;;
+        state-unknown)
+          report "exit $ID: NOT stopped - the agent's state on pane $PANE cannot be positively read (interrupt $itok), so the exit command was withheld; \"cannot tell\" is never treated as a stopped or running agent"
+          ;;
+        *)
+          report "exit $ID: NOT stopped - the exit command was not attempted (interrupt $itok, pane $PANE)"
+          ;;
+      esac
       ;;
     *)
-      report "exit $ID: NOT confirmed - the exit command was delivered and an agent still occupies pane $PANE after ${CS_CONTROL_EXIT_WAIT_SECS}s (pid $(cs_control_agent_pid "$PANE" 2>/dev/null || echo unreadable), interrupt $itok, exit $etok)"
+      report "exit $ID: NOT confirmed - the exit command was delivered and pane $PANE could not be confirmed agent-free after ${CS_CONTROL_EXIT_WAIT_SECS}s (pid $(cs_control_agent_pid "$PANE" 2>/dev/null || echo unreadable), interrupt $itok, exit $etok)"
       ;;
   esac
   exit "$rc"
@@ -294,6 +307,18 @@ case "$cwd_rc" in
   *) die "herdr did not report a working directory for pane $PANE; refusing to relaunch into an unverified location" ;;
 esac
 
+PRIOR_MODEL=$(cs_meta_get "$META" model 2>/dev/null || true)
+PRIOR_EFFORT=$(cs_meta_get "$META" effort 2>/dev/null || true)
+[ -n "$PRIOR_MODEL" ] || PRIOR_MODEL=default
+[ -n "$PRIOR_EFFORT" ] || PRIOR_EFFORT=default
+LAUNCH_MODEL=${MODEL:-$PRIOR_MODEL}
+LAUNCH_EFFORT=${EFFORT:-$PRIOR_EFFORT}
+cs_harness_effort_valid "$HARNESS" "$LAUNCH_EFFORT" ||
+  die "task '$ID' records effort '$LAUNCH_EFFORT', which $HARNESS does not accept; pass --effort to choose a usable level"
+
+# The journal check runs LAST among the refusals: acknowledging a stale journal
+# with --clear-journal displaces a record, so nothing that can still refuse may
+# come after it.
 JOURNAL=$(cs_control_journal_path "$STATE" "$ID")
 if [ -e "$JOURNAL" ]; then
   [ -f "$JOURNAL" ] || die "$JOURNAL is not an ordinary file; investigate before relaunching"
@@ -314,15 +339,6 @@ if [ -e "$JOURNAL" ]; then
     echo "note: the previous relaunch of '$ID' failed at phase '$(cs_meta_get "$JOURNAL" failed_phase 2>/dev/null || echo unknown)'; starting a fresh transaction" >&2
   fi
 fi
-
-PRIOR_MODEL=$(cs_meta_get "$META" model 2>/dev/null || true)
-PRIOR_EFFORT=$(cs_meta_get "$META" effort 2>/dev/null || true)
-[ -n "$PRIOR_MODEL" ] || PRIOR_MODEL=default
-[ -n "$PRIOR_EFFORT" ] || PRIOR_EFFORT=default
-LAUNCH_MODEL=${MODEL:-$PRIOR_MODEL}
-LAUNCH_EFFORT=${EFFORT:-$PRIOR_EFFORT}
-cs_harness_effort_valid "$HARNESS" "$LAUNCH_EFFORT" ||
-  die "task '$ID' records effort '$LAUNCH_EFFORT', which $HARNESS does not accept; pass --effort to choose a usable level"
 
 # Everything below this line changes durable state. Every refusal is above it.
 NOW=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
@@ -384,8 +400,14 @@ if [ "$rc" -ne 0 ]; then
   journal_fail stopping "$tokens"
   itok=${tokens%% *}
   etok=${tokens##* }
-  echo "error: relaunch $ID: the running agent could not be stopped (interrupt $itok, exit $etok); NOTHING was relaunched." >&2
-  echo "The agent is still on pane $PANE, its work is untouched at $WT_REAL, and the progress note is in $BRIEF." >&2
+  case "$itok" in
+    blocked)       stop_reason="the agent is waiting on a human (native blocked)" ;;
+    still-working) stop_reason="the running turn could not be cancelled" ;;
+    state-unknown) stop_reason="the agent's state cannot be positively read" ;;
+    *)             stop_reason="the agent could not be confirmed stopped" ;;
+  esac
+  echo "error: relaunch $ID: $stop_reason (interrupt $itok, exit $etok); NOTHING was relaunched." >&2
+  echo "No stop was confirmed on pane $PANE, the work is untouched at $WT_REAL, and the progress note is in $BRIEF." >&2
   exit 1
 fi
 journal_set stopped_pid "${PRE_PID:-}"
@@ -401,7 +423,7 @@ if [ "$spawn_rc" -ne 0 ]; then
   journal_fail launching "cs-spawn --relaunch exited $spawn_rc"
   echo "error: relaunch $ID: the previous agent was stopped (pid ${PRE_PID:-unknown}) and the replacement did NOT come up." >&2
   printf '%s\n' "$spawn_out" >&2
-  echo "No agent is running on pane $PANE. The work is preserved at $WT_REAL (commit $HEAD, $DIRTY uncommitted file(s)) and the progress note is in $BRIEF." >&2
+  echo "No replacement agent was confirmed on pane $PANE. The work is preserved at $WT_REAL (commit $HEAD, $DIRTY uncommitted file(s)) and the progress note is in $BRIEF." >&2
   exit 1
 fi
 printf '%s\n' "$spawn_out" >&2

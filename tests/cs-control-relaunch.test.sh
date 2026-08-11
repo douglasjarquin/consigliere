@@ -253,6 +253,18 @@ assert_contains "$out" "agent replaced via" "the acknowledged transaction runs"
 assert_present "$home/state/t1.control-relaunch.abandoned" "the acknowledged journal is kept for post-mortem"
 assert_grep 'pre_pid=699' "$home/state/t1.control-relaunch.abandoned" "the kept journal is the old one"
 [ "$(journal_field "$home" phase)" = 'done' ] || fail "the fresh transaction journals its own outcome"
+
+badeffort=$(setup_home badeffort "harness=claude" "effort=ultra")
+printf 'phase=stopped\ntask=t1\npane=w1:p1\npre_pid=799\n' > "$badeffort/state/t1.control-relaunch"
+badeffort_before=$(manifest "$badeffort")
+badstate=$(cs_control_state "$TMP/s-badeffort" agent=claude status=idle cwd="$badeffort/wt" on_run=up)
+rc=0
+out=$(run_relaunch "$badeffort" "$badstate" "$TMP/l-badeffort" t1 --note n --clear-journal) || rc=$?
+expect_code 1 "$rc" "an unusable recorded effort refuses even with --clear-journal"
+assert_contains "$out" "does not accept" "the refusal names the unusable recorded effort"
+[ "$(manifest "$badeffort")" = "$badeffort_before" ] ||
+  fail "a refusal after --clear-journal must still leave records byte-identical, including the stale journal"
+assert_absent "$badeffort/state/t1.control-relaunch.abandoned" "no journal is displaced by a refused relaunch"
 pass "cs-control relaunch: an interrupted transaction is reported, never launched over"
 
 # --- 8. profile overrides ---------------------------------------------------

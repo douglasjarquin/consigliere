@@ -159,7 +159,9 @@ cs_control_interrupt() { # <pane_id> <harness> -> token
 #   already-gone       the pane held no agent when asked (idempotent success)
 #   gone               the exit command was delivered and the agent left
 #   command-not-sent   herdr refused the send
-#   still-running      delivered, and an agent still occupies the pane
+#   still-running      the pane could not be confirmed agent-free - a turn that
+#                      would not cancel, an agent that stayed after the command,
+#                      or a process table that could not be read
 #
 # THE FLUSH. Unsent composer text breaks a lifecycle command: typing onto it
 # submits the concatenation as one prompt, which the agent reasons about instead
@@ -208,10 +210,15 @@ cs_control_exit() { # <pane_id> <harness> -> token
       if [ "$state" = busy ]; then
         cs_control_interrupt "$pane" "$harness" >/dev/null || true
       fi
-      if cs_control_agent_gone "$pane"; then
-        printf 'already-gone\n'
-        return 0
-      fi
+    fi
+    # The agent may have left since this attempt began - died with the turn the
+    # interrupt above cancelled, or exited on the flush - and its husk's bare
+    # shell would RUN the exit command as a shell command. The postcondition is
+    # already met, so this is the idempotent success, checked immediately before
+    # every send.
+    if cs_control_agent_gone "$pane"; then
+      printf 'already-gone\n'
+      return 0
     fi
     cs_herdr_send_text "$pane" "$cmd" >/dev/null 2>&1 || { printf 'command-not-sent\n'; return 1; }
     [ "$settle" = 1 ] && sleep "$CS_CONTROL_EXIT_SETTLE"

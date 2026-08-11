@@ -248,6 +248,16 @@ case "$order" in
   *) fail "the composer must be flushed BEFORE the exit command is typed, got: $order" ;;
 esac
 
+# An agent that leaves ON the flush leaves a husk whose bare shell would run the
+# exit command as a shell command; the pre-send check reports the idempotent
+# success instead of typing into it.
+fgone=$(cs_control_state "$TMP/s-fgone" agent=codex status=idle \
+  composer='❯ queued steer' gone_at_enter=1)
+out=$(run_control "$home" "$fgone" "$TMP/l-fgone" exit t1) ||
+  fail "an agent that exits on the flush is idempotent success: $out"
+assert_contains "$out" "agent gone from pane" "the postcondition is already met"
+assert_no_line "$(cat "$TMP/l-fgone")" 'send-text' "nothing is typed into a pane the agent left mid-attempt"
+
 # A row that survives the flush is not unsent input - a submit would have cleared
 # it - and the classifier reads `pending` for rows that only look like a composer
 # (docs/claude.md), so the command is typed anyway and the postcondition decides.
