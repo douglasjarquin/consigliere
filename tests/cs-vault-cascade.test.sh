@@ -43,7 +43,17 @@ cwd=${!cwd_var:-}
 case "${1:-} ${2:-}" in
   "status --json") echo '{"server":{"running":true,"protocol":17,"socket":""}}' ;;
   "pane get")
-    if [ -n "${FAKE_PANE_GONE:-}" ] && [ "$pane" = "$FAKE_PANE_GONE" ]; then exit 1; fi
+    # A genuinely absent pane answers with the structured pane_not_found body on
+    # stderr (rc 1), exactly as the real herdr does; an unreachable server emits
+    # non-JSON noise instead. The distinction is the whole point of the probe.
+    if [ -n "${FAKE_PANE_GONE:-}" ] && [ "$pane" = "$FAKE_PANE_GONE" ]; then
+      echo '{"error":{"code":"pane_not_found","message":"no such pane"}}' >&2
+      exit 1
+    fi
+    if [ -n "${FAKE_PANE_GET_ERROR_PANE:-}" ] && [ "$pane" = "$FAKE_PANE_GET_ERROR_PANE" ]; then
+      echo 'Error: Os { code: 2, kind: NotFound, message: "No such file or directory" }' >&2
+      exit 1
+    fi
     printf '{"result":{"pane":{"pane_id":"%s","cwd":"%s"}}}\n' "$pane" "$cwd" ;;
   "agent get")
     if [ -n "${FAKE_AGENT_GET_FAIL_PANE:-}" ] && [ "$pane" = "$FAKE_AGENT_GET_FAIL_PANE" ]; then exit 1; fi
@@ -123,9 +133,10 @@ assert_contains "$OUT" "sizes are never summed across homes" \
 # Live home -> ask its own agent; inert home -> curate in place.
 LIVE_BLOCK=$(printf '%s\n' "$OUT" | awk '/^capo: live$/{f=1;next} /^capo: /{f=0} f')
 assert_line "$LIVE_BLOCK" '^  route: send$' "a home with a live agent is asked to sweep itself"
-assert_contains "$LIVE_BLOCK" "cs-send.sh live '\$vault" \
+assert_contains "$LIVE_BLOCK" "cs-send.sh\" live '\$vault" \
   "the send goes through the ordinary marked cs-send path, in the target harness's skill syntax"
-assert_contains "$LIVE_BLOCK" "CS_HOME=$HOME_DIR" "the send is issued from the invoking home"
+assert_contains "$LIVE_BLOCK" "CS_HOME=\"$HOME_DIR\"" \
+  "the send is issued from the invoking home, quoted so a path with a space still runs"
 
 INERT_BLOCK=$(printf '%s\n' "$OUT" | awk '/^capo: inert$/{f=1;next} /^capo: /{f=0} f')
 assert_line "$INERT_BLOCK" '^  route: curate$' "a home with no live agent is curated in place"
@@ -142,15 +153,36 @@ assert_line "$LIVE_BLOCK" '^  route: exception$' \
   "an inconclusive liveness probe must not become a curate behind a live capo's back"
 assert_contains "$LIVE_BLOCK" "liveness probe for w1:p1 failed" "the exception names the probe"
 
+# The pane probe itself erroring (an unreachable server) is not proof of death:
+# the same failure exit carries a pane_not_found body only when the pane is
+# truly gone, so an errored probe must resolve to exception, never curate.
+OUT=$(FAKE_PANE_GET_ERROR_PANE=w1:p1 "$BIN" 2>&1)
+LIVE_BLOCK=$(printf '%s\n' "$OUT" | awk '/^capo: live$/{f=1;next} /^capo: /{f=0} f')
+assert_line "$LIVE_BLOCK" '^  route: exception$' \
+  "an unreachable herdr must never read as a confirmed-absent pane"
+assert_no_line "$LIVE_BLOCK" '^  route: curate$' \
+  "an errored probe must not curate behind a live capo's back"
+assert_contains "$LIVE_BLOCK" "pane probe for w1:p1 could not answer" "the exception names the probe"
+
+# A pane that answers without a readable cwd cannot prove it still roots at
+# this home, so the send leg is unproven and the route is an exception.
+OUT=$(FAKE_CWD_w1_p1= "$BIN" 2>&1)
+LIVE_BLOCK=$(printf '%s\n' "$OUT" | awk '/^capo: live$/{f=1;next} /^capo: /{f=0} f')
+assert_line "$LIVE_BLOCK" '^  route: exception$' \
+  "a pane with no readable cwd is an unproven root, never a send"
+assert_contains "$LIVE_BLOCK" "no readable cwd" "the exception names the missing proof"
+
 # A recycled pane id belongs to another home, so there is nobody to ask here.
 OUT=$(FAKE_CWD_w1_p1="$TMP/somewhere-else" "$BIN" 2>&1)
 LIVE_BLOCK=$(printf '%s\n' "$OUT" | awk '/^capo: live$/{f=1;next} /^capo: /{f=0} f')
 assert_line "$LIVE_BLOCK" '^  route: curate$' "a recycled pane id is never asked to run /vault"
 assert_contains "$LIVE_BLOCK" "the recorded id was recycled" "the recycled-pane decision says why"
 
-# A gone pane is the same story with a different reason.
+# A gone pane is the same story with a different reason: only the structured
+# pane_not_found body is positive proof of death.
 OUT=$(FAKE_PANE_GONE=w2:p1 "$BIN" 2>&1)
 INERT_BLOCK=$(printf '%s\n' "$OUT" | awk '/^capo: inert$/{f=1;next} /^capo: /{f=0} f')
+assert_line "$INERT_BLOCK" '^  route: curate$' "a confirmed-gone pane routes to curate in place"
 assert_contains "$INERT_BLOCK" "recorded pane w2:p1 no longer exists" "a vanished pane is reported as such"
 pass "liveness: inconclusive probes, recycled panes, and vanished panes"
 

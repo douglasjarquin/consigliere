@@ -173,17 +173,38 @@ resolve_route() {  # <id> <home-abs>
     record reason "herdr and jq are required to prove whether an agent holds $pane; liveness is unknown"
     return 0
   fi
+  # Classified from the structured response body, never from the exit status:
+  # `pane get` answers "no such pane" and "I cannot reach the server" over the
+  # same failure exit, and only the first is proof the pane is gone.
+  case "$(cs_herdr_pane_presence "$pane")" in
+    dead)
+      record route curate
+      record reason "recorded pane $pane no longer exists"
+      return 0
+      ;;
+    present) ;;
+    *)
+      record route exception
+      record reason "the pane probe for $pane could not answer, so whether an agent holds it is unknown"
+      return 0
+      ;;
+  esac
   if ! pane_json=$(cs_herdr pane get "$pane" 2>/dev/null) || [ -z "$pane_json" ]; then
-    record route curate
-    record reason "recorded pane $pane no longer exists"
+    record route exception
+    record reason "pane $pane could not be re-read after the presence probe, so liveness is unknown"
     return 0
   fi
   pane_cwd=$(printf '%s' "$pane_json" | jq -r '.result.pane.cwd // empty' 2>/dev/null)
+  if [ -z "$pane_cwd" ]; then
+    record route exception
+    record reason "pane $pane reported no readable cwd, so whether it still roots at this home cannot be proved"
+    return 0
+  fi
   # Resolve both sides the same way before comparing: a home reached through a
   # symlink, or spelled with a redundant slash, is the same home, and reporting
   # it as a recycled pane would send the sweep down the wrong route.
-  [ -z "$pane_cwd" ] || [ ! -d "$pane_cwd" ] || pane_cwd=$(cd "$pane_cwd" && pwd -P)
-  if [ -n "$pane_cwd" ] && [ "$pane_cwd" != "$home" ]; then
+  [ ! -d "$pane_cwd" ] || pane_cwd=$(cd "$pane_cwd" && pwd -P)
+  if [ "$pane_cwd" != "$home" ]; then
     record route curate
     record reason "pane $pane now roots at $pane_cwd, not this home; the recorded id was recycled"
     return 0
@@ -205,7 +226,7 @@ resolve_route() {  # <id> <home-abs>
   prefix=$(cs_harness_skill_prefix "$harness")
   record route send
   record reason "agent $harness holds $pane"
-  record command "CS_HOME=$CS_HOME $SCRIPT_DIR/cs-send.sh $id '${prefix}vault sweep this home now and report what you filed'"
+  record command "CS_HOME=\"$CS_HOME\" \"$SCRIPT_DIR/cs-send.sh\" $id '${prefix}vault sweep this home now and report what you filed'"
 }
 
 home_step() {  # <id> <home> - one capo, always exits 0; the parent owns the bound
