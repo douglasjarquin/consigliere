@@ -32,6 +32,7 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 | `config/boss.md` | portable | boss preferences and working style; inspect-then-update |
 | `config/boss-shared.md` | portable | main-authoritative shared boss preferences; source of the capo propagation |
 | `config/learnings.md` | portable | curated fleet-local operational facts |
+| `config/memory-archive.md` | portable | the cold tier of this home's curated memory: entries `skills/vault` retired from `boss.md`, `boss-shared.md`, or `learnings.md` because they went stale, were proved obsolete, or were evicted over budget with the boss's approval. Each entry keeps its provenance (original file, date, reason) in a trailing HTML comment. It lives in the backed-up user-owned tree precisely because archive-never-delete would be a lie in a disposable one, but nothing reads it at session start, so it costs no startup memory until a sweep deliberately opens it. `skills/vault` owns the tier markers, the decay clocks, and what may move here; `bin/cs-vault-cascade.sh` reports its size per home and never writes it |
 | `config/projects.md` | portable | fleet navigation registry with standing per-project posture |
 | `config/boards.md` | portable | per-project GitHub Projects board mapping (schema below) |
 | `config/backlog.md` | portable | the durable queue; written by tasks-axi (`.tasks.toml` owns schema) |
@@ -50,7 +51,7 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 
 Symlink policy, established empirically (2026-08-06, tasks-axi 0.2.x):
 
-- `boss.md`, `boss-shared.md`, `learnings.md`, `projects.md`, `boards.md`, and the four portable `.conf` files are read-only to scripts and safe to symlink out to a dotfiles repository.
+- `boss.md`, `boss-shared.md`, `learnings.md`, `memory-archive.md`, `projects.md`, `boards.md`, and the four portable `.conf` files are read-only to scripts and safe to symlink out to a dotfiles repository.
 - `backlog.md`, `done-archive.md`, `note-archive.md`, and `host/capos.md` are rewritten by rename (tasks-axi and the registry writers), which replaces a symlink with a regular file and silently forks the content; they must be real files, and the doctor fails when one is a symlink.
 - A `host/` entry whose symlink target resolves outside the home defeats the host tier (the `capos.md`-across-two-machines mistake); the doctor fails on it.
 
@@ -217,7 +218,9 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_BOOTSTRAP_NETWORK` | cs-bootstrap | `all` (default, and any unrecognized value), `skip` (every local step, no network one), or `only` (every network step and nothing else). The two halves are a strict partition of the unsplit run; `bin/cs-session-start.sh` passes `skip` and `bin/cs-startup-network.sh` runs `only` |
 | `CS_BOOTSTRAP_NETWORK_LOCK_PID` | cs-bootstrap | the `state/.lock` owner a deferred worker captured while that session still held the lock; each network mutating sweep re-verifies it and reports a skip rather than sweeping on behalf of a session that has gone away |
 | `CS_STARTUP_NETWORK_TIMEOUT` | cs-startup-network | one aggregate hard bound in seconds for the whole deferred network stage, which runs outside `CS_SESSION_START_TIMEOUT` in its own process group. Hitting it is reported as a `NETWORK_CHECKS:` line, never as silence. Default 120 |
-| `CS_STARTUP_MEMORY_MAX_BYTES` | cs-session-start | per-file budget for `config/boss.md`, `config/boss-shared.md`, and `config/learnings.md`; over budget is reported in the digest, never truncated. Default 8192 |
+| `CS_STARTUP_MEMORY_MAX_BYTES` | cs-session-start, cs-vault-cascade | per-file budget for `config/boss.md`, `config/boss-shared.md`, and `config/learnings.md`; over budget is reported in the digest, never truncated. The vault cascade applies the same per-file budget to each capo home it reports. Default 8192 |
+| `CS_VAULT_CASCADE_STEP_TIMEOUT` | cs-vault-cascade | per-home hard bound in seconds for one cascade step; a home that exceeds it is reported as an exception and the sweep continues. Default 20 |
+| `CS_VAULT_CASCADE_REGISTRY_BYTES` | cs-vault-cascade | max bytes read from `host/capos.md` by the cascade's registry walk. Default 65536 |
 | `CS_SESSION_START_STATUS_TAIL` | cs-session-start | `state/*.status` lines printed per task in the session-start digest; default 5; each line is capped by `bin/cs-line-cap-lib.sh` |
 | `CS_SESSION_START_QUEUED_LIMIT` | cs-session-start | plain queued backlog rows in the session-start digest; default 20; done rows are never listed |
 | `CS_SESSION_START_ACTIVE_LIMIT` | cs-session-start | in-flight, held, and blocked backlog rows per group in the session-start digest; default 40; each row is shown in full and any remainder is disclosed with the targeted follow-up that prints the rest; queued public-followup rows are outside this bound and always print in full |
