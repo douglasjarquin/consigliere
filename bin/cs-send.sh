@@ -285,7 +285,7 @@ SKILL_SETTLE=${CS_SEND_SKILL_SETTLE:-1.5}
 pre_status=$(cs_herdr_agent_busy_state "$PANE")
 
 SKILL_PREFIX=$(cs_harness_skill_prefix "$HARNESS")
-SKILL_NEEDS_SETTLE=$(cs_harness_skill_needs_settle "$HARNESS")
+SKILL_NEEDS_SETTLE=$(cs_harness_composer_command_settle "$HARNESS")
 case "$RAW_TEXT" in
   "$SKILL_PREFIX"*)
     # Skill invocation ($skill on codex, /skill on claude): send the literal

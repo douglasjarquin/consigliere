@@ -191,6 +191,17 @@ cs_herdr_pane_exists() { # <pane_id>
   cs_herdr pane get "$1" >/dev/null 2>&1
 }
 
+# The pane's own SHELL cwd. Verified live 2026-08-11 (herdr 0.7.5, protocol 17):
+# `pane get` returns result.pane.cwd (the shell's directory) beside
+# foreground_cwd (the foreground process's), both physically resolved, so a
+# caller comparing against a recorded path must resolve that path too.
+# rc 1 when unreported, which is "cannot tell" and never a mismatch.
+cs_herdr_pane_cwd() { # <pane_id> -> absolute path, rc 1 when unreported
+  local out
+  out=$(cs_herdr pane get "$1" 2>/dev/null) || return 1
+  printf '%s' "$out" | jq -er '.result.pane.cwd // empty | select(. != "")' 2>/dev/null
+}
+
 # Classify one pane from the STRUCTURED response body, never from the exit
 # status. `pane get` answers "no such pane", "here it is", and "I cannot tell
 # you" over the same failure exit, and only the first is proof of death, so an

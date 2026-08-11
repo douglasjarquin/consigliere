@@ -11,8 +11,13 @@ user-invocable: false
 
 Use this playbook when the session-start digest reports an ordinary direct report's endpoint dead or its metadata has no workspace, or when a direct report is stale, looping, repeatedly confused, asking a question its brief already answers, unresponsive, or when a steer failed to land.
 
-Consigliere runs on one of two harnesses (codex or claude) and one terminal runtime (herdr). A soldier's harness is recorded as `harness=` in its `state/<id>.meta`; use it (or `bin/cs-harness-lib.sh`'s `cs_harness_resume_cmd`) to pick the right resume command below.
-The target's endpoint is recorded as `workspace=` and `pane=` in `state/<id>.meta` (`bin/cs-meta-lib.sh`), and `bin/cs-send.sh` is the fail-closed steer path - it requires an explicit `CS_HOME` and supports `--key Enter|Escape|C-c`.
+Two channels reach a live soldier, and this playbook uses both deliberately.
+`bin/cs-send.sh` is the data plane: one line of conversational text for the soldier to read.
+`bin/cs-control.sh` is the control plane: the allowlisted lifecycle verbs `interrupt`, `exit`, and `relaunch`, each addressed to an exact task id and each verifying its own postcondition.
+Never hand-drive lifecycle through herdr, a raw key, or a typed exit command: a routing-marked lifecycle command arrives as chat the agent reasons about, and an unverified stop or relaunch is the failure this plane exists to prevent.
+`docs/agent-control.md` owns the mechanism and `bin/cs-control.sh --help` owns the exact flags; both scripts fail closed without an explicit `CS_HOME`.
+
+The target's endpoint is recorded as `workspace=` and `pane=` in `state/<id>.meta` (`bin/cs-meta-lib.sh`), with its harness as `harness=`.
 
 ## Session-start reconciliation for a dead ordinary direct report
 
@@ -26,14 +31,11 @@ A no-mistakes run matched to the soldier's branch and current code remains autho
 When no authoritative run accounts for the task, inspect only its recorded herdr inventory: the recorded `workspace=` and `pane=` through herdr, and the recorded `worktree=` on disk.
 Do not sweep the herdr session for matching names or infer ownership from a label; reconcile only this home's recorded direct reports.
 
-Before relaunch, prove that no live agent still owns the recorded task (`herdr agent get <pane>` via `bin/cs-herdr-lib.sh`'s corroborated status policy) and that the existing worktree remains available.
-Preserve its uncommitted changes and commits, and keep the same task identity:
+A surviving worktree whose workspace is gone is recovered with `herdr worktree open --path <worktree> --label <id>` (docs/herdr.md), never recreated from scratch; record the fresh `workspace=` and `pane=` in `state/<id>.meta` (append; the last occurrence of a key wins per `bin/cs-meta-lib.sh`).
+Once the endpoint is recorded again, bring the soldier back with `CS_HOME=<this-home> bin/cs-control.sh relaunch <id> --note '<one line of progress so far>'`.
+It preserves the same task identity, prefers resuming the soldier's own session so its context survives, and falls back to the brief only when no session is resumable.
 
-- A surviving worktree whose workspace is gone is recovered with `herdr worktree open --path <worktree> --label <id>` (docs/herdr.md), never recreated from scratch; record the fresh `workspace=` and `pane=` in `state/<id>.meta` (append; the last occurrence of a key wins per `bin/cs-meta-lib.sh`).
-- **Prefer resuming the exited session over a cold relaunch.** Both harnesses key sessions by working directory: codex `resume --last` and claude `--continue` are cwd-scoped by default (docs/codex.md, docs/claude.md); because each soldier owns a unique worktree cwd, resuming from that worktree recovers exactly its own session with its full context intact. In the recovered pane run the same launch shape as `bin/cs-spawn.sh` (model/effort flags, the turn-end wiring touching `state/<id>.turn-ended`) but with the harness resume command (`codex resume --last` / `claude --continue`, from `cs_harness_resume_cmd`) in place of the positional-prompt launch, then steer a one-line progress note. No session id has to be captured at spawn - the cwd is the key.
-- Only when no session is resumable (a different cwd, a cleared session store) fall back to a cold relaunch of the soldier's harness in that worktree with the same brief at `data/<id>/brief.md` plus a concise progress note.
-
-Do not use a fresh `cs-spawn` while the recorded worktree is unaccounted for: it would refuse on the existing metadata, and allocating another worktree can split one task across two copies.
+Never use a fresh `cs-spawn` while the recorded worktree is unaccounted for: it refuses on the existing metadata, and allocating another worktree can split one task across two copies.
 If the worktree or ownership cannot be reconciled safely, leave all state intact and report the task failed or blocked with the conflicting evidence.
 
 ## Live-endpoint escalation
@@ -43,19 +45,22 @@ Escalate in order:
 1. Peek the pane with `bin/cs-peek.sh <id>`.
    Then settle the question a peek cannot answer: is the agent still THERE?
    `bin/cs-crew-state.sh <id>` reports `source: pane-process` with a `husk` detail when the pane survived its agent, so a wedge and a dead agent stop looking alike.
-   A husk is not recoverable by redirection - there is nothing running to redirect - so skip straight to the relaunch path below.
+   A husk is not recoverable by redirection - there is nothing running to redirect - so skip straight to the relaunch step below.
    "Could not read the process table" is never reported as a husk, so absence of that detail is not evidence the agent is alive.
-2. If the soldier is waiting on a question its brief already answers, answer in one line: `CS_HOME=<this-consigliere-home> bin/cs-send.sh <id> '<answer>'` from an active consigliere session unless `CS_HOME` is already set to the active consigliere home.
+2. If the soldier is waiting on a question its brief already answers, answer in one line: `CS_HOME=<this-home> bin/cs-send.sh <id> '<answer>'`.
    When that question is an open keyed decision or blocker in its status ledger, add `--resolve-key <key>` before the answer so the delivered answer also closes it (`bin/cs-send.sh`'s header owns that contract).
-3. If the soldier is confused or looping, interrupt with Escape, then redirect with one corrective line:
-   `CS_HOME=<this-consigliere-home> bin/cs-send.sh <id> --key Escape`, then a single `cs-send` steer.
-4. Before relaunching, record the pane's agent session id (`cs_herdr_agent_session_id` in `bin/cs-herdr-lib.sh`); after the relaunch, read it again.
-   An UNCHANGED id means the original instance is still sitting there and the relaunch did not happen, however healthy the pane looks - do not report a recovery on that evidence.
-   A CHANGED id proves a different instance owns the pane, so the wedged context is gone and any "resumed its work" claim needs its own proof - but only when BOTH readings carried a value: a session id that was present, vanished, and returned is two observations with a gap, not a change.
-   An unreported id (no official integration answered) is not a failure; fall back to the other evidence rather than treating absence as a negative.
-   When herdr's own reading disagrees with what the pane appears to be doing, `cs_herdr_agent_explain` names the detection rule that decided it, so the disagreement is explained rather than guessed at.
-4. If the soldier is genuinely wedged after redirection, exit the agent (`/exit` via `cs-send`, or close and reopen through the recovery path above) and bring it back with the harness resume command (`codex resume --last` / `claude --continue`) in the same worktree (its session and context survive the exit); only cold-relaunch with the brief plus a `progress so far` note if no session is resumable.
+3. If the soldier is confused or looping, stop the turn with `CS_HOME=<this-home> bin/cs-control.sh interrupt <id>`, then redirect with a single `cs-send` steer.
+   The interrupt reports whether the turn actually stopped and whether the composer is clear; a steer sent into a composer that still holds text would be submitted as part of that text.
+4. If the soldier is genuinely wedged after redirection, relaunch it: `CS_HOME=<this-home> bin/cs-control.sh relaunch <id> --note '<one line of progress so far>'`.
    Genuine wedging means looping, unresponsive, repeating the same obstacle, or truly dead.
    A low context reading is not wedging; both harnesses auto-compact and keep going.
-   The worktree and commits persist, so relaunch is cheap.
-5. If a second relaunch fails too, write `failed` to the backlog and tell the boss the plain failure, preserved work, and consequence using `AGENTS.md` section 9; do not mention metadata, pane, or worktree unless the path itself is needed for action.
+   The worktree, its commits, and its uncommitted changes persist across a relaunch, so it is cheap.
+   The note is required because the replacement inherits the local copy and none of the conversation.
+   Read the reported result rather than assuming it: the relaunch names which path it took (`resume` keeps the soldier's own context, `cold` re-reads the brief), proves a different agent process now owns the pane, and reports a failure plainly instead of claiming a running agent.
+   If it refuses before stopping the old agent, nothing changed and the refusal names what to fix; if it fails after stopping it, no agent is running and the message names where the work is preserved.
+   When herdr's own reading disagrees with what the pane appears to be doing, `cs_herdr_agent_explain` (`bin/cs-herdr-lib.sh`) names the detection rule that decided it, so the disagreement is explained rather than guessed at.
+5. If `exit` or `relaunch` reports that it could not stop the agent, do not force it and do not tear the task down to get past it.
+   Read the concrete state it reported (unsent text in the composer, a turn that would not cancel, an unreadable process table), clear that specific obstacle, and try the verb again.
+   Unsent composer text already gets one submit-and-cancel attempt inside the verb, so a `composer` refusal means the text survived that: read the pane with `bin/cs-peek.sh <id>` and settle what is actually sitting there before trying again.
+   A pane whose agent cannot be stopped at all is recovered by closing the pane and reopening the surviving worktree with `herdr worktree open --path`, which is endpoint replacement, not work discard.
+6. If a second relaunch fails too, write `failed` to the backlog and tell the boss the plain failure, preserved work, and consequence using `AGENTS.md` section 9; do not mention metadata, pane, or worktree unless the path itself is needed for action.

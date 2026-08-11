@@ -150,6 +150,18 @@ scout_claude=$(cs_harness_scout_launch claude default default "$op" "$br" "$st")
 assert_contains "$scout_claude" 'claude -p ' "claude scout uses claude -p"
 assert_contains "$scout_claude" 'done: headless scout finished' "scout appends terminal status"
 
+# The relaunch shape: identical flags and turn-end wiring, the harness's own
+# cwd-keyed resume command in place of the brief prompt.
+resume_codex=$(cs_harness_soldier_resume codex gpt-5 high "$te" "" "")
+assert_contains "$resume_codex" "codex resume --last --model 'gpt-5' " "codex resume names the subcommand, then the flags"
+assert_contains "$resume_codex" "--dangerously-bypass-approvals-and-sandbox" "codex resume keeps autonomy"
+assert_contains "$resume_codex" 'notify=' "codex resume keeps the turn-end wiring"
+assert_not_contains "$resume_codex" 'encode launch-brief' "a resume carries no brief prompt"
+resume_claude=$(cs_harness_soldier_resume claude sonnet high "$te" "$se" "")
+assert_contains "$resume_claude" "claude --continue --model 'sonnet' --effort 'high' " "claude resume names the flag, then the flags"
+assert_contains "$resume_claude" "--settings '/home/state/t.claude-settings.json'" "claude resume keeps the turn-end wiring"
+assert_not_contains "$resume_claude" 'encode launch-brief' "a claude resume carries no brief prompt"
+
 capo_claude=$(cs_harness_capo_launch claude default default "$op" "$br" "$hm")
 assert_contains "$capo_claude" "CS_HOME='/home/capo' claude " "capo prefixes CS_HOME and names the harness"
 assert_not_contains "$capo_claude" '--settings' "capo has no turn-end wiring"
@@ -260,10 +272,19 @@ pass "claude folder-trust pre-seed and cleanup"
 # --- accessors --------------------------------------------------------------
 [ "$(cs_harness_skill_prefix codex)" = '$' ] || fail "codex skill prefix"
 [ "$(cs_harness_skill_prefix claude)" = '/' ] || fail "claude skill prefix"
-[ "$(cs_harness_skill_needs_settle codex)" = 1 ] || fail "codex needs settle"
-[ "$(cs_harness_skill_needs_settle claude)" = 0 ] || fail "claude no settle"
+[ "$(cs_harness_composer_command_settle codex)" = 1 ] || fail "codex needs settle"
+[ "$(cs_harness_composer_command_settle claude)" = 0 ] || fail "claude no settle"
 [ "$(cs_harness_resume_cmd codex)" = 'resume --last' ] || fail "codex resume"
 [ "$(cs_harness_resume_cmd claude)" = '--continue' ] || fail "claude resume"
+# Lifecycle mechanics: one key for both harnesses, one exit command each, and
+# herdr's canonical key spelling (docs/herdr.md refuses anything else).
+[ "$(cs_harness_interrupt_key codex)" = esc ] || fail "codex interrupt key"
+[ "$(cs_harness_interrupt_key claude)" = esc ] || fail "claude interrupt key"
+[ "$(cs_harness_exit_command codex)" = '/quit' ] || fail "codex exit command"
+[ "$(cs_harness_exit_command claude)" = '/exit' ] || fail "claude exit command"
+for fn in cs_harness_interrupt_key cs_harness_exit_command cs_harness_composer_command_settle; do
+  "$fn" bogus >/dev/null 2>&1 && fail "$fn must refuse an unknown harness"
+done
 [ "$(cs_harness_instruction_file codex)" = AGENTS.md ] || fail "codex instruction file"
 [ "$(cs_harness_instruction_file claude)" = CLAUDE.md ] || fail "claude instruction file"
 [ "$(cs_harness_busy_re codex)" = "$(cs_harness_busy_re claude)" ] || fail "busy signature shared"

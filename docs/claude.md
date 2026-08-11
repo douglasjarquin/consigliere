@@ -210,6 +210,33 @@ NOT verified: the behavior of `--permission-mode` and `--dangerously-skip-permis
 passed together. `cs_harness_autonomy_flag` emits exactly one of them, so the
 combination never occurs in a consigliere launch.
 
+## Agent lifecycle control (verified live 2026-08-11, claude 2.1.227, isolated herdr lab)
+
+The mechanics `bin/cs-control.sh` drives, measured the same way as the codex side (docs/codex.md).
+
+- **Interrupt is Escape.** During a live turn one `pane send-keys <pane> esc` moved `agent_status` from `working` to `idle` within 2s; the transcript recorded `⎿ Interrupted · What should Claude do instead?` and the composer classified `empty` afterwards. Claude does not restore the cancelled prompt into the composer.
+- **Exit is `/exit`.** Sent as `pane send-text '/exit'` then Enter, with NO settle (claude's completion popup does not swallow the Enter, the same asymmetry the `$skill` vs `/skill` send already has). The agent process left the pane in 2s and `agent get` returned `{"error":{"code":"agent_not_found",...}}`.
+- **Unsent composer text is what breaks a lifecycle command, and it is a real, reproducible case.** A steer delivered mid-turn is QUEUED, and cancelling the turn leaves that queued line sitting in the composer:
+
+  ```text
+  queued-mid-turn:          state=empty   busy=busy
+  queued-post-esc:          state=pending busy=idle     # ❯ QUEUED_SECOND_MESSAGE
+  queued-after-second-esc:  state=pending busy=idle     # a second esc does NOT clear it
+  ```
+
+  Typing the exit command onto it submits the concatenation as a prompt, and the agent reasons about it instead of exiting: `⏺ No task in message. /exit is CLI built-in - type it directly in terminal to quit session.` Cancelling a turn with NOTHING queued leaves the composer empty, measured repeatedly over 15s. Since herdr has no key that clears a composer (docs/herdr.md), `bin/cs-control-lib.sh` submits the line with one Enter, cancels the turn it starts, and only then types the exit command; a composer still non-empty after that refuses.
+- **The zsh prompt glyph collides with claude's composer glyph, and the collision is visible in a real soldier pane.** Sampled from a live `cs-spawn`ed soldier at mode `--format ansi`, the row `cs_composer_state` matched immediately after launch was the pane's SHELL prompt, not claude's composer:
+
+  ```text
+  \033[0m\033[38;5;5m❯\033[0m \033[38;5;2mclaude\033[0m --dangerously-skip-permissions --settings \033[38;5;3m'/…
+  ```
+
+  A 256-colour foreground (`38;5;n`) is deliberately KEPT by `cs_composer_strip_ghost`, so that row classified `pending` while the agent's own composer (a truecolour `38;2;153;153;153` `❯` with nothing after it) classifies `empty` correctly once claude has drawn it. Consequence for this plane: the flush above exists partly because `pending` is not always real typed text. Consequence NOT addressed here, and worth its own change: a pane whose agent has EXITED shows this same `❯` shell prompt, and `bin/cs-composer-lib.sh` treats `❯` as an agent glyph, so an empty shell prompt can read `empty` - the away-mode daemon's injection guard is what that classification protects.
+- **`claude --continue` with nothing to resume fails cleanly, but not instantly.** In a fresh directory it printed `No conversation found to continue`, exited rc 1, and left the pane at its shell with no agent process - the positively-agent-free signal `bin/cs-spawn.sh --relaunch` waits for before falling back to a cold launch. It is a real process while it does that, and herdr's detector reports an agent in the pane for that second, so "an agent appeared" alone is NOT proof a resume took: the relaunch requires the agent to still be there, with a readable process, after a settle.
+- **A resumed session keeps its id.** `agent_session.value` was byte-identical before the exit and after the resume, so it cannot be used as relaunch evidence (docs/herdr.md owns that conclusion).
+- **A finished claude turn does not necessarily read `idle`.** `herdr agent wait <pane> --until idle` timed out against a live claude soldier whose turn had provably ended (its Stop hook had already touched the turn-end file), because herdr reported native `done`, which the status policy maps to `done` and not to `idle` (docs/herdr.md). Wait on the corroborated busy state (`cs_herdr_agent_busy_state` is not `busy`), which is what every consigliere caller acts on; `tests/cs-lifecycle-claude-live.test.sh` does, after the raw wait failed a healthy agent.
+- NOT measurable in a lab launched from a Claude Code session: a real resume. A nested claude inherits `CLAUDE_CODE_CHILD_SESSION` and starts with `⚠ Transcript saving is off`, so it records no resumable session at all. The production evidence for the resume path is the per-worktree session store: each soldier worktree has its own `~/.claude/projects/<munged-cwd>/<session>.jsonl`, which is what `--continue` reads.
+
 ## Native features deliberately available to consigliere
 
 - `claude -p` / `--print` - headless non-interactive run; used for `--headless` scouts.

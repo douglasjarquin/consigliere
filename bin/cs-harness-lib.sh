@@ -379,6 +379,43 @@ cs_harness_soldier_launch() {
   esac
 }
 
+# cs_harness_soldier_resume <h> <model> <effort> <sq_turnend> <sq_settings> [telemetry-cmd]
+# The relaunch shape of cs_harness_soldier_launch: identical flags and identical
+# turn-end wiring, with the harness's cwd-keyed resume command in place of the
+# positional brief prompt. A soldier owns a unique worktree cwd, so resuming
+# from it recovers exactly that soldier's own session with its context intact
+# (docs/codex.md, docs/claude.md); bin/cs-spawn.sh --relaunch prefers this over
+# the cold launch and falls back only when no session was resumable.
+cs_harness_soldier_resume() {
+  local h=$1 model=$2 effort=$3 sq_turnend=$4 sq_settings=$5 telemetry=${6:-}
+  local mf ef auto env notify resume
+  mf=$(cs_harness_model_flag "$h" "$model")
+  ef=$(cs_harness_effort_flag "$h" "$effort")
+  auto=$(cs_harness_autonomy_flag "$h") || return 1
+  env=$(cs_harness_launch_env "$h")
+  resume=$(cs_harness_resume_cmd "$h") || return 1
+  notify="touch $sq_turnend"
+  if [ -n "$telemetry" ]; then
+    notify="$notify; $telemetry"
+  fi
+  # The launch STRING is data run later in the pane; its \" is literal and must
+  # not expand here. SC2016 disabled deliberately, as in the builders above.
+  case "$h" in
+    codex)
+      # `resume` is a subcommand, so every flag follows it (verified: codex
+      # 0.147 `codex resume --help` accepts -c, --model, and the autonomy flag).
+      # shellcheck disable=SC2016
+      printf '%scodex %s %s%s%s -c "notify=[\\"bash\\",\\"-c\\",\\"%s\\"]"' \
+        "$env" "$resume" "$mf" "$ef" "$auto" "$notify"
+      ;;
+    claude)
+      printf '%sclaude %s %s%s%s --settings %s' \
+        "$env" "$resume" "$mf" "$ef" "$auto" "$sq_settings"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
 # cs_harness_scout_launch <h> <model> <effort> <sq_op> <sq_brief> <sq_status>
 # Fire-and-forget headless scout: process exit IS the turn end; the launch line
 # appends the terminal done/failed status event.
@@ -433,12 +470,42 @@ cs_harness_skill_prefix() {
   esac
 }
 
-# cs_harness_skill_needs_settle <h> - 1 if a $-skill send needs a pre-Enter
-# settle (codex's completion popup swallows an atomic Enter); 0 otherwise.
-cs_harness_skill_needs_settle() {
+# cs_harness_composer_command_settle <h> - 1 if a composer command whose first
+# character opens the harness's own completion popup needs a pre-Enter settle,
+# 0 otherwise. That is one fact, not two: codex pops a completion list for a
+# leading `$` (a skill) and for a leading `/` (a slash command like the exit
+# command below) alike, and an atomic send swallows the Enter into the popup.
+# Claude's popup does not swallow it. cs-send.sh reads this for a skill
+# invocation and bin/cs-control-lib.sh for the exit command.
+cs_harness_composer_command_settle() {
   case "$1" in
     codex) printf '1\n' ;;
     claude) printf '0\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+# cs_harness_interrupt_key <h> - the key that cancels a running turn and leaves
+# the agent running in the pane. Both harnesses render "esc to interrupt"
+# during a live turn (cs_harness_busy_re), so both cancel on Escape. The name is
+# herdr's canonical spelling `esc`, which is what was verified live against both
+# harnesses (docs/codex.md, docs/claude.md); herdr's key vocabulary is narrow and
+# refuses anything it does not know outright (docs/herdr.md).
+cs_harness_interrupt_key() {
+  case "$1" in
+    codex|claude) printf 'esc\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+# cs_harness_exit_command <h> - the composer command that ends the agent
+# process while leaving the pane, its shell, the worktree, and every
+# uncommitted change untouched. Verified live per harness in docs/codex.md and
+# docs/claude.md; it is a composer command, so it needs the settle above.
+cs_harness_exit_command() {
+  case "$1" in
+    codex) printf '/quit\n' ;;
+    claude) printf '/exit\n' ;;
     *) return 1 ;;
   esac
 }

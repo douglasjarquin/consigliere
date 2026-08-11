@@ -103,6 +103,30 @@ So a codex worker turn is measurable in count, role, and task identity, but not 
 - Composer ghost-text (dim inline suggestions) can make an empty composer look non-empty in captures; the away-mode composer gate must strip ANSI de-emphasis before judging emptiness (ported incident, 2026-07-08 upstream).
 - Session resume is **cwd-keyed, not id-keyed**. codex records every session by working directory under `~/.codex/sessions/` (the rollout's `payload.cwd`), and `codex resume --last` continues the most recent session FOR THE CURRENT CWD by default (`--all` disables that cwd filter; verified codex 0.144, 2026-07-22). Because every soldier owns a unique worktree cwd, running `codex resume --last` from that worktree recovers exactly its own session with full context - no session id needs to be captured at spawn. `codex resume <uuid>` also works when an id is known (printed on quit), but recovery never depends on capturing it. See `skills/stuck-soldier-recovery`.
 
+## Agent lifecycle control (verified live 2026-08-11, codex-cli 0.147.0, isolated herdr lab)
+
+The mechanics `bin/cs-control.sh` drives, each measured in a lab pane rooted in a throwaway git repo.
+
+- **Interrupt is Escape.** During a live turn (`agent_status: working`) one `pane send-keys <pane> esc` moved the status to `idle` within 2s and the transcript recorded `■ Conversation interrupted - tell the model what to do differently`. The composer was EMPTY afterwards (its `›` row carried only codex's dim ghost suggestion), so no composer clear is needed and none is available (docs/herdr.md: herdr refuses `C-u`).
+- **A second Escape is not a retry.** Codex reads Escape twice at an idle composer as "edit the previous message", so an unconfirmed interrupt is reported rather than re-sent.
+- **Exit is `/quit`.** Sent as `pane send-text '/quit'`, a 1.5s settle, then Enter (the settle is the same completion-popup guard `$skill` sends need). The agent process left the pane within the 30s bound, `agent get` returned `{"error":{"code":"agent_not_found",...}}`, and the pane's shell came back carrying codex's own hint:
+
+  ```text
+  To continue this session, run codex resume 019ff0a3-7d80-7072-aa6b-3ebf889a8d97
+  repo main
+  ❯
+  ```
+
+- **The launch flags work after the `resume` subcommand.** `codex resume --help` (0.147.0) lists `-c`, `-m/--model`, and `--dangerously-bypass-approvals-and-sandbox`, and the live relaunch line
+
+  ```text
+  codex resume --last --dangerously-bypass-approvals-and-sandbox -c 'model_reasoning_effort="low"' -c "notify=[...]"
+  ```
+
+  brought up a new agent process (pid 43908 -> 63210) whose transcript still held the pre-exit conversation, including the interrupted prompt. That is what makes resume-first worth preferring: the soldier keeps its context.
+- **Directory trust blocks an unattended launch.** A codex TUI started in a directory it does not trust sits at `Do you trust the contents of this directory?` and herdr reports `agent_status: blocked` with the codex process still running. So a relaunch that cannot confirm the pane is agent-free must refuse rather than launch again - a blocked codex is present, not absent.
+- NOT established here: whether `-c notify=` still fires at turn end on 0.147.0. The lab's turn-end file was never touched although the same session's `SessionStart` hooks did run, and codex's persisted hook trust (above) is the obvious suspect. The launch template is unchanged by the control plane, so this is a standing question about the codex turn-end signal, not about relaunch.
+
 ## Native features deliberately available to consigliere
 
 - `codex exec` - headless non-interactive run; used for `--headless` scouts (turn-end = process exit; the launch line appends the terminal `done:`/`failed:` status event, so completion surfaces through the watcher's ordinary signal path). The analog of `claude -p`.

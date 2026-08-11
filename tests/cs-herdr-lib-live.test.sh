@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Behavior (LIVE, opt-in): cs-herdr-lib.sh drives a real isolated herdr lab -
 # protocol gate, home workspace ensure, workspace-per-task worktree create,
-# dirty-remove refusal, clean remove, capture, and worktree-open recovery.
+# dirty-remove refusal, clean remove, capture, the pane cwd and key vocabulary the
+# agent-control plane depends on, and worktree-open recovery.
 #
 # Skipped unless CS_TEST_HERDR_LIVE=1 because it provisions a real lab server.
 # It never touches the default session; all calls go through the lab guard's
@@ -82,6 +83,24 @@ for _ in $(seq 1 30); do
 done
 assert_contains "$out" "cs-capture-probe" "pane run output visible in capture"
 pass "pane run + capture round-trip"
+
+# The two endpoint facts the agent-control plane depends on, pinned against the
+# REAL binary (docs/herdr.md records the measurements).
+pane_cwd=$(cs_herdr_pane_cwd "$task_pane") || fail "herdr reported no cwd for pane $task_pane"
+want_cwd=$(cd "$task_path" && pwd -P) || fail "cannot resolve $task_path"
+[ "$pane_cwd" = "$want_cwd" ] ||
+  fail "pane cwd should be the worktree: got '$pane_cwd', want '$want_cwd'"
+pass "cs_herdr_pane_cwd reports the pane's own working directory"
+
+# herdr's key vocabulary is narrow, which is WHY a lifecycle command can never be
+# typed into a composer holding unsent text: there is no clear key to reach for.
+key_err=$(cs_herdr_send_keys "$task_pane" C-u 2>&1 >/dev/null || true)
+case "$key_err" in
+  *invalid_key*|*"unsupported key"*) : ;;
+  *) fail "herdr $(herdr --version 2>/dev/null) now accepts C-u ('$key_err'); re-verify docs/herdr.md and docs/agent-control.md before relying on the refusal" ;;
+esac
+cs_herdr_send_keys "$task_pane" esc >/dev/null || fail "herdr must accept its canonical esc key name"
+pass "send-keys accepts esc and refuses an unsupported key"
 
 # The submit-confirmation flag, pinned against the REAL binary at the pinned
 # version. `agent wait` renamed this flag between 0.7.4 (--status) and 0.7.5

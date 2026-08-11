@@ -4,6 +4,7 @@
 # Usage: cs-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--model <name>] [--effort <level>] [--base <ref>] [--issue <n>]
 #        cs-spawn.sh <task-id> <project-dir> --scout [--headless] [--model <name>] [--effort <level>] [--base <ref>]
 #        cs-spawn.sh <task-id> <capo-home> --capo [--model <name>] [--effort <level>]
+#        cs-spawn.sh --relaunch <task-id> [--model <name>] [--effort <level>]
 #
 #   --mode and --yolo are REQUIRED on a ship spawn and refused on --scout and
 #   --capo. A ship task's delivery posture is decided per task at intake, never
@@ -64,6 +65,29 @@
 #   - Writes state/<id>.meta, then launches codex in the task pane with the
 #     turn-end notify hook touching state/<id>.turn-ended.
 #
+# Relaunch mechanics (--relaunch <task-id>):
+#   - ADOPTS the endpoint and worktree recorded in state/<id>.meta instead of
+#     creating either, so a wedged soldier is replaced in place with its local
+#     copy, its commits, and its uncommitted changes untouched. It is the launch
+#     half of bin/cs-control.sh relaunch, which owns the transaction, the
+#     journal, the progress note, and stopping the old agent; nothing here
+#     removes, closes, or discards anything.
+#   - Refuses unless the recorded pane is POSITIVELY agent-free and its shell is
+#     sitting in the recorded worktree, so a replacement can never join a live
+#     agent or start outside the copy holding the work.
+#   - Refuses a kind=capo task (capo-provisioning owns a home's lifecycle) and a
+#     headless scout (no interactive agent to replace).
+#   - Prefers the harness resume command (cs_harness_resume_cmd) so the
+#     soldier's own session and context survive: both harnesses key sessions by
+#     cwd and every soldier owns a unique worktree cwd. It falls back to a cold
+#     launch with the brief only once the pane is positively agent-free again,
+#     which is exactly what a harness that had no session to resume leaves
+#     behind (docs/codex.md, docs/claude.md).
+#   - Keeps the recorded model, effort, harness, kind, mode, and yolo. --model
+#     and --effort override the profile for this relaunch and are recorded once
+#     an agent is confirmed; the harness is deliberately not switchable, since a
+#     soldier inherits the root session's harness.
+#
 # Capo mechanics:
 #   - The capo home must already be seeded (cs-home-seed.sh); this script
 #     creates the capo home workspace (label capo-<id>) at the home path and
@@ -100,6 +124,11 @@ esac
 . "$SCRIPT_DIR/cs-delivery-lib.sh"
 # shellcheck source=bin/cs-timeout-lib.sh
 . "$SCRIPT_DIR/cs-timeout-lib.sh"
+# The relaunch path adopts a recorded endpoint, so it shares the control plane's
+# definition of "positively agent-free" and "sitting in that worktree" rather
+# than keeping a second copy of either.
+# shellcheck source=bin/cs-control-lib.sh
+. "$SCRIPT_DIR/cs-control-lib.sh"
 
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
@@ -189,11 +218,13 @@ HEADLESS=0
 LAUNCH_WAIT=${CS_SPAWN_LAUNCH_WAIT_SECS:-60}
 case "$LAUNCH_WAIT" in ''|*[!0-9]*|0) LAUNCH_WAIT=60 ;; esac
 ISSUE=
+RELAUNCH=0
 POS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --scout) KIND=scout ;;
     --capo) KIND=capo ;;
+    --relaunch) RELAUNCH=1 ;;
     --headless) HEADLESS=1 ;;
     --model) MODEL=${2:?--model requires a value}; shift ;;
     --effort) EFFORT=${2:?--effort requires a value}; shift ;;
@@ -209,14 +240,36 @@ done
 if [ -n "$ISSUE" ]; then
   case "$ISSUE" in *[!0-9]*) echo "error: --issue must be a number, got '$ISSUE'" >&2; exit 2 ;; esac
 fi
-[ "${#POS[@]}" -ge 2 ] || { usage >&2; exit 2; }
-ID=${POS[0]}
-TARGET=${POS[1]}
+if [ "$RELAUNCH" -eq 1 ]; then
+  # A relaunch adopts one recorded task: everything that describes a NEW task is
+  # refused rather than silently ignored, because the recorded posture is the
+  # authority and a flag here would look like it had changed something.
+  [ "${#POS[@]}" -eq 1 ] || { echo "error: --relaunch takes exactly one task id (the project, branch, and posture come from state/<id>.meta)" >&2; exit 2; }
+  relaunch_refuse_flag() { # <flag> <value>
+    [ -z "$2" ] && return 0
+    echo "error: $1 does not apply to --relaunch; the task's recorded metadata owns it" >&2
+    exit 2
+  }
+  [ "$KIND" = ship ] || relaunch_refuse_flag "--$KIND" 1
+  [ "$HEADLESS" -eq 0 ] || relaunch_refuse_flag --headless 1
+  relaunch_refuse_flag --mode "$MODE"
+  relaunch_refuse_flag --yolo "$YOLO"
+  relaunch_refuse_flag --base "$BASE"
+  relaunch_refuse_flag --issue "$ISSUE"
+  ID=${POS[0]}
+else
+  [ "${#POS[@]}" -ge 2 ] || { usage >&2; exit 2; }
+  ID=${POS[0]}
+  TARGET=${POS[1]}
+fi
 
 case "$ID" in
   *[!A-Za-z0-9._-]*|'') echo "error: task id must be [A-Za-z0-9._-]+: '$ID'" >&2; exit 2 ;;
 esac
-cs_spawn_apply_dispatch_policy
+# The dispatch policy states a default for NEW work. A relaunch keeps the profile
+# the task was dispatched on, so a policy edited since then never silently moves
+# a running task's model or effort.
+[ "$RELAUNCH" -eq 1 ] || cs_spawn_apply_dispatch_policy
 if ! cs_harness_effort_valid "$HARNESS" "$EFFORT"; then
   case "$HARNESS:$EFFORT" in
     claude:ultra) echo "error: claude does not accept effort=ultra; choose default|low|medium|high|xhigh|max" >&2 ;;
@@ -236,7 +289,11 @@ fi
 # The delivery contract is validated with the other pre-flight checks, ahead of
 # the spawn lock and the worktree, so a bad or missing flag cannot leave an
 # endpoint, workspace, branch, or metadata file behind.
-if [ "$KIND" = ship ]; then
+if [ "$RELAUNCH" -eq 1 ]; then
+  # The delivery contract was stated when the task was dispatched and lives in
+  # state/<id>.meta; a relaunch neither restates nor revisits it.
+  :
+elif [ "$KIND" = ship ]; then
   if [ -z "$MODE" ]; then
     echo "error: a ship spawn requires --mode <$CS_DELIVERY_MODES>; the delivery contract is decided per task, not derived from the project registry" >&2
     exit 2
@@ -364,7 +421,12 @@ if ! _cs_spawn_lock_acquire; then
   exit 1
 fi
 
-if [ -e "$STATE/$ID.meta" ]; then
+if [ "$RELAUNCH" -eq 1 ]; then
+  [ -f "$STATE/$ID.meta" ] || {
+    echo "error: cannot relaunch '$ID': no metadata at $STATE/$ID.meta, so there is no recorded endpoint or worktree to adopt" >&2
+    exit 1
+  }
+elif [ -e "$STATE/$ID.meta" ]; then
   echo "error: task '$ID' already has metadata at $STATE/$ID.meta; tear it down or pick a new id" >&2
   exit 1
 fi
@@ -377,6 +439,153 @@ shell_quote() {
 
 BRIEF="$DATA/$ID/brief.md"
 sq_operational=$(shell_quote "$SCRIPT_DIR/cs-operational-input.sh")
+
+# ----------------------------------------------------------------- relaunch
+if [ "$RELAUNCH" -eq 1 ]; then
+  META="$STATE/$ID.meta"
+  R_KIND=$(cs_meta_get "$META" kind 2>/dev/null || true)
+  [ -n "$R_KIND" ] || R_KIND=ship
+  R_PANE=$(cs_meta_get "$META" pane) || { echo "error: no pane recorded in $META" >&2; exit 1; }
+  R_WT=$(cs_meta_get "$META" worktree 2>/dev/null || true)
+  R_PROJ=$(cs_meta_get "$META" project 2>/dev/null || true)
+  # A meta with no harness= predates the two-harness layer, when codex was the
+  # only one; bin/cs-send.sh reads such a record the same way.
+  R_HARNESS=$(cs_meta_get "$META" harness 2>/dev/null || true)
+  [ -n "$R_HARNESS" ] || R_HARNESS=codex
+  cs_harness_valid "$R_HARNESS" || { echo "error: task '$ID' records an unsupported harness '$R_HARNESS'" >&2; exit 1; }
+  if [ "$(cs_meta_get "$META" headless 2>/dev/null || true)" = 1 ]; then
+    echo "error: task '$ID' is a headless scout: it runs as a plain process whose turn end is its exit, so there is no interactive agent to relaunch" >&2
+    exit 1
+  fi
+  if [ "$R_KIND" = capo ]; then
+    echo "error: task '$ID' is a capo: relaunching a persistent home belongs to the capo-provisioning skill, which owns its state, backlog, and child work" >&2
+    exit 1
+  fi
+  [ -f "$BRIEF" ] || { echo "error: brief missing at $BRIEF; a relaunch needs it as the replacement's instructions" >&2; exit 1; }
+  [ -n "$R_WT" ] || { echo "error: task '$ID' records no worktree; reconcile it before relaunching" >&2; exit 1; }
+  [ -d "$R_WT" ] || { echo "error: task '$ID' records worktree $R_WT, which is gone; recover it with 'herdr worktree open --path' first" >&2; exit 1; }
+  R_WT_REAL=$(cd "$R_WT" && pwd -P) || { echo "error: cannot resolve recorded worktree $R_WT" >&2; exit 1; }
+  R_WT_TOP=$(git -C "$R_WT_REAL" rev-parse --show-toplevel 2>/dev/null || true)
+  R_WT_TOP_REAL=$(cd "${R_WT_TOP:-/nonexistent}" 2>/dev/null && pwd -P) || R_WT_TOP_REAL=
+  R_PROJ_REAL=$(cd "${R_PROJ:-/nonexistent}" 2>/dev/null && pwd -P) || R_PROJ_REAL=
+  if [ -z "$R_WT_TOP_REAL" ] || [ "$R_WT_TOP_REAL" != "$R_WT_REAL" ] ||
+    { [ -n "$R_PROJ_REAL" ] && [ "$R_WT_REAL" = "$R_PROJ_REAL" ]; }; then
+    echo "error: recorded worktree $R_WT_REAL is not an isolated git worktree root (git reports '${R_WT_TOP:-none}'; primary '${R_PROJ_REAL:-unknown}'); refusing to relaunch into it" >&2
+    exit 1
+  fi
+
+  # The endpoint must be there, positively agent-free, and sitting in the
+  # worktree that holds the work. Each of the three is refused on "cannot tell",
+  # never assumed: joining a live agent or launching in the wrong directory are
+  # both worse than a refusal.
+  R_PRESENCE=$(cs_herdr_pane_presence "$R_PANE")
+  [ "$R_PRESENCE" = present ] || {
+    echo "error: herdr reports pane $R_PANE as '$R_PRESENCE' for task '$ID'; a relaunch adopts an existing endpoint and never creates one" >&2
+    exit 1
+  }
+  if ! cs_control_agent_gone "$R_PANE"; then
+    echo "error: pane $R_PANE is not positively agent-free (pid $(cs_control_agent_pid "$R_PANE" 2>/dev/null || echo unreadable)); stop the agent through bin/cs-control.sh exit before relaunching" >&2
+    exit 1
+  fi
+  cwd_rc=0
+  cs_control_pane_in_dir "$R_PANE" "$R_WT_REAL" || cwd_rc=$?
+  case "$cwd_rc" in
+    0) ;;
+    1) echo "error: pane $R_PANE's shell is not in $R_WT_REAL; a replacement launched there would run outside the copy holding the work" >&2; exit 1 ;;
+    *) echo "error: herdr did not report a working directory for pane $R_PANE; refusing to launch into an unverified location" >&2; exit 1 ;;
+  esac
+
+  R_MODEL=${MODEL:-$(cs_meta_get "$META" model 2>/dev/null || true)}
+  R_EFFORT=${EFFORT:-$(cs_meta_get "$META" effort 2>/dev/null || true)}
+  [ -n "$R_MODEL" ] || R_MODEL=default
+  [ -n "$R_EFFORT" ] || R_EFFORT=default
+  cs_harness_effort_valid "$R_HARNESS" "$R_EFFORT" || {
+    echo "error: effort '$R_EFFORT' is not accepted by $R_HARNESS; pass --effort to choose a usable level" >&2
+    exit 1
+  }
+
+  R_TURNEND="$STATE/$ID.turn-ended"
+  sq_brief=$(shell_quote "$BRIEF")
+  sq_turnend=$(shell_quote "$R_TURNEND")
+  R_TELEMETRY=
+  case "$R_HARNESS" in
+    claude) R_TELEMETRY=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" stdin) ;;
+    codex) R_TELEMETRY=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" nostdin) ;;
+  esac
+  sq_settings=''
+  if [ "$R_HARNESS" = claude ]; then
+    SETTINGS_FILE="$STATE/$ID.claude-settings.json"
+    cs_harness_claude_settings_json "$R_TURNEND" "$R_TELEMETRY" > "$SETTINGS_FILE"
+    sq_settings=$(shell_quote "$SETTINGS_FILE")
+    cs_harness_claude_trust_dir "$R_WT_REAL" || {
+      echo "error: could not pre-trust claude worktree $R_WT_REAL; the pane is untouched" >&2
+      exit 1
+    }
+  fi
+
+  # Resume first. The wait is generous for a slow cold start, and breaks out as
+  # soon as the pane is positively agent-free again - which is what a harness
+  # that had nothing to resume leaves behind once it exits.
+  R_RESUME_WAIT=${CS_CONTROL_RESUME_WAIT_SECS:-$LAUNCH_WAIT}
+  case "$R_RESUME_WAIT" in ''|*[!0-9]*|0) R_RESUME_WAIT=$LAUNCH_WAIT ;; esac
+  R_RESUME_GRACE=${CS_CONTROL_RESUME_GRACE_SECS:-6}
+  case "$R_RESUME_GRACE" in ''|*[!0-9]*) R_RESUME_GRACE=6 ;; esac
+  # A harness with nothing to resume still RUNS for a second or two before it
+  # prints its refusal and exits, and herdr's detector sees an agent in that
+  # window (measured: `claude --continue` with no recorded session). So a resume
+  # counts only once the agent is still there after a settle, and it must be a
+  # real agent PROCESS, not just herdr's belief about the pane.
+  R_RESUME_CONFIRM=${CS_CONTROL_RESUME_CONFIRM_SECS:-4}
+  case "$R_RESUME_CONFIRM" in ''|*[!0-9]*) R_RESUME_CONFIRM=4 ;; esac
+  r_agent_running() { cs_herdr_agent_alive "$R_PANE" && cs_control_agent_pid "$R_PANE" >/dev/null 2>&1; }
+  R_LAUNCH=$(cs_harness_soldier_resume "$R_HARNESS" "$R_MODEL" "$R_EFFORT" "$sq_turnend" "$sq_settings" "$R_TELEMETRY")
+  cs_herdr_run "$R_PANE" "$R_LAUNCH" >/dev/null
+  R_PATH=resume
+  waited=0
+  resumed=0
+  while [ "$waited" -lt "$R_RESUME_WAIT" ]; do
+    if r_agent_running; then
+      sleep "$R_RESUME_CONFIRM"
+      waited=$((waited + R_RESUME_CONFIRM))
+      if r_agent_running; then resumed=1; break; fi
+    fi
+    if [ "$waited" -ge "$R_RESUME_GRACE" ] && cs_control_agent_gone "$R_PANE"; then break; fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if [ "$resumed" -eq 0 ]; then
+    if ! cs_control_agent_gone "$R_PANE"; then
+      echo "error: the resume of '$ID' was not confirmed within ${R_RESUME_WAIT}s and pane $R_PANE is not positively agent-free (pid $(cs_control_agent_pid "$R_PANE" 2>/dev/null || echo unreadable)); refusing to launch a second agent over it" >&2
+      exit 1
+    fi
+    R_PATH=cold
+    R_LAUNCH=$(cs_harness_soldier_launch "$R_HARNESS" "$R_MODEL" "$R_EFFORT" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings" "$R_TELEMETRY")
+    cs_herdr_run "$R_PANE" "$R_LAUNCH" >/dev/null
+    if ! cs_herdr_agent_wait_present "$R_PANE" "$LAUNCH_WAIT"; then
+      echo "error: no session was resumable for '$ID' and the cold launch brought up no agent within ${LAUNCH_WAIT}s; pane $R_PANE and worktree $R_WT_REAL are untouched" >&2
+      exit 1
+    fi
+    # Same stability requirement as the resume path: report a running agent only
+    # when its process is actually readable on the pane.
+    sleep "$R_RESUME_CONFIRM"
+    if ! r_agent_running; then
+      echo "error: the cold launch of '$ID' started an agent that did not stay on pane $R_PANE; the worktree $R_WT_REAL is untouched" >&2
+      exit 1
+    fi
+  fi
+
+  # Record a changed profile only now that an agent is actually running on it.
+  [ "$R_MODEL" = "$(cs_meta_get "$META" model 2>/dev/null || echo default)" ] || cs_meta_set "$META" model "$R_MODEL"
+  [ "$R_EFFORT" = "$(cs_meta_get "$META" effort 2>/dev/null || echo default)" ] || cs_meta_set "$META" effort "$R_EFFORT"
+  # TELEMETRY, measurement only: a relaunch is a dispatch of this task's work.
+  cs_telemetry_crumb spawn "$R_KIND" || true
+  # LOCKSTEP: bin/cs-control.sh reads `path=` off this line to decide whether the
+  # session survived (and so whether the progress note must be steered in, and
+  # whether an unchanged agent session id is evidence of failure). It refuses
+  # rather than assuming a path, so keep this token if the line is reworded.
+  echo "relaunched $ID kind=$R_KIND path=$R_PATH harness=$R_HARNESS model=$R_MODEL effort=$R_EFFORT pane=$R_PANE worktree=$R_WT_REAL"
+  exit 0
+fi
 
 # ---------------------------------------------------------------- capo spawn
 if [ "$KIND" = capo ]; then

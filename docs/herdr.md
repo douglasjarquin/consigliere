@@ -68,6 +68,32 @@ This is the same rule already applied to tab labels below: scope to this home's 
   It reports success whether or not the pane's SHELL was ready to read the line. A freshly created worktree pane frequently is not, and the line is then lost with no way to recover it from the buffer - `tests/cs-herdr-lib-live.test.sh` works around this by re-submitting an idempotent probe, and `bin/cs-spawn.sh` guards against it by requiring an agent to actually appear afterwards (`cs_herdr_agent_wait_present`). Never treat a `pane run` exit status as proof the command ran.
 - Machine input uses U+2063 INVISIBLE SEPARATOR because it survives UTF-8 terminal input; the upstream herdr 0.7.3 incident showed ASCII 0x1f was stripped from the composer. `bin/cs-operational-input.sh` owns the exact bytes.
 
+## Keys and pane working directory (verified live 2026-08-11, herdr 0.7.5)
+
+`pane send-keys` accepts a NARROW key vocabulary, and an unsupported name is refused with a structured error rather than approximated:
+
+```text
+$ herdr pane send-keys w1:p1 C-u --session cs-lab-ctl2
+{"error":{"code":"invalid_key","message":"unsupported key C-u"},"id":"cli:request"}
+
+$ herdr pane send-keys --help
+Use esc as the canonical Escape key name; escape is also accepted.
+```
+
+Consequence for the agent-control plane: there is no way to CLEAR a composer through herdr, so a lifecycle command can never be typed safely into a composer that already holds unsent text; `bin/cs-control-lib.sh` refuses that case instead of clearing it (docs/agent-control.md).
+
+`pane get` reports the pane's own working directory beside the foreground process's, both physically resolved:
+
+```text
+$ herdr pane get w1:p1 --session cs-lab-ctlcodex
+{"id":"cli:pane:get","result":{"pane":{"agent_status":"unknown",
+ "cwd":"/private/var/folders/.../ctlcodex.SshnGI/repo",
+ "foreground_cwd":"/private/var/folders/.../ctlcodex.SshnGI/repo",
+ "pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1", ...}}}
+```
+
+`cs_herdr_pane_cwd` reads `result.pane.cwd`. Because herdr resolves the path (`/private/var/...` for a `/var/...` symlink on macOS), any comparison against a recorded path must resolve that path too; `cs_control_pane_in_dir` does, and reports "cannot tell" separately from "does not match".
+
 ## Push events
 
 - Multi-pane push (`events.subscribe` -> `pane.agent_status_changed`) is socket-only; no CLI subcommand.
@@ -206,6 +232,16 @@ This makes "did this soldier restart?" a fact rather than an inference: an uncha
 - Most agent panes reported a session in every single sample (210/210).
 - `w48:p1`, a live codex soldier that HAD reported a session the previous afternoon, reported none in all 210 samples. Presence can be lost permanently while the agent keeps running, and both transports agree when it is (`agent get` and `api snapshot` both returned `codex/idle/none`), so this is the integration ceasing to report, not a snapshot defect.
 - `w4B:p1` and `w4R:p1` flapped between present and absent within a few samples.
+
+Re-measured in an isolated lab on 2026-08-11 while building the agent-control plane, and the two harnesses did not behave alike:
+
+```text
+codex 0.147.0, fresh agent, one completed turn:  agent_session.value ABSENT
+claude 2.1.227, fresh agent:                     62f6021c-f1da-4edb-8701-671b8e665c8f
+claude after /exit + `claude --continue`:         62f6021c-f1da-4edb-8701-671b8e665c8f (UNCHANGED)
+```
+
+Two consequences for relaunch. A codex soldier reports no session id at all, so an id comparison there is a no-op that looks like evidence. And a RESUME legitimately keeps the same id, because resuming continues the same session, so "unchanged id" is proof of a failed relaunch only for a COLD launch. The identity proof that holds on both harnesses and both launch paths is the agent PROCESS: `cs_control_agent_pid` before and after, which is why `bin/cs-control.sh` decides on the pid and reports the session id as corroboration.
 
 So absence is common and carries no information, which the recovery playbook already assumes. What is NOT yet established is whether a value that disappears and is later re-reported comes back IDENTICAL. Until that is measured, treat "changed id" as proof of a new instance only when both readings are present; a present -> absent -> present sequence is not a change, it is two observations with a gap. The soak that would have answered it recorded no usable timestamps on its per-pane rows, so the ordering was lost - a harness defect, not a herdr one.
 

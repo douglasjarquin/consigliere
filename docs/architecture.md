@@ -19,6 +19,11 @@ Unmarked input classifies as `boss`; provenance never depends on body prose.
 The U+2063 marker is a **boss-disambiguation aid, not an authenticity control**: it is unforgeable by boss keystrokes (U+2063 has no key), but an agent can emit those bytes verbatim, so a present marker is not proof of consigliere provenance. Where agent-authored text is folded into a trusted envelope — the away-mode daemon distilling soldier status lines into an `away-supervisor` digest — that text is neutralized as quoted DATA first (`cs_operational_input_neutralize`) so a soldier cannot launder a forged marker into trusted framing (docs/operational-input-provenance.md, option C). Full cryptographic integrity on the machine-classified channel (HMAC) is a documented, deferred follow-up.
 `bin/cs-marker-lib.sh` is a thin compatibility entry point for legacy marker callers.
 
+## Two planes to a running soldier
+
+Typed text is the data plane; a soldier's agent lifecycle is a separate control plane with an allowlisted verb set (`interrupt`, `exit`, `relaunch`), a verified postcondition per verb, and a journalled relaunch transaction that adopts the recorded endpoint instead of creating one.
+[`docs/agent-control.md`](agent-control.md) owns that narrative; `bin/cs-control.sh --help` owns the flags.
+
 ## Workspace-per-task, herdr-native worktrees
 
 `herdr worktree create --cwd <project> --branch cs/<id> --label <id>` creates the isolated task worktree at `~/.herdr/worktrees/<repo>/<branch>` AND its own workspace whose root pane is the task pane.
