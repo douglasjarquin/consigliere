@@ -188,8 +188,48 @@ cs_control_interrupt() { # <pane_id> <harness> -> token
 # Refusing on that reading blocked the exit verb on healthy soldiers, and a
 # blocked recovery is worse than a wasted prompt: an unverified exit is reported
 # honestly and a retry finds the composer empty.
+# The ONE send gate for cs_control_exit. Reads the pane and answers whether a
+# key or command may be typed into it right now, cancelling a running turn once
+# before concluding. Prints:
+#   clear          not mid-turn, not a dialog, an agent process is present
+#   still-running  a turn is running, including one that would not cancel;
+#                  typing now would queue the command invisibly as input
+#   blocked        a harness dialog waits on a human, and a keystroke there is
+#                  read as an ANSWER; nothing may be delivered
+#   gone           the pane is positively agent-free (the exit postcondition);
+#                  its bare shell would RUN a typed command
+#   cannot-tell    neither the state nor the presence could be positively read
+# Every send site in cs_control_exit consults this gate, so the entry path and
+# the post-flush path cannot disagree. cannot-tell does NOT withhold the send:
+# refusing on an unreadable reading blocked recovery on healthy soldiers
+# (measured - the refuse-on-pending history above), so the caller types and the
+# verified postcondition decides, exactly as the flush contract states.
+cs_control_exit_gate() { # <pane_id> <harness> -> clear|still-running|blocked|gone|cannot-tell
+  local pane=$1 harness=$2 state
+  state=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || state=unknown
+  if [ "$state" = busy ]; then
+    cs_control_interrupt "$pane" "$harness" >/dev/null 2>&1 || true
+    state=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || state=unknown
+  fi
+  case "$state" in
+    busy)    printf 'still-running\n'; return 1 ;;
+    blocked) printf 'blocked\n'; return 1 ;;
+  esac
+  if cs_control_agent_gone "$pane"; then
+    printf 'gone\n'
+    return 0
+  fi
+  if { [ "$state" = idle ] || [ "$state" = 'done' ]; } &&
+    cs_control_agent_pid "$pane" >/dev/null 2>&1; then
+    printf 'clear\n'
+    return 0
+  fi
+  printf 'cannot-tell\n'
+  return 0
+}
+
 cs_control_exit() { # <pane_id> <harness> -> token
-  local pane=$1 harness=$2 cmd settle composer state waited attempt=0
+  local pane=$1 harness=$2 cmd settle composer gate waited attempt=0
   if cs_control_agent_gone "$pane"; then
     printf 'already-gone\n'
     return 0
@@ -203,36 +243,20 @@ cs_control_exit() { # <pane_id> <harness> -> token
   # and type the command once more.
   while [ "$attempt" -lt 2 ]; do
     attempt=$((attempt + 1))
-    # Never type into a running turn, and never deliver ANYTHING to a natively
-    # blocked pane: a harness dialog waiting on a human reads a keystroke as an
-    # answer, so a blocked reading anywhere in an attempt withholds the command.
-    state=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || state=unknown
-    [ "$state" = blocked ] && { printf 'blocked\n'; return 1; }
-    if [ "$state" = busy ]; then
-      cs_control_interrupt "$pane" "$harness" >/dev/null || true
-      state=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || state=unknown
-      [ "$state" = busy ] && { printf 'still-running\n'; return 1; }
-      [ "$state" = blocked ] && { printf 'blocked\n'; return 1; }
-    fi
+    gate=$(cs_control_exit_gate "$pane" "$harness")
+    case "$gate" in
+      still-running|blocked) printf '%s\n' "$gate"; return 1 ;;
+      gone) printf 'already-gone\n'; return 0 ;;
+    esac
     composer=$(cs_composer_state "$pane" 2>/dev/null) || composer=unknown
     if [ "$composer" = pending ]; then
       cs_herdr_send_keys "$pane" Enter >/dev/null 2>&1 || { printf 'command-not-sent\n'; return 1; }
       sleep "$CS_CONTROL_FLUSH_SETTLE"
-      state=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || state=unknown
-      if [ "$state" = busy ]; then
-        cs_control_interrupt "$pane" "$harness" >/dev/null || true
-        state=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || state=unknown
-      fi
-      [ "$state" = blocked ] && { printf 'blocked\n'; return 1; }
-    fi
-    # The agent may have left since this attempt began - died with the turn the
-    # interrupt above cancelled, or exited on the flush - and its husk's bare
-    # shell would RUN the exit command as a shell command. The postcondition is
-    # already met, so this is the idempotent success, checked immediately before
-    # every send.
-    if cs_control_agent_gone "$pane"; then
-      printf 'already-gone\n'
-      return 0
+      gate=$(cs_control_exit_gate "$pane" "$harness")
+      case "$gate" in
+        still-running|blocked) printf '%s\n' "$gate"; return 1 ;;
+        gone) printf 'already-gone\n'; return 0 ;;
+      esac
     fi
     cs_herdr_send_text "$pane" "$cmd" >/dev/null 2>&1 || { printf 'command-not-sent\n'; return 1; }
     [ "$settle" = 1 ] && sleep "$CS_CONTROL_EXIT_SETTLE"

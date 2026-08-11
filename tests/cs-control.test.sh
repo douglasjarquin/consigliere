@@ -302,6 +302,17 @@ expect_code 1 "$rc" "a flush that ends on a dialog blocks the exit"
 assert_contains "$out" "waiting on a human" "the blocked pane is reported, never keyed past"
 assert_no_line "$(cat "$TMP/l-fblocked")" 'send-text' "no exit command is delivered into a dialog"
 
+# A flush Enter can start a turn that will not cancel; typing the exit command
+# then would queue it invisibly as input, so the gate withholds it and reports
+# the observed running turn.
+fbusy=$(cs_control_state "$TMP/s-fbusy" agent=codex status=idle \
+  composer='❯ queued steer' on_enter=busy)
+rc=0
+out=$(run_control "$home" "$fbusy" "$TMP/l-fbusy" exit t1) || rc=$?
+expect_code 1 "$rc" "a flush turn that will not cancel blocks the exit"
+assert_contains "$out" "NOT confirmed" "the uncancelled turn is reported, not typed into"
+assert_no_line "$(cat "$TMP/l-fbusy")" 'send-text' "no exit command is queued into a running turn after the flush"
+
 qblocked=$(cs_control_state "$TMP/s-qblocked" agent=codex status=idle on_enter=blocked)
 rc=0
 out=$(run_control "$home" "$qblocked" "$TMP/l-qblocked" exit t1) || rc=$?

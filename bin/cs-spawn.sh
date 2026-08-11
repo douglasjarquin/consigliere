@@ -270,7 +270,10 @@ esac
 # the task was dispatched on, so a policy edited since then never silently moves
 # a running task's model or effort.
 [ "$RELAUNCH" -eq 1 ] || cs_spawn_apply_dispatch_policy
-if ! cs_harness_effort_valid "$HARNESS" "$EFFORT"; then
+# A relaunch validates effort against the task's RECORDED harness in its own
+# section below; checking it here against the root-detected harness would turn
+# a valid relaunch into a refusal when the root pin has moved since dispatch.
+if [ "$RELAUNCH" -eq 0 ] && ! cs_harness_effort_valid "$HARNESS" "$EFFORT"; then
   case "$HARNESS:$EFFORT" in
     claude:ultra) echo "error: claude does not accept effort=ultra; choose default|low|medium|high|xhigh|max" >&2 ;;
     *) echo "error: unknown effort '$EFFORT'" >&2 ;;

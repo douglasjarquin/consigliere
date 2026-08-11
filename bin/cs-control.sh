@@ -267,7 +267,7 @@ if [ "$VERB" = exit ]; then
       esac
       ;;
     *)
-      report "exit $ID: NOT confirmed - the exit command was delivered and pane $PANE could not be confirmed agent-free after ${CS_CONTROL_EXIT_WAIT_SECS}s (pid $(cs_control_agent_pid "$PANE" 2>/dev/null || echo unreadable), interrupt $itok, exit $etok)"
+      report "exit $ID: NOT confirmed - pane $PANE could not be confirmed agent-free (a turn that would not cancel, an agent that stayed, or an unreadable process table; pid $(cs_control_agent_pid "$PANE" 2>/dev/null || echo unreadable), interrupt $itok, exit $etok)"
       ;;
   esac
   exit "$rc"

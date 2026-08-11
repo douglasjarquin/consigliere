@@ -314,6 +314,14 @@ ok=$(cs_control_state "$TMP/s-ok" agent= cwd="$home/wt" on_run=up)
 rc=0; out=$(run_spawn "$home" "$ok" --relaunch nosuchtask) || rc=$?
 expect_code 1 "$rc" "a task with no metadata cannot be relaunched"
 assert_contains "$out" "no metadata" "the refusal names what is missing"
+# The recorded harness is the authority for a relaunch: an effort it accepts
+# must not be refused against the machine's root pin, which may have moved
+# since the task was dispatched.
+rootmoved=$(cs_control_state "$TMP/s-rootmoved" agent= cwd="$home/wt" on_run=up)
+rc=0; out=$(CS_HARNESS_OVERRIDE=claude run_spawn "$home" "$rootmoved" --relaunch t1 --effort ultra) || rc=$?
+expect_code 0 "$rc" "a relaunch validates effort against the recorded harness, not the root pin: $out"
+assert_contains "$out" "effort=ultra" "the recorded codex harness accepts the effort the root pin would refuse"
+
 rc=0; out=$(run_spawn "$home" "$ok" --relaunch t1 --mode direct-PR) || rc=$?
 expect_code 2 "$rc" "a new-task flag is refused rather than ignored"
 assert_contains "$out" "does not apply to --relaunch" "the refusal explains the recorded posture owns it"
