@@ -505,3 +505,46 @@ cs_harness_instruction_file() {
     *) return 1 ;;
   esac
 }
+
+# cs_harness_plan_skill <h> - the exact text that activates this harness's
+# omo plan-mode skill when it appears in a brief. Live-verified 2026-08-11
+# against codex-cli 0.147.0 and claude 2.1.228 via a herdr-lab probe pane: the
+# bare skill name, with no leading slash or $ prefix, is sufficient on both
+# harnesses (.no-mistakes/evidence/task-1-ulw-plan-codex.txt, .no-mistakes/evidence/task-1-plan-start-work-claude.txt).
+cs_harness_plan_skill() {
+  case "$1" in
+    codex) printf 'ulw-plan\n' ;;
+    claude) printf 'omo:planing-prometheustic\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+# cs_harness_start_work_skill <h> - the exact text that activates this
+# harness's omo plan-execution skill. Live-verified 2026-08-11 alongside
+# cs_harness_plan_skill (same evidence files); again the bare skill name
+# activates on both harnesses.
+cs_harness_start_work_skill() {
+  case "$1" in
+    codex) printf 'start-work\n' ;;
+    claude) printf 'omo:start-work\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+# cs_harness_omo_installed <h> - true iff the omo plugin (source of
+# cs_harness_plan_skill / cs_harness_start_work_skill above) is actually
+# installed for this harness on this machine, so a brief naming those skills
+# is not a dead invocation. Both harnesses use the identical
+# plugins/cache/sisyphuslabs/omo layout (confirmed on disk 2026-08-11):
+# codex under CODEX_HOME (default ~/.codex, the documented `codex --help`
+# override), claude under CLAUDE_CONFIG_DIR (default ~/.claude, the same
+# override cs_harness_claude_json_path already honors).
+cs_harness_omo_installed() {
+  local h=$1 base
+  case "$h" in
+    codex) base=${CODEX_HOME:-$HOME/.codex} ;;
+    claude) base=${CLAUDE_CONFIG_DIR:-$HOME/.claude} ;;
+    *) return 1 ;;
+  esac
+  [ -d "$base/plugins/cache/sisyphuslabs/omo" ]
+}

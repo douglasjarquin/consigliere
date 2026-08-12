@@ -6,13 +6,29 @@
 # description, acceptance criteria, and context, and may adjust other sections
 # when the task genuinely deviates (e.g. working an existing external PR
 # instead of shipping a new one).
-# Usage: cs-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--issue <n>] [--herdr-lab]
+# Usage: cs-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--exec-mode <ultrawork|plan-first>] [--issue <n>] [--herdr-lab]
 #        cs-brief.sh <task-id> <repo-name> --scout [--herdr-lab]
 #        cs-brief.sh <task-id> --capo {<project>...|--no-projects}
 #   --mode is REQUIRED on a ship scaffold and refused on --scout and --capo,
 #   whose deliverables have no delivery mode. There is no fallback: a missing or
 #   out-of-set mode is a refusal, because a silently defaulted definition of done
 #   is exactly the drift this flag exists to prevent.
+#   --exec-mode is OPTIONAL on a ship scaffold and refused on --scout and --capo.
+#   Unlike --mode it defaults to "ultrawork" when omitted: it picks which
+#   already-installed harness-native rigor skill the brief names (the literal
+#   word "ultrawork", which self-activates the omo ultrawork hook already
+#   installed on both harnesses), never the definition of done or merge
+#   authority, so a stated default carries none of --mode's drift risk.
+#   "plan-first" instead has the brief invoke this root session's harness's
+#   plan skill first (bin/cs-harness-lib.sh's cs_harness_plan_skill), stop at
+#   a needs-decision review checkpoint once the plan exists, then - only after
+#   consigliere's reply - invoke the harness's start-work skill
+#   (cs_harness_start_work_skill) to execute it. Reserve plan-first for a
+#   large or architecture-scope task; decide it at intake same as --mode.
+#   Both values require the omo plugin (cs_harness_omo_installed) on the
+#   resolved harness. plan-first refuses when it is absent, since it would
+#   name a dead skill invocation; ultrawork only warns and still scaffolds,
+#   since the word alone degrades to plain-English instruction with no hook.
 #   There is no --yolo flag on any scaffold. yolo governs consigliere's own
 #   approval behaviour, never the worker's contract, so a brief must never carry
 #   it; passing it is refused rather than ignored.
@@ -89,12 +105,18 @@ PAUSED_VERB=${CS_CLASSIFY_PAUSED_VERB:-$CS_CLASSIFY_PAUSED_VERB_DEFAULT}
 . "$SCRIPT_DIR/cs-delivery-lib.sh"
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
+# shellcheck source=bin/cs-exec-mode-lib.sh
+. "$SCRIPT_DIR/cs-exec-mode-lib.sh"
+# shellcheck source=bin/cs-harness-lib.sh
+. "$SCRIPT_DIR/cs-harness-lib.sh"
 cs_resolve_root
+H=$(cs_harness_detect_root)
 KIND=ship
 HERDR_LAB=0
 NO_PROJECTS=0
 ISSUE=
 MODE=
+EXEC_MODE=
 POS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -106,6 +128,8 @@ while [ "$#" -gt 0 ]; do
     --issue=*) ISSUE=${1#--issue=} ;;
     --mode) MODE=${2:?--mode requires a value}; shift ;;
     --mode=*) MODE=${1#--mode=} ;;
+    --exec-mode) EXEC_MODE=${2:?--exec-mode requires a value}; shift ;;
+    --exec-mode=*) EXEC_MODE=${1#--exec-mode=} ;;
     # yolo is consigliere's own approval posture, not the worker's contract, so
     # it must never reach a brief. Refuse it instead of quietly treating it as a
     # positional argument.
@@ -125,6 +149,16 @@ if [ -n "$ISSUE" ] && [ "$KIND" != ship ]; then
   exit 1
 fi
 
+# --exec-mode is checked against the RAW (possibly empty) value before any
+# default is applied, and only refused here for a non-ship kind - the default
+# itself is resolved below, strictly inside the ship branch, so an ordinary
+# --scout/--capo scaffold with no --exec-mode flag never reaches that
+# resolution and stays byte-identical to before this flag existed.
+if [ -n "$EXEC_MODE" ] && [ "$KIND" != ship ]; then
+  echo "error: --exec-mode applies only to ship briefs" >&2
+  exit 1
+fi
+
 # The delivery contract is an explicit per-task decision with no fallback: a ship
 # brief states it or is refused, and a scout or capo deliverable has none to state.
 if [ "$KIND" = ship ]; then
@@ -135,6 +169,26 @@ if [ "$KIND" = ship ]; then
   if ! cs_delivery_mode_valid "$MODE"; then
     echo "error: --mode must be one of $CS_DELIVERY_MODES, got '$MODE'" >&2
     exit 1
+  fi
+  # Unlike --mode, --exec-mode has a stated default: it picks a harness-native
+  # rigor skill, never the definition of done or merge authority, so a silent
+  # default carries none of the drift risk --mode's required-with-no-fallback
+  # rule exists to prevent (bin/cs-exec-mode-lib.sh).
+  EXEC_MODE=${EXEC_MODE:-$CS_EXEC_MODE_DEFAULT}
+  if ! cs_exec_mode_valid "$EXEC_MODE"; then
+    echo "error: --exec-mode must be one of $CS_EXEC_MODES, got '$EXEC_MODE'" >&2
+    exit 1
+  fi
+  # plan-first names skills that do not exist without the omo plugin, so an
+  # absent install must refuse rather than scaffold a brief the soldier cannot
+  # follow. ultrawork degrades gracefully instead (the word is still readable
+  # plain-English instruction with no hook to act on it), so it only warns.
+  if ! cs_harness_omo_installed "$H"; then
+    if [ "$EXEC_MODE" = plan-first ]; then
+      echo "error: --exec-mode plan-first names an omo skill, but the omo plugin is not installed for harness '$H' (no plugins/cache/sisyphuslabs/omo under ${H}'s config dir); install it or scaffold with --exec-mode ultrawork instead" >&2
+      exit 1
+    fi
+    echo "warning: omo plugin not installed for harness '$H'; the ultrawork instruction in this brief will read as plain text, with no self-activating hook to act on it" >&2
   fi
 elif [ -n "$MODE" ]; then
   echo "error: --mode applies only to ship briefs; a $KIND deliverable has no delivery mode" >&2
@@ -344,6 +398,31 @@ echo "scaffolded: $BRIEF (scout; replace {TASK})"
 exit 0
 fi
 
+# EXEC_MODE picks which already-installed harness-native rigor skill this
+# brief names; unlike MODE it never touches delivery, so its text is built
+# from the closed set validated above with no further per-mode plumbing
+# elsewhere in this script. PLAN_SKILL/START_WORK_SKILL are the live-verified
+# strings for this root session's own harness (bin/cs-harness-lib.sh).
+# shellcheck disable=SC2016  # single quotes deliberate: literal brief text; only the '"$VAR"' break-outs interpolate.
+case "$EXEC_MODE" in
+  plan-first)
+    PLAN_SKILL=$(cs_harness_plan_skill "$H") || { echo "error: no plan skill known for harness '$H'" >&2; exit 1; }
+    START_WORK_SKILL=$(cs_harness_start_work_skill "$H") || { echo "error: no start-work skill known for harness '$H'" >&2; exit 1; }
+    EXEC_SECTION=$(printf '%s\n' \
+'# Execution mode - plan first' \
+'This is a large or architecture-scope task: plan before implementing.' \
+'1. Invoke `'"$PLAN_SKILL"'` and produce a complete plan.' \
+'2. Once the plan exists, append `needs-decision: plan ready for review at <plan path>` to the status file and STOP. Do not implement yet. Consigliere will review the plan and reply with an explicit instruction to proceed.' \
+'3. Only after that reply, invoke `'"$START_WORK_SKILL"'` to execute the approved plan. Do NOT pass any ship/PR/merge flag to it (e.g. no `--make-pr`, no `--ship`) - it must only implement inside this already-assigned worktree; delivery still follows this task'"'"'s `--mode` exactly like any other ship task.' \
+'4. If the target project'"'"'s `.gitignore` has no `.omo/` entry, add one before your first commit; never commit planning or evidence artifacts under `.omo/`.')
+    ;;
+  *)  # ultrawork; the closed-set validation above admits nothing else
+    EXEC_SECTION=$(printf '%s\n' \
+'# Execution mode' \
+'Use ultrawork for this task: plan obsessively, then implement with test-first RED-then-GREEN proof and a real manual-QA scenario for every criterion, exactly as the ultrawork directive already installed in this harness requires.')
+    ;;
+esac
+
 # Ship task: shape Setup / Rule 1 / Definition of done by the explicit --mode,
 # already validated against the closed set above.
 case "$MODE" in
@@ -449,6 +528,8 @@ You are a soldier: an autonomous worker agent managed by consigliere. Work on yo
 {TASK}
 $ISSUE_SECTION
 
+$EXEC_SECTION
+
 $HERDR_SECTION
 
 # Setup
@@ -497,4 +578,4 @@ $DOD
 
 $CONTRACT_LINE
 EOF
-echo "scaffolded: $BRIEF (ship, mode=$MODE; replace {TASK})"
+echo "scaffolded: $BRIEF (ship, mode=$MODE, exec-mode=$EXEC_MODE; replace {TASK})"

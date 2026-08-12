@@ -271,6 +271,29 @@ done
 [ "$(cs_harness_instruction_file codex)" = AGENTS.md ] || fail "codex instruction file"
 [ "$(cs_harness_instruction_file claude)" = CLAUDE.md ] || fail "claude instruction file"
 [ "$(cs_harness_busy_re codex)" = "$(cs_harness_busy_re claude)" ] || fail "busy signature shared"
+# Live-verified 2026-08-11 (codex-cli 0.147.0, claude 2.1.228): the bare skill
+# name activates on both harnesses (.no-mistakes/evidence/task-1-*.txt).
+[ "$(cs_harness_plan_skill codex)" = 'ulw-plan' ] || fail "codex plan skill"
+[ "$(cs_harness_plan_skill claude)" = 'omo:planing-prometheustic' ] || fail "claude plan skill"
+[ "$(cs_harness_start_work_skill codex)" = 'start-work' ] || fail "codex start-work skill"
+[ "$(cs_harness_start_work_skill claude)" = 'omo:start-work' ] || fail "claude start-work skill"
+for fn in cs_harness_plan_skill cs_harness_start_work_skill; do
+  "$fn" bogus >/dev/null 2>&1 && fail "$fn must refuse an unknown harness"
+done
 pass "skill/resume/instruction/busy accessors"
+
+# --- omo install detection ---------------------------------------------------
+# Isolated from the developer's own real ~/.codex and ~/.claude: both env
+# overrides point at fixture dirs under $TMP, never the real installs.
+OMO_CODEX="$TMP/codex-home"
+OMO_CLAUDE="$TMP/claude-home"
+mkdir -p "$OMO_CODEX/plugins/cache/sisyphuslabs/omo" "$OMO_CLAUDE/plugins/cache/sisyphuslabs/omo"
+
+CODEX_HOME="$OMO_CODEX" cs_harness_omo_installed codex || fail "codex omo present must report installed"
+CLAUDE_CONFIG_DIR="$OMO_CLAUDE" cs_harness_omo_installed claude || fail "claude omo present must report installed"
+CODEX_HOME="$TMP/no-such-codex" cs_harness_omo_installed codex && fail "codex omo absent must report not installed"
+CLAUDE_CONFIG_DIR="$TMP/no-such-claude" cs_harness_omo_installed claude && fail "claude omo absent must report not installed"
+cs_harness_omo_installed bogus && fail "cs_harness_omo_installed must refuse an unknown harness"
+pass "cs_harness_omo_installed detects the real plugin cache dir per harness, isolated from the developer's own installs"
 
 pass "cs-harness-lib behavior"

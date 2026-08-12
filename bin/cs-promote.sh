@@ -91,4 +91,4 @@ cs_telemetry_crumb promote "$MODE" || true
 
 HOME_Q=$(printf '%q' "$CS_HOME")
 echo "promoted $ID to ship mode=$MODE yolo=$YOLO (teardown protection restored)"
-echo "next: CS_HOME=$HOME_Q bin/cs-send.sh $ID '<ship instructions: review scratch state with git status and git log; reset to a clean default-branch base; carry over only intended fix changes; stay on branch cs/$ID; implement; report done per mode=$MODE>'"
+echo "next: CS_HOME=$HOME_Q bin/cs-send.sh $ID '<ship instructions: review scratch state with git status and git log; reset to a clean default-branch base; carry over only intended fix changes; stay on branch cs/$ID; implement; report done per mode=$MODE; also state execution mode (ultrawork, or plan-first per bin/cs-brief.sh --help) in the instructions>'"
