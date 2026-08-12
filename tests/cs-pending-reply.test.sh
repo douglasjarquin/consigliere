@@ -421,4 +421,17 @@ assert_contains "$(status_open_decisions "$state/mycapo.status")" "mycapo-w-31" 
   || fail "both unkeyed decisions must stay independently open, not collide into one"
 pass "two capo tasks that each raise an unkeyed decision never collide on the parent-facing key"
 
+# 20. one-owner rule: exactly one SCHEMA-OWNER marker for the pending-reply
+#     schema, and every doc that references the library points at it rather
+#     than restating the field list.
+[ "$(grep -rln "SCHEMA-OWNER: pending-reply" "$ROOT/bin" "$ROOT/docs" | wc -l | tr -d ' ')" = 1 ] \
+  || fail "there must be exactly one SCHEMA-OWNER marker for the pending-reply schema"
+for doc in architecture.md operational-input-provenance.md configuration.md; do
+  grep -q "cs-pending-reply-lib.sh" "$ROOT/docs/$doc" \
+    || fail "$doc should reference bin/cs-pending-reply-lib.sh"
+  grep -Eq 'corr_id=|parent_status=|delivered_epoch=' "$ROOT/docs/$doc" \
+    && fail "$doc must not restate the pending-reply field list"
+done
+pass "the pending-reply schema has exactly one owner, with pointers elsewhere"
+
 pass "cs-pending-reply lifecycle guards"

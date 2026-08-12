@@ -19,6 +19,8 @@
 #
 # Record location (parent CS_HOME): state/pending-replies/<corr_id>
 # Each record is a key=value file owned by this library. Schema:
+# SCHEMA-OWNER: pending-reply record fields - the one full statement; every
+# other mention of these fields is a pointer only.
 #   schema=cs-pending-reply.v1
 #   corr_id=                privacy-safe correlation token (16 lowercase hex)
 #   source_kind=             empty (an outbound marked-send expectation, the
