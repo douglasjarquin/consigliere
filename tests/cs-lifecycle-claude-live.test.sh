@@ -15,8 +15,15 @@ set -u
 # The root harness for this suite is claude; set BEFORE sourcing lib.sh so its
 # default codex pin does not win.
 export CS_HARNESS_OVERRIDE=claude
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/live-lifecycle-helpers.sh
+. "$(dirname "${BASH_SOURCE[0]}")/live-lifecycle-helpers.sh"
+
+# Opt out of lib.sh's folder-trust sandbox: it redirects only what consigliere
+# WRITES, and claude reads the real store, so a sandboxed pre-trust would leave a
+# real agent parked at the folder-trust dialog. Running against the real store is
+# also what proves teardown gives the entry back.
+CS_CLAUDE_JSON=
+export CS_CLAUDE_JSON
 
 if [ "${CS_TEST_CLAUDE_LIVE:-0}" != "1" ]; then
   pass "cs claude lifecycle live suite skipped (set CS_TEST_CLAUDE_LIVE=1 to run)"
@@ -90,23 +97,6 @@ done
 [ "$found" = 1 ] || fail "claude Stop hook never touched state/$ID.turn-ended"
 pass "claude turn-end Stop hook touches the turn-end signal"
 
-# Wait for the boot turn through the CORROBORATED state policy rather than a raw
-# `agent wait --until idle`: a finished claude turn can report native `done`, which
-# docs/herdr.md maps to `done` and not to `idle`, so the strict wait times out on a
-# perfectly healthy agent (observed 2026-08-11, claude 2.1.227). The busy state is
-# what every consigliere caller actually acts on.
-wait_not_busy() { # <pane> <secs>
-  local waited=0
-  while [ "$waited" -lt "$2" ]; do
-    case "$(cs_herdr_agent_busy_state "$1")" in
-      busy) ;;
-      *) return 0 ;;
-    esac
-    sleep 2
-    waited=$((waited + 2))
-  done
-  return 1
-}
 wait_not_busy "$PANE" 180 || fail "claude never finished its boot turn"
 out=$("$ROOT/bin/cs-send.sh" "$ID" "Reply with exactly LIVE_STEER_OK and stop." 2>&1) || fail "steer failed: $out"
 case "$out" in *submitted*|*queued*) : ;; *) fail "steer not confirmed: $out" ;; esac

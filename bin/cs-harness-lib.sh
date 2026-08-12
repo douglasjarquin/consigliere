@@ -281,6 +281,174 @@ if isinstance(doc, dict) and isinstance(doc.get("projects"), dict):
 PY
 }
 
+# cs_harness_codex_config_path - the file codex persists per-project trust in.
+# Honors CS_CODEX_TOML (test/escape seam), then CODEX_HOME, then ~/.codex.
+# CODEX_HOME is NOT isolated for a soldier launch the way CLAUDE_CONFIG_DIR can be:
+# it also holds auth.json, so pointing a soldier at a fresh one launches it
+# unauthenticated. Trust is therefore written into the store codex already uses.
+cs_harness_codex_config_path() {
+  if [ -n "${CS_CODEX_TOML:-}" ]; then
+    printf '%s\n' "$CS_CODEX_TOML"
+  elif [ -n "${CODEX_HOME:-}" ]; then
+    printf '%s/config.toml\n' "$CODEX_HOME"
+  else
+    printf '%s/.codex/config.toml\n' "$HOME"
+  fi
+}
+
+# _cs_harness_codex_trust_lock <file> - bounded mkdir lock shared by the two
+# codex trust mutators, so concurrent spawns/teardowns cannot interleave a
+# read-modify-write. rc=1 if the lock could not be taken.
+_cs_harness_codex_trust_lock() {
+  local lock="$1.cslock" attempt=0
+  while ! mkdir "$lock" 2>/dev/null; do
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt 50 ] || return 1
+    sleep 0.1
+  done
+  return 0
+}
+
+# cs_harness_codex_trust_dir <abs-dir> - mark a directory trusted in codex's
+# config.toml so an interactive codex launched there does not block at the
+# folder-trust dialog. `--dangerously-bypass-approvals-and-sandbox` does NOT
+# bypass that dialog (verified codex-cli 0.147.0, 2026-08-11, docs/codex.md), and a
+# codex parked there takes no turn at all until a human answers it - which is the
+# whole point of an unattended worker. Supervision is not the gap: herdr reports
+# such a pane `blocked` and bin/cs-watch.sh escalates that immediately. Not needing
+# the escalation is what this buys.
+# The boss's own config happens to trust $HOME, which is why the fleet never hit
+# this; a project cloned outside $HOME, or a test fixture under mktemp, does.
+# Appends a `[projects."<dir>"] trust_level = "trusted"` table when absent, and is
+# a no-op when the entry already exists, so it never rewrites the boss's file
+# needlessly and never drops other entries.
+cs_harness_codex_trust_dir() {
+  local dir=$1 file
+  [ -n "$dir" ] || return 1
+  command -v python3 >/dev/null 2>&1 || {
+    printf 'cs-harness: python3 required to pre-trust a codex worktree\n' >&2
+    return 1
+  }
+  file=$(cs_harness_codex_config_path)
+  # The lock is a sibling of the config, so its directory has to exist before the
+  # lock can be taken - otherwise a home whose codex config dir has not been
+  # created yet fails the lock instead of the write, and the spawn aborts.
+  mkdir -p "$(dirname "$file")" 2>/dev/null || {
+    printf 'cs-harness: cannot create the directory holding %s\n' "$file" >&2
+    return 1
+  }
+  _cs_harness_codex_trust_lock "$file" || {
+    printf 'cs-harness: timed out locking %s\n' "$file" >&2
+    return 1
+  }
+  # shellcheck disable=SC2064
+  trap "rmdir '$file.cslock' 2>/dev/null || true" RETURN
+  python3 - "$file" "$dir" <<'PY'
+import os, sys, tomllib
+path, wt = sys.argv[1], sys.argv[2]
+try:
+    with open(path, "rb") as fh:
+        doc = tomllib.load(fh)
+except FileNotFoundError:
+    doc = {}
+except tomllib.TOMLDecodeError as exc:
+    # Never rewrite a file we cannot parse: a malformed config is the boss's to
+    # fix, and a blind append could compound it.
+    sys.stderr.write(f"cs-harness: {path} is not valid TOML ({exc}); not touching it\n")
+    sys.exit(1)
+if isinstance(doc.get("projects"), dict) and wt in doc["projects"]:
+    sys.exit(0)          # already trusted; leave the file byte-identical
+try:
+    raw = open(path, encoding="utf-8").read()
+except FileNotFoundError:
+    raw = ""
+parent = os.path.dirname(path)
+if parent:
+    os.makedirs(parent, exist_ok=True)
+# A TOML basic string: escape backslash and quote, the only two that can appear
+# in a POSIX path and change the parse.
+key = wt.replace("\\", "\\\\").replace('"', '\\"')
+block = f'\n[projects."{key}"]\ntrust_level = "trusted"\n'
+new = raw + ("" if raw.endswith("\n") or raw == "" else "\n") + block
+try:
+    tomllib.loads(new)
+except tomllib.TOMLDecodeError as exc:
+    sys.stderr.write(f"cs-harness: refusing to write unparseable codex config ({exc})\n")
+    sys.exit(1)
+tmp = path + ".cstmp"
+with open(tmp, "w", encoding="utf-8") as fh:
+    fh.write(new)
+os.replace(tmp, path)
+PY
+}
+
+# cs_harness_codex_untrust_dir <abs-dir> - remove a directory's trust table
+# (teardown uses it so torn-down soldier worktrees do not accumulate in the
+# boss's codex config). Missing file, missing entry, or unparseable file are all
+# no-op successes: teardown must never fail on cleanup of an optional record.
+cs_harness_codex_untrust_dir() {
+  local dir=$1 file
+  [ -n "$dir" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  file=$(cs_harness_codex_config_path)
+  [ -f "$file" ] || return 0
+  _cs_harness_codex_trust_lock "$file" || return 0
+  # shellcheck disable=SC2064
+  trap "rmdir '$file.cslock' 2>/dev/null || true" RETURN
+  python3 - "$file" "$dir" <<'PY'
+import os, re, sys, tomllib
+path, wt = sys.argv[1], sys.argv[2]
+try:
+    with open(path, "rb") as fh:
+        before = tomllib.load(fh)
+except (FileNotFoundError, tomllib.TOMLDecodeError):
+    sys.exit(0)
+if not isinstance(before.get("projects"), dict) or wt not in before["projects"]:
+    sys.exit(0)
+lines = open(path, encoding="utf-8").read().splitlines(keepends=True)
+hdr = re.compile(r'^\[projects\.(".*")\]\s*$')
+out, i = [], 0
+while i < len(lines):
+    m = hdr.match(lines[i])
+    key = None
+    if m:
+        try:
+            key = tomllib.loads(f"x = {m.group(1)}")["x"]
+        except tomllib.TOMLDecodeError:
+            key = None
+    if key == wt:
+        i += 1
+        while i < len(lines) and not lines[i].lstrip().startswith("["):
+            i += 1
+        while out and out[-1].strip() == "":
+            out.pop()
+        # One blank line separates this table from the NEXT one, so put it back
+        # only when a next one exists. At end of file there is nothing to separate,
+        # and appending anyway is the exact inverse of nothing: the config would
+        # grow one blank line per torn-down worktree instead of coming back
+        # byte-identical.
+        if i < len(lines):
+            out.append("\n")
+        continue
+    out.append(lines[i])
+    i += 1
+new = "".join(out)
+try:
+    after = tomllib.loads(new)
+except tomllib.TOMLDecodeError:
+    sys.exit(0)
+# Only this one key may have moved, and nothing outside [projects] may change.
+if set(after.get("projects", {})) != set(before["projects"]) - {wt}:
+    sys.exit(0)
+if {k: v for k, v in after.items() if k != "projects"} != {k: v for k, v in before.items() if k != "projects"}:
+    sys.exit(0)
+tmp = path + ".cstmp"
+with open(tmp, "w", encoding="utf-8") as fh:
+    fh.write(new)
+os.replace(tmp, path)
+PY
+}
+
 # cs_harness_launch_env <h> - environment assignments that must ride the launch
 # line itself, with a trailing space, or nothing.
 #

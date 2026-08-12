@@ -137,6 +137,28 @@ codex -c model_reasoning_effort="low" --dangerously-bypass-approvals-and-sandbox
   `~/.codex/config.toml` carries `[projects."/Users/douglasjarquin"] trust_level = "trusted"`, and a repository created fresh under that path still raised the dialog.
   Trust is keyed on the exact resolved repository root, and for a linked worktree that root is the ORIGINAL clone, not the worktree: the dialog names it as "Trusting will apply to the repository root: `<clone>`".
   So one record per clone covers every soldier worktree of that clone, and each newly cloned project starts untrusted.
+
+  A LINKED WORKTREE'S OWN PATH ALSO SATISFIES THE CHECK, which the clause above does not predict.
+  Measured the same day through the same live lane, each variant asserting `state/<id>.turn-ended` BEFORE any keystroke reaches the pane, so nothing can answer a dialog and fake a pass:
+
+  | pre-trusted | turn ran | records left after teardown |
+  | --- | --- | --- |
+  | the clone root only | yes | 1, the clone root |
+  | nothing | NO - never fired, failed at 90s | none, the dialog sat unanswered |
+  | the linked worktree only | yes | none, teardown removed what spawn added |
+
+  The middle row is the control: trust really is required, and that worktree sat under the trusted `/Users/douglasjarquin` and still blocked, which is the no-cascade finding reproduced independently.
+  So codex accepts a record for EITHER the launch directory or its resolved clone root; only the clone root is named in the dialog.
+
+- **Consigliere pre-trusts the worktree, and teardown gives the entry back.**
+  `bin/cs-spawn.sh` writes the record through `cs_harness_codex_trust_dir` at first launch and at relaunch; `bin/cs-teardown.sh` removes it through `cs_harness_codex_untrust_dir` - the same spawn-and-return pair claude has had.
+  The worktree is chosen over the clone root deliberately, on the matrix above: a per-task record is removable at that task's teardown, while a shared per-clone record cannot be while sibling tasks on that clone are still live.
+  A completed task therefore leaves `~/.codex/config.toml` byte-identical, verified across a full live spawn/teardown pair and pinned by a round-trip test.
+- **`CODEX_HOME` is deliberately NOT isolated for a soldier launch**, which is why trust is written into the store codex already uses rather than a private one: it also holds `auth.json`, so pointing a soldier at a fresh one would launch it unauthenticated.
+  `cs_harness_launch_env` emits nothing for codex for the same reason.
+  Trust is edited as TOML by append-if-absent and block-removal under a bounded `mkdir` lock, verifying the parse before and after; a config that does not parse is refused rather than appended to, because a malformed config is the boss's to fix.
+- **`CS_CODEX_TOML` is the test seam** (the counterpart of `CS_CLAUDE_JSON`), and `tests/lib.sh` points both at a throwaway path for EVERY suite, so a new suite that drives `cs-spawn.sh` cannot silently edit the developer's own store.
+  The two live lanes deliberately opt back out: the seam redirects only what consigliere WRITES, so a sandboxed pre-trust would leave a real agent parked at the dialog, and running against the real store is what proves the pair leaves it as it was.
 - **An INTERRUPTED turn produces no turn-end signal at all.**
   Past the dialog, with a boot turn-end already recorded, a long turn was cancelled through `bin/cs-control.sh interrupt`:
 
@@ -179,6 +201,8 @@ The mechanics `bin/cs-control.sh` drives, each measured in a lab pane rooted in 
   brought up a new agent process (pid 43908 -> 63210) whose transcript still held the pre-exit conversation, including the interrupted prompt. That is what makes resume-first worth preferring: the soldier keeps its context.
 - **Directory trust blocks an unattended launch.** A codex TUI started in a directory it does not trust sits at `Do you trust the contents of this directory?` and herdr reports `agent_status: blocked` with the codex process still running. So a relaunch that cannot confirm the pane is agent-free must refuse rather than launch again - a blocked codex is present, not absent.
 - The turn-end file never being touched in this lab is explained by the directory-trust block above, not by the notify hook: see "Turn-end notify and directory trust" above, where `-c notify=` is verified firing on 0.147.0.
+- A real `~/.codex/config.toml` may also carry a GLOBAL `notify` program - this machine's points at Codex Computer Use's `SkyComputerUseClient`.
+  Consigliere's `-c notify=[...]` overrides it per session, so a launch that somehow lost that `-c` would not merely lose the turn-end signal, it would run an unrelated program instead.
 
 ## Native features deliberately available to consigliere
 

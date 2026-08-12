@@ -17,7 +17,7 @@
 
 # Idempotent guard: helper files may source this library for ROOT/fail/pass,
 # and the test that includes them may also source it directly. Re-sourcing
-# must not wipe the registered-cleanup array or reset state.
+# must not re-point the cleanup registry or reset state.
 if [ -n "${CS_TEST_LIB_SOURCED:-}" ]; then
   return 0
 fi
@@ -122,6 +122,26 @@ cs_test_tmproot() {
   printf '%s\n' "$root" >> "$CS_TEST_REGISTRY"
   printf '%s\n' "$root"
 }
+
+# --- folder-trust sandbox ---------------------------------------------------
+#
+# BOTH harnesses pre-trust the soldier's worktree at spawn (bin/cs-spawn.sh), so
+# any suite that drives cs-spawn.sh writes a trust entry SOMEWHERE. Default both
+# stores to a throwaway path for every suite, registered for removal like a temp
+# root, so an unsandboxed suite cannot edit the developer's own ~/.claude.json or
+# ~/.codex/config.toml. Defaulting HERE rather than per suite is deliberate: the
+# harness pinned above is codex, so every spawn-driving suite needs the codex
+# sandbox, and enumerating them means a new suite silently misses it.
+#
+# The two live lanes deliberately opt out by emptying these AFTER sourcing: the
+# seams redirect only what consigliere WRITES, not what the agent READS, so a
+# sandboxed pre-trust would leave a real agent parked at the folder-trust dialog.
+# Running against the real store is also what proves spawn-then-teardown leaves it
+# as it was found.
+: "${CS_CLAUDE_JSON:=$CS_TEST_TMPBASE/cs-test-claude.$$.json}"
+: "${CS_CODEX_TOML:=$CS_TEST_TMPBASE/cs-test-codex.$$.toml}"
+export CS_CLAUDE_JSON CS_CODEX_TOML
+printf '%s\n%s\n' "$CS_CLAUDE_JSON" "$CS_CODEX_TOML" >> "$CS_TEST_REGISTRY"
 
 # --- fakebin / PATH shims ---------------------------------------------------
 #

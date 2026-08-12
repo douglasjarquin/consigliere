@@ -898,11 +898,14 @@ if [ -n "$BRANCH" ] && [ "$BRANCH" != HEAD ] && [ -n "$PROJ" ] && [ -d "$PROJ" ]
 fi
 
 remove_task_artifacts || exit 1
-# claude soldiers pre-trust their worktree and carry a per-soldier settings file;
-# drop both so the boss's claude config and state dir do not accumulate leftovers.
+# Both harnesses pre-trust their worktree at spawn, so both give the trust entry
+# back here; claude additionally carries a per-soldier settings file. Without this
+# the boss's harness config accumulates one dead entry per torn-down worktree.
 if [ "$HARNESS" = claude ]; then
   [ -n "$WT" ] && cs_harness_claude_untrust_dir "$WT" || true
   rm -f "$STATE/$ID.claude-settings.json"
+elif [ "$HARNESS" = codex ]; then
+  [ -n "$WT" ] && cs_harness_codex_untrust_dir "$WT" || true
 fi
 rm -f "$STATE/$ID.status" "$STATE/$ID.turn-ended" "$STATE/$ID.meta"
 remove_watcher_markers || exit 1

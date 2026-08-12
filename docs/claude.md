@@ -1,8 +1,9 @@
 # Claude Code verified facts
 
 Verified live against claude 2.1.218 on 2026-07-24 (launch-scoped Stop hook fires
-and blocks; `--settings` accepts a file or JSON string; no trust prompt under
-`--dangerously-skip-permissions`), against claude 2.1.220 on 2026-07-28
+and blocks; `--settings` accepts a file or JSON string; the folder-trust dialog is
+NOT suppressed by `--dangerously-skip-permissions`, only by `-p`), against claude
+2.1.220 on 2026-07-28
 (`--permission-mode auto` keeps the launch-scoped Stop hook firing), and against
 claude 2.1.226 on 2026-08-08 (SessionStart source vocabulary and hook-stdout
 context injection; see the session-open section below).
@@ -149,6 +150,10 @@ HOOK_TOKEN_resume_60677             # recorder logged source=resume
   interactive TUI shows the one-time "Quick safety check: Is this a project you
   created or one you trust?" dialog first and runs project hooks only after it is
   accepted.
+  A soldier runs interactive, which is why `cs_harness_claude_trust_dir` pre-trusts
+  every fresh worktree at spawn.
+  Codex has the same dialog and the same non-bypass and is pre-trusted the same way;
+  `docs/codex.md` owns that pair's contract.
 
 End to end against this repo's real tracked hooks, in a plain clone with `state/`
 present:
