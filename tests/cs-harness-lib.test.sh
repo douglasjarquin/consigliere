@@ -252,6 +252,105 @@ CS_CLAUDE_JSON="$TMP/absent.json" cs_harness_claude_trust_dir "/tmp/wt-b" || fai
 [ -f "$TMP/absent.json" ] || fail "trust_dir did not create the config"
 pass "claude folder-trust pre-seed and cleanup"
 
+# --- codex folder trust pre-seed --------------------------------------------
+# codex has the same dialog as claude and its bypass flag does not skip it either,
+# so cs-spawn.sh pre-trusts a codex worktree too and cs-teardown.sh gives the entry
+# back. Unlike claude's JSON store this is TOML, edited by append-and-block-remove,
+# so the round trip must preserve unrelated tables exactly.
+CTOML="$TMP/codex-config.toml"
+printf '[tui]\ntheme = "dark"\n\n[projects."/existing"]\ntrust_level = "trusted"\n' > "$CTOML"
+CS_CODEX_TOML="$CTOML" cs_harness_codex_trust_dir "/tmp/wt with space" || fail "codex trust_dir failed"
+# Idempotent: a second call must not duplicate the table (a duplicate TOML table
+# is a parse error, so this would corrupt the boss's config outright).
+before_bytes=$(wc -c < "$CTOML")
+CS_CODEX_TOML="$CTOML" cs_harness_codex_trust_dir "/tmp/wt with space" || fail "codex trust_dir not idempotent"
+[ "$(wc -c < "$CTOML")" = "$before_bytes" ] || fail "codex trust_dir rewrote an already-trusted config"
+python3 - "$CTOML" <<'PY' || exit 1
+import sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+p = d["projects"]
+assert p["/tmp/wt with space"]["trust_level"] == "trusted", "new dir not trusted"
+assert p["/existing"]["trust_level"] == "trusted", "existing entry lost"
+assert d["tui"] == {"theme": "dark"}, "unrelated table changed"
+PY
+CS_CODEX_TOML="$CTOML" cs_harness_codex_untrust_dir "/tmp/wt with space" || fail "codex untrust_dir failed"
+python3 - "$CTOML" <<'PY' || exit 1
+import sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+p = d["projects"]
+assert "/tmp/wt with space" not in p, "untrust did not remove the entry"
+assert "/existing" in p, "untrust dropped an unrelated entry"
+assert d["tui"] == {"theme": "dark"}, "untrust changed an unrelated table"
+PY
+# A config that does not parse is the boss's to fix: refuse loudly rather than
+# appending to it, and leave the bytes untouched.
+printf 'this is [[[ not toml\n' > "$CTOML"
+if CS_CODEX_TOML="$CTOML" cs_harness_codex_trust_dir "/tmp/wt-c" 2>/dev/null; then
+  fail "codex trust_dir must refuse an unparseable config"
+fi
+[ "$(cat "$CTOML")" = 'this is [[[ not toml' ] || fail "codex trust_dir modified an unparseable config"
+# untrust is cleanup: it must never fail teardown, even on that same bad file.
+CS_CODEX_TOML="$CTOML" cs_harness_codex_untrust_dir "/tmp/wt-c" || fail "codex untrust_dir must no-op on a bad config"
+# Missing file: trust creates it; untrust on a missing file is a no-op success.
+CS_CODEX_TOML="$TMP/absent-codex.toml" cs_harness_codex_trust_dir "/tmp/wt-d" || fail "codex trust_dir must create a missing config"
+python3 -c 'import sys,tomllib; assert "/tmp/wt-d" in tomllib.load(open(sys.argv[1],"rb"))["projects"]' "$TMP/absent-codex.toml" \
+  || fail "created codex config lacks the trust entry"
+CS_CODEX_TOML="$TMP/still-absent.toml" cs_harness_codex_untrust_dir "/tmp/wt-e" || fail "codex untrust_dir must no-op on a missing config"
+# Missing DIRECTORY, not just missing file: the lock is a sibling of the config, so
+# a home whose codex config dir does not exist yet must still be pre-trustable
+# rather than aborting the spawn on a lock it could never take.
+CS_CODEX_TOML="$TMP/fresh-home/.codex/config.toml" cs_harness_codex_trust_dir "/tmp/wt-f" \
+  || fail "codex trust_dir must create a missing config directory"
+python3 -c 'import sys,tomllib; assert "/tmp/wt-f" in tomllib.load(open(sys.argv[1],"rb"))["projects"]' \
+  "$TMP/fresh-home/.codex/config.toml" || fail "config created in a fresh dir lacks the trust entry"
+pass "codex folder-trust pre-seed and cleanup"
+
+# --- the round trip is byte-identical ---------------------------------------
+# A spawn/teardown pair runs once per task against the boss's real config, so
+# "restores the entry" is not enough: anything the pair leaves behind accumulates
+# forever. The trailing-newline case is the one that bit - trust appends a blank
+# separator line, and an untrust that put one back at end of file grew the file by
+# a line per torn-down worktree.
+RT="$TMP/roundtrip.toml"
+for tail_shape in 'trailing-table' 'trailing-newline'; do
+  case "$tail_shape" in
+    trailing-table)   printf '[tui]\ntheme = "dark"\n\n[projects."/keep"]\ntrust_level = "trusted"\n' > "$RT" ;;
+    trailing-newline) printf '[tui]\ntheme = "dark"\n' > "$RT" ;;
+  esac
+  cp "$RT" "$RT.orig"
+  CS_CODEX_TOML="$RT" cs_harness_codex_trust_dir "/tmp/wt-rt" || fail "$tail_shape: trust failed"
+  cmp -s "$RT" "$RT.orig" && fail "$tail_shape: trust did not change the file"
+  CS_CODEX_TOML="$RT" cs_harness_codex_untrust_dir "/tmp/wt-rt" || fail "$tail_shape: untrust failed"
+  cmp -s "$RT" "$RT.orig" || fail "$tail_shape: the trust/untrust round trip must leave the config byte-identical"
+done
+# Mid-file removal keeps the blank line that separates the surviving tables, so a
+# later table never ends up glued to the one before it.
+printf '[tui]\ntheme = "dark"\n\n[projects."/keep"]\ntrust_level = "trusted"\n' > "$RT"
+CS_CODEX_TOML="$RT" cs_harness_codex_trust_dir "/tmp/wt-mid" || fail "mid-file: trust failed"
+printf '\n[extra]\nk = 1\n' >> "$RT"
+CS_CODEX_TOML="$RT" cs_harness_codex_untrust_dir "/tmp/wt-mid" || fail "mid-file: untrust failed"
+python3 - "$RT" <<'PY' || exit 1
+import sys, tomllib
+raw = open(sys.argv[1], encoding="utf-8").read()
+d = tomllib.loads(raw)
+assert "/tmp/wt-mid" not in d["projects"], "mid-file untrust left the entry"
+assert d["extra"] == {"k": 1}, "mid-file untrust damaged the table after it"
+assert '[projects."/keep"]' in raw, "mid-file untrust dropped the surviving projects table"
+assert "\n\n[extra]\n" in raw, f"the surviving tables lost their blank separator:\n{raw}"
+PY
+pass "codex trust round trip is byte-identical and keeps table separation"
+
+# --- the trust store resolves to the store codex itself reads ----------------
+# CODEX_HOME is deliberately NOT isolated for a soldier (it holds auth.json), so
+# the only two overrides are the test seam and an explicitly chosen CODEX_HOME.
+[ "$(CS_CODEX_TOML=/x/y.toml cs_harness_codex_config_path)" = /x/y.toml ] \
+  || fail "the test seam must win"
+[ "$(CS_CODEX_TOML='' CODEX_HOME=/c/home cs_harness_codex_config_path)" = /c/home/config.toml ] \
+  || fail "CODEX_HOME must select its own config.toml"
+[ "$(CS_CODEX_TOML='' CODEX_HOME='' HOME=/h cs_harness_codex_config_path)" = /h/.codex/config.toml ] \
+  || fail "the default store is ~/.codex/config.toml"
+pass "codex trust store path resolution"
+
 # --- accessors --------------------------------------------------------------
 [ "$(cs_harness_skill_prefix codex)" = '$' ] || fail "codex skill prefix"
 [ "$(cs_harness_skill_prefix claude)" = '/' ] || fail "claude skill prefix"

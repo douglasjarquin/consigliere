@@ -475,6 +475,15 @@ if [ "$RELAUNCH" -eq 1 ]; then
       echo "error: could not pre-trust claude worktree $R_WT_REAL; the pane is untouched" >&2
       exit 1
     }
+  elif [ "$R_HARNESS" = codex ]; then
+    # Same dialog, same non-bypass (docs/codex.md). Normally a no-op because the
+    # spawn already trusted this worktree, but a relaunch must not depend on that:
+    # if the entry is gone the replacement would park on the dialog instead of
+    # resuming the work.
+    cs_harness_codex_trust_dir "$R_WT_REAL" || {
+      echo "error: could not pre-trust codex worktree $R_WT_REAL; the pane is untouched" >&2
+      exit 1
+    }
   fi
 
   # Resume first. The wait is generous for a slow cold start, and breaks out as
@@ -756,6 +765,11 @@ else
     # Interactive claude blocks at the folder-trust dialog for a fresh worktree;
     # pre-trust it so the unattended soldier can take its first turn.
     cs_harness_claude_trust_dir "$WT_REAL" || abort_task "could not pre-trust claude worktree $WT_REAL"
+  elif [ "$HARNESS" = codex ]; then
+    # Interactive codex has the same dialog, and its bypass flag does not skip it
+    # either. A codex parked there takes no turn until a human answers, so an
+    # unattended soldier needs the dialog gone before launch, not escalated after.
+    cs_harness_codex_trust_dir "$WT_REAL" || abort_task "could not pre-trust codex worktree $WT_REAL"
   fi
   LAUNCH=$(cs_harness_soldier_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings" "$TELEMETRY_HOOK")
 fi

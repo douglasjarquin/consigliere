@@ -4,9 +4,28 @@
 # native agent detection, cs-send steer confirmation, the agent-control
 # lifecycle verbs, and cs-teardown of the clean worktree. Skipped unless
 # CS_TEST_CODEX_LIVE=1 (spawns a real codex).
+#
+# This suite proves a codex turn actually RAN, via state/<id>.turn-ended, the same
+# assertion the claude twin makes. That assertion is only reachable because
+# cs-spawn.sh pre-trusts the worktree: codex asks "Do you trust the contents of
+# this directory?" when it has no trust record covering where it was launched, and
+# this suite's fixture repo is a fresh mktemp dir outside anything the developer has
+# trusted (docs/codex.md). Before the pre-trust existed, codex reached that dialog on
+# every run: the steer below was typed INTO it and accepted it, leaving a permanent
+# trust entry for a soon-deleted temp path in the boss's real config, and the lane
+# spent 11m38s to assert nothing about a turn. cs-teardown.sh gives the entry back,
+# so a completed run leaves that config as it found it.
 set -u
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/live-lifecycle-helpers.sh
+. "$(dirname "${BASH_SOURCE[0]}")/live-lifecycle-helpers.sh"
+
+# Opt out of lib.sh's folder-trust sandbox: it redirects only what consigliere
+# WRITES, and codex reads the real store, so a sandboxed pre-trust would leave this
+# suite's codex parked at the folder-trust dialog - the exact failure this lane is
+# here to catch. Running against the real store is also what proves teardown gives
+# the entry back.
+CS_CODEX_TOML=
+export CS_CODEX_TOML
 
 if [ "${CS_TEST_CODEX_LIVE:-0}" != "1" ]; then
   pass "cs lifecycle live suite skipped (set CS_TEST_CODEX_LIVE=1 to run)"
@@ -80,8 +99,19 @@ done
 [ "$found" = 1 ] || fail "codex agent never detected in pane $PANE"
 pass "native agent detection sees codex"
 
+# turn-end signal: the codex notify hook must touch the turn-end file. This is the
+# assertion that makes the resting-state wait below meaningful - an unanswered
+# folder-trust dialog leaves it absent while the pane still reports an agent.
+found=0
+for _ in $(seq 1 90); do
+  [ -f "$TMP/home/state/$ID.turn-ended" ] && { found=1; break; }
+  sleep 1
+done
+[ "$found" = 1 ] || fail "codex notify hook never touched state/$ID.turn-ended (folder-trust dialog? see this file's header)"
+pass "codex turn-end notify hook touches the turn-end signal"
+
 # wait for the boot turn to finish, then steer and confirm
-cs_herdr_agent_wait "$PANE" idle 120000 >/dev/null || fail "codex never went idle after boot turn"
+wait_not_busy "$PANE" 180 || fail "codex never finished its boot turn"
 out=$("$ROOT/bin/cs-send.sh" "$ID" "Reply with exactly LIVE_STEER_OK and stop." 2>&1) || fail "steer failed: $out"
 case "$out" in *submitted*|*queued*) : ;; *) fail "steer not confirmed: $out" ;; esac
 pass "steer submit confirmed"
@@ -94,14 +124,14 @@ CTL="$ROOT/bin/cs-control.sh"
 
 # The steer above is still running its turn; the idempotent case needs an agent
 # that is genuinely between turns.
-cs_herdr_agent_wait "$PANE" idle 180000 >/dev/null 2>&1 || true
+wait_not_busy "$PANE" 180 || true
 out=$("$CTL" interrupt "$ID" 2>&1) || fail "interrupt on an idle agent must succeed: $out"
 assert_contains "$out" "no turn was running" "an idle agent is idempotent success"
 
 # Steer only into an agent that is BETWEEN turns: a steer delivered mid-turn is
 # queued into the composer instead, and a queued line is exactly what the exit
 # verb has to flush with one Enter before its command (docs/claude.md).
-cs_herdr_agent_wait "$PANE" idle 180000 >/dev/null 2>&1 || true
+wait_not_busy "$PANE" 180 || true
 out=$("$ROOT/bin/cs-send.sh" "$ID" "Count slowly from 1 to 60, one number per line, then stop." 2>&1) ||
   fail "steer for the interrupt case failed: $out"
 cs_herdr_agent_wait "$PANE" working 60000 >/dev/null 2>&1 || true
@@ -128,7 +158,7 @@ esac
 
 # Relaunch a SETTLED agent: its stop step would otherwise inherit whatever the
 # cancel above did or did not do, which is not what this case is testing.
-cs_herdr_agent_wait "$PANE" idle 180000 >/dev/null 2>&1 || true
+wait_not_busy "$PANE" 180 || true
 before_pid=$(cs_herdr_pane_agent_process "$PANE" | cut -f1)
 out=$("$CTL" relaunch "$ID" --note 'LIVE_RELAUNCH_NOTE: continue from here' 2>&1) ||
   fail "relaunch must succeed: $out"
@@ -142,8 +172,8 @@ assert_grep 'LIVE_RELAUNCH_NOTE' "$TMP/home/data/$ID/brief.md" "the progress not
 [ -d "$WT" ] || fail "relaunch must never touch the worktree"
 pass "cs-control relaunch replaces the agent in place, proven by process identity"
 
-# let the steer turn finish, then teardown the (clean) worktree
-cs_herdr_agent_wait "$PANE" idle 120000 >/dev/null || true
+# let the resumed turn finish, then teardown the (clean) worktree
+wait_not_busy "$PANE" 120 || true
 if [ -n "$(git -C "$WT" status --porcelain)" ]; then
   # The agent was told not to touch files; if it did, this is a finding, not a
   # test failure - discard explicitly to finish the lifecycle check.

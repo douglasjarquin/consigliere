@@ -222,6 +222,7 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_PROCEVENT_MAX_OUTPUT_BYTES` | cs-procevent | cap on one captured result; default 1048576. Over the cap the result is truncated and still captured |
 | `CS_LOCK_HARNESS_RE` | cs-session-pid-lib | test-only harness ancestry override, honored by every caller of that lib (the home lock and the telemetry breadcrumb key) |
 | `CS_HARNESS_OVERRIDE` | cs-harness-lib | force the root harness (codex\|claude); highest precedence, test/escape seam |
+| `CS_CLAUDE_JSON`, `CS_CODEX_TOML` | cs-harness-lib | test/escape seam pointing a harness's folder-trust store at a throwaway file instead of `~/.claude.json` / `~/.codex/config.toml`; `tests/lib.sh` defaults both for every suite that drives `cs-spawn.sh`, and the two live lifecycle suites clear them to exercise the real store (docs/codex.md) |
 | `CS_TELEMETRY_DISABLE` | cs-telemetry-lib | test/escape seam, unset in production: `1` forces turn telemetry off whatever `host/telemetry.conf` says. `tests/lib.sh` pins it for every suite, because most suites resolve `DATA` to the real repo checkout and would otherwise append synthetic test turns to a developer's own dataset |
 | `CS_ROOT_OVERRIDE` `CS_STATE_OVERRIDE` | single scripts | test-only resolution overrides |
 
