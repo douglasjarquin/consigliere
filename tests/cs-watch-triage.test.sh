@@ -1130,6 +1130,40 @@ test_capo_worker_event_deduped_and_scoped() {
   pass "capo worker events dedupe on the surfaced line and skip unmarked homes"
 }
 
+test_capo_worker_decision_survives_a_later_working_append() {
+  local dir state fakebin out capo pid
+  dir=$(make_case capo-worker-fold-survives); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  capo="$dir/capo-home"
+  mkdir -p "$capo/state"
+  : > "$capo/.cs-capo-home"
+  printf 'needs-decision [key=fix-a]: pick an approach\nworking: continuing\n' > "$capo/state/w-1.status"
+  cs_write_meta "$state/mycapo.meta" "kind=capo" "home=$capo"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_until "$CS_WATCH_TEST_TICKS" grep -q '^capo:' "$out" \
+    || { kill "$pid" 2>/dev/null; cat "$out"; fail "a decision masked by a later working: append was never surfaced"; }
+  grep -F 'pick an approach' "$out" >/dev/null || { cat "$out"; fail "the wake must still carry the open decision's own text"; }
+  kill "$pid" 2>/dev/null || true
+  pass "a capo decision survives a later working: append (the exact overnight bug class)"
+}
+
+test_capo_worker_resolved_decision_does_not_resurface() {
+  local dir state fakebin out capo pid
+  dir=$(make_case capo-worker-fold-resolved-quiet); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  capo="$dir/capo-home"
+  mkdir -p "$capo/state"
+  : > "$capo/.cs-capo-home"
+  printf 'needs-decision [key=fix-a]: pick an approach\nresolved [key=fix-a]: answered via cs-send: use option B\n' \
+    > "$capo/state/w-1.status"
+  cs_write_meta "$state/mycapo.meta" "kind=capo" "home=$capo"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_live "$pid" 25 || { cat "$out"; fail "a resolved decision must not resurface as a capo wake"; }
+  kill "$pid" 2>/dev/null || true
+  ! grep -q '^capo:' "$out" || { cat "$out"; fail "a resolved decision must not resurface"; }
+  pass "a resolved capo decision does not resurface"
+}
+
 
 test_provably_working_signal_absorbed
 test_turn_ended_provably_working_absorbed
@@ -1164,5 +1198,7 @@ test_event_splice_level_reconcile_catches_already_blocked
 test_duplicate_watcher_noops_through_singleton_lock
 test_capo_worker_event_surfaced_without_the_capo_taking_a_turn
 test_capo_worker_event_deduped_and_scoped
+test_capo_worker_decision_survives_a_later_working_append
+test_capo_worker_resolved_decision_does_not_resurface
 test_event_splice_exit_output_and_unknown_kinds
 test_snapshot_answers_panes_and_absence_falls_back

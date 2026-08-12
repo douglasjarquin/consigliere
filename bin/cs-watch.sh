@@ -730,19 +730,30 @@ capo_worker_homes() {  # -> <capo-id>\t<capo-state-dir>
 }
 
 # Boss-relevant worker events inside this home's capos that this home has not
-# surfaced yet. Emits <capo-id>\t<worker-task>\t<status-line>. A capo's OWN
+# surfaced yet. Emits <capo-id>\t<worker-task>\t<key>\t<verb>\t<display-line>,
+# one line per currently-OPEN decision rather than one line per file: this
+# folds each capo task file's full history through scan_open_decisions
+# (bin/cs-classify-lib.sh), the SAME whole-file open/resolved fold
+# status_open_decisions applies everywhere else, instead of reading only the
+# last status line. A last-line read silently loses an open needs-decision the
+# moment a later working:/done: append lands, which is the exact mechanism
+# that stalled the overnight casino sweep this fold replaces. A capo's OWN
 # parent-facing status file lives in this home and is already covered by the
 # ordinary signal path, so only its workers are read here.
 scan_capo_worker_events() {
-  local cid cstate f task last surfaced
+  local cid cstate task key verb note line surfaced
   while IFS=$(printf '\t') read -r cid cstate; do
     [ -n "$cid" ] || continue
-    while IFS=$(printf '\t') read -r f task last; do
-      [ -n "$f" ] || continue
+    while IFS=$(printf '\t') read -r task key verb note; do
+      [ -n "$task" ] || continue
+      case "$key" in
+        default) line="${verb}: ${note}" ;;
+        *)       line="${verb} [key=${key}]: ${note}" ;;
+      esac
       surfaced=$(cat "$(_capo_surfaced_path "$cid" "$task")" 2>/dev/null || true)
-      [ "$surfaced" = "$last" ] && continue
-      printf '%s\t%s\t%s\n' "$cid" "$task" "$last"
-    done < <(scan_boss_relevant_statuses "$cstate")
+      [ "$surfaced" = "$line" ] && continue
+      printf '%s\t%s\t%s\t%s\t%s\n' "$cid" "$task" "$key" "$verb" "$line"
+    done < <(scan_open_decisions "$cstate")
   done < <(capo_worker_homes)
   return 0
 }
@@ -1349,13 +1360,13 @@ EOF
   capo_pending=$(scan_capo_worker_events)
   if [ -n "$capo_pending" ]; then
     capo_reason="capo:"
-    while IFS=$(printf '\t') read -r cid ctask cline; do
+    while IFS=$(printf '\t') read -r cid ctask _ _ cline; do
       [ -n "$cid" ] || continue
       capo_reason="$capo_reason $cid/$ctask: $cline"
     done <<EOF
 $capo_pending
 EOF
-    while IFS=$(printf '\t') read -r cid ctask cline; do
+    while IFS=$(printf '\t') read -r cid ctask _ _ cline; do
       [ -n "$cid" ] || continue
       cs_wake_append capo "$cid/$ctask" "$cline" || exit 1
     done <<EOF
@@ -1363,7 +1374,7 @@ $capo_pending
 EOF
     # Enqueue before suppress, exactly as the signal path does: a crash between
     # the two re-fires the wake rather than losing it.
-    while IFS=$(printf '\t') read -r cid ctask cline; do
+    while IFS=$(printf '\t') read -r cid ctask _ _ cline; do
       [ -n "$cid" ] || continue
       printf '%s' "$cline" > "$(_capo_surfaced_path "$cid" "$ctask")"
     done <<EOF
