@@ -374,7 +374,7 @@ rec=$(cs_pending_reply_capo_escalation_find "$state" mycapo w-1 x) || fail "the 
 [ "$(cs_pending_reply_get "$rec" capo_task_key)" = x ] || fail "capo_task_key must round-trip"
 status_line=$(tail -1 "$state/mycapo.status")
 case "$status_line" in
-  "needs-decision [key=x]: capo-decision-escalation: capo=mycapo task=w-1 key=x summary="*) : ;;
+  "needs-decision [key=mycapo-w-1]: capo-decision-escalation: capo=mycapo task=w-1 key=x summary="*) : ;;
   *) fail "the parent status file must gain the escalation payload line: $status_line" ;;
 esac
 pass "a new capo decision opens exactly one parent-side record with a round-tripping schema"
@@ -397,5 +397,28 @@ cs_pending_reply_capo_escalation_find "$state" mycapo w-1 x \
 assert_contains "$(tail -1 "$state/mycapo.status")" "pending-reply-resolved: capo-decision-escalation" \
   "the closing line must carry the escalation's own composite marker"
 pass "capo-decision-escalation closes on the capo's own resolution, never on delivery alone"
+
+# 19. two unrelated capo tasks that each raise a bare (default-keyed)
+#     needs-decision must not collide on the parent-facing key: the key is
+#     derived from (capo id, capo task id), never the capo's own bare
+#     decision key, which both tasks share as "default" here.
+home=$(setup_parent capo-escalation-no-collision); state="$home/state"
+export CS_PENDING_REPLY_NOW=16000
+cs_pending_reply_capo_escalation_open "$state" "$home" mycapo w-30 default needs-decision "pick approach" \
+  || fail "opening the first unkeyed decision should succeed"
+cs_pending_reply_capo_escalation_open "$state" "$home" mycapo w-31 default needs-decision "pick approach" \
+  || fail "opening the second unkeyed decision should succeed"
+rec30=$(cs_pending_reply_capo_escalation_find "$state" mycapo w-30 default) \
+  || fail "the first task's record must be independently findable"
+rec31=$(cs_pending_reply_capo_escalation_find "$state" mycapo w-31 default) \
+  || fail "the second task's record must be independently findable"
+[ "$rec30" != "$rec31" ] || fail "the two tasks must not share a record"
+assert_contains "$(status_open_decisions "$state/mycapo.status")" "mycapo-w-30" \
+  "the first task's own parent-facing key must be open"
+assert_contains "$(status_open_decisions "$state/mycapo.status")" "mycapo-w-31" \
+  "the second task's own parent-facing key must be open"
+[ "$(printf '%s\n' "$(status_open_decisions "$state/mycapo.status")" | wc -l | tr -d ' ')" = 2 ] \
+  || fail "both unkeyed decisions must stay independently open, not collide into one"
+pass "two capo tasks that each raise an unkeyed decision never collide on the parent-facing key"
 
 pass "cs-pending-reply lifecycle guards"

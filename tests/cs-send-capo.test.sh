@@ -176,13 +176,13 @@ export CS_PENDING_REPLY_NOW=20000
 cs_pending_reply_capo_escalation_open "$home/state" "$home" mycapo w-1 x needs-decision "pick an approach" \
   || fail "escalation fixture setup should open cleanly"
 log="$TMP/send9.log"
-run_send "$home" "$log" mycapo --resolve-key x "use option B" \
+run_send "$home" "$log" mycapo --resolve-key mycapo-w-1 "use option B" \
   || fail "resolve-key against a capo-decision-escalation record should deliver"
 got=$(cat "$log")
 assert_contains "$got" "RELAYED ANSWER for your own task w-1 decision [key=x]" \
   "the relayed message must name the capo's own task and key"
 assert_contains "$got" "use option B" "the relayed message must carry the boss's own answer text"
-[ "$(grep -Fc 'resolved [key=x]: answered via cs-send:' "$home/state/mycapo.status")" = 0 ] \
+[ "$(grep -Fc 'resolved [key=mycapo-w-1]: answered via cs-send:' "$home/state/mycapo.status")" = 0 ] \
   || fail "this send must never write a local resolved line for the escalation key"
 rec=$(cs_pending_reply_capo_escalation_find "$home/state" mycapo w-1 x) \
   || fail "the escalation record must remain open after this send"
@@ -212,7 +212,7 @@ log="$TMP/send10.log"
 : > "$log"
 if env CS_HOME="$home" CS_STATE_OVERRIDE="$home/state" CS_SEND_LOG="$log" CS_SEND_SETTLE=0 \
   CS_SEND_RETRIES=0 FAKE_AGENT_WAIT_FAIL=1 \
-  "$SEND" mycapo --resolve-key y "use option C" >/dev/null 2>&1; then
+  "$SEND" mycapo --resolve-key mycapo-w-2 "use option C" >/dev/null 2>&1; then
   fail "an unconfirmed submit must exit non-zero"
 fi
 assert_contains "$(cat "$capo_home/state/w-2.status")" "needs-decision [key=y]: pick an approach" \

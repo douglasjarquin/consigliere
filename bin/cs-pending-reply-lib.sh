@@ -971,10 +971,16 @@ cs_pending_reply_detect_wrong_home() {  # <state-dir> <corr_id> <capo-home>
 # The parent status line's own [key=...] token for a capo-decision-escalation
 # record - a pure function of the capo's own identifiers, so the open and
 # close halves derive the identical key without storing it a second time.
-# Task 5 replaces this derivation with a collision-free one; every caller goes
-# through this one function so that fix has exactly one call site to change.
-cs_pending_reply_capo_escalation_key() {  # <capo-task-key>
-  printf '%s' "$1"
+# Derived from (capo id, capo task id), never the capo's own bare decision
+# key: that key may be "default" or otherwise reused across issues, while
+# capo task ids are already unique per dispatched issue within a capo, so
+# this derivation is collision-free by construction with no hash or
+# randomness needed - directly fixing the boss's original report item 5 (the
+# real mechanism: bin/cs-classify-lib.sh's fold dropping a same-key record the
+# instant a new open decision reuses it, not a generator that never existed
+# in the codebase). Every caller goes through this one function.
+cs_pending_reply_capo_escalation_key() {  # <capo-id> <capo-task-id>
+  printf '%s-%s' "$1" "$2"
 }
 
 cs_pending_reply_capo_escalation_payload() {  # <capo-id> <capo-task-id> <capo-task-key> <summary>
@@ -1086,7 +1092,7 @@ grace_secs=$(cs_pending_reply_grace_secs)
 EOF
   chmod 600 "$tmp" 2>/dev/null || true
   mv -f "$tmp" "$rec" || return 1
-  parent_key=$(cs_pending_reply_capo_escalation_key "$ckey")
+  parent_key=$(cs_pending_reply_capo_escalation_key "$cid" "$ctask")
   payload=$(cs_pending_reply_capo_escalation_payload "$cid" "$ctask" "$ckey" "$(cs_pending_reply_get "$rec" request_summary)")
   line="$verb [key=$parent_key]: $payload"
   mkdir -p "$(dirname "$parent_status")" 2>/dev/null || return 1
@@ -1109,7 +1115,7 @@ cs_pending_reply_capo_escalation_close() {  # <state-dir> <capo-id> <capo-task-i
   local rec now parent_key parent_status note open_line open_key open_note
   rec=$(cs_pending_reply_capo_escalation_find "$state" "$cid" "$ctask" "$ckey") || return 0
   now=$(cs_pending_reply_now)
-  parent_key=$(cs_pending_reply_capo_escalation_key "$ckey")
+  parent_key=$(cs_pending_reply_capo_escalation_key "$cid" "$ctask")
   parent_status="$state/${cid}.status"
   note=$(cs_pending_reply_capo_escalation_payload "$cid" "$ctask" "$ckey" "$(cs_pending_reply_get "$rec" request_summary)")
   while IFS= read -r open_line; do
