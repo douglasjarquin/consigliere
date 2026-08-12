@@ -163,4 +163,62 @@ cs_message_from_consigliere "do the work" && fail "direct boss input must remain
 cs_message_from_consigliere "[cs-from-consigliere]do the work" && fail "label without U+2063 must not match"
 pass "cs-send: the marker is the label plus terminal-safe U+2063"
 
+# 9. --resolve-key against a Task 3 capo-decision-escalation record routes the
+#    answer to the owning capo via a marked send, with no CS_HOME override,
+#    and never writes a local resolved line for the parent's own record -
+#    closing that stays Task 3's job, gated on the capo's own resolution.
+home=$(setup_home escalation-happy)
+capo_home="$TMP/escalation-happy-capo-home-$RANDOM"
+mkdir -p "$capo_home/state"
+cs_write_meta "$home/state/mycapo.meta" \
+  "workspace=w9" "pane=w9:p9" "kind=capo" "mode=capo" "home=$capo_home"
+export CS_PENDING_REPLY_NOW=20000
+cs_pending_reply_capo_escalation_open "$home/state" "$home" mycapo w-1 x needs-decision "pick an approach" \
+  || fail "escalation fixture setup should open cleanly"
+log="$TMP/send9.log"
+run_send "$home" "$log" mycapo --resolve-key x "use option B" \
+  || fail "resolve-key against a capo-decision-escalation record should deliver"
+got=$(cat "$log")
+assert_contains "$got" "RELAYED ANSWER for your own task w-1 decision [key=x]" \
+  "the relayed message must name the capo's own task and key"
+assert_contains "$got" "use option B" "the relayed message must carry the boss's own answer text"
+[ "$(grep -Fc 'resolved [key=x]: answered via cs-send:' "$home/state/mycapo.status")" = 0 ] \
+  || fail "this send must never write a local resolved line for the escalation key"
+rec=$(cs_pending_reply_capo_escalation_find "$home/state" mycapo w-1 x) \
+  || fail "the escalation record must remain open after this send"
+[ "$(cs_pending_reply_get "$rec" phase)" = escalated ] \
+  || fail "the escalation record's phase must be untouched by delivery"
+# Standing in for the capo's own next agent turn: it resolves its OWN decision
+# locally, in its OWN home, using the answer text this send delivered.
+printf 'needs-decision [key=x]: pick an approach\n' > "$capo_home/state/w-1.status"
+cs_write_meta "$capo_home/state/w-1.meta" "workspace=cw1" "pane=cw1:p1" "kind=ship"
+run_send "$capo_home" "$TMP/send9-capo.log" w-1 --resolve-key x "$got" \
+  || fail "the capo's own local resolve should succeed"
+assert_contains "$(cat "$capo_home/state/w-1.status")" "resolved [key=x]: answered via cs-send:" \
+  "the capo's own task file must show its own key resolved"
+pass "cs-send: a capo-decision-escalation resolve-key relays without CS_HOME gymnastics or a local close"
+
+# 10. failed delivery leaves the capo's own file untouched.
+home=$(setup_home escalation-fail)
+capo_home="$TMP/escalation-fail-capo-home-$RANDOM"
+mkdir -p "$capo_home/state"
+cs_write_meta "$home/state/mycapo.meta" \
+  "workspace=w10" "pane=w10:p10" "kind=capo" "mode=capo" "home=$capo_home"
+export CS_PENDING_REPLY_NOW=21000
+cs_pending_reply_capo_escalation_open "$home/state" "$home" mycapo w-2 y needs-decision "pick an approach" \
+  || fail "escalation fixture setup should open cleanly"
+printf 'needs-decision [key=y]: pick an approach\n' > "$capo_home/state/w-2.status"
+log="$TMP/send10.log"
+: > "$log"
+if env CS_HOME="$home" CS_STATE_OVERRIDE="$home/state" CS_SEND_LOG="$log" CS_SEND_SETTLE=0 \
+  CS_SEND_RETRIES=0 FAKE_AGENT_WAIT_FAIL=1 \
+  "$SEND" mycapo --resolve-key y "use option C" >/dev/null 2>&1; then
+  fail "an unconfirmed submit must exit non-zero"
+fi
+assert_contains "$(cat "$capo_home/state/w-2.status")" "needs-decision [key=y]: pick an approach" \
+  "the capo's own task file must be unchanged by a failed delivery"
+[ "$(grep -Fc 'resolved' "$capo_home/state/w-2.status")" = 0 ] \
+  || fail "the capo's own task file must show no resolved line after a failed delivery"
+pass "cs-send: a failed delivery to a capo-decision-escalation target leaves the capo's file untouched"
+
 pass "cs-send capo marker and pending-reply integration"
