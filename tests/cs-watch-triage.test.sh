@@ -1113,7 +1113,7 @@ test_capo_worker_event_deduped_and_scoped() {
   : > "$capo/.cs-capo-home"
   printf 'blocked: still the same block\n' > "$capo/state/w-1.status"
   # Already surfaced: a standing block must not re-wake every poll.
-  printf 'blocked: still the same block' > "$state/.capo-surfaced-mycapo__w-1"
+  printf 'default\tblocked\tstill the same block' > "$state/.capo-surfaced-mycapo__w-1"
   # A working: line is not boss-relevant, and a directory without the capo-home
   # marker is not a capo home at all - neither may produce a wake.
   printf 'working: mid-run\n' > "$capo/state/w-2.status"
@@ -1164,6 +1164,61 @@ test_capo_worker_resolved_decision_does_not_resurface() {
   pass "a resolved capo decision does not resurface"
 }
 
+test_capo_worker_identical_wording_different_tasks_both_surface() {
+  local dir state fakebin out capo pid
+  dir=$(make_case capo-worker-identical-wording); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  capo="$dir/capo-home"
+  mkdir -p "$capo/state"
+  : > "$capo/.cs-capo-home"
+  printf 'needs-decision [key=review]: needs boss input\n' > "$capo/state/w-10.status"
+  printf 'needs-decision [key=review]: needs boss input\n' > "$capo/state/w-20.status"
+  cs_write_meta "$state/mycapo.meta" "kind=capo" "home=$capo"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_until "$CS_WATCH_TEST_TICKS" grep -q '^capo:' "$out" \
+    || { kill "$pid" 2>/dev/null; cat "$out"; fail "identical-wording decisions on different tasks were never surfaced"; }
+  grep -F 'mycapo/w-10' "$out" >/dev/null || { cat "$out"; fail "the first task's identically-worded decision did not surface"; }
+  grep -F 'mycapo/w-20' "$out" >/dev/null || { cat "$out"; fail "the second task's identically-worded decision did not surface"; }
+  [ -s "$state/.capo-surfaced-mycapo__w-10" ] || fail "the first task's own marker must be written"
+  [ -s "$state/.capo-surfaced-mycapo__w-20" ] || fail "the second task's own marker must be written"
+  kill "$pid" 2>/dev/null || true
+  pass "identically-worded decisions on different tasks each get their own marker and both surface"
+}
+
+test_capo_worker_reopen_after_resolve_resurfaces() {
+  local dir state fakebin out out2 out3 capo pid
+  dir=$(make_case capo-worker-reopen); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  capo="$dir/capo-home"
+  mkdir -p "$capo/state"
+  : > "$capo/.cs-capo-home"
+  printf 'needs-decision [key=x]: pick approach\n' > "$capo/state/w-1.status"
+  cs_write_meta "$state/mycapo.meta" "kind=capo" "home=$capo"
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_until "$CS_WATCH_TEST_TICKS" grep -q '^capo:' "$out" \
+    || { kill "$pid" 2>/dev/null; cat "$out"; fail "the first open decision under key x was never surfaced"; }
+  reap "$pid"
+
+  # A poll while it sits resolved (the resurfacing regression's actual proof
+  # point): if this pass leaves a stale marker behind, the reopen below would
+  # wrongly collide with it even though the wording is byte-identical.
+  printf 'resolved [key=x]: answered via cs-send: use option A\n' >> "$capo/state/w-1.status"
+  out2="$dir/watch2.out"
+  watch_bg "$state" "$fakebin" "$out2"
+  pid=$!
+  wait_live "$pid" 25 || { cat "$out2"; fail "a resolved decision must not itself surface a wake"; }
+  reap "$pid"
+
+  printf 'needs-decision [key=x]: pick approach\n' >> "$capo/state/w-1.status"
+  out3="$dir/watch3.out"
+  watch_bg "$state" "$fakebin" "$out3"
+  pid=$!
+  wait_until "$CS_WATCH_TEST_TICKS" grep -q '^capo:' "$out3" \
+    || { kill "$pid" 2>/dev/null; cat "$out3"; fail "a decision reopened under the same key with IDENTICAL wording did not resurface"; }
+  kill "$pid" 2>/dev/null || true
+  pass "a decision reopened under the same key and wording after a resolve is treated as a new surfacing event"
+}
+
 
 test_provably_working_signal_absorbed
 test_turn_ended_provably_working_absorbed
@@ -1200,5 +1255,7 @@ test_capo_worker_event_surfaced_without_the_capo_taking_a_turn
 test_capo_worker_event_deduped_and_scoped
 test_capo_worker_decision_survives_a_later_working_append
 test_capo_worker_resolved_decision_does_not_resurface
+test_capo_worker_identical_wording_different_tasks_both_surface
+test_capo_worker_reopen_after_resolve_resurfaces
 test_event_splice_exit_output_and_unknown_kinds
 test_snapshot_answers_panes_and_absence_falls_back
