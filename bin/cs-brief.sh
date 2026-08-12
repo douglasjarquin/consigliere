@@ -25,6 +25,10 @@
 #   consigliere's reply - invoke the harness's start-work skill
 #   (cs_harness_start_work_skill) to execute it. Reserve plan-first for a
 #   large or architecture-scope task; decide it at intake same as --mode.
+#   Both values require the omo plugin (cs_harness_omo_installed) on the
+#   resolved harness. plan-first refuses when it is absent, since it would
+#   name a dead skill invocation; ultrawork only warns and still scaffolds,
+#   since the word alone degrades to plain-English instruction with no hook.
 #   There is no --yolo flag on any scaffold. yolo governs consigliere's own
 #   approval behaviour, never the worker's contract, so a brief must never carry
 #   it; passing it is refused rather than ignored.
@@ -174,6 +178,17 @@ if [ "$KIND" = ship ]; then
   if ! cs_exec_mode_valid "$EXEC_MODE"; then
     echo "error: --exec-mode must be one of $CS_EXEC_MODES, got '$EXEC_MODE'" >&2
     exit 1
+  fi
+  # plan-first names skills that do not exist without the omo plugin, so an
+  # absent install must refuse rather than scaffold a brief the soldier cannot
+  # follow. ultrawork degrades gracefully instead (the word is still readable
+  # plain-English instruction with no hook to act on it), so it only warns.
+  if ! cs_harness_omo_installed "$H"; then
+    if [ "$EXEC_MODE" = plan-first ]; then
+      echo "error: --exec-mode plan-first names an omo skill, but the omo plugin is not installed for harness '$H' (no plugins/cache/sisyphuslabs/omo under ${H}'s config dir); install it or scaffold with --exec-mode ultrawork instead" >&2
+      exit 1
+    fi
+    echo "warning: omo plugin not installed for harness '$H'; the ultrawork instruction in this brief will read as plain text, with no self-activating hook to act on it" >&2
   fi
 elif [ -n "$MODE" ]; then
   echo "error: --mode applies only to ship briefs; a $KIND deliverable has no delivery mode" >&2

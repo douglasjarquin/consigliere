@@ -282,4 +282,18 @@ for fn in cs_harness_plan_skill cs_harness_start_work_skill; do
 done
 pass "skill/resume/instruction/busy accessors"
 
+# --- omo install detection ---------------------------------------------------
+# Isolated from the developer's own real ~/.codex and ~/.claude: both env
+# overrides point at fixture dirs under $TMP, never the real installs.
+OMO_CODEX="$TMP/codex-home"
+OMO_CLAUDE="$TMP/claude-home"
+mkdir -p "$OMO_CODEX/plugins/cache/sisyphuslabs/omo" "$OMO_CLAUDE/plugins/cache/sisyphuslabs/omo"
+
+CODEX_HOME="$OMO_CODEX" cs_harness_omo_installed codex || fail "codex omo present must report installed"
+CLAUDE_CONFIG_DIR="$OMO_CLAUDE" cs_harness_omo_installed claude || fail "claude omo present must report installed"
+CODEX_HOME="$TMP/no-such-codex" cs_harness_omo_installed codex && fail "codex omo absent must report not installed"
+CLAUDE_CONFIG_DIR="$TMP/no-such-claude" cs_harness_omo_installed claude && fail "claude omo absent must report not installed"
+cs_harness_omo_installed bogus && fail "cs_harness_omo_installed must refuse an unknown harness"
+pass "cs_harness_omo_installed detects the real plugin cache dir per harness, isolated from the developer's own installs"
+
 pass "cs-harness-lib behavior"

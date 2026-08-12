@@ -530,3 +530,21 @@ cs_harness_start_work_skill() {
     *) return 1 ;;
   esac
 }
+
+# cs_harness_omo_installed <h> - true iff the omo plugin (source of
+# cs_harness_plan_skill / cs_harness_start_work_skill above) is actually
+# installed for this harness on this machine, so a brief naming those skills
+# is not a dead invocation. Both harnesses use the identical
+# plugins/cache/sisyphuslabs/omo layout (confirmed on disk 2026-08-11):
+# codex under CODEX_HOME (default ~/.codex, the documented `codex --help`
+# override), claude under CLAUDE_CONFIG_DIR (default ~/.claude, the same
+# override cs_harness_claude_json_path already honors).
+cs_harness_omo_installed() {
+  local h=$1 base
+  case "$h" in
+    codex) base=${CODEX_HOME:-$HOME/.codex} ;;
+    claude) base=${CLAUDE_CONFIG_DIR:-$HOME/.claude} ;;
+    *) return 1 ;;
+  esac
+  [ -d "$base/plugins/cache/sisyphuslabs/omo" ]
+}

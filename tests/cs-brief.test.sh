@@ -154,6 +154,14 @@ if "$BIN" t6 alpha --mode no-mistakes --no-projects >/dev/null 2>&1; then
 fi
 pass "flag misuse refusals"
 
+# --exec-mode fixture: a fake omo plugin cache for both harnesses, isolated
+# from the developer's own real ~/.codex and ~/.claude installs, so every
+# assertion below is deterministic regardless of what is actually installed
+# on the machine running this suite.
+export CODEX_HOME="$TMP/fake-codex-home"
+export CLAUDE_CONFIG_DIR="$TMP/fake-claude-home"
+mkdir -p "$CODEX_HOME/plugins/cache/sisyphuslabs/omo" "$CLAUDE_CONFIG_DIR/plugins/cache/sisyphuslabs/omo"
+
 # --exec-mode: default is ultrawork (codex, the ambient CS_HARNESS_OVERRIDE
 # from lib.sh), embedding the literal self-activating word and nothing plan-related.
 "$BIN" e1 alpha --mode local-only >/dev/null
@@ -202,5 +210,29 @@ fi
 "$BIN" e6 alpha --scout >/dev/null || fail "a scout with no --exec-mode must still scaffold"
 assert_no_grep 'Execution mode' "$TMP/data/e6/brief.md" "a scout brief carries no execution-mode section at all"
 pass "--exec-mode misuse refusals and the scout regression guard"
+
+# omo guard: plan-first refuses loudly when the omo plugin is absent for the
+# resolved harness; ultrawork only warns, since it degrades to plain text
+# rather than a dead skill invocation.
+NO_OMO_CODEX="$TMP/no-omo-codex-home"
+NO_OMO_CLAUDE="$TMP/no-omo-claude-home"
+
+err=$(CODEX_HOME="$NO_OMO_CODEX" "$BIN" e7 alpha --mode local-only --exec-mode plan-first 2>&1)
+rc=$?
+[ "$rc" -ne 0 ] || fail "plan-first with no omo installed must refuse"
+assert_contains "$err" "omo plugin is not installed" "the plan-first-no-omo refusal names the missing plugin"
+assert_absent "$TMP/data/e7" "a refused plan-first-no-omo scaffold leaves no task directory behind"
+
+out=$(CODEX_HOME="$NO_OMO_CODEX" "$BIN" e8 alpha --mode local-only 2>&1)
+rc=$?
+[ "$rc" -eq 0 ] || fail "ultrawork default with no omo installed must still scaffold: $out"
+assert_contains "$out" "warning: omo plugin not installed" "ultrawork-no-omo warns rather than refuses"
+assert_present "$TMP/data/e8/brief.md" "ultrawork-no-omo still scaffolds a brief"
+assert_grep 'Use ultrawork for this task' "$TMP/data/e8/brief.md" "ultrawork-no-omo brief still names ultrawork"
+
+CLAUDE_CONFIG_DIR="$NO_OMO_CLAUDE" CS_HARNESS_OVERRIDE=claude "$BIN" e9 alpha --mode local-only --exec-mode plan-first >/dev/null 2>&1 \
+  && fail "claude plan-first with no omo installed must refuse"
+assert_absent "$TMP/data/e9" "a refused claude plan-first-no-omo scaffold leaves no task directory behind"
+pass "the omo guard refuses plan-first and warns-but-proceeds on ultrawork when the plugin is absent"
 
 pass "cs-brief behaviors"
