@@ -6,6 +6,9 @@
 # token to release-reviewed-green at the exact recorded head. Capacity remains
 # a live decision by bin/cs-board-capacity.sh; this script does not merge,
 # close, clean up, discard, or move the task's board card.
+# The same armed poll also wakes on a CHANGES_REQUESTED review, not merge
+# alone - the only corrective-channel signal for a task this plan's bossless
+# mode may auto-decide without live escalation.
 # The watcher check source is byte-for-byte bin/cs-pr-poll.sh; task and PR data
 # live only in a private sidecar and are never interpolated into shell source.
 # Consigliere watches GitHub pull requests only. bin/cs-pr-lib.sh also parses

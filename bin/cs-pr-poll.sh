@@ -2,10 +2,11 @@
 # Static watcher program for a validated PR poll sidecar. Direct sidecar reads
 # consume and validate its exact-head and capacity-attestation fields but never
 # interpret them; bin/cs-board-capacity.sh is their only scheduling consumer.
-# It emits exactly one merged line for a merged GitHub PR and stays silent
-# otherwise, including on every error, so a failed lookup can never be read as
-# a merge. The identity is data in the sidecar and is never interpolated into
-# this source: these bytes are identical for every task.
+# It emits exactly one merged line for a merged GitHub PR, exactly one
+# changes_requested line for a PR under CHANGES_REQUESTED review, and stays
+# silent otherwise, including on every error, so a failed lookup can never be
+# read as either state. The identity is data in the sidecar and is never
+# interpolated into this source: these bytes are identical for every task.
 # Consigliere watches GitHub only. bin/cs-pr-lib.sh can validate a
 # gitlab-tagged sidecar, but consigliere never arms one (bin/cs-pr-check.sh
 # refuses GitLab URLs loudly), so any non-github provider reaching this poll
@@ -75,8 +76,19 @@ case "$provider" in
       .|..|*[!A-Za-z0-9._-]*) exit 0 ;;
     esac
     [ "$url" = "https://github.com/$owner/$repo/pull/$number" ] || exit 0
-    state=$(gh pr view "$url" --json state -q .state 2>/dev/null) || exit 0
-    [ "$state" = MERGED ] && printf '%s\n' merged
+    snapshot=$(gh pr view "$url" --json state,reviewDecision \
+      -q '(.state) + "|" + (.reviewDecision // "NONE")' 2>/dev/null) || exit 0
+    case "$snapshot" in
+      *'|'*) ;;
+      *) exit 0 ;;
+    esac
+    state=${snapshot%%|*}
+    review=${snapshot#*|}
+    if [ "$state" = MERGED ]; then
+      printf '%s\n' merged
+    elif [ "$review" = CHANGES_REQUESTED ]; then
+      printf '%s\n' changes_requested
+    fi
     ;;
   *) exit 0 ;;
 esac

@@ -34,9 +34,9 @@ make_pr_case() {
 printf '%s\n' "$*" >> "${CS_TEST_GH_LOG:-/dev/null}"
 case " $* " in
   *" headRefOid "*) printf '%s\n' "${CS_TEST_GH_HEAD:-0123456789abcdef0123456789abcdef01234567}" ;;
-  *" state "*)
+  *"state,reviewDecision"*)
     [ "${CS_TEST_GH_FAIL:-0}" = 0 ] || exit 1
-    printf '%s\n' "${CS_TEST_GH_STATE:-OPEN}"
+    printf '%s|%s\n' "${CS_TEST_GH_STATE:-OPEN}" "${CS_TEST_GH_REVIEW:-NONE}"
     ;;
 esac
 SH
@@ -188,7 +188,41 @@ SH
   pass "a check bound by cs-check-register runs through the watcher, and its tampered bytes are refused"
 }
 
+test_changes_requested_review_produces_a_wake() {
+  local dir state out pid
+  dir=$(make_pr_case poll-changes-requested); state="$dir/state"; out="$dir/watch.out"
+  arm_pr_poll "$dir" task https://github.com/o/r/pull/14
+
+  watch_bg "$state" "$dir/fakebin" "$out" \
+    CS_CHECK_INTERVAL=1 CS_TEST_GH_STATE=OPEN CS_TEST_GH_REVIEW=CHANGES_REQUESTED CS_TEST_GH_LOG="$dir/gh.log"
+  pid=$!
+  wait_for_exit "$pid" 80 || fail "watcher did not surface the requested-changes review"
+  grep -Fx "check: $state/task.check.sh: changes_requested" "$out" >/dev/null \
+    || fail "changes_requested wake reason was not printed: $(cat "$out")"
+  [ "$(count_wakes "$state" check "$state/task.check.sh")" -ge 1 ] \
+    || fail "changes_requested check wake was not queued"
+  pass "a PR under CHANGES_REQUESTED review produces exactly one changes_requested wake"
+}
+
+test_clean_open_pr_stays_silent_on_review_state() {
+  local dir state out pid
+  dir=$(make_pr_case poll-clean-open); state="$dir/state"; out="$dir/watch.out"
+  arm_pr_poll "$dir" task https://github.com/o/r/pull/15
+
+  watch_bg "$state" "$dir/fakebin" "$out" \
+    CS_CHECK_INTERVAL=1 CS_TEST_GH_STATE=OPEN CS_TEST_GH_REVIEW=NONE CS_TEST_GH_LOG="$dir/gh.log"
+  pid=$!
+  if ! wait_live "$pid" 30; then
+    reap "$pid"; fail "watcher exited on an open PR with no review activity: $(cat "$out")"
+  fi
+  [ ! -s "$out" ] || fail "an open PR with no review activity printed a wake reason: $(cat "$out")"
+  reap "$pid"
+  pass "an open PR with no review activity stays silent"
+}
+
 test_published_poll_round_trip_merged_wake
 test_retirement_leaves_a_rearmed_poll_alone
 test_tampered_published_poll_rejected_without_execution
 test_check_registered_via_registrar_accepted_by_watcher
+test_changes_requested_review_produces_a_wake
+test_clean_open_pr_stays_silent_on_review_state

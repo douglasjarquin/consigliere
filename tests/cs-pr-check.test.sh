@@ -57,9 +57,9 @@ SH
 printf '%s\n' "$*" >> "$CS_TEST_GH_LOG"
 case " $* " in
   *" headRefOid "*) printf '%s\n' "${CS_TEST_GH_HEAD:-0123456789abcdef0123456789abcdef01234567}" ;;
-  *" state "*)
+  *"state,reviewDecision"*)
     [ "${CS_TEST_GH_FAIL:-0}" = 0 ] || exit 1
-    printf '%s\n' "${CS_TEST_GH_STATE:-OPEN}"
+    printf '%s|%s\n' "${CS_TEST_GH_STATE:-OPEN}" "${CS_TEST_GH_REVIEW:-NONE}"
     ;;
 esac
 SH
