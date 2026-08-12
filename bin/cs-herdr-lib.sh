@@ -465,9 +465,10 @@ cs_herdr_pane_is_agent_husk() { # <pane_id>
 # strict undelivered path was permanently on. CI never noticed because it pinned
 # 0.7.4, where the old flag was still right.
 #
-# The pin is now 0.7.5 (bin/cs-install-herdr.sh), so CI exercises the same CLI
-# contract the fleet runs, and tests/cs-herdr-lib-live.test.sh pins this flag
-# against the real binary in the herdr lane.
+# The pin tracks whatever bin/cs-install-herdr.sh currently pins (0.8.0 as of
+# 2026-08-12, was 0.7.5), so CI exercises the same CLI contract the fleet
+# runs, and tests/cs-herdr-lib-live.test.sh pins this flag against the real
+# binary in the herdr lane.
 cs_herdr_agent_wait() { # <pane_id> <status> <timeout-ms>
   cs_herdr agent wait "$1" --until "$2" --timeout "$3"
 }
