@@ -18,6 +18,7 @@
 > That result is written by a consigliere-owned detached process and never by an agent, so the row's answer is unchanged.
 > Refreshed again for the composer-emptiness line reference in §2d when bin/cs-composer-lib.sh gained Unicode-space normalization before its trim, which shifted the capture call; the structural fact (capture never feeds marker classification) is unchanged.
 > Refreshed again for the composer-emptiness line reference in §2d when bin/cs-composer-lib.sh gained the claude-glyph rule-proof and agent-process corroboration (dead-shell `❯` fix), which shifted the capture call again; the structural fact is unchanged.
+> Refreshed again for the §2b `cs_message_from_consigliere` row and its §5 cross-reference: `bin/cs-send.sh`'s `cs_send_close_resolved_keys` (the composite parent-escalation-record -> marked-send -> capo-local-resolve path plan 009 added) is now a real production consumer, tagging a capo's own closing line `relayed-from-parent` instead of `answered` when the answer text it is closing still carries the marker. Both rows' "no production consumer" claim is corrected below rather than left stale.
 
 ## 1. Threat model
 
@@ -98,7 +99,25 @@ the reader-facing marker is an LLM, which cannot compute a cryptographic check
 | bin/cs-daemon.sh:181-186 | `message_is_injection` | afk-exit message text | Governs afk exit; ambiguity biases to exit (self-correcting) |
 | bin/cs-daemon.sh:193-201 | `should_exit_afk` | afk-exit message text | Same; **no live caller today** (testable contract only) |
 | bin/cs-daemon.sh:204-206 | `strip_injection_marker` (`cs_operational_input_body`) | typed body | Strips framing after provenance was read |
-| bin/cs-marker-lib.sh:20-24 | `cs_message_from_consigliere` | message text | **No production consumer — tests only** (see §5) |
+| bin/cs-marker-lib.sh:20-24 | `cs_message_from_consigliere` | message text | Production consumer since plan 009: `bin/cs-send.sh`'s `cs_send_close_resolved_keys` reads it to choose a capo's own closing verb (see §5) |
+
+The composite path this row's answer changed for: a parent's Task 3 escalation
+record resolves through a Task 4 marked send to the owning capo, and the
+capo's own next-turn local `--resolve-key` resolve is what now reads this
+marker, so its own closing line is distinguishable from a purely local
+decision (`tests/cs-send-capo.test.sh`, case 11):
+
+```
+$ bash tests/cs-send-capo.test.sh
+...
+ok - cs-send: a parent-relayed resolve is distinguishable from a purely local one
+```
+
+A purely local resolve still closes `resolved [key=z]: answered via cs-send: <answer>`;
+a resolve whose answer text still carries the `[cs-from-consigliere]` marker
+closes `resolved [key=z]: relayed-from-parent via cs-send: <answer>` instead -
+the marker itself is never written into the closing line, only the verb it
+selects.
 
 ### 2c. Exploitable sinks (ranked)
 
@@ -237,9 +256,11 @@ is **safe to leave byte-identical under this recommendation**:
 
 - Option (C) does not touch any `from-consigliere` producer or consumer.
 - Capo reply *routing* is corr-token + parent-owned-status based
-  (bin/cs-pending-reply-lib.sh), not `from-consigliere`-classification based, and
-  `cs_message_from_consigliere` has no production consumer (§2d). So even a later
-  option (A) rollout can add an HMAC tag to the *machine-checked* kinds while
+  (bin/cs-pending-reply-lib.sh), not `from-consigliere`-classification based.
+  `cs_message_from_consigliere` gained its first production consumer under plan
+  009 (§2b) - a capo's own closing verb, not routing - so this compatibility
+  argument still holds unchanged: even a later option (A) rollout can add an
+  HMAC tag to the *machine-checked* kinds while
   keeping the capo `[cs-from-consigliere] U+2063 <body>` bytes exactly as existing
   capos carry them in their charter context — the tag would live in a new field, not
   replace the legacy label. Migration for capo is therefore additive and deferred,

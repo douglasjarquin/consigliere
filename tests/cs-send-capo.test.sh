@@ -194,8 +194,8 @@ printf 'needs-decision [key=x]: pick an approach\n' > "$capo_home/state/w-1.stat
 cs_write_meta "$capo_home/state/w-1.meta" "workspace=cw1" "pane=cw1:p1" "kind=ship"
 run_send "$capo_home" "$TMP/send9-capo.log" w-1 --resolve-key x "$got" \
   || fail "the capo's own local resolve should succeed"
-assert_contains "$(cat "$capo_home/state/w-1.status")" "resolved [key=x]: answered via cs-send:" \
-  "the capo's own task file must show its own key resolved"
+assert_contains "$(cat "$capo_home/state/w-1.status")" "resolved [key=x]: relayed-from-parent via cs-send:" \
+  "the capo's own task file must show its own key resolved, distinguishably relayed from the parent (Task 7)"
 pass "cs-send: a capo-decision-escalation resolve-key relays without CS_HOME gymnastics or a local close"
 
 # 10. failed delivery leaves the capo's own file untouched.
@@ -220,5 +220,29 @@ assert_contains "$(cat "$capo_home/state/w-2.status")" "needs-decision [key=y]: 
 [ "$(grep -Fc 'resolved' "$capo_home/state/w-2.status")" = 0 ] \
   || fail "the capo's own task file must show no resolved line after a failed delivery"
 pass "cs-send: a failed delivery to a capo-decision-escalation target leaves the capo's file untouched"
+
+# 11. a parent-relayed resolve and a purely local one are distinguishable in
+#     the capo's own ledger, sourced from the existing from-consigliere
+#     marker (Task 4's marked send already applies it) - not a new signal.
+home=$(setup_home provenance)
+cs_write_meta "$home/state/w-local.meta" "workspace=wl" "pane=wl:p1" "kind=ship"
+printf 'needs-decision [key=z]: pick an approach\n' > "$home/state/w-local.status"
+run_send "$home" "$TMP/send11-local.log" w-local --resolve-key z "use option D" \
+  || fail "an ordinary local resolve should succeed"
+local_line=$(grep -F 'resolved [key=z]' "$home/state/w-local.status")
+assert_contains "$local_line" "answered via cs-send:" "a local resolve must use the plain closing verb"
+case "$local_line" in
+  *relayed-from-parent*) fail "a purely local resolve must not read as parent-relayed: $local_line" ;;
+esac
+marked_text="${CS_FROMCONS_MARK}corr=0123456789abcdef use option E"
+cs_write_meta "$home/state/w-local2.meta" "workspace=wl2" "pane=wl2:p2" "kind=ship"
+printf 'needs-decision [key=z]: pick an approach\n' > "$home/state/w-local2.status"
+run_send "$home" "$TMP/send11-relayed.log" w-local2 --resolve-key z "$marked_text" \
+  || fail "a marked-text resolve should succeed"
+relayed_line=$(grep -F 'resolved [key=z]' "$home/state/w-local2.status")
+assert_contains "$relayed_line" "relayed-from-parent via cs-send:" \
+  "a resolve carrying the from-consigliere marker must read as parent-relayed"
+[ "$local_line" != "$relayed_line" ] || fail "the two lines must be textually distinguishable"
+pass "cs-send: a parent-relayed resolve is distinguishable from a purely local one"
 
 pass "cs-send capo marker and pending-reply integration"
