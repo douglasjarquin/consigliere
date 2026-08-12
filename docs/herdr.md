@@ -1,8 +1,9 @@
 # Herdr verified facts
 
-Verified against herdr 0.7.4 (protocol 16) on 2026-07-22, and re-verified against the current pin herdr 0.7.5 (protocol 17) on 2026-08-01, both in isolated lab sessions.
-The CI pin (`bin/cs-install-herdr.sh`) is 0.7.5 so the required herdr lane exercises the same CLI contract the fleet runs; it was 0.7.4 until an `agent wait` flag rename broke the fleet while CI stayed green.
+Verified against herdr 0.7.4 (protocol 16) on 2026-07-22, re-verified against herdr 0.7.5 (protocol 17) on 2026-08-01, and re-verified again against herdr 0.8.0 (protocol 19) on 2026-08-12, all in isolated lab sessions.
+The CI pin (`bin/cs-install-herdr.sh`) tracks 0.8.0 so the required herdr lane exercises the same CLI contract the fleet runs; it was 0.7.4 until an `agent wait` flag rename broke the fleet while CI stayed green - the exact drift shape this re-verification exists to prevent recurring.
 Re-verify this table after any herdr upgrade; `bin/cs-bootstrap.sh` gates on the minimum protocol.
+The 0.8.0 pass was source-and-CLI verified (herdr's own `Cargo.toml`, `src/api/schema/events.rs`, `src/detect/manifests/*.toml`, `herdr api schema --json`, `herdr --help` trees) rather than lab-session interactive, because this session's own launch permissions refuse to start a nested claude/codex agent inside a nested herdr pane - two items below are recorded as blocked on that environment limit rather than guessed at; the next session that CAN launch a nested agent should close them first.
 
 ## Session discipline
 
@@ -47,6 +48,18 @@ This is the same rule already applied to tab labels below: scope to this home's 
 
 - `agent list` / `agent get <pane>` detect codex automatically (`"agent":"codex"`) with `agent_status`: `idle|working|blocked|done|unknown`.
 - Mid-turn status reads `working`; after the turn ends it reads `idle`.
+- `done` is not a fourth state layered on top of idle: herdr's own source maps `(Idle, seen=false) -> Done` and `(Idle, seen=true) -> Idle` (`src/app/api_helpers.rs`, herdr source, verified 2026-08-12) - "done" means the agent went idle and the pane has not been read since.
+
+### Blocked detection covers claude/codex permission prompts natively (verified against herdr source, 2026-08-12)
+
+Herdr's own detection manifests carry `state = "blocked"` rules that fire on the exact permission-prompt text this fleet cares about, not just on generic "waiting on a human" text:
+
+- claude (`src/detect/manifests/claude.toml`, herdr source): `bash_permission_prompt` (matches "do you want to proceed?" plus bash markers and a yes/no option list), `generic_permission_prompt` ("do you want to proceed?" + "esc to cancel" after the last horizontal rule), `live_blocked_form` ("esc to cancel" + an enter/navigate combination), `legacy_no_prompt_blocker` ("waiting for permission", "tab to amend", "would you like to"...).
+- codex (`src/detect/manifests/codex.toml`, herdr source): `osc_title_blocked` (OSC title "Action Required"), `trust_directory` (the folder-trust dialog), `live_strong_blocker` ("allow command?").
+- Manifests update over herdr's own remote channel independent of the CLI version (`agent explain` reports a `manifest: remote:...` line with its own date-stamped version).
+
+This retires the "Pattern policy trap" open item below as solved by the substrate rather than by a hand-captured `pane.output_matched` pattern: `pane.agent_status_changed` subscriptions accept an optional `agent_status` filter (`src/api/schema/events.rs`, herdr source) so a supervisor can subscribe to blocked-only transitions with zero pattern maintenance and no dependency on capturing the exact rendered prompt text.
+Source-verified only as of 2026-08-12; the live push-and-classify path (subscribe filtered, trigger a real prompt, confirm the wake fires) is not yet exercised end to end - do that before removing the poll-path fallback that currently covers this case.
 - `agent wait <pane> --until <status> --timeout <ms>` blocks until the status is reached (verified ~5s wait resolving on turn end); use it for submit confirmation and bounded single-target waits.
   **The flag was RENAMED between releases: 0.7.4 took `--status`, 0.7.5 takes `--until`, and each rejects the other outright.**
 
@@ -57,7 +70,7 @@ This is the same rule already applied to tab labels below: scope to this home's 
   ```
 
   This is the only recorded case of a herdr CLI contract moving under a running fleet, and it cost real supervision: consigliere shipped `--status` (correct for 0.7.4, recorded verified here), herdr self-updated the boss's machine to 0.7.5, and because `cs_herdr_submit_confirm` discards both streams the usage error read as "the turn never started" - every steer burned its Enter-retry loop and reported "not confirmed" even on success, and the away daemon's strict undelivered path stayed on. CI pinned 0.7.4 and never saw it.
-  Guarded three ways now: the CI pin is 0.7.5, `tests/cs-herdr-lib-live.test.sh` asserts the current spelling works AND that `--status` is rejected, and the offline fakes reject `--status` too, because a fake that matched only the subcommand is what let it ship.
+  Guarded three ways now: the CI pin tracks the currently-running release (0.8.0 as of 2026-08-12, previously 0.7.5), `tests/cs-herdr-lib-live.test.sh` asserts the current spelling works AND that `--status` is rejected, and the offline fakes reject `--status` too, because a fake that matched only the subcommand is what let it ship.
 
 - Known upstream gap (firstmate evidence, docs/herdr-backend.md): `agent get` can read `idle` during a LONG foreground tool call. Policy: native `working` is trusted outright; native `idle`/`unknown` must be corroborated against the codex busy signature (`esc to interrupt`) before a soldier is declared not-working. Single constant in `cs-herdr-lib.sh`.
 
@@ -82,6 +95,10 @@ Use esc as the canonical Escape key name; escape is also accepted.
 
 Consequence for the agent-control plane: there is no way to CLEAR a composer through herdr, so `bin/cs-control-lib.sh` gets past unsent text by SUBMITTING it - one flush Enter, cancel the turn that starts, then type the exit command regardless of what the classifier still says, with the verified postcondition deciding the outcome (docs/agent-control.md).
 
+**Correction (herdr source, verified 2026-08-12): the probe above tested the wrong spelling, not a real capability gap.** `parse_api_key` aliases only `C-c` -> `ctrl+c` (and `+` -> `plus`) before delegating to herdr's full keybinding combo parser (`src/app/api_helpers.rs` -> `src/config/keybinds.rs`, herdr source), which accepts `ctrl|control|shift|alt|option|meta|cmd|command|super|hyper` combined with any named key. `C-u` was never going to parse - it isn't one of the two aliases - but `ctrl+u` is, and has been since v0.7.0 (`git tag --contains` on the commit that added combo-syntax support spans v0.7.0 through the current 0.8.0). Whether `ctrl+u` actually CLEARS a given agent's composer is agent behavior, not a herdr-CLI question, and remains an open item:
+
+**Open verification item (blocked on environment, not on effort).** This session's launch permissions refuse to start a nested claude/codex agent inside a herdr lab pane, so the probe (type unsent text into a live composer, send `herdr pane send-keys <pane> ctrl+u`, read the pane, check whether the text cleared) could not be run here. Run it in a session that CAN launch a nested agent, for both claude and codex, before touching `bin/cs-control-lib.sh`'s flush-by-submitting design - if `ctrl+u` clears the composer on both harnesses, that design can shrink to a direct clear; if not, it stays exactly as documented above.
+
 `pane get` reports the pane's own working directory beside the foreground process's, both physically resolved:
 
 ```text
@@ -98,6 +115,7 @@ $ herdr pane get w1:p1 --session cs-lab-ctlcodex
 
 - Multi-pane push (`events.subscribe` -> `pane.agent_status_changed`) is socket-only; no CLI subcommand.
 - `bin/cs-herdr-events.py` is the raw AF_UNIX subscriber (ported from firstmate's herdr-eventwait.py); the watcher splices it in when the socket is capable and keeps the poll loop as the permanent backstop.
+- `pane.agent_status_changed` accepts an optional `agent_status` filter in the subscription request itself (`src/api/schema/events.rs`, herdr source, verified 2026-08-12) - a supervisor can subscribe to blocked-only (or any single-status) transitions per pane instead of receiving and locally triaging every transition. `bin/cs-herdr-events.py` does not use this yet; see "Blocked detection covers claude/codex permission prompts natively" above.
 
 ## Known gaps / watch list
 
@@ -105,9 +123,10 @@ $ herdr pane get w1:p1 --session cs-lab-ctlcodex
 
 - No `workspace move` CLI (method exists in `api schema`); consigliere does not order workspaces, so no shim is ported.
 - Tab labels are not unique; list-live matching stays defensive (scope to this home's workspace ids from meta, never by label sweep).
-- `herdr integration install codex` exists; not used yet — codex is launched directly with explicit flags so the launch template stays under consigliere's control.
+- `herdr integration install codex` / `claude` are BOTH installed on this machine already (`herdr integration status`: claude current v7, codex current v7) - herdr installs them itself when it detects the binary, not something consigliere opted into. Corrected 2026-08-12: this line previously read "not used yet", which was wrong. What v7 actually does (herdr source, `src/integration/claude_settings.rs`): register exactly one `SessionStart` hook that reports session id + transcript path for native resume (below); it does NOT report turn ends - earlier integration versions registered `Stop`/`PermissionRequest`/`PreToolUse` lifecycle hooks and v7 explicitly REMOVES them, because lifecycle state now comes entirely from the screen-detection manifests. Consigliere's own Stop-hook turn-end wiring (`bin/cs-turnend-guard.sh`) is therefore not duplicated by anything herdr installs; codex is still launched directly with explicit flags so the launch template stays under consigliere's control.
+- Herdr persists `agent_session_id` per pane (below) and, on server restart, rebuilds and re-executes each agent's resume command itself (`claude --resume <id>`, `codex resume <id>`, `src/agent_resume.rs`, herdr source) - including on a headless server with no TUI attached. This is a native answer to the server-restart half of `bin/cs-spawn.sh --relaunch`'s job; the live-server agent-died-mid-task half that relaunch also covers has no herdr-native equivalent and keeps its own pid-proof design (see `docs/agent-control.md`).
 
-## Push event subscriptions (verified live 2026-07-29, herdr 0.7.5, protocol 17)
+## Push event subscriptions (verified live 2026-07-29 at herdr 0.7.5/protocol 17; re-verified live 2026-08-12 at herdr 0.8.0/protocol 19)
 
 `events.subscribe` accepts one or more subscription specs on the session control socket and streams newline-delimited JSON. Probed each spec against a real pane and recorded the server's own answer:
 
@@ -121,7 +140,8 @@ pane.closed                       ACK subscription_started
 pane.output_changed               ERR invalid_request: unknown variant
 ```
 
-The rejection is the authoritative capability list, because the server enumerates what it will accept:
+The rejection is the authoritative capability list, because the server enumerates what it will accept.
+At protocol 17 (2026-07-29):
 
 ```text
 workspace.created workspace.updated workspace.metadata_updated workspace.renamed
@@ -132,29 +152,35 @@ pane.exited pane.agent_detected pane.output_matched pane.agent_status_changed
 pane.scroll_changed layout.updated
 ```
 
-- `pane.output_changed` is a real internal event kind but is NOT subscribable. Source reading alone is misleading here: the exclusion list in `src/api/schema/events.rs` governs plugin hooks, not subscriptions. Probe the socket, do not infer from the source.
+At protocol 19 (2026-08-12, same probe technique against a fresh `cs-lab-*` session, real socket, real pane), the ONLY change is one addition, `workspace.reordered`, inserted right after `workspace.moved`:
+
+```text
+$ python3 -c '... events.subscribe {"type":"pane.bogus_kind_probe"} ...'
+{"id":"","error":{"code":"invalid_request","message":"invalid request: unknown variant `pane.bogus_kind_probe`, expected one of `workspace.created`, `workspace.updated`, `workspace.metadata_updated`, `workspace.renamed`, `workspace.moved`, `workspace.reordered`, `workspace.closed`, ... [rest identical to the protocol-17 list above] ..."}}
+```
+
+`workspace.reordered` is irrelevant to consigliere today (it does not order workspaces, per "Known gaps" below) but is recorded here because this section's whole point is the server's own enumeration, not an assumption that nothing changed.
+
+- `pane.output_changed` is a real internal event kind but is NOT subscribable at protocol 19 either. Source reading alone is misleading here: the exclusion list in `src/api/schema/events.rs` governs plugin hooks, not subscriptions. Probe the socket, do not infer from the source.
 - `pane.output_matched` REQUIRES a `source` field (`visible`, `recent`, or `recent-unwrapped`); omitting it is `invalid_request`, not a default.
-- `bin/cs-herdr-events.py` subscribes to `pane.agent_status_changed`, `pane.exited`, and `pane.agent_detected` per pane, plus `pane.output_matched` for each pattern in `CS_HERDR_EVENT_PATTERNS`.
+- `pane.agent_status_changed` accepts an optional `agent_status` filter in the same subscription object - live-verified 2026-08-12 against a real pane in a fresh lab: `{"type":"pane.agent_status_changed","pane_id":"w1:p1","agent_status":"blocked"}` returned `{"result":{"type":"subscription_started"}}`. Not yet verified: that a real blocked transition actually delivers the filtered event (the lab pane had no live agent in it, per the environment limit noted at the top of this file).
+- `bin/cs-herdr-events.py` subscribes to `pane.agent_status_changed`, `pane.exited`, and `pane.agent_detected` per pane, plus `pane.output_matched` for each pattern in `CS_HERDR_EVENT_PATTERNS` - none of these subscriptions use the `agent_status` filter yet.
 
 ### Protocol precondition
 
-`CS_HERDR_MIN_PROTOCOL` in `bin/cs-herdr-lib.sh` is the floor (16); the live server reports 17.
+`CS_HERDR_MIN_PROTOCOL` in `bin/cs-herdr-lib.sh` is the floor (16); the live server reports 19 as of 2026-08-12 (herdr 0.8.0).
+The herdr source checkout at `~/github/oss/herdr` HEAD already declares `PROTOCOL_VERSION = 20` (`src/protocol/wire.rs`) - that is unreleased work ahead of the installed 0.8.0 binary, not a live-verifiable fact yet; re-probe again once a released herdr reports 20.
 
-Every capability above was verified at protocol 17 only, because that is the running server. They are NOT verified at 16, and this repo has no protocol-16 server to test against. So the floor deliberately stays at 16 and each new capability is gated at runtime instead of by version arithmetic: the subscribe either returns `subscription_started` or it does not, and `bin/cs-watch.sh` already treats any reader failure as "fall back to polling for this cycle". Raising the floor would trade a working fallback for a hard refusal, and would do it on an unverified assumption about which protocol first carried each event.
+Every capability above was verified at protocol 17 or 19 only, because those are the servers that were actually running when each pass happened. They are NOT verified at 16 or 18, and this repo has no protocol-16 or protocol-18 server to test against. So the floor deliberately stays at 16 and each new capability is gated at runtime instead of by version arithmetic: the subscribe either returns `subscription_started` or it does not, and `bin/cs-watch.sh` already treats any reader failure as "fall back to polling for this cycle". Raising the floor would trade a working fallback for a hard refusal, and would do it on an unverified assumption about which protocol first carried each event.
 
 Re-probe after a herdr upgrade rather than trusting this table.
 
-### Pattern policy trap
+### Pattern policy trap (superseded 2026-08-12 - use blocked-status filtering instead)
 
-A configured `pane.output_matched` pattern means "wake the supervisor". Do not configure a benign high-volume pattern: the harness busy signature (`CS_HARNESS_BUSY_RE`, `[Ee]sc to interrupt`) renders continuously during every turn, so subscribing to it would fire an actionable wake on every frame of normal work. The intended first pattern is the claude permission prompt under `--permission-mode auto|acceptEdits`, which currently surfaces only through the slow stale path - but its exact rendered text is NOT yet verified, so no pattern ships by default. Capture it from a real pane that has stopped on a prompt, record the string here with its command and output, then configure it.
-
-**Open verification item (blocked on environment, not on effort).** The prompt cannot be produced on the machine this was written on: codex runs there with permissions fully enabled, so it never stops to ask. It is reproducible in an environment running claude under `--permission-mode auto`, which is where this must be captured. What to record, so the pattern is written once and correctly:
-
-1. The exact rendered prompt line(s) from `herdr pane read --pane <id>`, ansi included and then stripped, since the subscription matches against a chosen `source` rather than the raw frame.
-2. Whether the text is stable across prompt types (file write vs command execution vs network), because one regex must cover every prompt that parks a soldier, or the ones it misses stay invisible.
-3. Whether the prompt persists in `recent` after scrolling, which decides the `source` value.
-
-Until all three are recorded, no pattern is configured. A pattern that matches nothing is indistinguishable from a working subscription, which is why guessing is worse than waiting.
+A configured `pane.output_matched` pattern means "wake the supervisor". Do not configure a benign high-volume pattern: the harness busy signature (`CS_HARNESS_BUSY_RE`, `[Ee]sc to interrupt`) renders continuously during every turn, so subscribing to it would fire an actionable wake on every frame of normal work.
+This section originally planned to solve the claude permission-prompt case by hand-capturing its exact rendered text into a substring/regex pattern - that plan is now superseded: "Blocked detection covers claude/codex permission prompts natively" above shows the prompt is already a native `blocked` transition, so the right subscription is `pane.agent_status_changed` filtered to `agent_status: blocked`, not a captured text pattern.
+No text-pattern capture is needed for this case and none should be added; the open item is now the end-to-end push verification named above, not a rendered-string capture.
+The general caution above (never subscribe a high-volume pattern like the busy signature) still stands for any future `pane.output_matched` use.
 
 ## Pane process evidence (verified live 2026-07-29, herdr 0.7.5, protocol 17)
 
@@ -255,3 +281,29 @@ rule: osc_title_working (region=osc_title priority=1050)
 ```
 
 That matters because consigliere's busy-signature corroboration exists precisely because `agent get` alone was not trusted; `explain` turns a disagreement into a named rule instead of a guess.
+
+## New at 0.8.0: an agent-automation facade consigliere does not yet use (source-verified 2026-08-12; CLI shapes confirmed against the installed 0.8.0 binary's `--help`)
+
+None of the below is adopted yet - recorded here as available capability so the next change to `bin/cs-herdr-lib.sh`, `bin/cs-spawn.sh`, or `bin/cs-control-lib.sh` starts from what herdr can already do, not from a re-derivation of the current workarounds.
+
+- **`herdr agent prompt <target> <text> [--wait] [--until <status>]... [--timeout MS]`** - atomic bracketed-paste submit with an optional server-owned wait; without `--timeout` the wait is indefinite, and a submission that never observes a state change within 5000ms returns a distinct `agent_prompt_stalled` error rather than a false "confirmed" (herdr source, `src/cli/agent.rs`). This is a native version of what `cs_herdr_submit_confirm` + the Enter-retry loop in `cs-herdr-lib.sh` hand-build today.
+- **`herdr agent start <name> --kind <claude|codex|...> --pane <id> [--timeout MS]`** - launches into an existing pane and polls until `interactive_ready`, failing distinctly on `agent_not_ready`, `agent_kind_mismatch`, or `agent_start_failed` (herdr source, `src/cli/agent.rs`). This is a native version of what `cs_herdr_agent_wait_present`'s launch-then-poll guard hand-builds today, with a richer failure vocabulary than "present or not yet".
+- **`herdr agent wait <target> [--until <status>]...`** - `--until` is now repeatable (wait for idle OR done OR blocked in one call); without `--until` it already matches idle, done, or blocked by default (`herdr agent wait --help`, installed 0.8.0 binary).
+- **`herdr pane wait-output <pane_id> (--match TEXT | --regex PATTERN) [--source ...] [--timeout MS]`** - a CLI-level blocking wait for pane output, no socket subscriber required for a one-shot pattern wait.
+- **`herdr notification show <title> [--body TEXT] [--sound none|done|request]`** - a native toast/sound channel from the CLI, a candidate replacement for part of `bin/cs-daemon.sh`'s hand-rolled osascript/herdr/command wedge-alarm channel plumbing.
+- **Named agents.** `agent rename` lets a supervisor address a pane by name (e.g. the task id) instead of tracking pane ids; the name clears when the occupant exits.
+- **Server-side exec-on-event.** A herdr plugin manifest may declare `[[events]] on = "pane.agent_status_changed" command = [...]` (high-volume kinds like `pane.output_changed`/`layout.updated` are deliberately excluded from the allowed set) plus one-shot `[[startup]]` hooks (herdr source, `src/app/api/plugins/mod.rs`). This runs server-side and survives a supervisor restart, unlike `bin/cs-herdr-events.py`'s subprocess-per-watcher-run design.
+- **Offline detection testing.** `herdr agent explain --file <capture> --agent <label> [--verbose]` runs the manifest engine against a saved capture instead of a live pane, and a new `--source detection` read (`pane read`/`agent read`) returns exactly the text region the classifier evaluates. Useful for turning a busy-signature regression into a named-rule assertion instead of a byte-for-byte pane capture pin.
+- **Misc fields available on reads already in use**: `PaneReadResult.truncated: bool` on `pane read` (a read that dropped older rows is now detectable); `AgentInfo.launch_pending`/`interactive_ready` on `api snapshot`; `pane report-agent`/`report-metadata --state-label --token --ttl-ms` let a supervisor stamp its own display-only state onto a pane under a non-reserved source id.
+
+None of the above changes the corroboration policy at the top of this file; that policy is about whether a native `idle`/`unknown` reading can be trusted, and nothing here re-verifies that specific claim (see the open item below).
+
+## Open verification item: does native idle still misread during a long foreground tool call at 0.8.0? (blocked on environment, not on effort, 2026-08-12)
+
+The corroboration policy (`cs_herdr_busy_state_from_raw`, `bin/cs-herdr-lib.sh`) exists because `agent get` could read `idle` while an agent was genuinely mid-turn inside a long foreground tool call.
+Nothing in herdr's 0.8.0 source or changelog claims that misread was fixed - detection is still purely screen-manifest-driven, so there is no source-level reason to expect it changed - but "no announced fix" is not the same as "reverified absent".
+The probe this needs: launch a real claude or codex agent in an isolated `cs-lab-*` session, start a tool call that runs long enough to render no busy-signature text for a stretch (or one that legitimately clears the screen), and sample `agent get`/`api snapshot` mid-call to see whether it still reads `idle`/`unknown` rather than `working`.
+
+**This could not be run in this session**: starting a nested claude or codex agent inside a herdr lab pane (`herdr pane run <pane> 'claude ...'`, tried with both `--dangerously-skip-permissions` and `--permission-mode auto`) was refused by this session's own launch-permission classifier, for reasons unrelated to herdr - the block is structural (spawning a nested coding-agent process from inside one), not specific to either flag.
+Run this in a session whose permissions allow a nested agent launch.
+Until it is run, the corroboration policy stays exactly as documented at the top of this file - do not remove or shrink it on the strength of "herdr got better since this was written" alone.

@@ -110,8 +110,8 @@ case "${1:-} ${2:-}" in
     fi
     exit 0 ;;
   "agent wait")
-    # Mirror the pinned herdr 0.7.5: reject the pre-0.7.5 --status spelling. A
-    # permissive fake is what let the wrong flag ship.
+    # Mirror the pinned herdr (0.8.0, --until spelling since 0.7.5): reject the
+    # pre-0.7.5 --status spelling. A permissive fake is what let the wrong flag ship.
     for a in "$@"; do
       case "$a" in
         --status|--status=*) echo "unknown option: --status" >&2; exit 2 ;;
