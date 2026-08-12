@@ -1186,7 +1186,7 @@ test_capo_worker_identical_wording_different_tasks_both_surface() {
 }
 
 test_capo_worker_reopen_after_resolve_resurfaces() {
-  local dir state fakebin out out2 out3 capo pid
+  local dir state fakebin out capo pid reopen_pending
   dir=$(make_case capo-worker-reopen); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
   capo="$dir/capo-home"
   mkdir -p "$capo/state"
@@ -1199,23 +1199,38 @@ test_capo_worker_reopen_after_resolve_resurfaces() {
     || { kill "$pid" 2>/dev/null; cat "$out"; fail "the first open decision under key x was never surfaced"; }
   reap "$pid"
 
-  # A poll while it sits resolved (the resurfacing regression's actual proof
-  # point): if this pass leaves a stale marker behind, the reopen below would
-  # wrongly collide with it even though the wording is byte-identical.
+  # A scan while it sits resolved (the resurfacing regression's actual proof
+  # point): if this pass leaves a stale manifest behind, the reopen below
+  # would wrongly collide with it even though the wording is byte-identical.
+  # Called directly rather than through a live watcher: the escalation
+  # record Task 3 opened for the first surfacing also becomes visible to the
+  # watcher's own ordinary per-task signal scan on its very next pass - an
+  # accepted, separate wake channel for the same underlying event, out of
+  # scope for this dedupe-identity regression (a direct call exercises only
+  # the fold this test is about).
   printf 'resolved [key=x]: answered via cs-send: use option A\n' >> "$capo/state/w-1.status"
-  out2="$dir/watch2.out"
-  watch_bg "$state" "$fakebin" "$out2"
-  pid=$!
-  wait_live "$pid" 25 || { cat "$out2"; fail "a resolved decision must not itself surface a wake"; }
-  reap "$pid"
+  (
+    cd "$dir" || exit 2
+    # shellcheck disable=SC1090,SC1091
+    PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
+    scan_capo_worker_events >/dev/null
+  )
 
   printf 'needs-decision [key=x]: pick approach\n' >> "$capo/state/w-1.status"
-  out3="$dir/watch3.out"
-  watch_bg "$state" "$fakebin" "$out3"
-  pid=$!
-  wait_until "$CS_WATCH_TEST_TICKS" grep -q '^capo:' "$out3" \
-    || { kill "$pid" 2>/dev/null; cat "$out3"; fail "a decision reopened under the same key with IDENTICAL wording did not resurface"; }
-  kill "$pid" 2>/dev/null || true
+  # Called directly for the same reason as the middle scan above: what this
+  # regression is actually about is scan_capo_worker_events's own dedupe
+  # decision, not which of possibly several independently-valid wake reasons
+  # a live watcher exits on first.
+  reopen_pending=$(
+    cd "$dir" || exit 2
+    # shellcheck disable=SC1090,SC1091
+    PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
+    scan_capo_worker_events
+  )
+  case "$reopen_pending" in
+    *"mycapo"*"w-1"*"x"*) ;;
+    *) fail "a decision reopened under the same key with IDENTICAL wording did not resurface: $reopen_pending" ;;
+  esac
   pass "a decision reopened under the same key and wording after a resolve is treated as a new surfacing event"
 }
 

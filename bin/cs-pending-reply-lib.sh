@@ -21,7 +21,17 @@
 # Each record is a key=value file owned by this library. Schema:
 #   schema=cs-pending-reply.v1
 #   corr_id=                privacy-safe correlation token (16 lowercase hex)
+#   source_kind=             empty (an outbound marked-send expectation, the
+#                            original and still-default shape below) or
+#                            capo-decision-escalation (a parent-side record for
+#                            a capo-nested decision Task 1's fold found open;
+#                            see the dedicated section further down)
 #   task_id=                capo task id in the parent home
+#   capo_task_id=            capo-decision-escalation only: the decision's own
+#                            task id INSIDE that capo (a level deeper than
+#                            task_id, which already names the capo itself)
+#   capo_task_key=           capo-decision-escalation only: the decision's own
+#                            key inside capo_task_id (may be "default")
 #   parent_home=            absolute parent CS_HOME
 #   parent_status=          absolute path of parent state/<task_id>.status
 #   parent_status_scan_signature=
@@ -941,6 +951,183 @@ cs_pending_reply_detect_wrong_home() {  # <state-dir> <corr_id> <capo-home>
   fi
   cs_pending_reply_set "$rec" wrong_home_scan_signature "$snapshot" || return 1
   return 0
+}
+
+# --- capo-nested decision escalation (source_kind=capo-decision-escalation) --
+#
+# A different direction from the outbound expectation above: no message is
+# ever sent here. A capo's own soldier already raised an open decision in ITS
+# OWN task file; bin/cs-watch.sh's fold-based capo scan (Task 1) noticed it
+# and needs a durable, resurfacing parent-side record so the boss's answer can
+# be routed back through cs-send.sh's --resolve-key (Task 4) without ever
+# writing into the capo's own state directory - AGENTS.md section 2's
+# CS_HOME-explicit guard exists specifically to block that, and it is what
+# failed in the original incident. This record's ONLY closure trigger is a
+# LATER run of that same capo scan observing that the capo's own key is no
+# longer open - i.e. the capo itself resolved it, on its own turn, in its own
+# home. Never delivery confirmation (nothing is delivered by opening this
+# record) and never boss intent alone.
+
+# The parent status line's own [key=...] token for a capo-decision-escalation
+# record - a pure function of the capo's own identifiers, so the open and
+# close halves derive the identical key without storing it a second time.
+# Task 5 replaces this derivation with a collision-free one; every caller goes
+# through this one function so that fix has exactly one call site to change.
+cs_pending_reply_capo_escalation_key() {  # <capo-task-key>
+  printf '%s' "$1"
+}
+
+cs_pending_reply_capo_escalation_payload() {  # <capo-id> <capo-task-id> <capo-task-key> <summary>
+  printf 'capo-decision-escalation: capo=%s task=%s key=%s summary=%s' "$1" "$2" "$3" "$4"
+}
+
+# Parse a capo-decision-escalation payload (an open decision's own note text,
+# after its verb/key/colon) back into its fields. Prints
+# "<capo-id>\t<capo-task-id>\t<capo-task-key>\t<summary>" on success; refuses
+# (nonzero, nothing printed) when <note> is not this exact payload shape - the
+# detection cs-send.sh's --resolve-key path (Task 4) uses to tell a
+# capo-decision-escalation record apart from an ordinary local decision.
+cs_pending_reply_capo_escalation_parse() {  # <note>
+  local note=$1 rest cid ctask ckey summary
+  case "$note" in
+    'capo-decision-escalation: capo='*' task='*' key='*' summary='*) ;;
+    *) return 1 ;;
+  esac
+  rest=${note#capo-decision-escalation: capo=}
+  cid=${rest%% task=*}
+  rest=${rest#*" task="}
+  ctask=${rest%% key=*}
+  rest=${rest#*" key="}
+  ckey=${rest%% summary=*}
+  summary=${rest#*" summary="}
+  [ -n "$cid" ] && [ -n "$ctask" ] && [ -n "$ckey" ] || return 1
+  printf '%s\t%s\t%s\t%s' "$cid" "$ctask" "$ckey" "$summary"
+}
+
+# The still-open record (if any) already tracking this exact
+# (capo,capo_task,capo_task_key) triple. Idempotent-open check: running the
+# capo scan twice against the same unresolved decision must open exactly one
+# record.
+cs_pending_reply_capo_escalation_find() {  # <state-dir> <capo-id> <capo-task-id> <capo-task-key>
+  local state=$1 cid=$2 ctask=$3 ckey=$4 dir rec
+  dir=$(cs_pending_reply_dir "$state")
+  [ -d "$dir" ] || return 1
+  for rec in "$dir"/*; do
+    [ -f "$rec" ] || continue
+    case "$(basename "$rec")" in .*) continue ;; esac
+    [ "$(cs_pending_reply_get "$rec" source_kind)" = capo-decision-escalation ] || continue
+    [ "$(cs_pending_reply_get "$rec" task_id)" = "$cid" ] || continue
+    [ "$(cs_pending_reply_get "$rec" capo_task_id)" = "$ctask" ] || continue
+    [ "$(cs_pending_reply_get "$rec" capo_task_key)" = "$ckey" ] || continue
+    [ "$(cs_pending_reply_get "$rec" phase)" = resolved ] && continue
+    printf '%s' "$rec"
+    return 0
+  done
+  return 1
+}
+
+# Open (idempotently) a parent-side escalation record and its resurfacing
+# status line for a capo-nested decision the fold-based capo scan just found
+# open. Never touches the capo's own state - only the parent's own
+# state/<capo-id>.status, the same file the ordinary open-decision fold
+# already reads.
+cs_pending_reply_capo_escalation_open() {  # <state-dir> <parent-home> <capo-id> <capo-task-id> <capo-task-key> <verb> <summary>
+  local state=$1 parent_home=$2 cid=$3 ctask=$4 ckey=$5 verb=$6 summary=$7
+  local dir rec corr now tmp parent_status parent_key payload line
+  cs_pending_reply_capo_escalation_find "$state" "$cid" "$ctask" "$ckey" >/dev/null && return 0
+  dir=$(cs_pending_reply_dir "$state")
+  mkdir -p "$dir" || return 1
+  chmod 700 "$dir" 2>/dev/null || true
+  corr=$(cs_pending_reply_new_id)
+  rec=$(cs_pending_reply_path "$state" "$corr")
+  if [ -e "$rec" ]; then
+    corr=$(cs_pending_reply_new_id)
+    rec=$(cs_pending_reply_path "$state" "$corr")
+    [ ! -e "$rec" ] || return 1
+  fi
+  now=$(cs_pending_reply_now)
+  parent_status="$state/${cid}.status"
+  case "$parent_home" in
+    /*) ;;
+    *) parent_home=$(cd "$parent_home" 2>/dev/null && pwd) || parent_home=$2 ;;
+  esac
+  tmp="$dir/.${corr}.tmp.$$"
+  cat > "$tmp" <<EOF
+schema=$CS_PENDING_REPLY_SCHEMA
+corr_id=$corr
+source_kind=capo-decision-escalation
+task_id=$cid
+capo_task_id=$ctask
+capo_task_key=$ckey
+parent_home=$parent_home
+parent_status=$parent_status
+parent_status_scan_signature=
+request_summary=$(cs_pending_reply_summarize "$summary")
+created_epoch=$now
+delivered_epoch=
+phase=escalated
+turn_seen_busy=0
+request_turn_completed_epoch=
+recovery_attempted_epoch=
+recovery_sender_pid=
+recovery_sender_identity=
+recovery_sent_epoch=
+recovery_delivery_outcome=
+recovery_turn_seen_busy=0
+recovery_turn_completed_epoch=
+escalated_epoch=$now
+escalation_closed_epoch=
+resolved_epoch=
+resolved_via=
+wrong_home_hits=0
+wrong_home_sightings=
+wrong_home_scan_signature=
+grace_secs=$(cs_pending_reply_grace_secs)
+EOF
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "$rec" || return 1
+  parent_key=$(cs_pending_reply_capo_escalation_key "$ckey")
+  payload=$(cs_pending_reply_capo_escalation_payload "$cid" "$ctask" "$ckey" "$(cs_pending_reply_get "$rec" request_summary)")
+  line="$verb [key=$parent_key]: $payload"
+  mkdir -p "$(dirname "$parent_status")" 2>/dev/null || return 1
+  if ! grep -Fqx "$line" "$parent_status" 2>/dev/null; then
+    printf '%s\n' "$line" >> "$parent_status" || return 1
+  fi
+  return 0
+}
+
+# Close a still-open capo-decision-escalation record: called by the SAME
+# fold-based capo scan that opened it, the moment a later pass shows the
+# capo's own key is no longer open. Idempotent; a no-op when no matching
+# unresolved record exists. Only appends the closing status line while that
+# exact keyed decision is still open per bin/cs-classify-lib.sh's fold AND
+# still carries this record's own payload - so it can neither double-close nor
+# clear an unrelated decision that has since taken the same key, mirroring
+# cs_pending_reply_close_escalation's own guard above.
+cs_pending_reply_capo_escalation_close() {  # <state-dir> <capo-id> <capo-task-id> <capo-task-key>
+  local state=$1 cid=$2 ctask=$3 ckey=$4
+  local rec now parent_key parent_status note open_line open_key open_note
+  rec=$(cs_pending_reply_capo_escalation_find "$state" "$cid" "$ctask" "$ckey") || return 0
+  now=$(cs_pending_reply_now)
+  parent_key=$(cs_pending_reply_capo_escalation_key "$ckey")
+  parent_status="$state/${cid}.status"
+  note=$(cs_pending_reply_capo_escalation_payload "$cid" "$ctask" "$ckey" "$(cs_pending_reply_get "$rec" request_summary)")
+  while IFS= read -r open_line; do
+    [ -n "$open_line" ] || continue
+    open_key=${open_line%%$'\t'*}
+    [ "$open_key" = "$parent_key" ] || continue
+    open_note=${open_line#*$'\t'}
+    open_note=${open_note#*$'\t'}
+    [ "$open_note" = "$note" ] || continue
+    printf 'resolved [key=%s]: pending-reply-resolved: capo-decision-escalation: capo=%s task=%s key=%s\n' \
+      "$parent_key" "$cid" "$ctask" "$ckey" >> "$parent_status" 2>/dev/null || return 1
+    break
+  done <<EOF
+$(status_open_decisions "$parent_status")
+EOF
+  cs_pending_reply_set "$rec" phase resolved || return 1
+  cs_pending_reply_set "$rec" resolved_epoch "$now" || return 1
+  cs_pending_reply_set "$rec" resolved_via capo
 }
 
 # One reconciliation tick for a single record: resolve, observe, recover,

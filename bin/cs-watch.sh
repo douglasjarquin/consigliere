@@ -756,6 +756,23 @@ EOF
   return 1
 }
 
+# 0 if <key> appears as the first field of any line in <manifest>; 1
+# otherwise. Unlike _capo_manifest_has_line, this ignores verb/note - it
+# answers "is this key still open at all," which a partial resolve (one of
+# several open keys on the same task closes while another stays open) needs:
+# the key vanishing is the close signal, regardless of what its note said.
+_capo_manifest_key_present() {  # <manifest> <key>
+  local manifest=$1 key=$2 l lkey
+  while IFS= read -r l; do
+    [ -n "$l" ] || continue
+    lkey=${l%%$'\t'*}
+    [ "$lkey" = "$key" ] && return 0
+  done <<EOF
+$manifest
+EOF
+  return 1
+}
+
 # Boss-relevant worker events inside this home's capos that this home has not
 # surfaced yet. Emits <capo-id>\t<worker-task>\t<key>\t<verb>\t<display-line>,
 # one line per currently-OPEN decision this scan has not already surfaced -
@@ -784,7 +801,9 @@ EOF
 # linger - otherwise a later reopen under the same key and wording would
 # match that leftover marker and wrongly look already-surfaced.
 scan_capo_worker_events() {
-  local cid cstate open f task old_manifest new_manifest key verb note line kline
+  local cid cstate open f task old_manifest new_manifest key verb note line kline okey
+  local have_escalation=0
+  command -v cs_pending_reply_capo_escalation_open >/dev/null 2>&1 && have_escalation=1
   while IFS=$(printf '\t') read -r cid cstate; do
     [ -n "$cid" ] || continue
     open=$(scan_open_decisions "$cstate")
@@ -793,6 +812,18 @@ scan_capo_worker_events() {
       task=$(basename "$f"); task=${task%.status}
       old_manifest=$(cat "$(_capo_surfaced_path "$cid" "$task")" 2>/dev/null || true)
       new_manifest=$(_capo_open_lines_for_task "$open" "$task")
+      # A key present in the OLD manifest but gone from the new one just
+      # resolved on the capo's own side - close its Task 3 escalation record
+      # now, regardless of whether other keys on this task are still open.
+      if [ "$have_escalation" = 1 ] && [ -n "$old_manifest" ]; then
+        while IFS=$(printf '\t') read -r okey verb note; do
+          [ -n "$okey" ] || continue
+          _capo_manifest_key_present "$new_manifest" "$okey" && continue
+          cs_pending_reply_capo_escalation_close "$STATE" "$cid" "$task" "$okey" 2>/dev/null || true
+        done <<EOF
+$old_manifest
+EOF
+      fi
       if [ -z "$new_manifest" ]; then
         [ -z "$old_manifest" ] || : > "$(_capo_surfaced_path "$cid" "$task")"
         continue
@@ -805,6 +836,9 @@ scan_capo_worker_events() {
           default) line="${verb}: ${note}" ;;
           *)       line="${verb} [key=${key}]: ${note}" ;;
         esac
+        if [ "$have_escalation" = 1 ]; then
+          cs_pending_reply_capo_escalation_open "$STATE" "$CS_HOME" "$cid" "$task" "$key" "$verb" "$note" 2>/dev/null || true
+        fi
         printf '%s\t%s\t%s\t%s\t%s\n' "$cid" "$task" "$key" "$verb" "$line"
       done <<EOF
 $new_manifest

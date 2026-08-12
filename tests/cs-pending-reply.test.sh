@@ -353,4 +353,49 @@ cs_pending_reply_tick "$state" || fail "the tick must survive a corrupt record"
   || fail "a NUL-bearing record must never write into the spliced-together home"
 pass "a NUL-bearing pending-reply record is refused before field parsing"
 
+# 17. capo-decision-escalation: a different direction from the outbound
+#     expectation above (no message is ever sent) - the parent-side record
+#     Task 1's fold-based capo scan opens for a capo-nested decision. Opening
+#     the same (capo,task,key) triple twice must not open a second record,
+#     and the record's schema must round-trip through the existing header
+#     parser exactly like the outbound schema above.
+home=$(setup_parent capo-escalation-open); state="$home/state"
+export CS_PENDING_REPLY_NOW=15000
+cs_pending_reply_capo_escalation_open "$state" "$home" mycapo w-1 x needs-decision "pick an approach" \
+  || fail "opening a new capo-decision-escalation record should succeed"
+first_count=$(find "$(cs_pending_reply_dir "$state")" -maxdepth 1 -type f | wc -l | tr -d ' ')
+cs_pending_reply_capo_escalation_open "$state" "$home" mycapo w-1 x needs-decision "pick an approach" \
+  || fail "re-opening the same triple should stay a successful no-op"
+second_count=$(find "$(cs_pending_reply_dir "$state")" -maxdepth 1 -type f | wc -l | tr -d ' ')
+[ "$first_count" = "$second_count" ] || fail "running the open twice must not open a second record"
+rec=$(cs_pending_reply_capo_escalation_find "$state" mycapo w-1 x) || fail "the record must be findable"
+[ "$(cs_pending_reply_get "$rec" source_kind)" = capo-decision-escalation ] || fail "source_kind must round-trip"
+[ "$(cs_pending_reply_get "$rec" capo_task_id)" = w-1 ] || fail "capo_task_id must round-trip"
+[ "$(cs_pending_reply_get "$rec" capo_task_key)" = x ] || fail "capo_task_key must round-trip"
+status_line=$(tail -1 "$state/mycapo.status")
+case "$status_line" in
+  "needs-decision [key=x]: capo-decision-escalation: capo=mycapo task=w-1 key=x summary="*) : ;;
+  *) fail "the parent status file must gain the escalation payload line: $status_line" ;;
+esac
+pass "a new capo decision opens exactly one parent-side record with a round-tripping schema"
+
+# 18. closure is gated on the capo's own resolution being noticed by a later
+#     scan, never on delivery confirmation alone - closing on delivery would
+#     recreate the original incident's shape (parent marks it handled while
+#     the capo may still be sitting on it unprocessed).
+cs_pending_reply_mark_delivered "$state" "$(cs_pending_reply_get "$rec" corr_id)" \
+  || fail "mark_delivered should still succeed (its own phase guard allows escalated) but never close"
+[ "$(cs_pending_reply_get "$rec" phase)" = escalated ] \
+  || fail "confirmed delivery alone must leave the record open"
+cs_pending_reply_capo_escalation_find "$state" mycapo w-1 x >/dev/null \
+  || fail "the record must still be open after delivery alone"
+cs_pending_reply_capo_escalation_close "$state" mycapo w-1 x \
+  || fail "closing after the capo's own resolution should succeed"
+[ "$(cs_pending_reply_get "$rec" phase)" = resolved ] || fail "phase should be resolved after close"
+cs_pending_reply_capo_escalation_find "$state" mycapo w-1 x \
+  && fail "a resolved record must not be findable as still-open"
+assert_contains "$(tail -1 "$state/mycapo.status")" "pending-reply-resolved: capo-decision-escalation" \
+  "the closing line must carry the escalation's own composite marker"
+pass "capo-decision-escalation closes on the capo's own resolution, never on delivery alone"
+
 pass "cs-pending-reply lifecycle guards"
