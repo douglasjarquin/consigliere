@@ -82,21 +82,25 @@ pass "cs_made_status forwards an explicit run-id"
 # --- gate init / doctor / daemon start / daemon stop: exact forwarding -----
 
 reset_log
+# shellcheck disable=SC2119  # cs_made_gate_init deliberately takes no args here: this case asserts the bare forwarding
 cs_made_gate_init >/dev/null || fail "cs_made_gate_init must succeed against the stub"
 assert_line "$(cat "$CALL_LOG")" '^gate init$' "cs_made_gate_init calls 'made gate init'"
 pass "cs_made_gate_init forwards to made gate init"
 
 reset_log
+# shellcheck disable=SC2119  # cs_made_doctor deliberately takes no args here: this case asserts the bare forwarding
 cs_made_doctor >/dev/null || fail "cs_made_doctor must succeed against the stub"
 assert_line "$(cat "$CALL_LOG")" '^doctor$' "cs_made_doctor calls 'made doctor'"
 pass "cs_made_doctor forwards to made doctor"
 
 reset_log
+# shellcheck disable=SC2119  # cs_made_daemon_start deliberately takes no args here: this case asserts the bare forwarding
 cs_made_daemon_start >/dev/null || fail "cs_made_daemon_start must succeed against the stub"
 assert_line "$(cat "$CALL_LOG")" '^daemon start$' "cs_made_daemon_start calls 'made daemon start'"
 pass "cs_made_daemon_start forwards to made daemon start"
 
 reset_log
+# shellcheck disable=SC2119  # cs_made_daemon_stop deliberately takes no args here: this case asserts the bare forwarding
 cs_made_daemon_stop >/dev/null || fail "cs_made_daemon_stop must succeed against the stub"
 assert_line "$(cat "$CALL_LOG")" '^daemon stop$' "cs_made_daemon_stop calls 'made daemon stop'"
 pass "cs_made_daemon_stop forwards to made daemon stop"
