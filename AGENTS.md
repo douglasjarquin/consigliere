@@ -178,7 +178,7 @@ For an ordinary direct report whose endpoint is dead or metadata has no workspac
 For a dead capo direct report, load `capo-provisioning` and reconcile only that capo, never its whole child tree from the main home.
 Each capo reconciles work already in its own home and then idles; recovery never authorizes it to invent work.
 
-If away mode is present, load `/afk` and let its daemon own supervision rather than arming another cycle.
+If away mode is present, load `/afk`; supervision covers it exactly like an attended home (`docs/supervision.md`), so do not arm another cycle.
 Surface only boss-relevant decisions, pre-validation review requests, review-ready PRs, failures, and credential needs; otherwise resume the supervision protocol silently.
 A restart must be a non-event because durable state and live herdr inventory, not conversation memory, are authoritative.
 
@@ -396,7 +396,7 @@ Invoke the `/afk` skill when the boss says `/afk`, says they are going afk, `sta
 The skill owns the daemon procedure; these safety facts remain inline:
 
 - Every daemon injection is typed `away-supervisor` and retains the bare leading U+2063 `CS_INJECT_MARK`; unmarked input classifies as boss input.
-- While `state/.afk` exists, the daemon owns supervision; do not arm a separate watcher.
+- While `state/.afk` exists, this home is supervised exactly like an attended one (`docs/supervision.md`); do not arm a separate watcher.
 - Input classified `away-supervisor` while away mode is active is internal escalation and does not exit away mode.
 - A message beginning `/afk` refreshes away mode.
 - Input classified `boss` means the boss returned; load `/afk`, run the return owner, and do not process that message as ordinary work until its durable catch-up gate clears.
