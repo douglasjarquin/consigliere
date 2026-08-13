@@ -72,7 +72,7 @@ Restoring an interrupted drain's queue removes the batch it restored from, becau
   A capo home is polled only while its own agent sits idle on a checkpoint, so an event there can otherwise wait as long as that agent's turn lasts.
   The wake reports that the event exists; the capo still owns the lane.
   Discovery is from this home's own `state/<id>.meta` records with `kind=capo`, and a recorded home is read only when it still carries the `.cs-capo-home` marker.
-  Dedup is per capo and worker on the surfaced line (`state/.capo-surfaced-<capo>__<worker>`), so a standing block wakes the parent once.
+  Dedup is per capo, worker task, and decision key against a per-task open-decision manifest (`state/.capo-surfaced-<capo>__<worker>`), not the surfaced line's text, so a standing block wakes the parent once and a resolve-then-reopen under the same key and wording still surfaces again; `bin/cs-watch.sh`'s `scan_capo_worker_events` owns the fold.
 - `heartbeat` - fleet-scan backstop found an unsurfaced boss-relevant status.
 
 `bin/cs-classify-lib.sh` is the single owner of the verb vocabulary shared with the away-mode daemon and delegates machine-input typing to `bin/cs-operational-input.sh`.

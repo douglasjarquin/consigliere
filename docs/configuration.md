@@ -39,6 +39,7 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 | `config/done-archive.md` | portable | tasks-axi done archive, pinned by `.tasks.toml` |
 | `config/note-archive.md` | portable | tasks-axi body archive; an internal sibling name tasks-axi creates beside the backlog |
 | `config/charter.md` | portable, capo homes only | the capo's filled charter brief |
+| `config/bossless-ack.md` | portable | per-project bossless-mode acknowledgment / kill switch; `bin/cs-afk-start.sh`'s own header owns the record format and fail-closed parsing |
 | `config/backlog-backend.conf` | portable | absent or `tasks-axi` = tasks-axi against `config/backlog.md`; `manual` = hand-edit the markdown |
 | `config/permission-mode.conf` | portable | optional narrower claude launch permission mode; absent = full autonomy; `bin/cs-harness-lib.sh` owns the two-column schema below. This is a Claude ACCOUNT policy, not a machine property - the record is `<harness> <mode>` with no machine-specific content, so the same file is correct verbatim on every machine that account uses; do not re-derive it as host-specific |
 | `config/wedge-alarm.conf` | portable | away-mode wedge-alarm active-alert directives; absent = auto (macOS Notification Center when available, degrading elsewhere). A boss preference, boss-authored only; the directives are channel selectors that adapt per OS, so the file is portable. The one non-portable use is a `command:` directive naming a machine-local path - keep such a value out of shared dotfiles |
