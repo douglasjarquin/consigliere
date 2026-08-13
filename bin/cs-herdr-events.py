@@ -10,12 +10,24 @@ react sub-second. The bash side normalizes each line, applies the single-owner
 policy table (bin/cs-watch.sh), decides when to stop, and kills this reader.
 
 Subscribed kinds, all per pane:
-  pane.agent_status_changed  every status edge (working/idle/blocked/done)
+  pane.agent_status_changed  filtered server-side to agent_status=blocked only
+                             (herdr's native manifests already classify a
+                             claude/codex permission prompt as this state, so
+                             no pattern hunting is needed - docs/herdr.md,
+                             "Blocked detection covers claude/codex permission
+                             prompts natively"). The bash side's transition
+                             policy (bin/cs-watch.sh cs_transition_policy) only
+                             ever treats `blocked` as actionable from a push
+                             edge in the first place; every other status edge
+                             is re-read every cycle by the poll loop anyway, so
+                             the filter drops nothing the push path was the
+                             sole source of.
   pane.exited                the pane's process ended - a soldier that is gone
                              rather than quiet, which polling could only infer
                              from a later "pane not found"
   pane.agent_detected        an agent appeared in the pane, so a relaunch is a
-                             fact instead of an inference
+                             fact instead of an inference; UNFILTERED - the
+                             agent's status at detection time still matters
   pane.output_matched        the pane rendered text matching a requested
                              pattern (see CS_HERDR_EVENT_PATTERNS)
 
@@ -24,12 +36,13 @@ as `name=regex` pairs separated by newlines. Absent, no output subscription is
 requested. A pattern the server rejects fails the whole subscribe (exit 3) so a
 typo is loud rather than a subscription that silently never fires.
 
-Wire protocol (verified live: herdr 0.7.5, protocol 17, newline-delimited JSON.
+Wire protocol (verified live: herdr 0.7.5, protocol 17, newline-delimited JSON;
+the agent_status filter re-verified live at herdr 0.8.0, protocol 19, docs/herdr.md.
 Every kind below was confirmed to return subscription_started against a real
 pane; pane.output_changed is NOT subscribable and the server names the accepted
 set in its rejection):
   request : {"id","method":"events.subscribe","params":{"subscriptions":[
-             {"type":"pane.agent_status_changed","pane_id":P},
+             {"type":"pane.agent_status_changed","pane_id":P,"agent_status":"blocked"},
              {"type":"pane.exited","pane_id":P},
              {"type":"pane.agent_detected","pane_id":P},
              {"type":"pane.output_matched","pane_id":P,"source":"recent",
@@ -160,7 +173,13 @@ def main(argv):
     patterns = _patterns()
     subscriptions = []
     for pane in panes:
-        subscriptions.append({"type": "pane.agent_status_changed", "pane_id": pane})
+        subscriptions.append(
+            {
+                "type": "pane.agent_status_changed",
+                "pane_id": pane,
+                "agent_status": "blocked",
+            }
+        )
         subscriptions.append({"type": "pane.exited", "pane_id": pane})
         subscriptions.append({"type": "pane.agent_detected", "pane_id": pane})
         for name, regex in patterns:

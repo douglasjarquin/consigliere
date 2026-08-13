@@ -1087,7 +1087,14 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
       status|agent-detected)
         # An agent appearing in a pane is a relaunch fact rather than an
         # inference, but it is projected through the same status policy: the
-        # detected event carries the agent's current status.
+        # detected event carries the agent's current status. `status` lines
+        # are server-filtered to agent_status=blocked only (cs-herdr-events.py
+        # subscribes pane.agent_status_changed with that filter), which is
+        # safe here because cs_transition_policy already treats every other
+        # status as absorb/defer for a push edge - the filter drops no case
+        # this policy table would otherwise have acted on. `agent-detected`
+        # carries whatever status the agent had when it appeared and stays
+        # unfiltered.
         record=$(cs_transition_normalize "$p" "$ws" "$status" "$agent")
         if hit=$(cs_transition_apply "$state" "$record"); then
           printf '%s' "$hit"

@@ -60,8 +60,12 @@ Herdr's own detection manifests carry `state = "blocked"` rules that fire on the
 - codex (`src/detect/manifests/codex.toml`, herdr source): `osc_title_blocked` (OSC title "Action Required"), `trust_directory` (the folder-trust dialog), `live_strong_blocker` ("allow command?").
 - Manifests update over herdr's own remote channel independent of the CLI version (`agent explain` reports a `manifest: remote:...` line with its own date-stamped version).
 
-This retires the "Pattern policy trap" open item below as solved by the substrate rather than by a hand-captured `pane.output_matched` pattern: `pane.agent_status_changed` subscriptions accept an optional `agent_status` filter (`src/api/schema/events.rs`, herdr source) so a supervisor can subscribe to blocked-only transitions with zero pattern maintenance and no dependency on capturing the exact rendered prompt text.
-Source-verified only as of 2026-08-12; the live push-and-classify path (subscribe filtered, trigger a real prompt, confirm the wake fires) is not yet exercised end to end - do that before removing the poll-path fallback that currently covers this case.
+This is solved by the substrate rather than by a hand-captured `pane.output_matched` pattern: `pane.agent_status_changed` subscriptions accept an optional `agent_status` filter (`src/api/schema/events.rs`, herdr source) so a supervisor can subscribe to blocked-only transitions with zero pattern maintenance and no dependency on capturing the exact rendered prompt text.
+**Adopted and live-verified end to end (2026-08-13, herdr 0.8.0/protocol 19, isolated `cs-herdr-lab.sh` session, never the default session):** `bin/cs-herdr-events.py` now subscribes `pane.agent_status_changed` with `"agent_status":"blocked"` for every pane (`pane.exited`/`pane.agent_detected` stay unfiltered).
+A real nested claude agent (`herdr agent start ... --kind claude`) produced two independent genuine blocked transitions - the one-time folder-trust dialog on first launch (`agent get` and `agent prompt` both reported `"agent_status":"blocked"`, and `pane read` showed the actual dialog text, "Quick safety check: Is this a project you created or one you trust?"), and a second, transient blocked reading on a relaunch under `--permission-mode default` in response to a Bash-tool prompt (resolved too fast to capture its rendered text before the next `pane read`, evidently from a permission already cached for that command from the prior launch, but `agent_status` still read `blocked` in both the `agent prompt` response and the pushed event before it cleared).
+Both transitions arrived over the filtered subscription as the ordinary `status\t<pane>\t<ws>\tblocked\tclaude` projected line, decoded identically to the pre-filter unfiltered stream; `@subscribed` plus exactly one such line was the reader's full captured output for each case.
+The poll-path fallback is unchanged and stays the permanent backstop (`cs-watch.sh`'s poll pass reads `pane_busy_state` every cycle regardless of push capability) - this verification only closes the "does the filter actually deliver" open item, per data/stow-synthesis-survey/report.md S2.
+Filtering the subscription to `blocked` only is safe for every OTHER status too: `bin/cs-watch.sh`'s `cs_transition_policy` already treats a pushed `working` edge as absorb (marker-clear only, never a wake) and `idle`/`done` as defer (no-op), and the always-running poll pass clears the same dedupe marker on its own cadence independent of push - so no case the filter drops was ever the SOLE source of a push wake.
 - `agent wait <pane> --until <status> --timeout <ms>` blocks until the status is reached (verified ~5s wait resolving on turn end); use it for submit confirmation and bounded single-target waits.
   **The flag was RENAMED between releases: 0.7.4 took `--status`, 0.7.5 takes `--until`, and each rejects the other outright.**
 
@@ -117,7 +121,7 @@ $ herdr pane get w1:p1 --session cs-lab-ctlcodex
 
 - Multi-pane push (`events.subscribe` -> `pane.agent_status_changed`) is socket-only; no CLI subcommand.
 - `bin/cs-herdr-events.py` is the raw AF_UNIX subscriber (ported from firstmate's herdr-eventwait.py); the watcher splices it in when the socket is capable and keeps the poll loop as the permanent backstop.
-- `pane.agent_status_changed` accepts an optional `agent_status` filter in the subscription request itself (`src/api/schema/events.rs`, herdr source, verified 2026-08-12) - a supervisor can subscribe to blocked-only (or any single-status) transitions per pane instead of receiving and locally triaging every transition. `bin/cs-herdr-events.py` does not use this yet; see "Blocked detection covers claude/codex permission prompts natively" above.
+- `pane.agent_status_changed` accepts an optional `agent_status` filter in the subscription request itself (`src/api/schema/events.rs`, herdr source, verified 2026-08-12) - a supervisor can subscribe to blocked-only (or any single-status) transitions per pane instead of receiving and locally triaging every transition. **Adopted 2026-08-13**: `bin/cs-herdr-events.py` subscribes with `agent_status:blocked`; see "Blocked detection covers claude/codex permission prompts natively" above for the live end-to-end verification.
 
 ## Known gaps / watch list
 
@@ -177,12 +181,10 @@ Every capability above was verified at protocol 17 or 19 only, because those are
 
 Re-probe after a herdr upgrade rather than trusting this table.
 
-### Pattern policy trap (superseded 2026-08-12 - use blocked-status filtering instead)
+### `pane.output_matched` pattern caution (the old "Pattern policy trap" plan is retired - see "Blocked detection..." above)
 
 A configured `pane.output_matched` pattern means "wake the supervisor". Do not configure a benign high-volume pattern: the harness busy signature (`CS_HARNESS_BUSY_RE`, `[Ee]sc to interrupt`) renders continuously during every turn, so subscribing to it would fire an actionable wake on every frame of normal work.
-This section originally planned to solve the claude permission-prompt case by hand-capturing its exact rendered text into a substring/regex pattern - that plan is now superseded: "Blocked detection covers claude/codex permission prompts natively" above shows the prompt is already a native `blocked` transition, so the right subscription is `pane.agent_status_changed` filtered to `agent_status: blocked`, not a captured text pattern.
-No text-pattern capture is needed for this case and none should be added; the open item is now the end-to-end push verification named above, not a rendered-string capture.
-The general caution above (never subscribe a high-volume pattern like the busy signature) still stands for any future `pane.output_matched` use.
+This still stands for any future `pane.output_matched` use; the claude/codex permission-prompt case itself no longer needs a captured pattern at all (native `blocked` detection, adopted and live-verified above), so no text-pattern capture should be added for it.
 
 ## Pane process evidence (verified live 2026-07-29, herdr 0.7.5, protocol 17)
 
