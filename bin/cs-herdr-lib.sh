@@ -163,14 +163,19 @@ cs_herdr_run() { # <pane_id> <text>  - text plus Enter, atomic
   cs_herdr pane run "$1" "$2"
 }
 
-# Agent-aware atomic submit. Preferred over cs_herdr_run for prompting an AGENT
-# (rather than a shell): it is agent-state-aware, and it delivers multiline text
-# as ONE message instead of submitting at the first newline.
-# It does NOT check the composer and will concatenate onto existing text, and it
-# reports success for prompts it never delivers - bin/cs-prompt-lib.sh owns both
-# guards and is the only thing that should call this.
-cs_herdr_agent_prompt() { # <pane_id> <text>
-  cs_herdr agent prompt "$1" "$2"
+# Agent-aware atomic submit-and-confirm. Preferred over cs_herdr_run for
+# prompting an AGENT (rather than a shell): it delivers multiline text as ONE
+# message instead of submitting at the first newline, and native `--wait
+# --until working` (herdr 0.8.0+) folds the old separate submit-then-poll
+# pattern into one call - herdr itself returns the distinct
+# "agent_prompt_stalled" error (src/api/wait.rs, herdr source) when the agent
+# never leaves its pre-submit state within its own 5s settle window, instead
+# of consigliere polling `agent wait` a second time to find out.
+# Still does NOT check the composer and will concatenate onto existing text -
+# bin/cs-prompt-lib.sh owns that guard and is the only thing that should call
+# this.
+cs_herdr_agent_prompt_confirmed() { # <pane_id> <text> [timeout-ms] -> rc 0 iff confirmed working
+  cs_herdr agent prompt "$1" "$2" --wait --until working --timeout "${3:-8000}"
 }
 
 cs_herdr_send_text() { # <pane_id> <text>  - literal, no submit
