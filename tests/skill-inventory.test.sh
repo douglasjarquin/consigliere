@@ -66,4 +66,19 @@ EOF
 [ -z "$missing" ] || fail "AGENTS.md promises slash commands with no matching skill:$missing"
 pass "every slash command AGENTS.md promises the boss resolves to a skill"
 
+# 4. /afk is the one canonical owner of bossless mode: the old orthogonality
+#    claim decisions 1+2 invert must be gone, and the new section must carry
+#    all five load-bearing claims (scope condition, merge exclusion, capo
+#    non-participation, recording requirement, acknowledgment pointer).
+AFK_SKILL="$SKILLS/afk/SKILL.md"
+grep -q "still waits for the boss's explicit word" "$AFK_SKILL" \
+  && fail "skills/afk/SKILL.md still carries the old orthogonality claim decisions 1+2 invert"
+grep -q "^## Bossless mode" "$AFK_SKILL" || fail "skills/afk/SKILL.md is missing its Bossless mode section"
+grep -q "yolo.*posture is on" "$AFK_SKILL" || fail "bossless section is missing its scope condition (yolo + armed daemon)"
+grep -q "Merge is never included" "$AFK_SKILL" || fail "bossless section is missing its merge-exclusion claim"
+grep -q "A capo never independently enters this mode" "$AFK_SKILL" || fail "bossless section is missing its capo-non-participation claim"
+grep -q "durably recorded and attached to the resulting PR" "$AFK_SKILL" || fail "bossless section is missing its recording requirement"
+grep -q "acknowledgment before applying it" "$AFK_SKILL" || fail "bossless section is missing its acknowledgment pointer"
+pass "skills/afk/SKILL.md is the one canonical owner of bossless mode's scope and boundaries"
+
 pass "skill inventory is internally consistent"
