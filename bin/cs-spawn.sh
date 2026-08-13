@@ -451,7 +451,7 @@ spawn_graft_prep() {  # <project-abs> <worktree-real>
     0) echo "notice: built graft index in $wt_real" >&2 ;;
     124) echo "warn: graft build did not finish within ${timeout}s in $wt_real; the worktree has no graft index" >&2 ;;
     "$CS_TIMEOUT_UNAVAILABLE") echo "warn: could not run graft build under a time bound; skipping graft index prep in $wt_real" >&2 ;;
-    *) echo "warn: graft build exited $rc in $wt_real; the worktree has no graft index (output: $out)" >&2 ;;
+    *) echo "warn: graft build exited $rc in $wt_real; the worktree has no graft index (output: ${out//$'\n'/ })" >&2 ;;
   esac
 }
 
