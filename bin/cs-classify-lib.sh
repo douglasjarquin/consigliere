@@ -45,9 +45,10 @@ CS_CREW_STATE_BIN="${CS_CREW_STATE_BIN:-$_CS_CLASSIFY_LIB_DIR/cs-crew-state.sh}"
 
 # Boss-relevant status verbs. A status line carrying any of these is work
 # consigliere must see. Lines without these verbs are no-verb signals: the
-# watcher absorbs them only with positive provably-working evidence, while the
-# daemon uses its away-mode classification. CS_BOSS_RE overrides the whole set;
-# absent, this default applies.
+# watcher absorbs them only with positive provably-working evidence, whether
+# the pane is attended or away (docs/supervision.md: no separate away-mode
+# supervisor). CS_BOSS_RE overrides the whole set; absent, this default
+# applies.
 #
 # Free-text tokens (PR ready, checks green, ready in branch, merged) exist only
 # for legacy lines that lack a standard terminal verb. status_is_boss_relevant
@@ -68,9 +69,9 @@ CS_CLASSIFY_PAUSED_VERB_DEFAULT='paused'
 # Bounded re-surface cadence for a declared pause or a dead-agent boss hold.
 # Far longer than the wedge threshold (CS_STALE_ESCALATE_SECS, default 240s), it
 # avoids nagging a deliberate wait while ensuring a forgotten hold cannot rot
-# invisibly. One hour by default; both consumers read CS_PAUSE_RESURFACE_SECS
+# invisibly. One hour by default; the watcher reads CS_PAUSE_RESURFACE_SECS
 # with this default so the cadence has one owner.
-# shellcheck disable=SC2034 # Read by the watcher and daemon, not this lib.
+# shellcheck disable=SC2034 # Read by the watcher, not this lib.
 CS_PAUSE_RESURFACE_SECS_DEFAULT=3600
 
 # The resolution verb and durable-backlog-transfer verb that CLOSE a keyed
@@ -455,8 +456,8 @@ signal_crew_provably_working() {  # <file> ...
 
 # 0 (terminal/actionable) if a stale pane's last status line is boss-relevant;
 # 1 otherwise, including the no-status case. A 1 only means "non-terminal";
-# the always-on watcher then applies crew_is_provably_working, while the
-# away-mode daemon applies its persistence recheck.
+# the always-on watcher then applies crew_is_provably_working, whether the
+# pane is attended or away.
 stale_is_terminal() {  # <pane> <state>
   local pane=$1 state=$2 last
   last=$(last_status_line "$state/$(pane_to_task "$pane" "$state").status")

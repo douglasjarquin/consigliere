@@ -13,7 +13,7 @@
 #   session-start      ordered session-start digest
 #   watcher            a cs-send steer or supervision poke
 #   turn-end-guard     codex Stop-hook continuation
-#   away-supervisor    away-mode daemon escalation
+#   away-supervisor    away-mode activation delivery (bin/cs-activate.sh)
 #   from-consigliere   capo-routed request compatibility form
 #
 # from-consigliere is deliberately encoded in its pre-v1 byte form:
