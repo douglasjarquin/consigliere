@@ -393,7 +393,7 @@ The spawn assertion and generated ship brief must both enforce that project work
 ### Away-mode stub
 
 Invoke the `/afk` skill when the boss says `/afk`, says they are going afk, `state/.afk` exists, an incoming message classifies as `away-supervisor` through `bin/cs-operational-input.sh`, or any `state/.subsuper-*` marker is involved.
-The skill owns the daemon procedure; these safety facts remain inline:
+The skill owns the full contract; these safety facts remain inline:
 
 - Every daemon injection is typed `away-supervisor` and retains the bare leading U+2063 `CS_INJECT_MARK`; unmarked input classifies as boss input.
 - While `state/.afk` exists, this home is supervised exactly like an attended one (`docs/supervision.md`); do not arm a separate watcher.
