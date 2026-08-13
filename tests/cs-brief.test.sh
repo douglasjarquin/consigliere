@@ -235,4 +235,67 @@ CLAUDE_CONFIG_DIR="$NO_OMO_CLAUDE" CS_HARNESS_OVERRIDE=claude "$BIN" e9 alpha --
 assert_absent "$TMP/data/e9" "a refused claude plan-first-no-omo scaffold leaves no task directory behind"
 pass "the omo guard refuses plan-first and warns-but-proceeds on ultrawork when the plugin is absent"
 
+# no-mistakes (t1): render/commit recipe uses the override vars cs_resolve_root
+# actually honors - a plain STATE=/DATA= assignment is silently stomped, since
+# sourcing cs-auto-decision-lib.sh pulls in cs-afk-start.sh's unconditional
+# cs_resolve_root call, reproduced live during implementation - plus the
+# --intent pointer-line instruction and an explicit ban on a direct PR edit.
+B="$TMP/data/t1/brief.md"
+assert_grep 'CS_STATE_OVERRIDE=' "$B" "no-mistakes brief's render recipe sets CS_STATE_OVERRIDE"
+assert_grep 'CS_DATA_OVERRIDE=' "$B" "no-mistakes brief's render recipe sets CS_DATA_OVERRIDE"
+assert_grep 'cs_auto_decision_render t1' "$B" "no-mistakes brief renders this task's own ledger"
+assert_grep 'docs/auto-decisions/t1.md' "$B" "no-mistakes brief names the committed evidence file"
+assert_grep 'ask-user findings were auto-decided under bossless mode' "$B" "no-mistakes brief appends the --intent pointer sentence"
+# shellcheck disable=SC2016  # literal grep pattern; backticks are brief markup, not expansion
+assert_grep 'Never call `gh-axi pr edit`' "$B" "no-mistakes brief forbids a direct PR-edit call for this evidence"
+assert_no_grep '## Auto-decisions (bossless mode)' "$B" "no-mistakes brief never asks the soldier to write PR-body markdown itself"
+pass "no-mistakes brief attaches bossless evidence via committed file + intent pointer, never a PR edit"
+
+# direct-PR (t2): same committed-file recipe, plus the short PR-body section
+# since this mode's own soldier writes the PR body itself.
+B="$TMP/data/t2/brief.md"
+assert_grep 'cs_auto_decision_render t2' "$B" "direct-PR brief renders this task's own ledger"
+assert_grep 'docs/auto-decisions/t2.md' "$B" "direct-PR brief names the committed evidence file"
+assert_grep '## Auto-decisions (bossless mode)' "$B" "direct-PR brief includes the PR-body section heading"
+# shellcheck disable=SC2016  # literal grep pattern; backticks are brief markup, not expansion
+assert_grep 'See `docs/auto-decisions/t2.md` in this diff' "$B" "direct-PR brief's PR-body section links the committed file"
+pass "direct-PR brief attaches bossless evidence via committed file + a short PR-body section"
+
+# local-only (t3): out of Task 15's scope per the plan's own QA scenarios (only
+# direct-PR and no-mistakes are covered, since local-only never opens a PR).
+assert_no_grep 'auto-decided under bossless mode' "$TMP/data/t3/brief.md" \
+  "local-only brief carries no bossless-evidence instructions (out of scope)"
+pass "local-only brief is untouched by the bossless-evidence attachment step"
+
+# Functional round-trip: extract the render-and-commit recipe VERBATIM from
+# t1's real generated brief (not a hand-written copy of it) and run it against
+# a real fixture ledger, so a future edit that breaks the recipe's own syntax,
+# or regresses the override-var fix above, fails here rather than only in
+# prose-matching assertions.
+(
+  set -eu
+  # shellcheck source=bin/cs-auto-decision-lib.sh
+  . "$ROOT/bin/cs-auto-decision-lib.sh"
+  cs_auto_decision_record t1 destructive "removed a stale symlink" "removed it" "target no longer existed"
+  cs_auto_decision_record t1 contract-expanding "added a new endpoint" "added it" "needed for the feature"
+
+  PROJECT="$TMP/auto-decisions-fixture-project"
+  mkdir -p "$PROJECT"
+  cd "$PROJECT"
+  git init -q
+  git config user.email test@example.com
+  git config user.name test
+  touch placeholder && git add placeholder && git commit -q -m init
+
+  RECIPE=$(awk '/^```$/{c++; next} c==1' "$TMP/data/t1/brief.md")
+  eval "$RECIPE"
+
+  [ -f docs/auto-decisions/t1.md ] || { echo "fixture: committed file missing" >&2; exit 1; }
+  N=$(grep -c '^- \*\*\[' docs/auto-decisions/t1.md)
+  [ "$N" -eq 2 ] || { echo "fixture: expected 2 entries, got $N" >&2; exit 1; }
+  git diff --cached --name-only | grep -qx docs/auto-decisions/t1.md \
+    || { echo "fixture: git add did not stage the file" >&2; exit 1; }
+) || fail "the brief's own render-and-commit recipe, extracted and run verbatim, did not produce a valid staged evidence file"
+pass "the render-and-commit recipe embedded in a real generated brief works end to end against a fixture ledger"
+
 pass "cs-brief behaviors"
