@@ -57,16 +57,19 @@ cs_prompt_guarded() {
     return 1
   fi
 
-  if ! cs_herdr_agent_prompt "$pane" "$text" >/dev/null 2>&1; then
-    "$logfn" "prompt failed: herdr rejected the prompt for '$pane' (no agent there?)"
-    return 1
-  fi
-
-  # `agent_prompted` is not delivery. Require the turn.
+  # Submit and confirm in one native call; herdr's own agent_prompt_stalled
+  # distinguishes "sent but the agent never left its pre-submit state" from a
+  # hard rejection, so the two log messages below still mean what they said.
   wait_ms=${CS_PROMPT_CONFIRM_WAIT_MS:-8000}
-  if cs_herdr_submit_confirm "$pane" "$wait_ms"; then
+  local out
+  if out=$(cs_herdr_agent_prompt_confirmed "$pane" "$text" "$wait_ms" 2>&1); then
     return 0
   fi
-  "$logfn" "prompt unconfirmed: no idle->working transition within ${wait_ms}ms (agent may not have been ready)"
+  case "$out" in
+    *agent_prompt_stalled*|*'"timeout"'*)
+      "$logfn" "prompt unconfirmed: no idle->working transition within ${wait_ms}ms (agent may not have been ready)" ;;
+    *)
+      "$logfn" "prompt failed: herdr rejected the prompt for '$pane' (no agent there?)" ;;
+  esac
   return 1
 }
