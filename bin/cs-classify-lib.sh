@@ -2,9 +2,9 @@
 # Shared wake classifier: the common source of truth for boss-relevant status
 # tests, declared-external-wait vocabulary, and the working/paused absorb
 # classification that makes no-verb signal and stale-pane wakes safe to absorb.
-# Sourced by BOTH the always-on watcher (bin/cs-watch.sh) and the away-mode
-# daemon (bin/cs-daemon.sh) so the overlapping triage policy lives in one place
-# instead of two copies that can drift apart.
+# The always-on watcher (bin/cs-watch.sh) sources it for that triage policy;
+# several other callers (bin/cs-send.sh, bin/cs-crew-state.sh,
+# bin/cs-wake-drain.sh, and others) source it for its status-parsing helpers.
 #
 # Most functions are pure, side-effect-free reads of status files: each takes
 # what it needs as arguments and touches no globals beyond the optional

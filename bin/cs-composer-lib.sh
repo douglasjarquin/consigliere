@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# bin/cs-composer-lib.sh - composer-emptiness classifier for the away-mode daemon
-# (bin/cs-daemon.sh). Sourced, never executed. Requires bin/cs-herdr-lib.sh to be
-# sourced first (cs_herdr_capture).
+# bin/cs-composer-lib.sh - composer-emptiness classifier backing the composer
+# guard every guarded-prompt caller shares (bin/cs-prompt-lib.sh). Sourced,
+# never executed. Requires bin/cs-herdr-lib.sh to be sourced first
+# (cs_herdr_capture).
 #
 # HARNESSES: recognizes both agent prompt glyphs - codex `›` and claude `❯`
 # (distinct codepoints, so recognition is universal, no harness plumbing). codex

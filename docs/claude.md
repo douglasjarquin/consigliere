@@ -211,7 +211,7 @@ dead shell after /exit           unknown                 unknown
 Before the fix the dead-shell capture read `empty`, which is the verdict that
 authorizes the away-mode daemon to type its escalation digest into the pane - a
 login shell would have EXECUTED it.
-`bin/cs-composer-lib.sh`'s header owns the resulting rule; `tests/cs-afk-daemon.test.sh` pins these captures as regressions.
+`bin/cs-composer-lib.sh`'s header owns the resulting rule; `tests/cs-composer-lib.test.sh` pins these captures as regressions.
 
 Corroborating signals recorded from the same run, after `/exit`:
 

@@ -4,13 +4,22 @@
 # bin/cs-decision-hold.sh's blocking captain-hold machinery, plus
 # cs_bossless_active (the one fail-closed "is bossless active right now"
 # predicate) and cs_auto_decision_decide (the one record-then-close entry
-# point that re-checks it).
+# point that re-checks it), plus the bossless-mode acknowledgment gate and
+# ack subcommand (bin/cs-afk-start.sh) that decides which projects reach it.
+#
+# The bossless-gate tests below set fixture env vars inside deliberate
+# `( ... )` subshells for isolation between cases; the enclosing scope reads
+# its own already-correct copy afterward, never the subshell's.
+# shellcheck disable=SC2030,SC2031
 set -u
 
 # shellcheck source=tests/capo-helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/capo-helpers.sh"
 # shellcheck source=bin/cs-auto-decision-lib.sh
 . "$ROOT/bin/cs-auto-decision-lib.sh"
+
+AFK_START="$ROOT/bin/cs-afk-start.sh"
+AFK_RETURN="$ROOT/bin/cs-afk-return.sh"
 
 TMP=$(cs_test_tmproot cs-auto-decision)
 mkdir -p "$TMP"
@@ -186,5 +195,281 @@ assert_contains "$(cat "$STATE/taskG.status")" "needs-decision [key=x]: pick an 
 [ "$(grep -Fc 'resolved' "$STATE/taskG.status")" = 0 ] \
   || fail "a ledger write failure must never still close the finding"
 pass "a ledger write failure blocks closure even when bossless is otherwise active"
+
+# 8. cs_bossless_ack_status/record (bin/cs-afk-start.sh) track acknowledgment
+#    per project, and a later kill-switch line wins.
+test_bossless_ack_status_record_and_kill_switch() {
+  local dir ack
+  dir="$TMP/bossless-ack-status-$RANDOM"; mkdir -p "$dir"
+  ack="$dir/bossless-ack.md"
+  (
+    CS_BOSSLESS_ACK_OVERRIDE="$ack"
+    export CS_BOSSLESS_ACK_OVERRIDE
+    # shellcheck source=bin/cs-afk-start.sh
+    . "$AFK_START"
+    [ "$(cs_bossless_ack_status myproj)" = unacknowledged ] \
+      || fail "a project with no record must read unacknowledged"
+    cs_bossless_ack_record myproj || fail "recording an acknowledgment should succeed"
+    [ "$(cs_bossless_ack_status myproj)" = acknowledged ] \
+      || fail "myproj must read acknowledged after recording"
+    [ "$(cs_bossless_ack_status otherproj)" = unacknowledged ] \
+      || fail "recording myproj must not affect an unrelated project"
+    printf 'myproj disabled\n' >> "$ack"
+    [ "$(cs_bossless_ack_status myproj)" = disabled ] \
+      || fail "a later disabled line (the kill switch) must win over an earlier acknowledged one"
+  ) || fail "bossless ack status/record/kill-switch subshell failed"
+  pass "cs_bossless_ack_status/record track acknowledgment per project, and a later kill-switch line wins"
+}
+test_bossless_ack_status_record_and_kill_switch
+
+# 9. a corrupt acknowledgment file fails closed for every project, including
+#    one whose own record DID parse.
+test_bossless_ack_corrupt_file_fails_closed() {
+  local dir ack
+  dir="$TMP/bossless-ack-corrupt-$RANDOM"; mkdir -p "$dir"
+  ack="$dir/bossless-ack.md"
+  printf 'myproj acknowledged 1700000000\nGARBAGE LINE WITH NO STATUS\n' > "$ack"
+  (
+    CS_BOSSLESS_ACK_OVERRIDE="$ack"
+    export CS_BOSSLESS_ACK_OVERRIDE
+    # shellcheck source=bin/cs-afk-start.sh
+    . "$AFK_START"
+    [ "$(cs_bossless_ack_status myproj)" = unacknowledged ] \
+      || fail "a corrupt file must fail closed even for a record that DID parse"
+  ) || fail "bossless ack corrupt-file subshell failed"
+  pass "a corrupt acknowledgment file fails closed for every project"
+}
+test_bossless_ack_corrupt_file_fails_closed
+
+# 10. cs_afk_bossless_unacked_projects scans state/*.meta for yolo=on ship
+#     tasks only, and drops an acknowledged project.
+test_bossless_unacked_projects_scans_state_meta() {
+  local dir state ack out
+  dir="$TMP/bossless-unacked-scan-$RANDOM"; state="$dir/state"; mkdir -p "$state"
+  ack="$dir/bossless-ack.md"
+  mkdir -p "$dir/projects/proj-a" "$dir/projects/proj-b"
+  cs_write_meta "$state/ship-a.meta" "kind=ship" "yolo=on" "project=$dir/projects/proj-a"
+  cs_write_meta "$state/ship-b.meta" "kind=ship" "yolo=on" "project=$dir/projects/proj-b"
+  cs_write_meta "$state/ship-c.meta" "kind=ship" "yolo=off" "project=$dir/projects/proj-a"
+  cs_write_meta "$state/capo.meta" "kind=capo" "yolo=on" "project=$dir/projects/proj-a"
+  out=$(
+    CS_STATE_OVERRIDE="$state" CS_BOSSLESS_ACK_OVERRIDE="$ack"
+    export CS_STATE_OVERRIDE CS_BOSSLESS_ACK_OVERRIDE
+    # shellcheck source=bin/cs-afk-start.sh
+    . "$AFK_START"
+    cs_afk_bossless_unacked_projects
+  )
+  assert_contains "$out" "proj-a" "a yolo=on ship task's project must be reported as unacknowledged"
+  assert_contains "$out" "proj-b" "a second yolo=on ship task's project must also be reported"
+  [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = 2 ] \
+    || fail "yolo=off and kind=capo tasks must not contribute extra projects: $out"
+  out=$(
+    CS_STATE_OVERRIDE="$state" CS_BOSSLESS_ACK_OVERRIDE="$ack"
+    export CS_STATE_OVERRIDE CS_BOSSLESS_ACK_OVERRIDE
+    # shellcheck source=bin/cs-afk-start.sh
+    . "$AFK_START"
+    cs_bossless_ack_record proj-a
+    cs_afk_bossless_unacked_projects
+  )
+  assert_contains "$out" "proj-b" "proj-b must still be unacknowledged"
+  case "$out" in
+    *proj-a*) fail "proj-a must no longer appear once acknowledged: $out" ;;
+  esac
+  pass "cs_afk_bossless_unacked_projects scans state/*.meta for yolo=on ship tasks only, and drops an acknowledged project"
+}
+test_bossless_unacked_projects_scans_state_meta
+
+# 11. cs-afk-start.sh's ack subcommand durably records the acknowledgment.
+#     No fixture herdr needed: the ack subcommand never touches a pane.
+test_afk_start_ack_subcommand_records_durably() {
+  local dir ack out rc
+  dir="$TMP/bossless-ack-cli-$RANDOM"; mkdir -p "$dir"
+  ack="$dir/bossless-ack.md"
+  out=$(CS_BOSSLESS_ACK_OVERRIDE="$ack" "$AFK_START" ack myproj 2>&1)
+  rc=$?
+  expect_code 0 "$rc" "cs-afk-start.sh ack <project>"
+  assert_contains "$out" "bossless acknowledged for project 'myproj'" "the ack subcommand did not confirm by name"
+  assert_present "$ack" "the ack subcommand did not create the acknowledgment file"
+  grep -q '^myproj acknowledged [0-9]\+$' "$ack" \
+    || fail "the acknowledgment file does not carry a well-formed record: $(cat "$ack")"
+  out=$(CS_BOSSLESS_ACK_OVERRIDE="$ack" "$AFK_START" ack 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "ack with no project name must be refused"
+  pass "cs-afk-start.sh ack <project> durably records the acknowledgment, and refuses with no project name"
+}
+test_afk_start_ack_subcommand_records_durably
+
+# 12. the first bossless engagement for a project prompts by name; a later
+#     one does not re-prompt after acknowledgment. cs-afk-start.sh no longer
+#     touches herdr, a watcher, or the wedge alarm at all (nothing left to
+#     launch), so this needs no fixture beyond state/*.meta and the ack file.
+test_afk_start_first_engagement_prompts_second_does_not() {
+  local dir state ack out rc
+  dir="$TMP/bossless-first-engagement-$RANDOM"; state="$dir/state"; mkdir -p "$state"
+  ack="$dir/bossless-ack.md"
+  cs_write_meta "$state/ship-a.meta" "kind=ship" "yolo=on" "project=$dir/projects/proj-a"
+
+  out=$(env CS_STATE_OVERRIDE="$state" CS_BOSSLESS_ACK_OVERRIDE="$ack" "$AFK_START" 2>&1)
+  rc=$?
+  expect_code 0 "$rc" "cs-afk-start on a fresh +yolo project with no acknowledgment"
+  assert_contains "$out" "bossless mode would newly apply to project 'proj-a'" \
+    "the first engagement must name the unacknowledged project explicitly"
+  assert_present "$state/.afk" "away mode must still arm even with an unacknowledged bossless project"
+
+  CS_BOSSLESS_ACK_OVERRIDE="$ack" "$AFK_START" ack proj-a >/dev/null \
+    || fail "acknowledging proj-a should succeed"
+
+  out=$(env CS_STATE_OVERRIDE="$state" CS_BOSSLESS_ACK_OVERRIDE="$ack" "$AFK_START" 2>&1)
+  rc=$?
+  expect_code 0 "$rc" "cs-afk-start refresh after acknowledgment"
+  assert_contains "$out" "away mode refreshed" "the second run must be the ordinary refresh path"
+  case "$out" in
+    *"would newly apply to project"*) fail "an already-acknowledged project must not be re-prompted: $out" ;;
+  esac
+  pass "the first bossless engagement for a project prompts by name; a later one does not re-prompt after acknowledgment"
+}
+test_afk_start_first_engagement_prompts_second_does_not
+
+# 13. two of the three "must stay narrow" states: (a) yolo=on with no afk
+#     active, (b) yolo=off with afk active. The third (afk ends mid-task with
+#     a decision already open) is its own test below, since it exercises the
+#     real bin/cs-afk-return.sh return path rather than a static state.
+test_bossless_narrow_states_refuse_auto_decide() {
+  local dir state ack data
+  dir="$TMP/bossless-narrow-states-$RANDOM"; state="$dir/state"; data="$dir/data"
+  mkdir -p "$state" "$data"
+  ack="$dir/bossless-ack.md"
+  printf 'proj-narrow acknowledged 1700000000\n' > "$ack"
+
+  # (a) yolo=on, no afk active.
+  cs_write_meta "$state/narrowA.meta" "kind=ship" "yolo=on" "project=$dir/projects/proj-narrow"
+  printf 'needs-decision [key=a]: pick an approach\n' > "$state/narrowA.status"
+  rm -f "$state/.afk"
+  (
+    CS_STATE_OVERRIDE="$state" CS_DATA_OVERRIDE="$data" CS_BOSSLESS_ACK_OVERRIDE="$ack" CS_HOME="$dir"
+    export CS_STATE_OVERRIDE CS_DATA_OVERRIDE CS_BOSSLESS_ACK_OVERRIDE CS_HOME
+    # shellcheck source=bin/cs-auto-decision-lib.sh
+    . "$ROOT/bin/cs-auto-decision-lib.sh"
+    cs_auto_decision_decide narrowA routine "minor tweak" "did it" "harmless" a 2>/dev/null \
+      && fail "(a) yolo=on with no afk active must refuse auto-decide"
+    [ ! -e "$(cs_auto_decision_log_path narrowA)" ] || fail "(a) must not write a ledger entry"
+  ) || fail "(a) subshell failed"
+  grep -Fqx 'needs-decision [key=a]: pick an approach' "$state/narrowA.status" \
+    || fail "(a) the decision must remain open and unresolved, exactly like an ordinary escalation"
+
+  # (b) yolo=off, afk active.
+  cs_write_meta "$state/narrowB.meta" "kind=ship" "yolo=off" "project=$dir/projects/proj-narrow"
+  printf 'needs-decision [key=b]: pick an approach\n' > "$state/narrowB.status"
+  date +%s > "$state/.afk"
+  (
+    CS_STATE_OVERRIDE="$state" CS_DATA_OVERRIDE="$data" CS_BOSSLESS_ACK_OVERRIDE="$ack" CS_HOME="$dir"
+    export CS_STATE_OVERRIDE CS_DATA_OVERRIDE CS_BOSSLESS_ACK_OVERRIDE CS_HOME
+    # shellcheck source=bin/cs-auto-decision-lib.sh
+    . "$ROOT/bin/cs-auto-decision-lib.sh"
+    cs_auto_decision_decide narrowB routine "minor tweak" "did it" "harmless" b 2>/dev/null \
+      && fail "(b) yolo=off with afk active must refuse auto-decide"
+    [ ! -e "$(cs_auto_decision_log_path narrowB)" ] || fail "(b) must not write a ledger entry"
+  ) || fail "(b) subshell failed"
+  grep -Fqx 'needs-decision [key=b]: pick an approach' "$state/narrowB.status" \
+    || fail "(b) the decision must remain open and unresolved, exactly like an ordinary escalation"
+  pass "bossless auto-decide stays off for yolo=on with no afk active, and for yolo=off with afk active"
+}
+test_bossless_narrow_states_refuse_auto_decide
+
+# 14. the third narrow state, through the REAL return path rather than a
+#     static check: neither bin/cs-afk-return.sh nor the retired
+#     bin/cs-daemon.sh ever called the auto-decision machinery, so ending afk
+#     with a needs-decision still open - boss-owned, deliberately not part of
+#     the return gate that blocks on blocked: - leaves it untouched. This
+#     proves the in-flight decision is never grandfathered into a decidable
+#     state by the act of returning, and stays refused afterward too.
+test_afk_return_does_not_retroactively_auto_decide_an_open_decision() {
+  local dir state ack data rc out
+  dir="$TMP/afk-return-no-retro-decide-$RANDOM"; state="$dir/state"; data="$dir/data"
+  mkdir -p "$state" "$data"
+  ack="$dir/bossless-ack.md"
+  date '+%s' > "$state/.afk"
+  cs_write_meta "$state/midtask.meta" "kind=ship" "yolo=on" "project=$dir/projects/proj-mid"
+  printf 'needs-decision [key=mid]: pick an approach\n' > "$state/midtask.status"
+  printf 'proj-mid acknowledged 1700000000\n' > "$ack"
+
+  out=$(env CS_STATE_OVERRIDE="$state" "$AFK_RETURN" 2>&1)
+  rc=$?
+  expect_code 0 "$rc" "cs-afk-return with only an open needs-decision (boss-owned, ungated) must complete"
+  assert_absent "$state/.afk" "return must clear the away-mode flag"
+  grep -Fqx 'needs-decision [key=mid]: pick an approach' "$state/midtask.status" \
+    || fail "the open decision must be untouched by return - no retroactive resolution"
+  ! grep -q '^resolved' "$state/midtask.status" \
+    || fail "ending afk must never itself close or auto-decide the standing open decision"
+
+  (
+    CS_STATE_OVERRIDE="$state" CS_DATA_OVERRIDE="$data" CS_BOSSLESS_ACK_OVERRIDE="$ack" CS_HOME="$dir"
+    export CS_STATE_OVERRIDE CS_DATA_OVERRIDE CS_BOSSLESS_ACK_OVERRIDE CS_HOME
+    # shellcheck source=bin/cs-auto-decision-lib.sh
+    . "$ROOT/bin/cs-auto-decision-lib.sh"
+    cs_auto_decision_decide midtask routine "picked an approach" "did X" "matches accepted intent" mid 2>/dev/null \
+      && fail "a decision that outlived afk must not become auto-decidable after the fact"
+    [ ! -e "$(cs_auto_decision_log_path midtask)" ] || fail "no ledger entry for the post-return attempt"
+  ) || fail "post-return auto-decide subshell failed"
+  grep -Fqx 'needs-decision [key=mid]: pick an approach' "$state/midtask.status" \
+    || fail "the decision must still read open after the refused post-return attempt"
+  pass "ending afk mid-task never retroactively auto-decides a standing open decision, and it stays refused to auto-decide afterward too"
+}
+test_afk_return_does_not_retroactively_auto_decide_an_open_decision
+
+# 15. both delivery modes get a real bossless auto-decide (through the actual
+#     cs_auto_decision_decide entry point, not a hand-written ledger line),
+#     then a real cs-brief.sh-generated brief for that mode, then the EXACT
+#     render-and-commit recipe extracted from that brief and run against a
+#     scratch project repo - proving the ledger and the PR-attachment pointer
+#     exist end to end, not just that the mechanisms exist in isolation.
+test_bossless_ledger_and_pr_pointer_both_delivery_modes() {
+  local dir state data ack pair mode id b recipe project
+  dir="$TMP/bossless-both-modes-$RANDOM"; state="$dir/state"; data="$dir/data"
+  mkdir -p "$state" "$data"
+  ack="$dir/bossless-ack.md"
+  date '+%s' > "$state/.afk"
+  printf 'proj-both acknowledged 1700000000\n' > "$ack"
+
+  for pair in "direct-PR:bothdp" "no-mistakes:bothnm"; do
+    mode=${pair%%:*}
+    id=${pair#*:}
+    cs_write_meta "$state/$id.meta" "workspace=w1" "pane=w1:p1" "kind=ship" "yolo=on" "project=$dir/projects/proj-both"
+    printf 'needs-decision [key=k-%s]: pick an approach\n' "$id" > "$state/$id.status"
+
+    (
+      CS_STATE_OVERRIDE="$state" CS_DATA_OVERRIDE="$data" CS_BOSSLESS_ACK_OVERRIDE="$ack" CS_HOME="$dir"
+      export CS_STATE_OVERRIDE CS_DATA_OVERRIDE CS_BOSSLESS_ACK_OVERRIDE CS_HOME
+      # shellcheck source=bin/cs-auto-decision-lib.sh
+      . "$ROOT/bin/cs-auto-decision-lib.sh"
+      cs_auto_decision_decide "$id" contract-expanding "extended an endpoint" "extended it" "needed for the feature" "k-$id" >/dev/null
+    ) || fail "mode $mode: a real bossless auto-decide should succeed under a truly active fixture"
+    grep -q "resolved \[key=k-$id\]" "$state/$id.status" \
+      || fail "mode $mode: the decision must be resolved after a real bossless auto-decide"
+
+    CS_DATA_OVERRIDE="$data" CS_STATE_OVERRIDE="$state" "$ROOT/bin/cs-brief.sh" "$id" alpha --mode "$mode" >/dev/null \
+      || fail "mode $mode: brief scaffold failed"
+    b="$data/$id/brief.md"
+    assert_grep "cs_auto_decision_render $id" "$b" "mode $mode: brief renders this task's own ledger"
+    assert_grep "docs/auto-decisions/$id.md" "$b" "mode $mode: brief names the committed evidence file"
+
+    (
+      set -eu
+      project="$dir/proj-$id"
+      mkdir -p "$project"
+      cd "$project"
+      git init -q
+      git config user.email test@example.com
+      git config user.name test
+      touch placeholder && git add placeholder && git commit -q -m init
+      recipe=$(awk '/^```$/{c++; next} c==1' "$b")
+      eval "$recipe"
+      [ -f "docs/auto-decisions/$id.md" ] || { echo "missing evidence file" >&2; exit 1; }
+      grep -q "extended an endpoint" "docs/auto-decisions/$id.md" || { echo "entry missing" >&2; exit 1; }
+    ) || fail "mode $mode: the real brief's own render-and-commit recipe did not produce the evidence file for a real auto-decide's ledger"
+  done
+  pass "the auto-decision ledger and the PR-attachment pointer exist end to end, for a real bossless auto-decide, in both delivery modes"
+}
+test_bossless_ledger_and_pr_pointer_both_delivery_modes
 
 pass "cs-auto-decision-lib.sh non-blocking ledger contract"
