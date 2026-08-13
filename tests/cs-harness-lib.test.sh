@@ -359,8 +359,6 @@ pass "codex trust store path resolution"
 [ "$(cs_harness_skill_prefix claude)" = '/' ] || fail "claude skill prefix"
 [ "$(cs_harness_composer_command_settle codex)" = 1 ] || fail "codex needs settle"
 [ "$(cs_harness_composer_command_settle claude)" = 0 ] || fail "claude no settle"
-[ "$(cs_harness_resume_cmd codex)" = 'resume --last' ] || fail "codex resume"
-[ "$(cs_harness_resume_cmd claude)" = '--continue' ] || fail "claude resume"
 # Lifecycle mechanics: one key for both harnesses, one exit command each, and
 # herdr's canonical key spelling (docs/herdr.md refuses anything else).
 [ "$(cs_harness_interrupt_key codex)" = esc ] || fail "codex interrupt key"
@@ -382,7 +380,7 @@ done
 for fn in cs_harness_plan_skill cs_harness_start_work_skill; do
   "$fn" bogus >/dev/null 2>&1 && fail "$fn must refuse an unknown harness"
 done
-pass "skill/resume/instruction/busy accessors"
+pass "skill/instruction/busy accessors"
 
 # --- omo install detection ---------------------------------------------------
 # Isolated from the developer's own real ~/.codex and ~/.claude: both env

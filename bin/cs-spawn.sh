@@ -93,7 +93,7 @@
 #     agent or start outside the copy holding the work.
 #   - Refuses a kind=capo task (capo-provisioning owns a home's lifecycle) and a
 #     headless scout (no interactive agent to replace).
-#   - Prefers the harness resume command (cs_harness_resume_cmd) so the
+#   - Prefers the harness resume invocation (cs_harness_resume_argv) so the
 #     soldier's own session and context survive: both harnesses key sessions by
 #     cwd and every soldier owns a unique worktree cwd. It falls back to a cold
 #     launch with the brief only once the pane is positively agent-free again,
@@ -221,15 +221,14 @@ _cs_spawn_env_export_confirmed() {
 # harnesses, bin/cs-prompt-lib.sh); that same confirmation catches a miss, so
 # retrying is safe.
 _cs_spawn_deliver_brief() {
-  local pane=$1 brief=$2 waited=0 bs
-  while [ "$waited" -lt "$BRIEF_DELIVER_WAIT" ]; do
+  local pane=$1 brief=$2 start=$SECONDS bs
+  while [ $((SECONDS - start)) -lt "$BRIEF_DELIVER_WAIT" ]; do
     bs=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || bs=unknown
     case "$bs" in
       busy|blocked) : ;;
       *) cs_herdr_agent_prompt_confirmed "$pane" "$brief" >/dev/null 2>&1 && return 0 ;;
     esac
     sleep "$BRIEF_DELIVER_RETRY_SECS"
-    waited=$((waited + BRIEF_DELIVER_RETRY_SECS))
   done
   return 1
 }
@@ -683,7 +682,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
       }
     fi
     if ! cs_herdr_agent_start "$R_PANE" "$ID" "$R_HARNESS" "$(cs_herdr_agent_start_timeout_ms "$LAUNCH_WAIT")" "${COLD_ARGV[@]}"; then
-      echo "error: no session was resumable for '$ID' and the cold launch brought up no agent within ${LAUNCH_WAIT}s; pane $R_PANE and worktree $R_WT_REAL are untouched" >&2
+      echo "error: no session was resumable for '$ID' and the cold launch brought up no agent within ${LAUNCH_WAIT}s; no replacement is running on pane $R_PANE and the work is preserved in $R_WT_REAL" >&2
       exit 1
     fi
     # Same stability requirement as the resume path: report a running agent only

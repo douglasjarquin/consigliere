@@ -182,9 +182,9 @@ cs_harness_autonomy_argv() {
   esac
 }
 
-# cs_harness_resume_argv <out-array-name> <h> - like cs_harness_resume_cmd, but
-# APPENDS discrete argv tokens instead of one string meant for a pane's shell
-# to word-split.
+# cs_harness_resume_argv <out-array-name> <h> - APPENDS the harness's
+# cwd-keyed "resume this worktree's session" invocation as discrete argv
+# tokens for a native `agent start` call.
 cs_harness_resume_argv() {
   local -n _cs_resume_argv_out=$1
   case "$2" in
@@ -632,15 +632,6 @@ cs_harness_exit_command() {
   case "$1" in
     codex) printf '/quit\n' ;;
     claude) printf '/exit\n' ;;
-    *) return 1 ;;
-  esac
-}
-
-# cs_harness_resume_cmd <h> - the cwd-keyed "resume this worktree's session" cmd.
-cs_harness_resume_cmd() {
-  case "$1" in
-    codex) printf 'resume --last\n' ;;
-    claude) printf -- '--continue\n' ;;
     *) return 1 ;;
   esac
 }

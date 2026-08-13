@@ -198,10 +198,16 @@ cs_herdr_run() { # <pane_id> <text>  - text plus Enter, atomic
 # so a stale marker from an earlier call on the same long-lived pane (a
 # capo's home pane; a relaunch's second attempt) could otherwise false-match
 # before the fresh line has actually run.
+# The TYPED marker is quote-split ('CS''_...') so it never contains the
+# matched string: the pty renders the typed line the moment the bytes arrive,
+# before and independently of the shell executing it, so matching the typed
+# spelling would confirm exactly the swallowed-line case this helper exists
+# to catch. Only the shell EXECUTING the echo concatenates the halves into
+# the string wait-output is asked for.
 cs_herdr_pane_run_confirmed() {
   local pane=$1 line=$2 timeout_ms=$3 marker
   marker="CS_LINE_RAN_$$_${RANDOM}_${RANDOM}"
-  cs_herdr_run "$pane" "$line; echo $marker" >/dev/null || return 1
+  cs_herdr_run "$pane" "$line; echo 'CS''${marker#CS}'" >/dev/null || return 1
   cs_herdr pane wait-output "$pane" --match "$marker" --timeout "$timeout_ms" >/dev/null 2>&1
 }
 
@@ -414,22 +420,6 @@ cs_herdr_agent_start() {
     agent_start_failed) echo "cs-herdr: agent start failed to launch in pane $pane: $out" >&2 ;;
     *) echo "cs-herdr: agent start failed for pane $pane: $out" >&2 ;;
   esac
-  return 1
-}
-
-# A launch line is delivered to a pane's SHELL with `pane run`, and a freshly
-# created worktree pane's shell may not be ready to read yet - the line is then
-# silently swallowed and no re-read can recover it (the same hazard
-# tests/cs-herdr-lib-live.test.sh works around by re-submitting an idempotent
-# probe). `pane run` reports success either way, so without this the caller
-# cannot tell "launched" from "typed into a void".
-cs_herdr_agent_wait_present() { # <pane_id> [timeout-secs]
-  local pane=$1 limit=${2:-60} waited=0
-  while [ "$waited" -lt "$limit" ]; do
-    cs_herdr_agent_alive "$pane" && return 0
-    sleep 1
-    waited=$((waited + 1))
-  done
   return 1
 }
 

@@ -135,7 +135,17 @@ spawn_one() {
     CS_FAKE_SPAWN_WORKTREE="$wt" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-$id" \
     CS_FAKE_SPAWN_PANE_RUN="$TMP/panerun-$id" \
     "$SPAWN" "$id" "$REPO" "$@" >/dev/null || fail "spawn ($harness) failed"
-  cat "$TMP/launch-$id"
+  # An interactive spawn is captured by `agent start`; a headless scout never
+  # calls it and is captured by its `pane run` launch line instead. Returning
+  # an empty string here would make every downstream assert_not_contains
+  # vacuously true, so a spawn that captured nothing fails loudly.
+  if [ -f "$TMP/launch-$id" ]; then
+    cat "$TMP/launch-$id"
+  elif [ -f "$TMP/panerun-$id" ]; then
+    cat "$TMP/panerun-$id"
+  else
+    fail "spawn ($harness, $id) captured neither an agent start nor a pane run launch"
+  fi
 }
 
 # --- codex root: unchanged launch shape, harness=codex ----------------------
