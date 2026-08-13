@@ -1,0 +1,27 @@
+ok - with no config, a home activates on its own
+ok - an explicit afk-only home stays quiet while the boss is present
+ok - afk-only activates while away
+ok - off disables activation entirely
+ok - an unrecognized host/activation.conf refuses
+ok - an empty queue never activates
+ok - standing open decisions never activate a home
+ok - a still-arriving queue waits for quiet
+ok - the main home waits a longer quiet window before prompting its own pane
+ok - a capo home uses the shorter quiet window
+ok - cooldown suppresses back-to-back activation
+ok - a recycled pane id is refused, not prompted
+ok - a vanished target pane is surfaced, not ignored
+ok - a home whose agent died is surfaced, not left to rot
+ok - a due home prompts its own agent and stamps the cooldown
+ok - the activation prompt is marked machine input, not boss input
+ok - a half-typed composer is never prompted over
+ok - a mid-turn agent is not interrupted
+ok - the busy-stretch trigger fires when the queue never goes quiet
+ok - a refilling queue under BUSY_MAX still waits for quiet
+ok - an empty queue clears both the busy-stretch and fail sidecars
+ok - a failed delivery stamps the fail-since sidecar without prompting the busy composer
+ok - a failing stretch retries on the short RETRY_SECS floor
+ok - continuous failure crossing WEDGE_MAX fires the wedge alarm and writes the durable marker
+ok - the wedge alarm does not re-fire while the same failure stretch continues
+ok - a successful delivery clears the fail-since sidecar
+ok - cs-activate per-home activation contract
