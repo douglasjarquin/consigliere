@@ -145,7 +145,7 @@ fi
 # --- is there work sitting? --------------------------------------------------
 
 if [ ! -s "$QUEUE" ]; then
-  rm -f "$BUSY_SINCE" "$FAIL_SINCE" "$WEDGED" 2>/dev/null || true
+  [ "$STATUS_ONLY" = 1 ] || rm -f "$BUSY_SINCE" "$FAIL_SINCE" "$WEDGED" 2>/dev/null || true
   decision "idle: wake queue empty"
   exit 0
 fi

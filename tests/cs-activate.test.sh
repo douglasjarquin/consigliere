@@ -277,13 +277,19 @@ pass "a refilling queue under BUSY_MAX still waits for quiet"
 
 # 18. An empty queue clears both new sidecars along with the old idle path,
 #     so a resolved busy or failing stretch never lingers into the next one.
+#     A --status probe must report the same idle verdict without touching them.
 dir=$(make_home clearsidecars)
 printf 'always\n' > "$dir/host/activation.conf"
 : > "$dir/state/.wake-queue"
 : > "$dir/state/.activate-busy-since"
 : > "$dir/state/.activate-fail-since"
+ACT_ARGS=(--status)
 out=$(run_activate "$dir")
 assert_contains "$out" "queue empty" "an empty queue must still report idle"
+assert_present "$dir/state/.activate-busy-since" "a --status probe must not mutate the busy-stretch sidecar"
+assert_present "$dir/state/.activate-fail-since" "a --status probe must not mutate the fail sidecar"
+ACT_ARGS=()
+run_activate "$dir" >/dev/null
 assert_absent "$dir/state/.activate-busy-since" "an empty queue must clear the busy-stretch sidecar"
 assert_absent "$dir/state/.activate-fail-since" "an empty queue must clear the fail sidecar"
 pass "an empty queue clears both the busy-stretch and fail sidecars"
