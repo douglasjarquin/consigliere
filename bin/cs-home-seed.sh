@@ -85,6 +85,8 @@ esac
 . "$SCRIPT_DIR/cs-inherit-lib.sh"
 # shellcheck source=bin/cs-herdr-lib.sh
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
+# shellcheck source=bin/cs-made-lib.sh
+. "$SCRIPT_DIR/cs-made-lib.sh"
 # The two sweep halves below, and each capo inside them, carry one elapsed-time
 # record. Inert unless the run that launched this one asked for recording
 # (bin/cs-timing-lib.sh).
@@ -440,7 +442,7 @@ validate_seed_project() {  # <project>
     || { echo "error: project $project is not a git repo" >&2; return 1; }
   mode=$(project_mode_main "$project")
   if [ "$mode" = local-only ]; then
-    echo "error: project $project is local-only; capo routes support only no-mistakes and direct-PR projects" >&2
+    echo "error: project $project is local-only; capo routes support only made and direct-PR projects" >&2
     return 1
   fi
   url=$(git -C "$src" remote get-url origin 2>/dev/null || true)
@@ -470,21 +472,22 @@ clone_project() {  # <project> <home>
 initialize_no_mistakes_project() {  # <home> <project> <created:0|1>
   local home=$1 project=$2 created=$3 mode dst
   mode=$(project_mode_in_home "$home" "$project")
-  [ "$mode" = no-mistakes ] || return 0
+  [ "$mode" = made ] || return 0
   dst="$home/projects/$project"
-  if git -C "$dst" remote get-url no-mistakes >/dev/null 2>&1; then
+  if git -C "$dst" remote get-url made >/dev/null 2>&1; then
     return 0
   fi
   if [ "$created" != 1 ]; then
-    echo "error: seeded project $project at $dst is not initialized for no-mistakes; refusing to mutate preexisting clone" >&2
+    echo "error: seeded project $project at $dst is not initialized for made; refusing to mutate preexisting clone" >&2
     return 1
   fi
-  command -v no-mistakes >/dev/null 2>&1 || {
-    echo "error: no-mistakes command not found; cannot initialize $project in $home" >&2
+  command -v made >/dev/null 2>&1 || {
+    echo "error: made command not found; cannot initialize $project in $home" >&2
     return 1
   }
-  ( cd "$dst" && no-mistakes init && no-mistakes doctor ) || {
-    echo "error: failed to initialize no-mistakes for $project at $dst" >&2
+  # shellcheck disable=SC2119  # both shims deliberately take no args here
+  ( cd "$dst" && cs_made_gate_init && cs_made_doctor ) || {
+    echo "error: failed to initialize made for $project at $dst" >&2
     return 1
   }
 }
