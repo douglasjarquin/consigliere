@@ -234,15 +234,25 @@ cs_harness_codex_notify_argv() {
 # every hook command, so the telemetry command reads the same Stop payload the
 # touch ignores. With no telemetry command the output is byte identical to an
 # uninstrumented soldier's.
+# The touch's path is single-quoted for the shell claude runs a type=command
+# hook through, inside a JSON string - the same double context as the codex
+# notify value above, with the same fail-closed contract: a path carrying
+# ", \, or ' returns 1 and emits nothing, rather than a hook command that
+# word-splits (supervision silently never sees a turn end) or a settings file
+# that is not valid JSON.
 cs_harness_claude_settings_json() {
-  local turnend=$1 telemetry=${2:-}
+  local telemetry=${2:-} touch_cmd
+  touch_cmd="touch $(cs_harness_shell_quote "$1")"
+  case "$touch_cmd" in
+    *'"'*|*\\*) return 1 ;;
+  esac
   if [ -n "$telemetry" ]; then
-    printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"touch %s"},{"type":"command","command":"%s"}]}]}}\n' \
-      "$turnend" "$telemetry"
+    printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"%s"},{"type":"command","command":"%s"}]}]}}\n' \
+      "$touch_cmd" "$telemetry"
     return 0
   fi
-  printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"touch %s"}]}]}}\n' \
-    "$turnend"
+  printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"%s"}]}]}}\n' \
+    "$touch_cmd"
 }
 
 # cs_harness_claude_json_path - the file claude persists per-folder trust in.

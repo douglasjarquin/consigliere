@@ -583,7 +583,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
   SETTINGS_FILE=''
   if [ "$R_HARNESS" = claude ]; then
     SETTINGS_FILE="$STATE/$ID.claude-settings.json"
-    cs_harness_claude_settings_json "$R_TURNEND" "$R_TELEMETRY" > "$SETTINGS_FILE"
+    cs_harness_claude_settings_json "$R_TURNEND" "$R_TELEMETRY" > "$SETTINGS_FILE" || {
+      rm -f "$SETTINGS_FILE"
+      echo "error: turn-end path $R_TURNEND cannot be embedded safely in claude's Stop hook command (it carries a quote or backslash); the pane is untouched" >&2
+      exit 1
+    }
     cs_harness_claude_trust_dir "$R_WT_REAL" || {
       echo "error: could not pre-trust claude worktree $R_WT_REAL; the pane is untouched" >&2
       exit 1
@@ -639,7 +643,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     RESUME_ARGV+=(--settings "$SETTINGS_FILE")
   elif [ "$R_HARNESS" = codex ]; then
     cs_harness_codex_notify_argv RESUME_ARGV "$R_TURNEND" "$R_TELEMETRY" || {
-      echo "error: turn-end path $R_TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash); the pane is untouched" >&2
+      echo "error: turn-end path $R_TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash); no replacement agent was started" >&2
       exit 1
     }
   fi
@@ -937,7 +941,10 @@ else
   SETTINGS_FILE=''
   if [ "$HARNESS" = claude ]; then
     SETTINGS_FILE="$STATE/$ID.claude-settings.json"
-    cs_harness_claude_settings_json "$TURNEND" "$TELEMETRY_HOOK" > "$SETTINGS_FILE"
+    cs_harness_claude_settings_json "$TURNEND" "$TELEMETRY_HOOK" > "$SETTINGS_FILE" || {
+      rm -f "$SETTINGS_FILE"
+      abort_task "turn-end path $TURNEND cannot be embedded safely in claude's Stop hook command (it carries a quote or backslash)"
+    }
     # Interactive claude blocks at the folder-trust dialog for a fresh worktree;
     # pre-trust it so the unattended soldier can take its first turn.
     cs_harness_claude_trust_dir "$WT_REAL" || abort_task "could not pre-trust claude worktree $WT_REAL"

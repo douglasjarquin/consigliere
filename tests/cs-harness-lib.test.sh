@@ -208,9 +208,28 @@ pass "cs_harness_launch_env forwards the selected credential store"
 # notify. The exit-2 guard is a root/capo concern, never on a soldier.
 json=$(cs_harness_claude_settings_json /home/state/t.turn-ended)
 assert_contains "$json" '"Stop"' "settings json has a Stop hook"
-assert_contains "$json" 'touch /home/state/t.turn-ended' "settings json touches turn-end"
+assert_contains "$json" "touch '/home/state/t.turn-ended'" "settings json touches turn-end"
 assert_not_contains "$json" 'cs-turnend-guard' "soldier settings must not run the root guard"
 pass "claude settings json shape (touch-only)"
+
+# Same double context as the codex notify value: the Stop hook command runs
+# through a shell and lives inside a JSON string, so run the exact command
+# claude would run against a state path carrying a space, and refuse a path
+# carrying a character the JSON string cannot hold.
+mkdir -p "$TMP/settings dir"
+json=$(cs_harness_claude_settings_json "$TMP/settings dir/t.turn-ended") \
+  || fail "a plain state path must build the settings json"
+stop_cmd=$(printf '%s' "$json" | jq -r '.hooks.Stop[0].hooks[0].command') \
+  || fail "the settings json must stay valid JSON: $json"
+bash -c "$stop_cmd" || fail "the Stop hook command claude would run failed"
+[ -f "$TMP/settings dir/t.turn-ended" ] \
+  || fail "a state path with a space must still receive the turn-end touch"
+for bad in 'quo"te' 'back\slash' "apos'trophe"; do
+  json=$(cs_harness_claude_settings_json "$TMP/$bad/t.turn-ended" 2>/dev/null) \
+    && fail "a turn-end path carrying $bad must be refused, not emitted malformed"
+  [ -z "$json" ] || fail "a refused turn-end path must emit nothing"
+done
+pass "the claude settings json quotes the turn-end path for the hook shell and fails closed on unsafe characters"
 
 # --- claude folder trust pre-seed -------------------------------------------
 CJSON="$TMP/claude.json"

@@ -273,7 +273,7 @@ test_launch_wiring_is_byte_identical_with_telemetry_off() {
   [ "$notify_argv" = 'notify=["bash","-c","touch '"'"'/turnend'"'"'"]' ] ||
     fail "the codex notify argv changed with telemetry off:"$'\n'"$notify_argv"
   settings=$(bash -c ". '$ROOT/bin/cs-harness-lib.sh'; cs_harness_claude_settings_json /s/t.turn-ended")
-  [ "$settings" = '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"touch /s/t.turn-ended"}]}]}}' ] ||
+  [ "$settings" = '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"touch '"'"'/s/t.turn-ended'"'"'"}]}]}}' ] ||
     fail "the claude soldier settings file changed with telemetry off:"$'\n'"$settings"
   pass "cs-telemetry: with telemetry off every soldier launch artefact is byte identical"
 }
@@ -300,7 +300,7 @@ test_worker_turn_end_signal_survives_a_failing_telemetry_command() {
   printf '%s' "$settings" | jq -e . >/dev/null ||
     fail "an instrumented claude settings file must stay valid JSON:"$'\n'"$settings"
   first=$(printf '%s' "$settings" | jq -r '.hooks.Stop[0].hooks[0].command')
-  [ "$first" = "touch $dir/claude-turn-ended" ] ||
+  [ "$first" = "touch '$dir/claude-turn-ended'" ] ||
     fail "the touch must remain the FIRST, separate claude Stop hook command, got: $first"
   [ "$(printf '%s' "$settings" | jq -r '.hooks.Stop[0].hooks | length')" = 2 ] ||
     fail "telemetry must be a second hook command, never folded into the touch"

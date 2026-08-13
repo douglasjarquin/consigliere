@@ -34,9 +34,11 @@ case "${1:-} ${2:-}" in
     ;;
   "pane run")
     # A headless scout still types its whole launch line into the pane's shell
-    # (no composer/agent_status lifecycle for agent start to target); capture
-    # it verbatim, same as before.
-    printf 'pane_run=%s\n' "${4:-}" > "$CS_FAKE_SPAWN_LAUNCH" ;;
+    # (no composer/agent_status lifecycle for agent start to target), and an
+    # interactive spawn types its env-export pre-step here. Capture to a
+    # dedicated append-mode file when the caller provides one, so the later
+    # `agent start` truncate of CS_FAKE_SPAWN_LAUNCH cannot clobber it.
+    printf 'pane_run=%s\n' "${4:-}" >> "${CS_FAKE_SPAWN_PANE_RUN:-$CS_FAKE_SPAWN_LAUNCH}" ;;
   "agent start")
     # Every interactive soldier/capo launch now goes through native
     # `agent start <name> --kind <k> --pane <p> --timeout <ms> -- ARGV...`.
@@ -124,11 +126,14 @@ spawn_one() {
   [ -n "$brief_mode" ] \
     && printf 'Delivery contract: mode=%s\n' "$brief_mode" >> "$HOME_DIR/data/$id/brief.md"
   # CS_CLAUDE_JSON sandboxes the folder-trust pre-seed away from the real
-  # ~/.claude.json (claude spawns pre-trust their worktree).
-  env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE="$harness" \
+  # ~/.claude.json (claude spawns pre-trust their worktree). CLAUDE_CONFIG_DIR
+  # is pinned empty so a developer's own credential-store split cannot add an
+  # env pre-step these launch assertions do not expect.
+  env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE="$harness" CLAUDE_CONFIG_DIR= \
     CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
     CS_CLAUDE_JSON="$TMP/claude.json" \
     CS_FAKE_SPAWN_WORKTREE="$wt" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-$id" \
+    CS_FAKE_SPAWN_PANE_RUN="$TMP/panerun-$id" \
     "$SPAWN" "$id" "$REPO" "$@" >/dev/null || fail "spawn ($harness) failed"
   cat "$TMP/launch-$id"
 }
@@ -151,10 +156,10 @@ mkdir -p "$CAPO_HOME"
 : > "$CAPO_HOME/.cs-capo-home"
 mkdir -p "$HOME_DIR/data/t-capo"
 printf 'charter\n' > "$HOME_DIR/data/t-capo/brief.md"
-env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude \
+env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude CLAUDE_CONFIG_DIR="$TMP/work-claude" \
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
   CS_CLAUDE_JSON="$TMP/claude.json" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-t-capo" \
-  CS_FAKE_SPAWN_PROMPT="$TMP/prompt-t-capo" \
+  CS_FAKE_SPAWN_PROMPT="$TMP/prompt-t-capo" CS_FAKE_SPAWN_PANE_RUN="$TMP/panerun-t-capo" \
   "$SPAWN" t-capo "$CAPO_HOME" --capo >/dev/null || fail "capo spawn failed"
 launch=$(cat "$TMP/launch-t-capo")
 [ "$(cs_meta_get "$HOME_DIR/state/t-capo.meta" kind)" = capo ] || fail "capo meta kind"
@@ -162,12 +167,20 @@ assert_contains "$launch" "kind=claude" "capo launches the root harness"
 assert_not_contains "$launch" '--settings' "capo has no turn-end wiring"
 assert_not_contains "$launch" 'notify=' "capo has no turn-end wiring"
 assert_not_contains "$launch" 'CONSIGLIERE_OP' "the charter never rides agent start's argv"
+# The env pre-step is what binds the capo to ITS OWN home: dropping CS_HOME (or
+# the whole pre-step) leaves every capo writing into the ROOT session's
+# state/data. One exact substring pins the content AND the order: credential
+# store first, then the override clears, then the capo's own home.
+CAPO_ABS=$(cd "$CAPO_HOME" && pwd -P)
+assert_contains "$(cat "$TMP/panerun-t-capo")" \
+  "export CLAUDE_CONFIG_DIR='$TMP/work-claude' CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME='$CAPO_ABS'" \
+  "the capo env pre-step must export the credential store, the override clears, and its own home, in that order"
 prompt=$(cat "$TMP/prompt-t-capo")
 [ "$(printf '%s' "$prompt" | "$ROOT/bin/cs-operational-input.sh" kind)" = launch-brief ] \
   || fail "the capo charter prompt lacks the launch-brief kind"
 [ "$(printf '%s' "$prompt" | "$ROOT/bin/cs-operational-input.sh" body)" = "$(cat "$HOME_DIR/data/t-capo/brief.md")" ] \
   || fail "the capo charter prompt lost the charter body"
-pass "capo spawn: env pre-step confirmed, no turn-end wiring, correct harness, charter delivered as a typed follow-up prompt"
+pass "capo spawn: env pre-step confirmed with its content, no turn-end wiring, correct harness, charter delivered as a typed follow-up prompt"
 
 # --- the harness owns model and reasoning level ------------------------------
 # Consigliere selects neither, on either harness and for every task kind, so no
@@ -222,7 +235,24 @@ assert_grep 't-claude.turn-ended' "$SETTINGS" "claude settings touches the turn-
 assert_no_grep 'cs-turnend-guard' "$SETTINGS" "soldier settings must not run the root guard"
 # The launch references the settings file by path.
 assert_contains "$launch" "$SETTINGS" "claude launch references the settings file"
+assert_absent "$TMP/panerun-t-claude" "no credential-store split means no env pre-step is typed into the pane"
 pass "claude root: harness=claude, --settings launch, settings file written"
+
+# --- a credential-store split reaches the pane before the agent starts -------
+# The pane's shell is spawned by the herdr daemon and does NOT inherit
+# consigliere's environment, so a soldier under a work/personal claude split
+# comes up against the wrong store unless the export pre-step actually lands.
+mkdir -p "$HOME_DIR/data/t-claude-env"
+printf 'implement the fixture\nDelivery contract: mode=no-mistakes\n' > "$HOME_DIR/data/t-claude-env/brief.md"
+env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude CLAUDE_CONFIG_DIR="$TMP/work-claude" \
+  CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
+  CS_CLAUDE_JSON="$TMP/claude.json" \
+  CS_FAKE_SPAWN_WORKTREE="$TMP/wt-t-claude-env" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-t-claude-env" \
+  CS_FAKE_SPAWN_PANE_RUN="$TMP/panerun-t-claude-env" \
+  "$SPAWN" t-claude-env "$REPO" --mode no-mistakes --yolo off >/dev/null || fail "claude credential-split spawn failed"
+assert_contains "$(cat "$TMP/panerun-t-claude-env")" "export CLAUDE_CONFIG_DIR='$TMP/work-claude'" \
+  "a soldier under a credential-store split must export the store into the pane before agent start"
+pass "a claude credential-store split is exported into the pane shell before the agent starts"
 
 # --- config/permission-mode.conf reaches a real spawn ----------------------------
 # End-to-end, not just the launch-string unit: proves the home's config dir
@@ -278,7 +308,7 @@ assert_not_contains "$(cat "$TMP/launch-t-codex")" 'cs-telemetry-emit.sh' \
 [ "$(jq -r '.hooks.Stop[0].hooks | length' "$HOME_DIR/state/t-claude.claude-settings.json")" = 1 ] ||
   fail "telemetry off must leave the claude soldier's Stop hook list at exactly the turn-end touch"
 [ "$(jq -r '.hooks.Stop[0].hooks[0].command' "$HOME_DIR/state/t-claude.claude-settings.json")" \
-  = "touch $HOME_DIR/state/t-claude.turn-ended" ] ||
+  = "touch '$HOME_DIR/state/t-claude.turn-ended'" ] ||
   fail "telemetry off must leave the claude soldier's single Stop hook command as the bare turn-end touch"
 
 mkdir -p "$HOME_DIR/host"
@@ -301,7 +331,7 @@ assert_not_contains "$launch" 'cs-telemetry-emit.sh' \
   "a claude soldier is instrumented through its settings file, not its launch line"
 jq -e . "$SETTINGS" >/dev/null || fail "an instrumented claude settings file must stay valid JSON"
 [ "$(jq -r '.hooks.Stop[0].hooks[0].command' "$SETTINGS")" \
-  = "touch $HOME_DIR/state/t-telemetry-claude.turn-ended" ] ||
+  = "touch '$HOME_DIR/state/t-telemetry-claude.turn-ended'" ] ||
   fail "the turn-end touch must remain the first, separate claude Stop hook command"
 [ "$(jq -r '.hooks.Stop[0].hooks | length' "$SETTINGS")" = 2 ] ||
   fail "telemetry must be a second hook command, never folded into the touch"
