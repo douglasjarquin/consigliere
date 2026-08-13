@@ -58,7 +58,7 @@ CS_AFK_STATE="$STATE"
 . "$CS_AFK_START_DIR/cs-meta-lib.sh"
 
 cs_afk_start_usage() {
-  sed -n '2,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,46p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # Recomputed on every call, deliberately never a fixed variable snapshotted
