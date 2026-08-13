@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a soldier in a herdr-native task worktree, or a capo
 # in its isolated consigliere home.
-# Usage: cs-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--base <ref>] [--issue <n>]
+# Usage: cs-spawn.sh <task-id> <project-dir> --mode <made|direct-PR|local-only> --yolo <on|off> [--base <ref>] [--issue <n>]
 #        cs-spawn.sh <task-id> <project-dir> --scout [--headless] [--base <ref>]
 #        cs-spawn.sh <task-id> <capo-home> --capo
 #        cs-spawn.sh --relaunch <task-id>
