@@ -11,6 +11,8 @@ set -u
 
 # shellcheck source=tests/cs-watch-helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/cs-watch-helpers.sh"
+# shellcheck source=tests/capo-helpers.sh
+. "$(dirname "${BASH_SOURCE[0]}")/capo-helpers.sh"
 
 WATCH="$ROOT/bin/cs-watch.sh"
 PR_CHECK="$ROOT/bin/cs-pr-check.sh"
@@ -204,6 +206,48 @@ test_changes_requested_review_produces_a_wake() {
   pass "a PR under CHANGES_REQUESTED review produces exactly one changes_requested wake"
 }
 
+# Task 17: teardown already refuses until landing is proven
+# (bin/cs-teardown.sh), so a rejected PR's soldier and worktree stay alive -
+# the only missing piece was Task 9's detection above. This proves the wake it
+# produces reaches the SAME generic AGENTS.md section-8-item-3 check: handling
+# any other check wake uses (drained with no PR-specific code), and that the
+# still-live soldier can then be steered with the boss's real review feedback
+# through the completely unmodified cs-send.sh - no new "resume for rework"
+# command exists, and none is needed.
+test_changes_requested_wake_reaches_ordinary_steer() {
+  local dir state out pid drained send_log
+  dir=$(make_pr_case poll-changes-requested-steer); state="$dir/state"; out="$dir/watch.out"
+  arm_pr_poll "$dir" task https://github.com/o/r/pull/16
+
+  watch_bg "$state" "$dir/fakebin" "$out" \
+    CS_CHECK_INTERVAL=1 CS_TEST_GH_STATE=OPEN CS_TEST_GH_REVIEW=CHANGES_REQUESTED CS_TEST_GH_LOG="$dir/gh.log"
+  pid=$!
+  wait_for_exit "$pid" 80 || fail "watcher did not surface the requested-changes review"
+  grep -Fx "check: $state/task.check.sh: changes_requested" "$out" >/dev/null \
+    || fail "changes_requested wake reason was not printed: $(cat "$out")"
+
+  drained=$(CS_STATE_OVERRIDE="$state" "$ROOT/bin/cs-wake-drain.sh" 2>&1) \
+    || fail "cs-wake-drain.sh could not drain the changes_requested wake: $drained"
+  assert_contains "$drained" "check: $state/task.check.sh: changes_requested" \
+    "the drained wake reaches the ordinary check: handling path, with no PR-specific drain code"
+
+  # arm_pr_poll's meta has no pane=, since the earlier scenario only exercises
+  # the check sweep. Add one now to stand in for the still-live soldier pane
+  # teardown's landing-required refusal keeps alive after a rejected PR.
+  cs_write_meta "$state/task.meta" \
+    "workspace=w1" "pane=w1:p1" "kind=ship" "mode=no-mistakes" \
+    "worktree=$dir/wt" "project=$dir/project"
+  cs_capo_fake_herdr "$dir/fakebin"
+  send_log="$dir/send.log"
+  env CS_HOME="$dir" CS_STATE_OVERRIDE="$state" PATH="$dir/fakebin:$PATH" \
+    CS_SEND_LOG="$send_log" CS_SEND_SETTLE=0 FAKE_AGENT=codex FAKE_AGENT_STATUS=idle FAKE_PANE_EXISTS=1 \
+    "$ROOT/bin/cs-send.sh" task "reviewer asked for X and Y; please address both" \
+    >/dev/null 2>&1 || fail "steering the still-live soldier with review feedback failed through the ordinary send path"
+  assert_contains "$(cat "$send_log")" "reviewer asked for X and Y; please address both" \
+    "the review feedback reached the fixture soldier's pane verbatim, through the unmodified steer command"
+  pass "a changes_requested wake reaches ordinary check: handling, and the still-live soldier is steerable through the unmodified cs-send.sh path"
+}
+
 test_clean_open_pr_stays_silent_on_review_state() {
   local dir state out pid
   dir=$(make_pr_case poll-clean-open); state="$dir/state"; out="$dir/watch.out"
@@ -225,4 +269,5 @@ test_retirement_leaves_a_rearmed_poll_alone
 test_tampered_published_poll_rejected_without_execution
 test_check_registered_via_registrar_accepted_by_watcher
 test_changes_requested_review_produces_a_wake
+test_changes_requested_wake_reaches_ordinary_steer
 test_clean_open_pr_stays_silent_on_review_state
