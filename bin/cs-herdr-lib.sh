@@ -380,8 +380,6 @@ cs_herdr_agent_alive() { # <pane_id>  - is a real agent (codex or claude) in the
   printf '%s' "$out" | jq -e '.result.agent.agent // empty | select(. != "")' >/dev/null 2>&1
 }
 
-# Wait for an agent to actually appear in a pane, bounded. rc=1 on timeout.
-#
 # cs_herdr_agent_start_timeout_ms <seconds> - seconds converted to milliseconds
 # for `agent start --timeout`, clamped to herdr's own documented ceiling
 # (`herdr agent start --help`: max 300000). LAUNCH_WAIT and its

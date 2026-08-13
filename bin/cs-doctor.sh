@@ -57,10 +57,14 @@ case "${1:-}" in
     ;;
 esac
 
-# Stock macOS ships bash 3.2; every script in this repo stays compatible with it,
-# so that is the floor rather than whatever the developer's newer bash provides.
-BASH_FLOOR_MAJOR=3
-BASH_FLOOR_MINOR=2
+# The argv builders (bin/cs-harness-lib.sh) and cs_herdr (bin/cs-herdr-lib.sh)
+# use namerefs (`local -n`), a bash 4.3 feature, so 4.3 is the floor. Every
+# script here runs via `#!/usr/bin/env bash`, which resolves to a modern bash
+# in practice (5.3 on the maintainer's machine) - stock macOS /bin/bash 3.2
+# was never the interpreter, and the old 3.2 floor was aspirational rather
+# than observed.
+BASH_FLOOR_MAJOR=4
+BASH_FLOOR_MINOR=3
 
 PROBLEMS=0
 

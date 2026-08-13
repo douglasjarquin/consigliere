@@ -67,7 +67,7 @@ case "${1:-} ${2:-}" in
       printf 'argv=%s\n' "${argv[*]}"
     } > "$CS_FAKE_SPAWN_LAUNCH"
     # cs-spawn now requires agent start itself to report interactive_ready,
-    # instead of a separate cs_herdr_agent_wait_present poll after `pane run`.
+    # instead of a separate hand-rolled agent-presence poll after `pane run`.
     # CS_FAKE_SPAWN_NO_AGENT=1 reproduces a launch agent start never confirms.
     if [ "${CS_FAKE_SPAWN_NO_AGENT:-0}" = 1 ]; then
       printf '{"error":{"code":"agent_not_ready","message":"timed out"}}\n'
@@ -353,6 +353,8 @@ esac
 launch=$(spawn_one codex t-telemetry-headless --scout --headless)
 assert_not_contains "$launch" 'cs-telemetry-emit.sh' \
   "a headless scout's turn end is process exit; its launch line stays uninstrumented"
+assert_contains "$launch" 'encode launch-brief' \
+  "a headless scout's launch line must stamp its brief as typed launch-brief operational input"
 
 unset CS_TELEMETRY_DISABLE
 rm -f "$HOME_DIR/host/telemetry.conf"

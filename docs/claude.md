@@ -70,9 +70,12 @@ is what catches that miss and makes a retry safe.
   Exactly one of the two flags is emitted, never both.
 - Turn-end is wired via the `--settings` Stop hook, NOT an inline flag: claude has
   no codex-style `-c notify=`. cs-spawn writes a per-soldier settings file whose
-  `Stop` hook touches `state/<id>.turn-ended` every turn and then runs
-  `bin/cs-turnend-guard.sh` (the continuation backstop). The file's path is passed
-  as one argv token (`--settings <file>`), same as the flag form.
+  `Stop` hook touches `state/<id>.turn-ended` every turn (plus an optional,
+  separate telemetry hook command) and NOTHING more - the `bin/cs-turnend-guard.sh`
+  continuation backstop belongs to the root/capo `.claude/settings.json` described
+  below, never to a soldier, and tests/cs-spawn-harness.test.sh pins its absence.
+  The file's path rides `agent start`'s trailing argv as two literal tokens
+  (`--settings`, then the path).
 - **Why a launch-scoped file, not `.claude/settings.json` in the worktree:** claude
   resolves a repo `.claude/settings.json` through worktrees to the MAIN checkout,
   so a file dropped in a soldier's worktree would land in the boss's real project

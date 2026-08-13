@@ -173,10 +173,11 @@ SH
   [ "$(cs_operational_input_kind "$prompt")" = launch-brief ] || fail "spawn prompt lacks launch-brief kind"
   [ "$(cs_operational_input_body "$prompt")" = "$(cat "$home/data/task/brief.md")" ] \
     || fail "spawn prompt lost brief body"
-  # The other launch paths get the same captured-prompt proof elsewhere: the
-  # capo charter in tests/cs-spawn-harness.test.sh, the relaunch cold-launch
-  # fallback in tests/cs-control-relaunch.test.sh, and the headless scout's
-  # shell-string launch in tests/cs-spawn-harness.test.sh's pane-run capture.
+  # The other launch paths get launch-brief proof elsewhere: the capo charter's
+  # captured agent-prompt round-trip and the headless scout's captured launch
+  # line stamping 'encode launch-brief' in tests/cs-spawn-harness.test.sh, and
+  # the relaunch cold-launch fallback's captured agent-prompt line in
+  # tests/cs-control-relaunch.test.sh.
   pass "spawn passes a typed launch-brief prompt to the started agent"
 }
 
