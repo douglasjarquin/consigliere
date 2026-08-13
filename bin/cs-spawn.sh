@@ -70,6 +70,16 @@
 #     CS_SPAWN_HUMAN_GATE_SECS (default 10) bounds the settle window. Applies to
 #     ship, scout, capo, and relaunch; a headless scout takes no pane agent, so
 #     herdr's agent state says nothing about it and it is exempt.
+#   - Graft index prep (interactive ship/scout spawn and relaunch, both
+#     harnesses): when the project's primary checkout carries a built graft
+#     index (graft/.graph/wiring.json) and the worktree's committed ignore
+#     rules already exclude graft/, runs `graft build <worktree>` so the
+#     soldier's first turn has a working index (herdr worktree create
+#     propagates no untracked/ignored files, so the index would otherwise be
+#     lost). Fail-open and time-bounded by CS_SPAWN_GRAFT_TIMEOUT_SECS
+#     (default 10, docs/graft.md): no graft binary, no primary index, an unclean ignore
+#     guard, or an exhausted bound all warn (or stay silent) and never block
+#     the spawn. CS_SPAWN_GRAFT_PREP=off disables it entirely.
 #
 # Relaunch mechanics (--relaunch <task-id>):
 #   - ADOPTS the endpoint and worktree recorded in state/<id>.meta instead of
@@ -400,6 +410,51 @@ shell_quote() {
   printf "'"
 }
 
+# spawn_graft_prep <project-abs> <worktree-real>: build the project's graft
+# index into a fresh task worktree, fail-open. herdr's worktree create
+# propagates no untracked/ignored files (src/worktree.rs:228-265), so a
+# worktree starts with none of the primary's graft/ index even when one
+# exists; graft's own seedGraph only copies the query graph and only on its
+# own next invocation, so this is the synchronous trigger that gets the full
+# built surface (INDEX.md, per-file cards) there before the agent's first
+# turn. Every negative case is a silent or warned no-op, in the order graft's
+# own writer risk requires checking them: the kill switch, the binary, the
+# primary's index, then the worktree's committed ignore rules (graft's
+# ensureGitignored/ensureSearchable write .gitignore/.ignore into the build
+# root when its own entries are absent, so an unclean guard here would dirty
+# a soldier's tree on its first build). Only `graft build` runs, positionally
+# against $wt_real, never `--dir` (which disables seeding) or `--deep`, and
+# never against $proj_abs.
+spawn_graft_prep() {  # <project-abs> <worktree-real>
+  local proj_abs=$1 wt_real=$2 timeout out rc
+  [ "${CS_SPAWN_GRAFT_PREP:-}" = off ] && return 0
+  command -v graft >/dev/null 2>&1 || return 0
+  [ -n "$proj_abs" ] && [ -f "$proj_abs/graft/.graph/wiring.json" ] || return 0
+  # The trailing slash matters: git's dir-only ignore pattern "graft/" only
+  # matches a bare "graft" query when that path already exists on disk as a
+  # directory (verified empirically), which a fresh worktree never has - this
+  # guard would otherwise always report "not ignored" for exactly the
+  # worktrees this feature targets. "graft/" asserts "this is a directory"
+  # without requiring it to exist.
+  if ! git -C "$wt_real" check-ignore -q graft/; then
+    echo "warn: $wt_real's committed rules do not ignore graft/; skipping graft index build there (graft's own gitignore writer would otherwise dirty the worktree)" >&2
+    return 0
+  fi
+  if [ -z "$wt_real" ] || [ "$wt_real" = "$proj_abs" ]; then
+    echo "warn: refusing to run graft build against the primary checkout; skipping graft index prep" >&2
+    return 0
+  fi
+  timeout=${CS_SPAWN_GRAFT_TIMEOUT_SECS:-10}
+  case "$timeout" in ''|*[!0-9]*|0) timeout=10 ;; esac
+  out=$(cs_run_timed "$timeout" env -u GRAFT_API_KEY graft build "$wt_real" 2>&1) && rc=0 || rc=$?
+  case "$rc" in
+    0) echo "notice: built graft index in $wt_real" >&2 ;;
+    124) echo "warn: graft build did not finish within ${timeout}s in $wt_real; the worktree has no graft index" >&2 ;;
+    "$CS_TIMEOUT_UNAVAILABLE") echo "warn: could not run graft build under a time bound; skipping graft index prep in $wt_real" >&2 ;;
+    *) echo "warn: graft build exited $rc in $wt_real; the worktree has no graft index (output: $out)" >&2 ;;
+  esac
+}
+
 BRIEF="$DATA/$ID/brief.md"
 sq_operational=$(shell_quote "$SCRIPT_DIR/cs-operational-input.sh")
 
@@ -485,6 +540,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
       exit 1
     }
   fi
+
+  # A relaunch must not depend on the original spawn having built the index
+  # (it may predate this feature, or have failed open the first time), so it
+  # re-runs the same idempotent prep call.
+  spawn_graft_prep "$R_PROJ_REAL" "$R_WT_REAL"
 
   # Resume first. The wait is generous for a slow cold start, and breaks out as
   # soon as the pane is positively agent-free again - which is what a harness
@@ -771,6 +831,7 @@ else
     # unattended soldier needs the dialog gone before launch, not escalated after.
     cs_harness_codex_trust_dir "$WT_REAL" || abort_task "could not pre-trust codex worktree $WT_REAL"
   fi
+  spawn_graft_prep "$PROJ_ABS" "$WT_REAL"
   LAUNCH=$(cs_harness_soldier_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings" "$TELEMETRY_HOOK")
 fi
 cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
