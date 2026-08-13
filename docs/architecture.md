@@ -65,7 +65,7 @@ Inheritance is deliberately tiny: `config/boss-shared.md` (read-only) and the ba
 
 ## Away mode
 
-`/afk` sets the durable `state/.afk` flag and starts `bin/cs-daemon.sh`, a presence-gated sub-supervisor that self-handles routine wakes in bash and injects batched `away-supervisor` digests into the primary's own pane (recorded at afk-start from `HERDR_PANE_ID`), only into an affirmatively empty composer (`bin/cs-composer-lib.sh` strips codex ghost text before judging emptiness).
+`/afk` sets the durable `state/.afk` flag and returns immediately: the existing watch/monitor/activate triangle already supervises an away-mode home the same way it does an attended one, so nothing separate is launched (see the `/afk` skill for the entry, exit, and escalation-digest detail).
 Input classified `boss` means the boss returned; `bin/cs-afk-return.sh` owns ordered shutdown and the fail-closed catch-up gate.
 
 ## Restart-proof
