@@ -56,6 +56,7 @@ Escalate in order:
 4. If the soldier is genuinely wedged after redirection, relaunch it: `CS_HOME=<this-home> bin/cs-control.sh relaunch <id> --note '<one line of progress so far>'`.
    Genuine wedging means looping, unresponsive, repeating the same obstacle, or truly dead.
    A low context reading is not wedging; both harnesses auto-compact and keep going.
+   A pane visibly repeating itself or looping is worth naming precisely rather than calling it "confused": if a peek shows the transcript itself saying something like "context compacted", "context_length_exceeded", "context_too_large", "ran out of room in the model's context window", "your input exceeds the context window", or "long threads and multiple compactions" (the field-tested marker set from lazycodex's start-work-continuation component, `components/start-work-continuation/src/codex-hook.ts`), the soldier is drowning in context rather than merely stuck, and relaunching it fresh - not redirecting it again - is the fix.
    The worktree, its commits, and its uncommitted changes persist across a relaunch, so it is cheap.
    The note is required because the replacement inherits the local copy and none of the conversation.
    Read the reported result rather than assuming it: the relaunch names which path it took (`resume` keeps the soldier's own context, `cold` re-reads the brief), proves a different agent process now owns the pane, and reports a failure plainly instead of claiming a running agent.
