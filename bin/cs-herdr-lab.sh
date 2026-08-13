@@ -63,7 +63,7 @@ cs_herdr_lab_raw() { # <session> <herdr arguments...>
       after+=("$arg")
     fi
   done
-  HERDR_SESSION="$name" herdr "${before[@]}" --session "$name" "${after[@]}"
+  HERDR_SESSION="$name" herdr "${before[@]+"${before[@]}"}" --session "$name" "${after[@]+"${after[@]}"}"
 }
 
 cs_herdr_lab_session_list() { # <session>
