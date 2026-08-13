@@ -857,7 +857,9 @@ SH
 
   # Reader 2: a working edge only, then a clean full-budget end (exit 0). The
   # pre-seeded escalation marker must be CLEARED (so a later blocked edge
-  # re-escalates) and the wait must report a clean timeout (rc 1).
+  # re-escalates) and the wait must report a clean timeout (rc 1). The pane
+  # reads `idle` here, which is `defer`, so the level reconcile clears nothing
+  # and the STREAMED working edge is the only thing that can clear the marker.
   cat > "$reader" <<'SH'
 #!/usr/bin/env bash
 echo "@subscribed"
@@ -866,7 +868,7 @@ sleep 0.3
 exit 0
 SH
   chmod +x "$reader"
-  export CS_FAKE_HERDR_AGENT_STATUS=working
+  export CS_FAKE_HERDR_AGENT_STATUS=idle
   marker="$state/.herdr-escalated-pane-ev-1"
   : > "$marker"
   rec=$(
