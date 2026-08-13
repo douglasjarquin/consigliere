@@ -270,7 +270,7 @@ test_launch_wiring_is_byte_identical_with_telemetry_off() {
   notify_argv=$(codex_notify_argv /turnend)
   # The exact string an uninstrumented consigliere produced, so a regression in
   # the optional telemetry argument cannot silently reshape the notify value.
-  [ "$notify_argv" = 'notify=["bash","-c","touch /turnend"]' ] ||
+  [ "$notify_argv" = 'notify=["bash","-c","touch '"'"'/turnend'"'"'"]' ] ||
     fail "the codex notify argv changed with telemetry off:"$'\n'"$notify_argv"
   settings=$(bash -c ". '$ROOT/bin/cs-harness-lib.sh'; cs_harness_claude_settings_json /s/t.turn-ended")
   [ "$settings" = '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"touch /s/t.turn-ended"}]}]}}' ] ||
@@ -286,7 +286,7 @@ test_worker_turn_end_signal_survives_a_failing_telemetry_command() {
   # land: it is what supervision watches for, and it runs first, joined by `;`
   # rather than `&&` so nothing about telemetry can gate it.
   tele='/nonexistent/telemetry --worker --task t'
-  notify="touch $dir/turn-ended; $tele"
+  notify="touch '$dir/turn-ended'; $tele"
   notify_argv=$(codex_notify_argv "$dir/turn-ended" "$tele")
   assert_contains "$notify_argv" "$notify" \
     "the codex notify command must touch first and only then run telemetry"

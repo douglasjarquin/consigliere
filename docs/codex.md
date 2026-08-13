@@ -11,18 +11,26 @@ Re-verify after codex upgrades; `bin/cs-bootstrap.sh` checks presence only, not 
 An interactive soldier or capo launches via herdr's native `agent start`, not a typed
 shell command: `herdr agent start <id> --kind codex --pane <p> --timeout <ms> --
 --dangerously-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch
-state/<id>.turn-ended\"]"`. Everything after `--` reaches the `codex` binary as
+'state/<id>.turn-ended'\"]"`. Everything after `--` reaches the `codex` binary as
 literal argv, with no shell evaluation, so the notify config VALUE (the JSON-looking
 `notify=[...]` string) needs no shell escaping of its own here - it is one plain argv
 token, built directly by `bin/cs-harness-lib.sh`'s `cs_harness_codex_notify_argv`
-rather than assembled inside a larger quoted shell string.
+rather than assembled inside a larger quoted shell string. The touch's PATH inside
+that value is still single-quoted, because codex execs the command through `bash
+-c`: an unquoted state path with a space, `$`, or glob character would word-split
+or expand there and the turn-end signal would silently never land. The builder
+fails closed (rc 1, nothing appended) on a path carrying `"`, `\`, or `'`, which
+cannot be embedded in the JSON string safely.
 
 **The brief is NOT part of this call - it cannot be, on either harness.** See
 docs/claude.md's launch template for the full story (live-verified 2026-08-13:
 `agent start`'s trailing argv refuses any token with an embedded newline, and every
 real brief is multi-line); codex's cold launch and capo launch deliver the brief the
-same way claude's do, through `bin/cs-prompt-lib.sh`'s `cs_prompt_guarded` as a
-follow-up prompt after a bare `agent start`, not as a positional argument.
+same way claude's do - `bin/cs-spawn.sh`'s `_cs_spawn_deliver_brief` calls
+`cs_herdr_agent_prompt_confirmed` directly as a follow-up prompt after a bare
+`agent start`, deliberately bypassing `bin/cs-prompt-lib.sh`'s `cs_prompt_guarded`
+(whose composer-empty check can never succeed on a fresh session; docs/claude.md
+owns why) - not as a positional argument.
 
 - The `-c` flag and its notify value are two separate argv elements (`-c`, then the
   value), matching codex's own `-c key=value` config-override CLI convention -

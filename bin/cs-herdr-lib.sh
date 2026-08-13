@@ -213,9 +213,12 @@ cs_herdr_pane_run_confirmed() {
 # "agent_prompt_stalled" error (src/api/wait.rs, herdr source) when the agent
 # never leaves its pre-submit state within its own 5s settle window, instead
 # of consigliere polling `agent wait` a second time to find out.
-# Still does NOT check the composer and will concatenate onto existing text -
-# bin/cs-prompt-lib.sh owns that guard and is the only thing that should call
-# this.
+# Still does NOT check the composer and will concatenate onto existing text.
+# Two sanctioned callers: bin/cs-prompt-lib.sh's cs_prompt_guarded, which owns
+# that composer guard, and bin/cs-spawn.sh's _cs_spawn_deliver_brief, which
+# deliberately bypasses it because the guard's composer-empty check can never
+# succeed on the fresh session its own spawn just created (rationale there and
+# in docs/claude.md) - do not route that call site back through the guard.
 cs_herdr_agent_prompt_confirmed() { # <pane_id> <text> [timeout-ms] -> rc 0 iff confirmed working
   cs_herdr agent prompt "$1" "$2" --wait --until working --timeout "${3:-8000}"
 }

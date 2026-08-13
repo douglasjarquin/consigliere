@@ -83,9 +83,11 @@ case "${1:-} ${2:-}" in
   "pane get") printf '{"result":{"pane":{"pane_id":"w1:p1","cwd":"%s"}}}\n' "${CS_FAKE_SPAWN_WORKTREE:-}" ;;
   "pane read")
     # A generic empty-composer read (codex's glyph, which the classifier
-    # recognizes regardless of which harness is actually running) so
-    # cs_prompt_guarded's post-launch brief delivery proceeds on its first
-    # attempt instead of retrying for its full window every spawn.
+    # recognizes regardless of which harness is actually running) so the
+    # post-launch brief delivery (bin/cs-spawn.sh's _cs_spawn_deliver_brief,
+    # which calls cs_herdr_agent_prompt_confirmed directly and bypasses
+    # cs_prompt_guarded) proceeds on its first attempt instead of retrying
+    # for its full window every spawn.
     printf '%s\n' $'\342\200\272 ' ;;
   "agent get") printf '{"result":{"agent":{"agent":"codex","agent_status":"idle"}}}\n' ;;
   "pane process-info")
@@ -152,13 +154,20 @@ printf 'charter\n' > "$HOME_DIR/data/t-capo/brief.md"
 env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude \
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
   CS_CLAUDE_JSON="$TMP/claude.json" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-t-capo" \
+  CS_FAKE_SPAWN_PROMPT="$TMP/prompt-t-capo" \
   "$SPAWN" t-capo "$CAPO_HOME" --capo >/dev/null || fail "capo spawn failed"
 launch=$(cat "$TMP/launch-t-capo")
 [ "$(cs_meta_get "$HOME_DIR/state/t-capo.meta" kind)" = capo ] || fail "capo meta kind"
 assert_contains "$launch" "kind=claude" "capo launches the root harness"
 assert_not_contains "$launch" '--settings' "capo has no turn-end wiring"
 assert_not_contains "$launch" 'notify=' "capo has no turn-end wiring"
-pass "capo spawn: env pre-step confirmed, no turn-end wiring, correct harness"
+assert_not_contains "$launch" 'CONSIGLIERE_OP' "the charter never rides agent start's argv"
+prompt=$(cat "$TMP/prompt-t-capo")
+[ "$(printf '%s' "$prompt" | "$ROOT/bin/cs-operational-input.sh" kind)" = launch-brief ] \
+  || fail "the capo charter prompt lacks the launch-brief kind"
+[ "$(printf '%s' "$prompt" | "$ROOT/bin/cs-operational-input.sh" body)" = "$(cat "$HOME_DIR/data/t-capo/brief.md")" ] \
+  || fail "the capo charter prompt lost the charter body"
+pass "capo spawn: env pre-step confirmed, no turn-end wiring, correct harness, charter delivered as a typed follow-up prompt"
 
 # --- the harness owns model and reasoning level ------------------------------
 # Consigliere selects neither, on either harness and for every task kind, so no
@@ -282,7 +291,7 @@ assert_contains "$launch" 'cs-telemetry-emit.sh' "an enabled home instruments th
 assert_contains "$launch" '--worker --task' "the worker emitter is called with its task identity"
 assert_not_contains "$launch" '--stdin' "codex notify carries no piped payload, so the emitter must not read stdin"
 case "$launch" in
-  *"touch $HOME_DIR/state/t-telemetry-codex.turn-ended; "*) ;;
+  *"touch '$HOME_DIR/state/t-telemetry-codex.turn-ended'; "*) ;;
   *) fail "the turn-end touch must run first, joined by ';' so telemetry cannot gate it: $launch" ;;
 esac
 

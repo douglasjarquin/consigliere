@@ -120,10 +120,12 @@ test_spawn_launch_brief_stamping() {
   # An interactive soldier no longer carries the brief in agent start's argv -
   # it cannot: agent start's trailing argv is refused outright on an embedded
   # newline (docs/herdr.md), and every real brief is multi-line. The brief is
-  # delivered as a follow-up `agent prompt` instead (bin/cs-prompt-lib.sh's
-  # cs_prompt_guarded), so this fake answers that guard's checks with the same
+  # delivered as a follow-up `agent prompt` instead (bin/cs-spawn.sh's
+  # _cs_spawn_deliver_brief calling cs_herdr_agent_prompt_confirmed directly,
+  # bypassing bin/cs-prompt-lib.sh's cs_prompt_guarded - docs/claude.md owns
+  # why), so this fake answers that path's busy-state check with the same
   # minimal empty-composer/idle-agent shape tests/cs-activate.test.sh already
-  # established for it, then captures what agent prompt actually receives.
+  # established, then captures what agent prompt actually receives.
   cat > "$fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
 set -u
@@ -171,15 +173,11 @@ SH
   [ "$(cs_operational_input_kind "$prompt")" = launch-brief ] || fail "spawn prompt lacks launch-brief kind"
   [ "$(cs_operational_input_body "$prompt")" = "$(cat "$home/data/task/brief.md")" ] \
     || fail "spawn prompt lost brief body"
-  # Interactive soldier/capo launches now compute the encoded brief directly in
-  # cs-spawn.sh's own shell (one call per launch context: ship, capo, and the
-  # relaunch cold-launch fallback = 3); only the headless scout, which stays on
-  # the shell-string mechanism permanently, still stamps it via cs-harness-lib.sh.
-  occurrences=$(grep -c 'encode launch-brief' "$ROOT/bin/cs-harness-lib.sh")
-  [ "$occurrences" -eq 1 ] || fail "the headless scout must be the only cs-harness-lib.sh launch path stamping launch-brief"
-  occurrences=$(grep -c 'encode launch-brief' "$ROOT/bin/cs-spawn.sh")
-  [ "$occurrences" -eq 3 ] || fail "ship, capo, and the relaunch cold-launch fallback must each stamp launch-brief directly"
-  pass "spawn passes a typed launch-brief prompt on every launch path"
+  # The other launch paths get the same captured-prompt proof elsewhere: the
+  # capo charter in tests/cs-spawn-harness.test.sh, the relaunch cold-launch
+  # fallback in tests/cs-control-relaunch.test.sh, and the headless scout's
+  # shell-string launch in tests/cs-spawn-harness.test.sh's pane-run capture.
+  pass "spawn passes a typed launch-brief prompt to the started agent"
 }
 
 test_library_and_cli_round_trip

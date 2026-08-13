@@ -110,8 +110,8 @@ case "$1 $2" in
     composer=$(read_state composer)
     # Codex's actual empty-composer glyph (a bare ❯ alone does not classify as
     # empty to cs_composer_state - nothing in this suite exercised that verdict
-    # before cs_prompt_guarded gained a caller here, bin/cs-spawn.sh's post-launch
-    # brief delivery).
+    # before bin/cs-spawn.sh's post-launch brief delivery, _cs_spawn_deliver_brief,
+    # which bypasses cs_prompt_guarded, started reading this pane).
     [ -n "$composer" ] || composer=$'\342\200\272 '
     printf 'some transcript line\n%s\n' "$composer"
     ;;

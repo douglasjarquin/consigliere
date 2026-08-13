@@ -145,6 +145,30 @@ cs_harness_resume_argv argv claude
   || fail "claude resume argv (got: ${argv[*]-<empty>})"
 pass "the resume argv builder per harness"
 
+# The notify value embeds `touch <path>` inside a JSON string that codex execs
+# via `bash -c`, so the path must survive BOTH contexts: run the exact command
+# codex would run against a state path carrying a space, and refuse a path
+# carrying a character the JSON string cannot hold - supervision silently never
+# seeing a turn end is the failure this guards against.
+mkdir -p "$TMP/state dir"
+argv=()
+cs_harness_codex_notify_argv argv "$TMP/state dir/t.turn-ended" \
+  || fail "a plain state path must build the notify wiring"
+{ [ "${#argv[@]}" -eq 2 ] && [ "${argv[0]}" = -c ]; } \
+  || fail "notify wiring must be -c plus one config value (got: ${argv[*]-<empty>})"
+notify_cmd=$(printf '%s' "${argv[1]#notify=}" | jq -r '.[2]') \
+  || fail "the notify config value must stay valid JSON: ${argv[1]}"
+bash -c "$notify_cmd" || fail "the command codex would exec on turn end failed"
+[ -f "$TMP/state dir/t.turn-ended" ] \
+  || fail "a state path with a space must still receive the turn-end touch"
+for bad in 'quo"te' 'back\slash' "apos'trophe"; do
+  argv=()
+  cs_harness_codex_notify_argv argv "$TMP/$bad/t.turn-ended" 2>/dev/null \
+    && fail "a turn-end path carrying $bad must be refused, not emitted malformed"
+  [ "${#argv[@]}" -eq 0 ] || fail "a refused turn-end path must append nothing"
+done
+pass "the codex notify argv quotes the turn-end path for bash -c and fails closed on unsafe characters"
+
 # The narrower mode must reach agent start as clean argv, not the string
 # builder's shell-quote-wrapped value: `agent start`'s trailing argv reaches
 # the launched binary literally, with no shell to strip a quote character.

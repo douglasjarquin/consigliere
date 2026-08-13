@@ -638,7 +638,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
   if [ "$R_HARNESS" = claude ]; then
     RESUME_ARGV+=(--settings "$SETTINGS_FILE")
   elif [ "$R_HARNESS" = codex ]; then
-    cs_harness_codex_notify_argv RESUME_ARGV "$R_TURNEND" "$R_TELEMETRY"
+    cs_harness_codex_notify_argv RESUME_ARGV "$R_TURNEND" "$R_TELEMETRY" || {
+      echo "error: turn-end path $R_TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash); the pane is untouched" >&2
+      exit 1
+    }
   fi
   # A short trigger timeout on purpose: its own result is not the resume
   # decision (the loop below is), so it must not block waiting for the
@@ -670,7 +673,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
     if [ "$R_HARNESS" = claude ]; then
       COLD_ARGV+=(--settings "$SETTINGS_FILE")
     elif [ "$R_HARNESS" = codex ]; then
-      cs_harness_codex_notify_argv COLD_ARGV "$R_TURNEND" "$R_TELEMETRY"
+      cs_harness_codex_notify_argv COLD_ARGV "$R_TURNEND" "$R_TELEMETRY" || {
+        echo "error: turn-end path $R_TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash); no cold launch was attempted" >&2
+        exit 1
+      }
     fi
     if ! cs_herdr_agent_start "$R_PANE" "$ID" "$R_HARNESS" "$(cs_herdr_agent_start_timeout_ms "$LAUNCH_WAIT")" "${COLD_ARGV[@]}"; then
       echo "error: no session was resumable for '$ID' and the cold launch brought up no agent within ${LAUNCH_WAIT}s; pane $R_PANE and worktree $R_WT_REAL are untouched" >&2
@@ -684,7 +690,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
       exit 1
     fi
     _cs_spawn_deliver_brief "$R_PANE" "$encoded_brief" ||
-      echo "warning: the cold launch of '$ID' started but the brief was never confirmed delivered within ${BRIEF_DELIVER_WAIT}s; pane $R_PANE and worktree $R_WT_REAL are untouched - steer it manually" >&2
+      echo "warning: the cold launch of '$ID' started an agent on pane $R_PANE but its brief was never confirmed delivered within ${BRIEF_DELIVER_WAIT}s - steer it manually" >&2
   fi
 
   report_human_gate "$R_PANE" "$R_HARNESS" "$ID"
@@ -960,7 +966,8 @@ else
   if [ "$HARNESS" = claude ]; then
     AGENT_ARGV+=(--settings "$SETTINGS_FILE")
   elif [ "$HARNESS" = codex ]; then
-    cs_harness_codex_notify_argv AGENT_ARGV "$TURNEND" "$TELEMETRY_HOOK"
+    cs_harness_codex_notify_argv AGENT_ARGV "$TURNEND" "$TELEMETRY_HOOK" ||
+      abort_task "turn-end path $TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash)"
   fi
 
   # Verify the launch actually started an agent. Native `agent start` waits

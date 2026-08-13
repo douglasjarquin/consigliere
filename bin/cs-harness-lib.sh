@@ -200,10 +200,20 @@ cs_harness_resume_argv() {
 # records the worker's own turn (measurement only), appended after `; ` -
 # never `&& ` - so the turn-end `touch` runs first, unconditionally, and its
 # result is not gated on anything telemetry does.
+# The touch's path is single-quoted for the `bash -c` codex execs the notify
+# command through, and the whole command sits inside a JSON string - the same
+# double context as cs_telemetry_worker_hook_command, with the same fail-closed
+# contract: a command carrying a double quote or a backslash (which only a path
+# containing ", \, or ' can produce) returns 1 and appends nothing, because a
+# malformed notify value means supervision silently never sees a turn end.
 cs_harness_codex_notify_argv() {
   local -n _cs_codex_notify_out=$1
-  local notify="touch $2"
+  local notify
+  notify="touch $(cs_harness_shell_quote "$2")"
   [ -n "${3:-}" ] && notify="$notify; $3"
+  case "$notify" in
+    *'"'*|*\\*) return 1 ;;
+  esac
   _cs_codex_notify_out+=(-c "notify=[\"bash\",\"-c\",\"$notify\"]")
 }
 
