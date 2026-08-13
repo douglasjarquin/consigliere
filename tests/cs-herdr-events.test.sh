@@ -23,6 +23,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 command -v python3 >/dev/null 2>&1 || { echo "1..0 # skip python3 is required"; exit 0; }
+command -v jq >/dev/null 2>&1 || { echo "1..0 # skip jq is required"; exit 0; }
 
 READER="$ROOT/bin/cs-herdr-events.py"
 

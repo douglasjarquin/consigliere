@@ -26,9 +26,9 @@ Subscribed kinds, all per pane:
                              window that opens and closes inside one drain
                              window (back-to-back permission prompts) is
                              observable ONLY as a pushed edge. `idle`/`done`
-                             are the highest-volume statuses and are pure
-                             no-ops for the push path, so they stay filtered
-                             off the wire.
+                             stay filtered off the wire: both map to `defer`
+                             in cs_transition_policy, a pure no-op on the
+                             fast path.
   pane.exited                the pane's process ended - a soldier that is gone
                              rather than quiet, which polling could only infer
                              from a later "pane not found"
