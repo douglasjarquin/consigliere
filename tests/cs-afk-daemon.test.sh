@@ -173,7 +173,16 @@ daemon_bg() {
   STARTED_PIDS+=("$!")
 }
 
-reap() { kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
+reap() {
+  local pid=$1 i=0
+  kill "$pid" 2>/dev/null || true
+  while [ "$i" -lt 20 ] && kill -0 "$pid" 2>/dev/null; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
 
 # wait_for <ticks> <cmd...>: poll every 0.1s until <cmd...> succeeds.
 wait_for() {
