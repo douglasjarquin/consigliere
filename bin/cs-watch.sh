@@ -35,12 +35,12 @@
 #                          IMMEDIATELY as a stale wake - via the native event
 #                          stream sub-second when the socket is capable, and via
 #                          the poll loop's level read otherwise - never left to
-#                          the wedge timer. Unless afk is active.
+#                          the wedge timer.
 #   check: <script>: <out> authenticated check output, always actionable
 #   check: rejected unauthenticated state checks: <paths>
 #                          unsafe state checks were refused without execution
 #   heartbeat              fleet-scan backstop found an unsurfaced boss-relevant
-#                          status, unless afk is active
+#                          status
 # For normal supervision, resume the supervision protocol after each printed
 # reason. Direct duplicate invocations of this script still no-op through the
 # watcher singleton lock.
