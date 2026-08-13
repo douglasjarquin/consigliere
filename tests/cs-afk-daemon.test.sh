@@ -18,9 +18,9 @@
 #     seam (never a real notification);
 #   - buffered escalations survive a daemon SIGTERM and are flushed as durable
 #     catch-up evidence by cs-afk-return, which also clears state/.afk;
-#   - cs-afk-start refuses outside a herdr pane, and inside one it arms
-#     state/.afk, records the target pane, starts the daemon headless, and
-#     verifies it came alive; cs-afk-return stops it in order.
+#   - cs-afk-start arms state/.afk immediately (nothing to launch, so nothing
+#     to separately certify) and a refresh preserves the buffer; cs-afk-return
+#     clears state/.afk and surfaces catch-up evidence.
 # The composer unit test modifies PATH inside a deliberate subshell; every
 # other test passes PATH per-command through env. Both are intentional.
 # shellcheck disable=SC2030,SC2031
@@ -33,7 +33,6 @@ set -u
 
 DAEMON="$ROOT/bin/cs-daemon.sh"
 AFK_START="$ROOT/bin/cs-afk-start.sh"
-AFK_VERIFY="$ROOT/bin/cs-afk-verify.sh"
 AFK_RETURN="$ROOT/bin/cs-afk-return.sh"
 
 TMP_ROOT=$(cs_test_tmproot cs-afk-daemon)
@@ -509,156 +508,39 @@ test_return_gate_blocks_on_open_blocker() {
   pass "the return catch-up gate fails closed on an open blocked: decision and clears only after resolved [key=...]"
 }
 
-# --- 5. afk-start refuses outside a herdr pane ---------------------------------
-
-test_afk_start_refuses_outside_herdr_pane() {
-  local dir state fakebin out rc
-  dir=$(make_case start-refuse); state="$dir/state"; fakebin="$dir/fakebin"
-  out=$(env -u HERDR_PANE_ID PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
-    "$AFK_START" 2>&1)
-  rc=$?
-  expect_code 1 "$rc" "cs-afk-start outside a herdr pane"
-  assert_contains "$out" "HERDR_PANE_ID" "refusal does not name the missing herdr pane env"
-  assert_absent "$state/.afk" "a refused start still armed away mode"
-  assert_absent "$state/.subsuper-target" "a refused start still recorded a target pane"
-  pass "cs-afk-start refuses outside a herdr pane and arms nothing"
-}
-
-# --- 6. afk-start arms + verifies the daemon; return stops it in order ---------
+# --- 5. afk-start arms immediately; a refresh preserves the buffer; return
+#        clears the flag -------------------------------------------------------
 
 test_afk_start_and_return_lifecycle() {
-  local dir state fakebin out rc pid
+  local dir state fakebin out rc
   dir=$(make_case start-return); state="$dir/state"; fakebin="$dir/fakebin"
   : > "$dir/watch-script"   # quiet watcher: the stub blocks
-  out=$(env HERDR_PANE_ID=w9:p9 PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
+  out=$(env PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
     CS_WATCH_BIN="$fakebin/cs-watch-stub" CS_FAKE_WATCH_SCRIPT="$dir/watch-script" \
     CS_FAKE_HERDR_LOG="$dir/herdr.log" CS_WEDGE_ALARM_EXEC=discard \
     "$AFK_START" 2>&1)
   rc=$?
-  expect_code 0 "$rc" "cs-afk-start inside a herdr pane"
-  # Starting is not arming: only cs-afk-verify.sh, in a later call, can tell.
-  assert_contains "$out" "NOT yet certified" "start must not claim away mode is armed"
+  expect_code 0 "$rc" "cs-afk-start"
+  # Nothing is launched, so arming is immediate - no separate certification step.
+  assert_contains "$out" "away mode armed" "start did not report an armed away mode"
   assert_present "$state/.afk" "start did not write the durable away flag"
-  [ "$(cat "$state/.subsuper-target" 2>/dev/null)" = "w9:p9" ] \
-    || fail "start did not record the supervisor pane id in .subsuper-target"
-  pid=$(cat "$state/.subsuper-daemon.pid" 2>/dev/null || true)
-  [ -n "$pid" ] || fail "start did not record the daemon pid"
-  kill -0 "$pid" 2>/dev/null || fail "daemon is not alive after start"
-  STARTED_PIDS+=("$pid")
 
-  # THE root-cause regression test. `nohup ... & disown` leaves the daemon in
-  # the launching process group, and cs-afk-start.sh always runs inside an
-  # agent's bounded tool call, so the daemon died with that call every time.
-  # cs-detach.py double-forks, so the daemon is the GRANDCHILD and inherits the
-  # intermediate's group (pgid != pid). What must hold is that the group is not
-  # its launcher's and that it has been reparented away from the launcher.
-  local dpgid mypgid dppid
-  dpgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]')
-  mypgid=$(ps -o pgid= -p $$ 2>/dev/null | tr -d '[:space:]')
-  dppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]')
-  [ -n "$dpgid" ] || fail "could not read the daemon's process group"
-  [ "$dpgid" != "$mypgid" ] \
-    || fail "the daemon is still in its launcher's process group ($dpgid); it will die with the tool call exactly as it did on every recorded away session"
-  [ "$dppid" = 1 ] \
-    || fail "the daemon was not reparented away from its launcher (ppid=$dppid); cs-detach.py did not take effect"
-
-  # Certification is a SEPARATE step and is what actually arms away mode.
+  # A second start while already away is a refresh, not a fresh entry.
   out=$(env PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
-    CS_AFK_VERIFY_TICKS=150 "$AFK_VERIFY" 2>&1)
-  rc=$?
-  expect_code 0 "$rc" "cs-afk-verify after a healthy start"
-  assert_contains "$out" "away mode certified" "verify did not certify a healthy daemon"
-  assert_present "$state/.afk" "verify cleared the flag on a healthy daemon"
-
-  # A second start while the daemon lives is a refresh, not a restart - and it
-  # still points at certification rather than declaring success on a live pid.
-  out=$(env HERDR_PANE_ID=w9:p9 PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
     CS_WATCH_BIN="$fakebin/cs-watch-stub" CS_FAKE_WATCH_SCRIPT="$dir/watch-script" \
     "$AFK_START" 2>&1)
   rc=$?
   expect_code 0 "$rc" "cs-afk-start refresh"
-  assert_contains "$out" "daemon already running" "refresh did not detect the live daemon"
-  assert_contains "$out" "certify it with cs-afk-verify.sh" \
-    "the refresh path claimed success on a live pid without pointing at certification"
-  [ "$(cat "$state/.subsuper-daemon.pid" 2>/dev/null)" = "$pid" ] \
-    || fail "refresh restarted the daemon instead of preserving it"
+  assert_contains "$out" "away mode refreshed" "a second start while already away must report a refresh"
 
-  # Ordered return: daemon stopped first, then .afk cleared.
+  # Return clears the flag even with no daemon ever having run.
   out=$(env PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
     CS_FAKE_HERDR_LOG="$dir/herdr.log" "$AFK_RETURN" 2>&1)
   rc=$?
   expect_code 0 "$rc" "cs-afk-return after a clean away session"
   assert_contains "$out" "catch-up clear" "return did not report catch-up clear"
-  wait_for_death "$pid" 50 || fail "return did not stop the daemon"
   assert_absent "$state/.afk" "return did not clear state/.afk"
-  pass "cs-afk-start detaches the daemon out of its launcher's process group; verify certifies it, refresh preserves it, return stops it and clears .afk in order"
-}
-
-# The failure mode that cost five away sessions, reproduced directly: the
-# daemon is gone by the time anyone looks again. Certification must roll away
-# mode back rather than leave the boss believing the fleet is watched.
-test_afk_verify_rolls_back_a_daemon_that_did_not_survive() {
-  local dir state fakebin out rc pid
-  dir=$(make_case verify-dead); state="$dir/state"; fakebin="$dir/fakebin"
-  : > "$dir/watch-script"
-  env HERDR_PANE_ID=w9:p9 PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
-    CS_WATCH_BIN="$fakebin/cs-watch-stub" CS_FAKE_WATCH_SCRIPT="$dir/watch-script" \
-    CS_FAKE_HERDR_LOG="$dir/herdr.log" CS_WEDGE_ALARM_EXEC=discard \
-    "$AFK_START" >/dev/null 2>&1
-  pid=$(cat "$state/.subsuper-daemon.pid" 2>/dev/null || true)
-  [ -n "$pid" ] || fail "start did not record the daemon pid"
-
-  # Stand in for the process-group teardown: the daemon dies after the call
-  # that started it returns, before anyone certifies.
-  kill -9 "$pid" 2>/dev/null || true
-  wait_for_death "$pid" 50 || fail "could not stage the dead-daemon case"
-
-  # No set +e/-e here: this file runs without errexit, and switching it on
-  # leaks into the EXIT trap.
-  out=$(env PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
-    CS_AFK_VERIFY_TICKS=20 "$AFK_VERIFY" 2>&1)
-  rc=$?
-  [ "$rc" -ne 0 ] || fail "verify certified away mode with no daemon behind it"
-  assert_contains "$out" "away mode NOT armed" "verify did not say away mode is off"
-  assert_absent "$state/.afk" "verify left the away flag up with no daemon"
-  pass "cs-afk-verify rolls away mode back when the daemon did not survive the call that started it"
-}
-
-# A daemon that is running but never completes a pass is not supervising, and a
-# live pid is exactly what used to make it look armed.
-test_afk_verify_rolls_back_a_daemon_that_never_completes_a_pass() {
-  local dir state fakebin out rc pid
-  dir=$(make_case verify-no-pass); state="$dir/state"; fakebin="$dir/fakebin"
-
-  cat > "$fakebin/stillborn-daemon.sh" <<SH
-#!/usr/bin/env bash
-set -u
-. "$ROOT/bin/cs-wake-lib.sh"
-STATE="\$CS_STATE_OVERRIDE"
-cs_lock_try_acquire "\$STATE/.subsuper-daemon.lock" || exit 1
-printf '%s\n' "\$\$" > "\$STATE/.subsuper-daemon.pid"
-sleep 300
-SH
-  chmod +x "$fakebin/stillborn-daemon.sh"
-
-  env HERDR_PANE_ID=w9:p9 PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
-    CS_AFK_DAEMON="$fakebin/stillborn-daemon.sh" \
-    CS_FAKE_HERDR_LOG="$dir/herdr.log" "$AFK_START" >/dev/null 2>&1
-  pid=$(cat "$state/.subsuper-daemon.pid" 2>/dev/null || true)
-  if [ -n "$pid" ]; then STARTED_PIDS+=("$pid"); fi
-
-  out=$(env PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
-    CS_AFK_DAEMON="$fakebin/stillborn-daemon.sh" CS_AFK_VERIFY_TICKS=20 \
-    "$AFK_VERIFY" 2>&1)
-  rc=$?
-  [ "$rc" -ne 0 ] || fail "verify certified a daemon that never completed a pass"
-  assert_contains "$out" "never completed a supervision pass" "verify did not name the missing pass"
-  assert_absent "$state/.afk" "away mode must be rolled back, not left armed without an engine"
-  if [ -n "$pid" ]; then
-    wait_for_death "$pid" 50 \
-      || fail "rollback left a wedged daemon holding the lock; the next arm would take the refresh path and report success"
-  fi
-  pass "cs-afk-verify rolls back and stops a daemon that comes alive but never completes a supervision pass"
+  pass "cs-afk-start arms immediately and a repeat call refreshes; cs-afk-return clears the flag"
 }
 
 # --- 7. bossless acknowledgment gate / kill switch (bin/cs-afk-start.sh) ------
@@ -758,13 +640,13 @@ test_afk_start_ack_subcommand_records_durably() {
 }
 
 test_afk_start_first_engagement_prompts_second_does_not() {
-  local dir state fakebin ack out rc pid
+  local dir state fakebin ack out rc
   dir=$(make_case bossless-first-engagement); state="$dir/state"; fakebin="$dir/fakebin"
   ack="$dir/bossless-ack.md"
   : > "$dir/watch-script"
   cs_write_meta "$state/ship-a.meta" "kind=ship" "yolo=on" "project=$dir/projects/proj-a"
 
-  out=$(env HERDR_PANE_ID=w9:p9 PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
+  out=$(env PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
     CS_BOSSLESS_ACK_OVERRIDE="$ack" CS_WATCH_BIN="$fakebin/cs-watch-stub" \
     CS_FAKE_WATCH_SCRIPT="$dir/watch-script" CS_FAKE_HERDR_LOG="$dir/herdr.log" \
     CS_WEDGE_ALARM_EXEC=discard "$AFK_START" 2>&1)
@@ -773,19 +655,17 @@ test_afk_start_first_engagement_prompts_second_does_not() {
   assert_contains "$out" "bossless mode would newly apply to project 'proj-a'" \
     "the first engagement must name the unacknowledged project explicitly"
   assert_present "$state/.afk" "away mode must still arm even with an unacknowledged bossless project"
-  pid=$(cat "$state/.subsuper-daemon.pid" 2>/dev/null || true)
-  if [ -n "$pid" ]; then STARTED_PIDS+=("$pid"); fi
 
   CS_BOSSLESS_ACK_OVERRIDE="$ack" "$AFK_START" ack proj-a >/dev/null \
     || fail "acknowledging proj-a should succeed"
 
-  out=$(env HERDR_PANE_ID=w9:p9 PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
+  out=$(env PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
     CS_BOSSLESS_ACK_OVERRIDE="$ack" CS_WATCH_BIN="$fakebin/cs-watch-stub" \
     CS_FAKE_WATCH_SCRIPT="$dir/watch-script" \
     "$AFK_START" 2>&1)
   rc=$?
   expect_code 0 "$rc" "cs-afk-start refresh after acknowledgment"
-  assert_contains "$out" "daemon already running" "the second run must be the ordinary refresh path"
+  assert_contains "$out" "away mode refreshed" "the second run must be the ordinary refresh path"
   case "$out" in
     *"would newly apply to project"*) fail "an already-acknowledged project must not be re-prompted: $out" ;;
   esac
@@ -946,10 +826,7 @@ test_forged_marker_in_status_is_neutralized
 test_pending_composer_defers_and_wedge_alarm_fires
 test_buffer_survives_kill_and_return_flushes
 test_return_gate_blocks_on_open_blocker
-test_afk_start_refuses_outside_herdr_pane
 test_afk_start_and_return_lifecycle
-test_afk_verify_rolls_back_a_daemon_that_did_not_survive
-test_afk_verify_rolls_back_a_daemon_that_never_completes_a_pass
 test_bossless_ack_status_record_and_kill_switch
 test_bossless_ack_corrupt_file_fails_closed
 test_bossless_unacked_projects_scans_state_meta
