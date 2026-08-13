@@ -42,14 +42,17 @@ setup_bossless_fixture() {  # <case-name> <task_id> <project> <key>
 
 # 1. record then render round-trip: three categories recorded, rendered
 #    output lists all three with the most severe first. Also proves no
-#    blocking hold is ever created: real tasks-axi backs $CS_HOME here (never
-#    a fake), and a captain hold created via bin/cs-decision-hold.sh's tasks_axi
-#    wrapper always writes $CS_HOME/backlog.md - its absence after every
-#    record() call in this scenario is a real side-effect proof, not a
+#    blocking hold is ever created: $CS_HOME carries the same .tasks.toml
+#    markdown-backend wiring as the real repo root, so a captain hold created
+#    via bin/cs-decision-hold.sh's tasks_axi wrapper (real tasks-axi, never a
+#    fake) would land at $CS_HOME/config/backlog.md, exactly as
+#    cs-decision-hold.sh's own error text names that path - its absence after
+#    every record() call in this scenario is a real side-effect proof, not a
 #    source-text grep, that no hold of any kind was created.
 CS_HOME="$TMP/record-render"
 DATA="$CS_HOME/data"
-mkdir -p "$DATA"
+mkdir -p "$DATA" "$CS_HOME/config"
+cp "$ROOT/.tasks.toml" "$CS_HOME/.tasks.toml"
 cs_auto_decision_record task1 routine "minor fix" "did X" "matches accepted intent" \
   || fail "recording a routine entry should succeed"
 cs_auto_decision_record task1 destructive "deleted stale cache" "cleared it" "cache was corrupt" \
@@ -66,7 +69,7 @@ assert_contains "$rendered" "minor fix" "rendered output must list the routine e
 destructive_pos=$(printf '%s\n' "$rendered" | grep -n "deleted stale cache" | cut -d: -f1)
 routine_pos=$(printf '%s\n' "$rendered" | grep -n "minor fix" | cut -d: -f1)
 [ "$destructive_pos" -lt "$routine_pos" ] || fail "the destructive entry must render before the routine one"
-[ ! -e "$CS_HOME/backlog.md" ] \
+[ ! -e "$CS_HOME/config/backlog.md" ] \
   || fail "cs_auto_decision_record must never create a tasks-axi backlog hold artifact"
 pass "cs_auto_decision_record and cs_auto_decision_render round-trip, most-severe first, with no tasks-axi hold"
 
