@@ -898,7 +898,7 @@ test_bossless_ledger_and_pr_pointer_both_delivery_modes() {
   # send-text path), so this test swaps in the fuller shared fake instead.
   cs_capo_fake_herdr "$fakebin"
 
-  for pair in "direct-PR:bothdp" "no-mistakes:bothnm"; do
+  for pair in "direct-PR:bothdp" "made:bothnm"; do
     mode=${pair%%:*}
     id=${pair#*:}
     cs_write_meta "$state/$id.meta" "workspace=w1" "pane=w1:p1" "kind=ship" "yolo=on" "project=$dir/projects/proj-both"
