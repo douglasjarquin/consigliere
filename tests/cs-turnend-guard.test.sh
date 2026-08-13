@@ -178,19 +178,38 @@ test_no_work_in_flight_is_always_permitted() {
   pass "cs-turnend-guard: an idle home ends its turn without a word"
 }
 
-test_away_mode_still_exits_zero() {
+test_away_mode_permits_a_stop_when_the_home_can_wake_itself() {
   local home out rc
-  home=$(make_primary_home afk-home)
-  # Free lock so the away-mode short-circuit (not the lock defer) is what exits 0.
+  home=$(make_wakeable_home afk-wakeable)
   touch "$home/state/.afk"
 
   out=$(run_guard "$home")
   rc=$?
 
-  expect_code 0 "$rc" "away mode must still exit 0"
-  assert_not_contains "$out" "$BLOCK_BANNER" \
-    "away mode owns supervision; the guard must not print the block banner"
-  pass "cs-turnend-guard: away mode still exits 0 (existing behavior unchanged)"
+  expect_code 0 "$rc" "an away-mode home that can wake itself must be allowed to end its turn"
+  [ -z "$out" ] || fail "a permitted away-mode turn end must print nothing, got:"$'\n'"$out"
+  pass "cs-turnend-guard: away mode permits an ordinary turn end while the home can still wake itself"
+}
+
+# There is no separate away-mode supervisor left to fall back on: an away-mode
+# home is covered by the exact same watch/monitor/activate triangle as an
+# attended one, so a home that cannot wake itself must block the stop while
+# away exactly as it would while attended. state/.afk once exempted this
+# check entirely, on the reasoning that an away-mode daemon (with its own,
+# separately-guarded liveness check) restarted turns instead - both the
+# daemon and its liveness check are gone.
+test_away_mode_blocks_when_the_home_cannot_wake_itself() {
+  local home out rc
+  home=$(make_primary_home afk-unwakeable)
+  touch "$home/state/.afk"
+
+  out=$(run_guard "$home")
+  rc=$?
+
+  expect_code 2 "$rc" "an away-mode home with no recorded pane must still block the stop"
+  assert_contains "$out" "$BLOCK_BANNER" "an unwakeable away-mode home must be told it cannot wake itself"
+  assert_contains "$out" "no pane is recorded" "the block must name the missing record"
+  pass "cs-turnend-guard: away mode blocks the stop exactly like an attended home when it cannot wake itself"
 }
 
 test_clears_the_per_turn_checkpoint_marker() {
@@ -230,5 +249,6 @@ test_blocks_when_activation_is_stalled
 test_blocks_when_no_pane_is_recorded
 test_blocks_when_the_recorded_pane_is_someone_else
 test_no_work_in_flight_is_always_permitted
-test_away_mode_still_exits_zero
+test_away_mode_permits_a_stop_when_the_home_can_wake_itself
+test_away_mode_blocks_when_the_home_cannot_wake_itself
 test_clears_the_per_turn_checkpoint_marker
