@@ -126,13 +126,13 @@ visible stall, never an unbounded silent no-op.
 
 ## Submit model
 
-The digest is typed **once** (`herdr pane send-text`, literal and
-non-submitting), then submitted with Enter and **verified natively**:
-`cs_herdr_agent_wait`/`cs_herdr_submit_confirm` confirms the receiving turn
-actually started (idle -> working). Enter is retried - Enter only, never a
-retype, since retyping would concatenate two marked digests - up to
-`CS_INJECT_CONFIRM_RETRIES` times. An unconfirmed submit counts as
-undelivered, so the buffer is preserved rather than cleared.
+The digest is submitted through `cs_prompt_guarded` (`bin/cs-prompt-lib.sh`),
+which delivers it atomically via `cs_herdr_agent_prompt_confirmed`'s
+`herdr agent prompt ... --wait --until working` in a single native call -
+one call both submits and **verifies** the receiving turn actually started
+(idle -> working), with no separate Enter-retry loop. An unconfirmed submit
+(herdr's `agent_prompt_stalled`) counts as undelivered, so the buffer is
+preserved rather than cleared. See `docs/herdr.md` for the adoption record.
 
 ## Classification policy
 
