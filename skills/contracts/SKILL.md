@@ -32,6 +32,9 @@ This is ordinary section-7 ship lifecycle with a board front door - the safety c
 3. Read each issue (`gh-axi issue view <n>`) enough to write a real brief: scope, acceptance criteria, and whether it overlaps another issue's subsystem or depends on unlanded work.
 4. Order and gate:
    - **Concurrency cap: 3 lanes per project** by default. The boss can override per sweep ("knock out 5 at once"); honor an explicit number.
+   - Before the first dispatch of a sweep, check `quota-axi --provider <root harness>` for the runway the soldiers this sweep spawns will spend.
+     A `pace` reading of `behind` or a `projectedExhaustedAt` inside the sweep's expected duration means the harness will likely run out before the column clears: dispatch fewer lanes than the cap, or tell the boss the quota is thin and let them decide whether to proceed at the full cap anyway.
+     Healthy quota needs no mention; this is a pre-dispatch check, not a per-lane one.
    - Before dispatching, run `bin/cs-board-capacity.sh <project> <lane-cap>` and use its `free=` value as the number of Ready issues to dispatch.
      This command is the single owner of live lane accounting; do not substitute the backlog's `## In flight` count.
      It consumes the armed sweep's durable green-PR policy automatically, so later wakes do not depend on conversational memory.
