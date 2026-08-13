@@ -31,7 +31,7 @@ Because a soldier's very first turn must never start with a dirty tree from this
 ## Coverage gap: no bash extractor
 
 Graft's depth tier covers ts/js/py/go; the breadth tier adds swift/rust/java/etc; there is no `.sh` extractor.
-Consigliere's own index therefore covers exactly the 2 Python files in `bin/` (`cs-detach.py`, `cs-herdr-events.py`) out of roughly 90 shell scripts - confirmed in the measurement below.
+Consigliere's own index therefore covers the Python files in `bin/` (`cs-detach.py`; `cs-herdr-events.py` was the second until the event transport moved onto herdr's plugin hooks) out of roughly 90 shell scripts - the measurement below was taken while both existed.
 The fleet projects that actually benefit from this feature today are the ones with indexable source: `pinchos` (swift) and `niceuptime`/`nicebaas` (ts).
 Upstream extractor work for shell is out of scope for this feature.
 

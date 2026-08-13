@@ -31,6 +31,10 @@
 # session; each also skipped silently while its owning script is not yet
 # installed):
 #   FLEET_SYNC: ...            refresh project clones (bin/cs-fleet-sync.sh).
+#   herdr event plugin         install this home's push-event transport
+#                              (bin/cs-herdr-event-plugin.sh); idempotent, and a
+#                              failure reports BOOTSTRAP_INFO rather than
+#                              blocking - the watcher keeps its poll loop.
 #   CAPO_SYNC: / CAPO_LIVENESS: fast-forward and respawn registered capos
 #                              (bin/cs-home-seed.sh sweep modes).
 #
@@ -226,6 +230,16 @@ if [ "$DETECT_ONLY" != 1 ]; then
     && network_sweep_authorized 'project clone refresh'; then
     sync_out=$(cs_timed clone-refresh '' "$SCRIPT_DIR/cs-fleet-sync.sh" --all 2>&1) || true
     [ -z "$sync_out" ] || printf '%s\n' "$sync_out" | sed 's/^/FLEET_SYNC: /'
+  fi
+  # Local: the herdr event plugin is a machine-local registration this home owns
+  # (bin/cs-herdr-event-plugin.sh). Re-running install is idempotent and never
+  # required: a failure here costs blocked-escalation latency, not supervision,
+  # so it reports and moves on rather than gating dispatch.
+  if local_phase && [ -x "$SCRIPT_DIR/cs-herdr-event-plugin.sh" ] && command -v herdr >/dev/null 2>&1; then
+    if ! plugin_out=$("$SCRIPT_DIR/cs-herdr-event-plugin.sh" install 2>&1); then
+      printf 'BOOTSTRAP_INFO: herdr event plugin not installed (%s); supervision continues on the poll loop.\n' \
+        "$(printf '%s' "$plugin_out" | tail -n 1)"
+    fi
   fi
   # Local: capo homes are detached worktrees of this repo on this machine, and
   # their liveness probe asks the local herdr server (see the header).

@@ -42,6 +42,14 @@ export CS_HARNESS_OVERRIDE
 : "${CS_TELEMETRY_DISABLE:=1}"
 export CS_TELEMETRY_DISABLE
 
+# Safe-by-default herdr plugin seam: herdr's plugin registry is GLOBAL to the
+# user, so a suite that runs bootstrap with a real herdr on PATH would link a
+# plugin for its own throwaway temp home into the developer's live registry and
+# leave it there pointing at a deleted directory. Every suite therefore runs with
+# the install disabled; the transport suite re-enables it against a fake herdr.
+: "${CS_EVENT_PLUGIN_DISABLE:=1}"
+export CS_EVENT_PLUGIN_DISABLE
+
 # Safe-by-default notifier seam: any suite that can cross a wedge-alarm
 # threshold must not fire a real desktop notification just because it forgot
 # to stub CS_WEDGE_ALARM_EXEC itself. A suite that sets its own value (e.g. an

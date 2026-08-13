@@ -97,6 +97,7 @@ config/              THE USER-OWNED TREE; LOCAL, gitignored; back it up wholesal
 host/                MACHINE-LOCAL; LOCAL, gitignored; not backed up, re-created per machine, never propagated
   capos.md           capo routing table; maintained by cs-home-seed.sh (section 6); parsed by bin/cs-capo-registry-lib.sh
   harness.conf       pins the root harness (codex or claude); absent = auto-detect
+  herdr-plugin/      generated manifest for this home's herdr push-event plugin; bin/cs-herdr-event-plugin.sh
   upstream.conf      path of the firstmate checkout used by /upstream-review; absent = ../firstmate
   activation.conf    per-home activation scope (section 8); absent = afk-only
   telemetry.conf     optional per-home turn telemetry switch; absent = off; docs/telemetry.md
@@ -120,6 +121,7 @@ state/               volatile runtime signals; gitignored
   pending-replies/   parent-owned capo pending-reply records; cs-pending-reply-lib.sh
   procevent/         armed blocking sources supervised outside a turn; bin/cs-procevent.sh
   procevent-inbox/   their captured results, adapter records, and handled acknowledgements
+  .herdr-events .herdr-events-cursor  push-event spool fed by herdr's plugin hook, and the watcher's cursor into it; bin/cs-herdr-event-lib.sh
   .wake-queue        durable queued wakes: epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload
   .afk               durable away-mode flag; present = cs-activate.sh may afk-only-inject and cs-auto-decision-lib.sh may decide bosslessly
   .watch.lock .wake-queue.lock .monitor.lock   watcher, queue, and monitor singleton locks

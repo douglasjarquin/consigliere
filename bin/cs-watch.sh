@@ -32,10 +32,10 @@
 #                          resume. A pane whose native herdr agent state reads
 #                          `blocked` (waiting on the human: a trust dialog, an
 #                          interactive menu, a wedged prompt) is surfaced
-#                          IMMEDIATELY as a stale wake - via the native event
-#                          stream sub-second when the socket is capable, and via
-#                          the poll loop's level read otherwise - never left to
-#                          the wedge timer.
+#                          IMMEDIATELY as a stale wake - sub-second from the
+#                          herdr plugin event spool when this home has it, and
+#                          via the poll loop's level read otherwise - never left
+#                          to the wedge timer.
 #   check: <script>: <out> authenticated check output, always actionable
 #   check: rejected unauthenticated state checks: <paths>
 #                          unsafe state checks were refused without execution
@@ -62,15 +62,19 @@ mkdir -p "$STATE"
 # shellcheck source=bin/cs-classify-lib.sh
 . "$SCRIPT_DIR/cs-classify-lib.sh"
 # The one herdr layer: captures, native agent busy-state (codex corroboration
-# built in), socket path, and the events-capability probe. This watcher's poll
-# loop over those pull primitives synthesizes the signal/stale/check/heartbeat
-# wake vocabulary; when the herdr socket is push-capable the watcher
-# additionally replaces its blind terminal sleep with a bounded wait on the
-# native pane.agent_status_changed stream (event_wait_or_sleep below), so a
-# soldier entering `blocked` wakes its supervisor sub-second; the poll loop
-# stays live every cycle as the permanent fail-closed backstop.
+# built in), and the socket path. This watcher's poll loop over those pull
+# primitives synthesizes the signal/stale/check/heartbeat wake vocabulary; when
+# this home's herdr event plugin is installed the watcher additionally replaces
+# its blind terminal sleep with a bounded wait on the spooled
+# pane.agent_status_changed edges (event_wait_or_sleep below), so a soldier
+# entering `blocked` wakes its supervisor sub-second; the poll loop stays live
+# every cycle as the permanent fail-closed backstop.
 # shellcheck source=bin/cs-herdr-lib.sh
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
+# The spool the herdr plugin hook appends to, and its cursor drain
+# (bin/cs-herdr-event-plugin.sh installs the plugin that feeds it).
+# shellcheck source=bin/cs-herdr-event-lib.sh
+. "$SCRIPT_DIR/cs-herdr-event-lib.sh"
 # shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
 # PR merge-poll artifact validation (byte-static poll published by cs-pr-check).
@@ -180,17 +184,6 @@ BUSY_TURN_MAX_SECS=${CS_BUSY_TURN_MAX_SECS:-3600}
 PAUSE_RESURFACE_SECS=${CS_PAUSE_RESURFACE_SECS:-$CS_PAUSE_RESURFACE_SECS_DEFAULT}
 TRIAGE_LOG="$STATE/.watch-triage.log"
 TRIAGE_LOG_MAX_BYTES=${CS_WATCH_TRIAGE_LOG_MAX_BYTES:-262144}
-# Consecutive event-path failures (cs_watch_wait_transition returning 2 -
-# connect/subscribe failure) before the push fast-path is disabled for the rest
-# of this watcher process and the loop reverts to pure polling. A watcher
-# restart re-probes capability, so a transient herdr hiccup self-heals on the
-# next cycle chain.
-EVENT_CAP_FAIL_MAX=${CS_EVENT_CAP_FAIL_MAX:-3}
-# Per-process memo for the push-capability probe, keyed by session; re-probed
-# only when that key changes.
-_event_cap_key=""
-_event_cap_ok=0
-_event_cap_fails=0
 
 # Append one line to the triage debug log explaining an absorbed (benign) wake,
 # size-capped so a long benign stretch cannot grow it without bound. Best-effort:
@@ -861,12 +854,12 @@ _capo_state_dir() {  # <capo-id>
 
 # --- normalized transition shape + status->action policy ---------------------
 #
-# The NORMALIZED TRANSITION RECORD is the one shape herdr's event stream is
+# The NORMALIZED TRANSITION RECORD is the one shape herdr's events are
 # projected into before any policy runs. A single TAB-separated line:
 #     <pane_id>\t<workspace_id>\t<from_status>\t<to_status>\t<agent>
 # Only `to_status` is authoritative for the policy below; the other fields are
 # identity/telemetry and MAY be empty. herdr's pane.agent_status_changed event
-# carries no previous status and its stream is edge-triggered, so from_status
+# carries no previous status and it is edge-triggered, so from_status
 # is left empty. Statuses use the shared agent-state vocabulary
 # (idle|working|blocked|done|unknown), the same enum herdr's `agent get` and
 # `pane.agent_status_changed` report.
@@ -887,7 +880,7 @@ cs_transition_record() {  # <pane_id> <workspace_id> <from_status> <to_status> <
   printf '%s\t%s\t%s\t%s\t%s' "$pane_id" "$ws" "$from" "$to" "$agent"
 }
 
-# THE single normalize point: both the stream reader's projected lines AND the
+# THE single normalize point: both the spooled event lines AND the
 # level-reconcile's `agent get` reads flow through here.
 cs_transition_normalize() {  # <pane_id> <workspace_id> <agent_status> <agent>
   cs_transition_record "${1:-}" "${2:-}" "" "${3:-}" "${4:-}"
@@ -971,175 +964,122 @@ cs_transition_clear() {  # <state_dir> <pane>
   rm -f "$marker" 2>/dev/null || true
 }
 
-# --- native event push: pane.agent_status_changed splice ---------------------
+# --- native event push: the herdr plugin event spool -------------------------
 
-# cs_watch_events_capable: capability gate for the event fast-path. Fails
-# closed to the poll loop unless the herdr control socket is present and the
-# raw-socket reader can run (cs_herdr_events_capable). CS_HERDR_EVENTS_FORCE
+# cs_watch_events_capable: capability gate for the event fast-path. The spool
+# file is created by bin/cs-herdr-event-plugin.sh only after herdr accepts the
+# plugin link, so its presence IS the proof that this machine has the transport;
+# without it the watcher keeps its poll loop unchanged. CS_HERDR_EVENTS_FORCE
 # overrides the whole verdict for tests (1 = capable, 0 = incapable).
 cs_watch_events_capable() {
   case "${CS_HERDR_EVENTS_FORCE:-}" in
     1) return 0 ;;
     0) return 1 ;;
   esac
-  cs_herdr_events_capable
+  [ -e "$(cs_event_spool_path "$STATE")" ]
 }
 
-# cs_watch_event_reader_cmd: emit the reader argv (one word per line) for the
-# raw-socket subscriber. Default: `python3 <this dir>/cs-herdr-events.py`.
-# CS_HERDR_EVENT_READER overrides it with a whitespace-split command so tests
-# can substitute a fake reader that replays canned stream lines.
-cs_watch_event_reader_cmd() {
-  local word
-  if [ -n "${CS_HERDR_EVENT_READER:-}" ]; then
-    for word in $CS_HERDR_EVENT_READER; do
-      printf '%s\n' "$word"
-    done
-    return 0
-  fi
-  printf 'python3\n'
-  printf '%s\n' "$SCRIPT_DIR/cs-herdr-events.py"
-}
+# How often the bounded wait re-checks the spool. Each tick costs one stat and
+# one read of a local file, so this is the trade between escalation latency and
+# the idle cost of a watcher with panes but no events; half a second keeps a
+# blocked soldier's wake sub-second in practice (the hook itself runs the moment
+# herdr sees the edge).
+EVENT_SPOOL_TICK=${CS_EVENT_SPOOL_TICK:-0.5}
 
 # cs_watch_wait_transition: the bounded event wait. Blocks up to <timeout_secs>
 # for one of <pane...> to reach a fresh `blocked` edge, then prints the
-# normalized record and returns 0. Returns 1 on a clean timeout (the reader ran
-# the full budget, no fresh actionable edge - the caller has effectively
-# already slept and just continues) and 2 when the event path is unusable
-# (socket unresolved, reader failed to run/subscribe - the caller sleeps the
-# budget itself, the fail-closed backstop). The reader is a short-lived
-# subprocess of THIS watcher, not a second watcher, so every guard/beacon/arm/
-# turn-end mechanism is unchanged. Capability is the caller's responsibility
-# (event_wait_or_sleep memoizes cs_watch_events_capable).
+# normalized record and returns 0. Returns 1 on a clean timeout (no fresh
+# actionable edge - the caller has effectively already slept and just continues)
+# and 2 when the transport is unusable (no spool: this machine has no event
+# plugin installed - the caller sleeps the budget itself, the fail-closed
+# backstop). Capability is the caller's responsibility (event_wait_or_sleep
+# checks cs_watch_events_capable first).
+#
+# Unlike the socket subscriber this replaced, there is no connection to lose:
+# herdr writes the spool from its own process, so edges that fired while this
+# watcher was down are drained here on the next wait, from the persisted cursor.
 cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
   local timeout=$1 state=$2
   shift 2
   local panes=("$@")
   [ "${#panes[@]}" -gt 0 ] || return 2
-  local sock
-  sock=$(cs_herdr_socket_path)
-  [ -n "$sock" ] || return 2
+  local spool cursor
+  spool=$(cs_event_spool_path "$state")
+  cursor=$(cs_event_cursor_path "$state")
+  [ -e "$spool" ] || return 2
 
-  # Start the raw-socket reader and wait for its subscription acknowledgement
-  # before level reconciliation, so edges occurring during reconciliation are
-  # already buffered in the live stream.
-  local reader=()
-  local word
-  while IFS= read -r word; do
-    reader+=("$word")
-  done < <(cs_watch_event_reader_cmd)
-  [ "${#reader[@]}" -gt 0 ] || return 2
-
-  local fifo_dir fifo reader_pid line kind p ws status agent raw record hit rc=1 reader_rc=0
-  fifo_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-herdr-eventwait.XXXXXX") || return 2
-  fifo="$fifo_dir/events"
-  if ! mkfifo "$fifo" 2>/dev/null; then
-    rm -rf "$fifo_dir" 2>/dev/null || true
-    return 2
-  fi
-  "${reader[@]}" "$sock" "$timeout" "${panes[@]}" > "$fifo" 2>/dev/null &
-  reader_pid=$!
-  if ! exec 9< "$fifo"; then
-    kill "$reader_pid" 2>/dev/null || true
-    wait "$reader_pid" 2>/dev/null || true
-    rm -rf "$fifo_dir" 2>/dev/null || true
-    return 2
-  fi
-  if ! IFS= read -r -u 9 line || [ "$line" != "@subscribed" ]; then
-    rc=2
-  fi
-
-  # Level reconcile on (re)connect: a pane already `blocked` during the gap
-  # since the last subscription is returned now, once, while newer edges
-  # accumulate in the active stream. `working` panes clear their marker here too.
-  if [ "$rc" -ne 2 ]; then
-    for p in "${panes[@]}"; do
-      raw=$(cs_herdr_agent_status_raw "$p")
-      [ -n "$raw" ] || continue
-      record=$(cs_transition_normalize "$p" "" "$raw" "")
-      if hit=$(cs_transition_apply "$state" "$record"); then
-        printf '%s' "$hit"
-        rc=0
-        break
-      fi
-    done
-  fi
-
-  # Drain stream edges until an actionable one or the timeout. The reader is
-  # killed the instant one is found.
-  # Split each raw projected line (kind\tpane_id\tworkspace_id\tfield3\tfield4)
-  # with `cut`, NOT `IFS=$'\t' read`: a tab is IFS-whitespace, so `read` would
-  # collapse an empty middle field (e.g. an absent workspace_id) and shift the
-  # remaining columns. `cut` preserves empty fields.
-  #
-  # Field 1 is the event kind, so this never has to infer which subscription
-  # produced a line. An unrecognized kind is ignored rather than misread, which
-  # is what lets the reader add a kind before this side knows about it.
-  while [ "$rc" -eq 1 ] && IFS= read -r line <&9; do
-    [ -n "$line" ] || continue
-    kind=$(printf '%s' "$line" | cut -f1)
-    p=$(printf '%s' "$line" | cut -f2)
-    ws=$(printf '%s' "$line" | cut -f3)
-    status=$(printf '%s' "$line" | cut -f4)
-    agent=$(printf '%s' "$line" | cut -f5)
-    [ -n "$p" ] || continue
-    case "$kind" in
-      status|agent-detected)
-        # An agent appearing in a pane is a relaunch fact rather than an
-        # inference, but it is projected through the same status policy: the
-        # detected event carries the agent's current status.
-        record=$(cs_transition_normalize "$p" "$ws" "$status" "$agent")
-        if hit=$(cs_transition_apply "$state" "$record"); then
-          printf '%s' "$hit"
-          rc=0
-          break
-        fi
-        ;;
-      exited)
-        # The pane's process ended. Polling can only notice this later, as a
-        # pane that no longer exists; this is the moment it happened, and it is
-        # always actionable - a soldier that is gone is never benign.
-        printf 'exited: %s' "$p"
-        rc=0
-        break
-        ;;
-      output)
-        # A requested pattern rendered in the pane. The pattern name carries the
-        # meaning, so the policy lives with whoever configured the pattern.
-        printf 'output: %s %s' "$p" "$status"
-        rc=0
-        break
-        ;;
-      *) continue ;;
-    esac
+  local p raw record hit line kind ws status agent mine=
+  for p in "${panes[@]}"; do
+    mine="$mine|$p|"
   done
-  if [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
-    kill "$reader_pid" 2>/dev/null || true
-  fi
-  # No actionable edge: distinguish a clean full-budget wait (reader exit 0 ->
-  # return 1, caller already waited) from a reader error (connect/subscribe
-  # failure, exit non-zero -> return 2, caller sleeps and counts toward the
-  # runtime-disable threshold).
-  wait "$reader_pid" 2>/dev/null || reader_rc=$?
-  exec 9<&-
-  rm -rf "$fifo_dir" 2>/dev/null || true
-  [ "$rc" -eq 0 ] && return 0
-  [ "$rc" -eq 2 ] && return 2
-  [ "$reader_rc" -eq 0 ] && return 1
-  return 2
+
+  # Level reconcile first: a pane already `blocked` before this wait started -
+  # because the edge predates the plugin install, or was lost to a spool
+  # rotation - is returned now, once. `working` panes clear their marker here too.
+  for p in "${panes[@]}"; do
+    raw=$(cs_herdr_agent_status_raw "$p")
+    [ -n "$raw" ] || continue
+    record=$(cs_transition_normalize "$p" "" "$raw" "")
+    if hit=$(cs_transition_apply "$state" "$record"); then
+      printf '%s' "$hit"
+      return 0
+    fi
+  done
+
+  # Then drain spooled edges until an actionable one or the timeout.
+  # Split each spooled line with `cut`, NOT `IFS=$'\t' read`: a tab is
+  # IFS-whitespace, so `read` would collapse an empty middle field (e.g. an
+  # absent workspace_id) and shift the remaining columns. `cut` preserves them.
+  # $SECONDS is a bash builtin, so the tick loop costs no extra process to
+  # know the time.
+  local started=$SECONDS first=
+  while :; do
+    # A drained batch is consumed whether or not it holds an actionable edge,
+    # so EVERY line in it is applied before returning: stopping at the first hit
+    # would silently discard the rest of that batch, including the `working`
+    # edges that clear other panes' dedupe markers. Only the first actionable
+    # record is handed up; a second one keeps its marker uncommitted and
+    # surfaces on the next wait.
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      kind=$(printf '%s' "$line" | cut -f1)
+      [ "$kind" = status ] || continue
+      p=$(printf '%s' "$line" | cut -f2)
+      [ -n "$p" ] || continue
+      # The spool carries every pane the herdr server knows about; this home
+      # supervises only its own recorded panes.
+      case "$mine" in
+        *"|$p|"*) ;;
+        *) continue ;;
+      esac
+      ws=$(printf '%s' "$line" | cut -f3)
+      status=$(printf '%s' "$line" | cut -f4)
+      agent=$(printf '%s' "$line" | cut -f5)
+      record=$(cs_transition_normalize "$p" "$ws" "$status" "$agent")
+      if hit=$(cs_transition_apply "$state" "$record") && [ -z "$first" ]; then
+        first=$hit
+      fi
+    done < <(cs_event_drain "$spool" "$cursor")
+    if [ -n "$first" ]; then
+      printf '%s' "$first"
+      return 0
+    fi
+    [ "$((SECONDS - started))" -lt "$timeout" ] || return 1
+    sleep "$EVENT_SPOOL_TICK"
+  done
 }
 
 # event_wait_or_sleep: the terminal wait of each supervision cycle. For a home
-# with recorded soldier panes and a push-capable herdr socket, it replaces the
-# blind `sleep POLL` with a bounded wait on herdr's native transition stream,
-# so a soldier going `blocked` wakes the supervisor sub-second instead of after
-# the poll loop's next level read. For every other case - no panes, socket not
-# capable, or the event path proven unreliable this process - it sleeps POLL.
+# with recorded soldier panes and this home's herdr event plugin installed, it
+# replaces the blind `sleep POLL` with a bounded wait on the event spool, so a
+# soldier going `blocked` wakes the supervisor sub-second instead of after the
+# poll loop's next level read. For every other case - no panes, or no plugin on
+# this machine - it sleeps POLL.
 # The poll loop above still runs every cycle, so this only ever SHORTENS
 # latency; it can never drop an escalation (the poll loop is the permanent
 # fail-closed backstop).
 event_wait_or_sleep() {
-  local w rec rc session
+  local w rec rc
   local panes=()
   while IFS= read -r w; do
     # Capo endpoints are supervised via status writes, not pane/agent state (an
@@ -1154,18 +1094,9 @@ event_wait_or_sleep() {
     return
   fi
 
-  # Memoized capability probe; re-probed only when the session key changes.
-  session=$(cs_herdr_session)
-  if [ "$_event_cap_key" != "$session" ]; then
-    _event_cap_key=$session
-    if cs_watch_events_capable; then
-      _event_cap_ok=1
-    else
-      _event_cap_ok=0
-    fi
-    _event_cap_fails=0
-  fi
-  if [ "$_event_cap_ok" != 1 ]; then
+  # The capability check is one stat of a local file, so it is re-read every
+  # cycle: a plugin installed (or removed) mid-run takes effect on the next one.
+  if ! cs_watch_events_capable; then
     sleep "$POLL"
     return
   fi
@@ -1173,28 +1104,21 @@ event_wait_or_sleep() {
   rec=$(cs_watch_wait_transition "$POLL" "$STATE" "${panes[@]}")
   rc=$?
   case "$rc" in
-    0)
-      _event_cap_fails=0
-      handle_push_transition "$rec"
-      ;;
+    0) handle_push_transition "$rec" ;;
     2)
-      # Event path unusable this cycle (connect/subscribe failure). Sleep the
-      # budget and count toward the runtime-disable threshold; past it, drop to
-      # pure polling for the rest of this watcher process.
-      _event_cap_fails=$((_event_cap_fails + 1))
-      [ "$_event_cap_fails" -ge "$EVENT_CAP_FAIL_MAX" ] && _event_cap_ok=0
+      # The transport vanished between the check and the wait (an uninstall, a
+      # rotated-away spool). Sleep the budget; the poll loop above already ran.
       sleep "$POLL"
       ;;
     *)
-      # 1: a clean full-budget wait with no actionable edge - the reader already
+      # 1: a clean full-budget wait with no actionable edge - the wait already
       # blocked ~POLL, so just continue; the next cycle re-scans.
-      _event_cap_fails=0
       ;;
   esac
 }
 
 # handle_push_transition: act on a fresh actionable (blocked) transition record
-# - from the native event stream, or from the poll loop's level read of the
+# - from the spooled herdr events, or from the poll loop's level read of the
 # same native state. Maps the pane back to its task, applies the declared-pause
 # exemption (a soldier waiting on a known external dependency is not a surprise
 # block - absorb it on the poll loop's long pause cadence instead), and
@@ -1517,7 +1441,7 @@ EOF
       blocked)
         # Native blocked: waiting on the human. Surface immediately through the
         # same policy/dedupe/pause machinery the event splice uses, so the poll
-        # loop is a complete backstop when the socket is not push-capable. A
+        # loop is a complete backstop on a machine with no event plugin. A
         # capo's blocked pane is healthy by design and stays excluded.
         if [ "$kind" != capo ] && rec=$(cs_transition_apply "$STATE" "$(cs_transition_normalize "$w" "" blocked "")"); then
           handle_push_transition "$rec"
@@ -1705,7 +1629,7 @@ EOF
     fi
   fi
 
-  # Terminal wait: a bounded native-event wait for a push-capable herdr socket,
-  # else the blind poll sleep. See event_wait_or_sleep.
+  # Terminal wait: a bounded wait on the herdr event spool when this home has
+  # the plugin, else the blind poll sleep. See event_wait_or_sleep.
   event_wait_or_sleep
 done

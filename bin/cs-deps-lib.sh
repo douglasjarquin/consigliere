@@ -110,7 +110,7 @@ cs_deps_purpose() {
     chrome-devtools-axi) printf 'browser work for soldiers that must drive a real page\n' ;;
     quota-axi) printf 'local provider quota headroom before spending a quota window\n' ;;
     shellcheck) printf 'the required shell-lint check (bin/cs-lint.sh)\n' ;;
-    python3) printf 'herdr push events (bin/cs-herdr-events.py); the watcher poll loop is the backstop\n' ;;
+    python3) printf 'detached monitor handoff (bin/cs-detach.py) and harness worktree pre-trust\n' ;;
     *) printf 'no recorded purpose\n'; return 1 ;;
   esac
 }

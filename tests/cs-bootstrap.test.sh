@@ -280,4 +280,54 @@ assert_not_contains "$owned" 'NETWORK_CHECKS:' \
 rm -f "$PART_HOME/state/.lock"
 pass 'a deferred worker sweeps only while state/.lock still names the session that asked'
 
+# --- the herdr event plugin sweep ---------------------------------------------
+# The push-event transport is a machine-local herdr registration this home owns.
+# Installing it is idempotent and silent; failing to install it is an advisory,
+# never a blocker, because the watcher's poll loop covers the same escalations
+# more slowly.
+
+EV_ROOT="$TMP/event-root"
+mkdir -p "$EV_ROOT"
+git init -q -b main "$EV_ROOT"
+git -C "$EV_ROOT" commit -q --allow-empty -m init
+# The sweep runs bin/ scripts by path from the resolved root, so the fixture
+# root carries a copy of bin/ rather than pointing back at the real checkout.
+mkdir -p "$EV_ROOT/bin"
+cp "$ROOT"/bin/*.sh "$EV_ROOT/bin/"
+
+EV_HOME="$TMP/event-home"
+mkdir -p "$EV_HOME/config" "$EV_HOME/state" "$EV_HOME/data" "$EV_HOME/host"
+
+EV_FB=$(cs_fakebin "$TMP/event-tools")
+cat > "$EV_FB/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+case "${1:-} ${2:-}" in
+  "plugin list") printf '{"result":{"plugins":[]}}\n'; exit 0 ;;
+  "plugin link") exit "${CS_FAKE_HERDR_LINK_RC:-0}" ;;
+esac
+exit 1
+SH
+chmod +x "$EV_FB/herdr"
+
+ev_out=$(PATH="$EV_FB:$PATH" CS_HOME="$EV_HOME" CS_ROOT_OVERRIDE="$EV_ROOT" \
+  CS_EVENT_PLUGIN_DISABLE=0 CS_BOOTSTRAP_NETWORK=skip "$EV_ROOT/bin/cs-bootstrap.sh" 2>&1)
+assert_not_contains "$ev_out" 'herdr event plugin' 'a successful plugin install must be silent'
+[ -f "$EV_HOME/host/herdr-plugin/herdr-plugin.toml" ] \
+  || fail 'the sweep did not install this home event plugin manifest'
+[ -e "$EV_HOME/state/.herdr-events" ] \
+  || fail 'the sweep did not create the spool the watcher gates on'
+
+rm -rf "$EV_HOME/host/herdr-plugin" "$EV_HOME/state/.herdr-events"
+ev_fail=$(PATH="$EV_FB:$PATH" CS_HOME="$EV_HOME" CS_ROOT_OVERRIDE="$EV_ROOT" \
+  CS_FAKE_HERDR_LINK_RC=1 CS_EVENT_PLUGIN_DISABLE=0 CS_BOOTSTRAP_NETWORK=skip \
+  "$EV_ROOT/bin/cs-bootstrap.sh" 2>&1)
+assert_contains "$ev_fail" 'BOOTSTRAP_INFO: herdr event plugin not installed' \
+  'a refused plugin link must report an advisory'
+assert_contains "$ev_fail" 'supervision continues on the poll loop' \
+  'the advisory must say supervision is unaffected'
+[ ! -e "$EV_HOME/state/.herdr-events" ] \
+  || fail 'a failed install left a spool behind, arming the watcher onto a dead transport'
+pass 'the herdr event plugin sweep installs silently and degrades to an advisory'
+
 printf 'ok - cs-bootstrap axi version floors and network phase split\n'

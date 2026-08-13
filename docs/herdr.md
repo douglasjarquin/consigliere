@@ -115,9 +115,79 @@ $ herdr pane get w1:p1 --session cs-lab-ctlcodex
 
 ## Push events
 
-- Multi-pane push (`events.subscribe` -> `pane.agent_status_changed`) is socket-only; no CLI subcommand.
-- `bin/cs-herdr-events.py` is the raw AF_UNIX subscriber (ported from firstmate's herdr-eventwait.py); the watcher splices it in when the socket is capable and keeps the poll loop as the permanent backstop.
-- `pane.agent_status_changed` accepts an optional `agent_status` filter in the subscription request itself (`src/api/schema/events.rs`, herdr source, verified 2026-08-12) - a supervisor can subscribe to blocked-only (or any single-status) transitions per pane instead of receiving and locally triaging every transition. `bin/cs-herdr-events.py` does not use this yet; see "Blocked detection covers claude/codex permission prompts natively" above.
+Push escalation reaches this fleet through herdr's own server-side plugin `[[events]]` hook, not through a subscriber consigliere runs.
+`bin/cs-herdr-event-plugin.sh` installs a per-home manifest, herdr runs `bin/cs-herdr-event-hook.sh` once per `pane.agent_status_changed` edge inside the server's process tree, and the hook appends one record to that home's `state/.herdr-events` spool, which `bin/cs-watch.sh` drains from a persisted cursor.
+The poll loop remains the permanent fail-closed backstop, and a machine with no plugin installed has no spool, so the watcher simply keeps polling.
+
+The socket-subscriber facts below (`events.subscribe` and its accepted specs) are still accurate about the API; consigliere no longer uses them.
+
+### Plugin `[[events]]` hooks (verified live 2026-08-13, herdr 0.8.0 / protocol 19, live `default` session)
+
+Every fact here was probed with a scratch plugin (`cs-probe`) linked into this machine's real registry and unlinked afterwards.
+
+**A linked manifest keeps its event hooks verbatim, and `plugin link` is registration, not validation.**
+
+```text
+$ herdr plugin link /tmp/.../probe-plugin
+{"id":"cli:plugin","result":{"plugin":{"enabled":true,"events":[{"command":["./hook.sh"],"on":"pane.agent_detected"},{"command":["./hook.sh"],"on":"pane.agent_status_changed"},{"command":["./hook.sh"],"on":"pane.exited"}],"manifest_path":"/tmp/.../herdr-plugin.toml", ... "warnings":["manifest does not declare platforms; platform support unknown"]},"type":"plugin_linked"}}
+```
+
+`on = "bogus.kind"`, `on = "pane.output_changed"`, and `on = "pane.scroll_changed"` ALL link successfully too.
+Link-time acceptance therefore proves nothing about whether a kind is dispatched: the only proof is observing the hook fire.
+Required manifest fields are `id`, `name`, `version`, `min_herdr_version`; an `[[actions]]` entry needs `title`, not `name` (`missing field \`title\``).
+
+**`pane.agent_status_changed` DOES fire, with the full payload.**
+A real fleet pane's turn boundary ran the hook, which recorded `$HERDR_PLUGIN_EVENT`, `$HERDR_PANE_ID`, and `$HERDR_PLUGIN_EVENT_JSON`:
+
+```text
+pane.agent_status_changed|w7Z:p1|{"event":"pane_agent_status_changed","data":{"type":"pane_agent_status_changed","pane_id":"w7Z:p1","workspace_id":"w7Z","agent_status":"working","agent":"claude"}}
+```
+
+`tab.renamed` fires the same way (`herdr tab rename w70:t1 s5-probe` produced a `tab.renamed|...|{"data":{...,"label":"s5-probe"}}` line within 3s), which is how the dispatch path itself was confirmed before waiting on a status edge.
+
+**`HERDR_PANE_ID` is the INVOCATION CONTEXT's pane, not the event's.**
+The `tab.renamed` hook above received `HERDR_PANE_ID=w70:p1` for an event whose payload carries no pane at all.
+Read pane identity from `HERDR_PLUGIN_EVENT_JSON`; `bin/cs-herdr-event-hook.sh` does.
+
+**Hooks are live-picked-up and logged.**
+The plugin was linked at 22:16:52Z into an already-running server and its hook fired without any server restart or `server reload-config`.
+Each run is recorded with its exit status:
+
+```text
+$ herdr plugin log list
+{"id":"cli:plugin","result":{"logs":[{"command":["./hook.sh"],"event":"tab.renamed","exit_code":0,"log_id":"plugin-log-2","plugin_id":"cs-probe","status":"succeeded","stderr":"","stdout":""}, ...]}}
+```
+
+**Relative commands resolve from the plugin root** (`command = ["./hook.sh"]` ran correctly), and the plugin's config directory is created automatically (`herdr plugin config-dir cs-probe` -> `~/.config/herdr/plugins/config/cs-probe`) while the STATE directory is not: `~/.config/herdr/plugins/state/cs-probe` did not exist, so a hook that redirects into `$HERDR_PLUGIN_STATE_DIR` silently writes nothing.
+This fleet's hook takes its target directory as an argv instead.
+
+**Not verified, and therefore not built on: `pane.exited` and `pane.agent_detected` firing.**
+Both link cleanly, but triggering either requires starting or killing a pane, which is herdr lifecycle work this task's brief did not authorize.
+The transport carries `pane.agent_status_changed` only; a pane that dies is still detected by the watcher's poll loop, one cycle later.
+
+**Every subscribed plugin receives the same edge, and the transport was proven end to end.**
+With five plugins subscribed to `pane.agent_status_changed`, a single burst of real fleet edges dispatched to all five (`consigliere-events-*`, `cs-probe`, `cs-probe4`, `cs-probe6`, `cs-probe7`), and `bin/cs-herdr-event-hook.sh`, run by herdr itself, wrote exactly the expected records into the home's spool:
+
+```text
+status<TAB>w70:p1<TAB>w70<TAB>done<TAB>claude
+status<TAB>w70:p1<TAB>w70<TAB>working<TAB>claude
+status<TAB>w7T:p1<TAB>w7T<TAB>working<TAB>claude
+```
+
+`bin/cs-watch.sh`'s `cs_watch_wait_transition` was then run against that live-written spool and behaved as designed: it consumed the records, advanced its cursor to the file's end, and the real `working` record cleared a pre-seeded escalation marker.
+
+**Dispatch has observable gaps.**
+Between two confirmed working windows, roughly 25 minutes passed in which real status edges produced no hook run for any plugin, including one that had just fired.
+The trigger was not identified; the registry had been churned (repeated link/unlink, and briefly ~24 stale entries) during the same period, and `herdr plugin log list` proved an unreliable witness - it omitted hook runs that demonstrably happened, so absence from that log never proves absence of a run.
+Treat delivery as best-effort and keep the poll loop authoritative.
+
+**Hook delivery is best-effort, by herdr's own design.**
+The 0.8.0 binary carries a `plugin_command_limit_reached` error alongside the plugin-hook environment strings, so herdr caps how many plugin commands it will run at once; the exact cap was not probed.
+Nothing here should be treated as guaranteed delivery: the transport is a latency optimization, and `bin/cs-watch.sh`'s poll loop plus its level reconcile stay the fail-closed backstop.
+
+**Related, verified in the same pass: a supervisor cannot take agent authority from an installed integration by reporting over it.**
+`herdr pane report-agent w70:p1 --source cs-s5-probe --agent claude --state idle` returned success and changed nothing - `agent get` still read `working` from the claude integration's own reporting, and no `pane.agent_status_changed` fired.
+`report-agent` is additive display/state reporting under a non-reserved source id, not an override of an authoritative source.
 
 ## Known gaps / watch list
 
@@ -166,7 +236,7 @@ $ python3 -c '... events.subscribe {"type":"pane.bogus_kind_probe"} ...'
 - `pane.output_changed` is a real internal event kind but is NOT subscribable at protocol 19 either. Source reading alone is misleading here: the exclusion list in `src/api/schema/events.rs` governs plugin hooks, not subscriptions. Probe the socket, do not infer from the source.
 - `pane.output_matched` REQUIRES a `source` field (`visible`, `recent`, or `recent-unwrapped`); omitting it is `invalid_request`, not a default.
 - `pane.agent_status_changed` accepts an optional `agent_status` filter in the same subscription object - live-verified 2026-08-12 against a real pane in a fresh lab: `{"type":"pane.agent_status_changed","pane_id":"w1:p1","agent_status":"blocked"}` returned `{"result":{"type":"subscription_started"}}`. Not yet verified: that a real blocked transition actually delivers the filtered event (the lab pane had no live agent in it, per the environment limit noted at the top of this file).
-- `bin/cs-herdr-events.py` subscribes to `pane.agent_status_changed`, `pane.exited`, and `pane.agent_detected` per pane, plus `pane.output_matched` for each pattern in `CS_HERDR_EVENT_PATTERNS` - none of these subscriptions use the `agent_status` filter yet.
+- Consigliere no longer subscribes over the socket at all; the plugin hook above is the transport, and it receives every status edge rather than a filtered subset.
 
 ### Protocol precondition
 
@@ -294,7 +364,7 @@ Most of the below is not adopted yet - recorded here as available capability so 
 - **`herdr pane wait-output <pane_id> (--match TEXT | --regex PATTERN) [--source ...] [--timeout MS]`** - a CLI-level blocking wait for pane output, no socket subscriber required for a one-shot pattern wait.
 - **`herdr notification show <title> [--body TEXT] [--sound none|done|request]`** - a native toast/sound channel from the CLI, a candidate replacement for part of `bin/cs-prompt-lib.sh`'s hand-rolled osascript/herdr/command wedge-alarm channel plumbing.
 - **Named agents.** `agent rename` lets a supervisor address a pane by name (e.g. the task id) instead of tracking pane ids; the name clears when the occupant exits.
-- **Server-side exec-on-event.** A herdr plugin manifest may declare `[[events]] on = "pane.agent_status_changed" command = [...]` (high-volume kinds like `pane.output_changed`/`layout.updated` are deliberately excluded from the allowed set) plus one-shot `[[startup]]` hooks (herdr source, `src/app/api/plugins/mod.rs`). This runs server-side and survives a supervisor restart, unlike `bin/cs-herdr-events.py`'s subprocess-per-watcher-run design.
+- **Server-side exec-on-event. ADOPTED 2026-08-13** - see "Plugin `[[events]]` hooks" above for the live verification and `bin/cs-herdr-event-plugin.sh` for the install. Running server-side is what makes push survive a watcher restart, which the previous subprocess-per-watcher-run subscriber could not.
 - **Offline detection testing.** `herdr agent explain --file <capture> --agent <label> [--verbose]` runs the manifest engine against a saved capture instead of a live pane, and a new `--source detection` read (`pane read`/`agent read`) returns exactly the text region the classifier evaluates. Useful for turning a busy-signature regression into a named-rule assertion instead of a byte-for-byte pane capture pin.
 - **Misc fields available on reads already in use**: `AgentInfo.launch_pending`/`interactive_ready` on `api snapshot`; `pane report-agent`/`report-metadata --state-label --token --ttl-ms` let a supervisor stamp its own display-only state onto a pane under a non-reserved source id.
 - **Correction (verified live 2026-08-13): `PaneReadResult.truncated` is NOT reachable through `herdr pane read`.** The field exists in the socket API's `PaneReadResult` schema, but the CLI's own `print_read_response` (herdr source, `src/cli.rs:61-70`) extracts and prints only `result.read.text`, for every `--format`/`--source` combination - there is no flag that returns the JSON envelope carrying `truncated`. A truncated read is invisible to any caller going through the CLI, including `cs_herdr_capture`; only a direct socket client could see it.
