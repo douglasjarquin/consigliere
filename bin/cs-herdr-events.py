@@ -10,18 +10,25 @@ react sub-second. The bash side normalizes each line, applies the single-owner
 policy table (bin/cs-watch.sh), decides when to stop, and kills this reader.
 
 Subscribed kinds, all per pane:
-  pane.agent_status_changed  filtered server-side to agent_status=blocked only
+  pane.agent_status_changed  subscribed TWICE, each filtered server-side: once
+                             to agent_status=blocked and once to
+                             agent_status=working. `blocked` is the wake edge
                              (herdr's native manifests already classify a
                              claude/codex permission prompt as this state, so
                              no pattern hunting is needed - docs/herdr.md,
                              "Blocked detection covers claude/codex permission
-                             prompts natively"). The bash side's transition
-                             policy (bin/cs-watch.sh cs_transition_policy) only
-                             ever treats `blocked` as actionable from a push
-                             edge in the first place; every other status edge
-                             is re-read every cycle by the poll loop anyway, so
-                             the filter drops nothing the push path was the
-                             sole source of.
+                             prompts natively"). `working` is the edge that
+                             CLEARS the bash side's per-pane escalation dedupe
+                             marker (bin/cs-watch.sh cs_transition_apply,
+                             absorb), and it must stay on the wire: the poll
+                             pass and the reconnect level-reconcile only sample
+                             pane state once per poll cycle, so a working
+                             window that opens and closes inside one drain
+                             window (back-to-back permission prompts) is
+                             observable ONLY as a pushed edge. `idle`/`done`
+                             are the highest-volume statuses and are pure
+                             no-ops for the push path, so they stay filtered
+                             off the wire.
   pane.exited                the pane's process ended - a soldier that is gone
                              rather than quiet, which polling could only infer
                              from a later "pane not found"
@@ -43,6 +50,7 @@ pane; pane.output_changed is NOT subscribable and the server names the accepted
 set in its rejection):
   request : {"id","method":"events.subscribe","params":{"subscriptions":[
              {"type":"pane.agent_status_changed","pane_id":P,"agent_status":"blocked"},
+             {"type":"pane.agent_status_changed","pane_id":P,"agent_status":"working"},
              {"type":"pane.exited","pane_id":P},
              {"type":"pane.agent_detected","pane_id":P},
              {"type":"pane.output_matched","pane_id":P,"source":"recent",
@@ -173,13 +181,14 @@ def main(argv):
     patterns = _patterns()
     subscriptions = []
     for pane in panes:
-        subscriptions.append(
-            {
-                "type": "pane.agent_status_changed",
-                "pane_id": pane,
-                "agent_status": "blocked",
-            }
-        )
+        for status in ("blocked", "working"):
+            subscriptions.append(
+                {
+                    "type": "pane.agent_status_changed",
+                    "pane_id": pane,
+                    "agent_status": status,
+                }
+            )
         subscriptions.append({"type": "pane.exited", "pane_id": pane})
         subscriptions.append({"type": "pane.agent_detected", "pane_id": pane})
         for name, regex in patterns:

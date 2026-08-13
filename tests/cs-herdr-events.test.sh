@@ -7,10 +7,12 @@
 # covers claude/codex permission prompts natively"), and `pane.agent_status_changed`
 # subscriptions accept an optional `agent_status` filter so the SERVER, not this
 # reader, decides which status edges are worth a wire message
-# (data/stow-synthesis-survey/report.md, S2). This suite runs a minimal real
-# AF_UNIX socket server (no herdr binary needed) and asserts the actual bytes
-# cs-herdr-events.py sends, so a regression that silently drops the filter (or
-# widens it back to every edge) fails here instead of only in a live lab.
+# (data/stow-synthesis-survey/report.md, S2). Two such subscriptions are made
+# per pane - `blocked` (the wake) and `working` (the dedupe-marker clear) - and
+# only `idle`/`done` are dropped. This suite runs a minimal real AF_UNIX socket
+# server (no herdr binary needed) and asserts the actual bytes
+# cs-herdr-events.py sends, so a regression that silently drops either filter
+# (or widens back to every edge) fails here instead of only in a live lab.
 #
 # tests/cs-watch-triage.test.sh separately covers cs_watch_wait_transition's
 # BASH-side decode of whatever the reader prints; that suite fakes the reader
@@ -85,7 +87,7 @@ wait_for_socket() {  # <path> <max-tenths-of-a-second> - a bound AF_UNIX socket
   return 0
 }
 
-# --- subscribe request carries the agent_status:blocked filter --------------
+# --- subscribe request carries the blocked AND working status filters -------
 
 test_status_subscription_is_filtered_to_blocked() {
   local dir sock capture server_pid out req
@@ -94,7 +96,8 @@ test_status_subscription_is_filtered_to_blocked() {
   capture="$dir/request.json"
 
   server_pid=$(fake_server "$sock" "$capture" \
-    '{"event":"pane.agent_status_changed","data":{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"blocked","agent":"claude"}}')
+    '{"event":"pane.agent_status_changed","data":{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"blocked","agent":"claude"}}' \
+    '{"event":"pane.agent_status_changed","data":{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"working","agent":"claude"}}')
   wait_for_socket "$sock" 30 || { kill "$server_pid" 2>/dev/null || true; fail "fake server never bound its socket"; }
 
   out=$(python3 "$READER" "$sock" 2 w1:p1 2>/dev/null)
@@ -103,14 +106,16 @@ test_status_subscription_is_filtered_to_blocked() {
   wait_for_file "$capture" 10 || fail "fake server never captured a request"
   req=$(cat "$capture")
 
-  # The status subscription for the pane must carry agent_status:blocked -
-  # the server-side filter this suite exists to pin. jq -e fails (and this
-  # test with it) if the entry, or the filter field on it, is missing.
+  # The pane gets exactly TWO status subscriptions, one filtered to `blocked`
+  # (the actionable wake) and one to `working` (the edge that clears the bash
+  # side's per-pane dedupe marker). Neither may be dropped and no third status
+  # may creep back on: jq -e fails (and this test with it) otherwise.
   printf '%s' "$req" | jq -e '
     .params.subscriptions
-    | map(select(.type == "pane.agent_status_changed" and .pane_id == "w1:p1"))
-    | length == 1 and .[0].agent_status == "blocked"
-  ' >/dev/null || fail "status subscription missing agent_status:blocked filter: $req"
+    | map(select(.type == "pane.agent_status_changed" and .pane_id == "w1:p1")
+          | .agent_status)
+    | sort == ["blocked", "working"]
+  ' >/dev/null || fail "status subscriptions must be exactly blocked + working: $req"
 
   # pane.exited and pane.agent_detected stay unfiltered - only the status kind
   # narrows, never the other two kinds this reader also relies on.
@@ -125,12 +130,14 @@ test_status_subscription_is_filtered_to_blocked() {
     | length == 1
   ' >/dev/null || fail "pane.agent_detected subscription changed shape: $req"
 
-  # A filtered blocked event the server actually sends still decodes exactly
-  # like the old unfiltered stream did - the filter narrows the WIRE, not the
-  # projected line shape the bash side already pins.
+  # A filtered event the server actually sends still decodes exactly like the
+  # old unfiltered stream did - the filters narrow the WIRE, not the projected
+  # line shape the bash side already pins. Both surviving statuses are checked.
   assert_contains "$out" "$(printf 'status\tw1:p1\tw1\tblocked\tclaude')" \
     "a server-filtered blocked event must still print the ordinary projected line"
-  pass "cs-herdr-events.py subscribes to agent_status:blocked only, leaving exited/agent-detected unfiltered"
+  assert_contains "$out" "$(printf 'status\tw1:p1\tw1\tworking\tclaude')" \
+    "a server-filtered working event must still print the ordinary projected line"
+  pass "cs-herdr-events.py subscribes to agent_status blocked+working, leaving exited/agent-detected unfiltered"
 }
 
 test_status_subscription_is_filtered_to_blocked
