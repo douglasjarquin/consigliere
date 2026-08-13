@@ -48,9 +48,10 @@ batched digest rather than per-wake injections.
    otherwise.
 
 4. **Do not separately arm the watcher or a checkpoint.** The daemon manages
-   `bin/cs-watch.sh` as its one-shot child; the watcher singleton lock no-ops
-   a stray arm harmlessly, and while `state/.afk` exists the watcher queues
-   and exits on every wake so the daemon owns triage.
+   `bin/cs-watch.sh` as its child; the watcher singleton lock no-ops a stray
+   arm harmlessly. The watcher runs the same triage regardless of `state/.afk`,
+   so the daemon consumes whatever the watcher enqueues rather than seeing
+   every raw wake.
 
 5. **Acknowledge** in AGENTS.md section 9 language: "Boss, away mode is
    active; I will batch routine updates and surface only decisions, failures,
