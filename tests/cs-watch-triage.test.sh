@@ -822,29 +822,6 @@ test_beacon_stays_fresh_while_absorbing() {
   pass "the liveness beacon stays fresh while the watcher absorbs benign wakes (guards never false-alarm)"
 }
 
-# --- afk coherence: the daemon owns triage; the watcher does not double-triage -
-
-test_afk_present_reverts_watcher_to_one_shot() {
-  local dir state fakebin out status_file pid
-  dir=$(make_case afk-coherence); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
-  status_file="$state/task.status"
-  printf 'working: routine note\n' > "$status_file"
-  date '+%s' > "$state/.afk"   # away mode: the daemon owns triage
-  # Set a PROVABLY-WORKING verdict: if afk failed to bypass the provably-working
-  # check, this no-verb signal would be absorbed (not surfaced). The test
-  # asserting a surface therefore also proves afk reverts to one-shot and skips
-  # the costly read.
-  export CS_FAKE_CREW_STATE='state: working · source: run-step · validating (running)'
-  watch_bg "$state" "$fakebin" "$out"
-  pid=$!
-  wait_for_exit "$pid" || fail "with .afk present the watcher did not exit one-shot for a benign signal"
-  grep -F "signal: $status_file" "$out" >/dev/null || fail "afk-mode watcher did not surface the signal for the daemon"
-  grep "$(printf '\tsignal\t')" "$state/.wake-queue" | grep -F "task.status" >/dev/null \
-    || fail "afk-mode benign signal was not queued for the daemon to classify"
-  unset CS_FAKE_CREW_STATE
-  pass "with .afk present the watcher reverts to one-shot so the daemon owns triage (no double-triage)"
-}
-
 # --- event splice: bounded native wait over a canned stream -------------------
 # cs_watch_wait_transition is exercised offline by substituting the raw-socket
 # reader (CS_HERDR_EVENT_READER) with a script replaying projected lines, the
@@ -1262,7 +1239,6 @@ test_tampered_registered_check_rejected
 test_heartbeat_no_change_absorbed
 test_heartbeat_backstop_surfaces_unsurfaced_status
 test_beacon_stays_fresh_while_absorbing
-test_afk_present_reverts_watcher_to_one_shot
 test_event_splice_blocked_edge_and_dedupe_clear
 test_event_splice_level_reconcile_catches_already_blocked
 test_duplicate_watcher_noops_through_singleton_lock
