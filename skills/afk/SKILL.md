@@ -53,7 +53,7 @@ No `/back` is needed. The first genuine message is the return signal:
 
 - Input classified `boss` and not starting with `/afk` -> the boss is back.
   Run `bin/cs-afk-return.sh` before acting on the message that brought the boss back.
-  That script owns correct-ordered daemon shutdown (stop the daemon, then clear `state/.afk`), durable wake draining, escalation and wedge evidence, and the fail-closed return catch-up gate.
+  That script owns clearing `state/.afk`, durable wake draining, escalation and wedge evidence, and the fail-closed return catch-up gate.
   If it reports a consigliere-actionable `blocked:` decision, remediate it immediately through the normal lifecycle, or explicitly reclassify it with a durable reason and close its decision key with `resolved [key=...]`, then run `bin/cs-afk-return.sh check`.
   Once the daemon stops, resume the normal foreground checkpoint cycle while blocker handling proceeds, so the gate never creates a blind wait.
   Do not perform any other ordinary boss work until the check exits successfully.
