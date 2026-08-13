@@ -15,3 +15,6 @@ projects/
 
 # Python bytecode caches (bin/cs-herdr-events.py) — build artifacts, never tracked.
 __pycache__/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/
