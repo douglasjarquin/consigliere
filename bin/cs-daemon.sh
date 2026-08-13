@@ -12,8 +12,8 @@
 #
 # PRESENCE-GATING (the /afk contract). The daemon injects ONLY while the
 # durable away-mode flag state/.afk is present. bin/cs-afk-start.sh sets that
-# flag and starts this daemon; bin/cs-afk-return.sh stops the daemon and
-# clears the flag when the boss returns. While state/.afk exists the watcher
+# flag and starts this daemon; bin/cs-afk-return.sh clears the flag when the
+# boss returns. While state/.afk exists the watcher
 # reverts to daemon-owned one-shot behavior (bin/cs-watch.sh queues and exits
 # on every wake), so the two never triage the same wake twice. Buffered
 # escalations that remain when afk turns off survive in
