@@ -245,7 +245,10 @@ log "activation not delivered this cycle; queue remains for the next attempt"
 fail_age=$(cs_path_age "$FAIL_SINCE")
 case "$fail_age" in ''|*[!0-9]*) fail_age=0 ;; esac
 if [ "$fail_age" -ge "$WEDGE_MAX" ] && [ ! -e "$WEDGED" ]; then
-  : > "$WEDGED"
+  {
+    printf 'cs activate WEDGED: %ss undelivered as of %s\n' "$fail_age" "$(date '+%Y-%m-%dT%H:%M:%S%z')"
+    printf "'%s' could not accept an activation prompt (queue has %ss of unattended work).\n" "$pane" "$queue_age"
+  } > "$WEDGED" 2>/dev/null || true
   cs_wedge_alarm_notify log "consigliere: activation WEDGED" \
     "'$pane' has not accepted an activation prompt for ${fail_age}s (queue has ${queue_age}s of unattended work) - see $WEDGED"
 fi
