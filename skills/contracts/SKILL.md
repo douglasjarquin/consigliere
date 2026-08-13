@@ -64,6 +64,7 @@ The poll goes quiet on its own once both columns are clear, and stays quiet whil
 - A soldier reports done per its delivery mode (`no-mistakes`: `done: PR <url> checks green`; `direct-PR`: `done: PR <url>`).
   Arm the merge poll with `bin/cs-pr-check.sh <task-id> <PR url>` and relay the full https URL to the boss.
   For a no-mistakes board task under an armed `release-green-prs` sweep, that PR-ready entrypoint records the exact-head capacity attestation when GitHub supplies a valid head; otherwise capacity stays held.
+  A requested-changes wake on that same poll is handled exactly like any other `check:` wake: steer the still-live soldier with the boss's actual review feedback through the ordinary steer command - no bossless-specific or board-specific rework branch exists for it, on this project or any other.
 - On the boss's merge - the only merge authority, `yolo` or not - the PR's `Closes #<n>` closes the issue and the board workflow moves the card to Done. Consigliere does not touch the card.
 - After teardown, read-only verify the card is no longer stuck: `bin/cs-board.sh status <project> <item-id>`. If it still reads `In Progress` after the issue is closed, the board's closed->Done workflow is off - warn the boss (with the card and issue) and let them enable it; do not move the card yourself (Done is built-in-only by the boss's choice).
 - For a `local-only` project, after the approved local merge, close the issue yourself (`gh-axi issue close <n>`) so the board workflow can still move its card.

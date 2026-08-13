@@ -24,7 +24,7 @@ The concise standing authority boundary remains always loaded in `AGENTS.md` sec
 7. Examine the causal theme across prior findings and fix rounds.
    Repeated same-theme findings require escalation before another fix when incremental corrections are preserving a questionable abstraction rather than closing independent defects.
 8. Apply the existing stronger boss boundaries first.
-   Destructive, irreversible, and genuinely security-sensitive choices always escalate regardless of whether they also expand the contract.
+   Destructive, irreversible, and genuinely security-sensitive choices always escalate regardless of whether they also expand the contract - unless the project is running in bossless mode (see the `/afk` skill's bossless section), in which case classify the same way and auto-decide with a recorded recommendation instead of escalating.
 
 The soldier never decides or answers its own ask-user finding.
 It stops at the finding, routes the decision to consigliere, and applies only the decision returned through the active validation gate.

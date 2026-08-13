@@ -204,15 +204,52 @@ if [ -n "$RESOLVE_KEYS" ]; then
   done
 fi
 
+# A matched open decision that is one of Task 3's capo-decision-escalation
+# records answers a capo-nested finding, not a local one: closing it here
+# with a plain resolved line would orphan the capo's own still-open decision
+# (Task 3 owns that closure, gated on the capo's own resolution, never on
+# this delivery). Route it instead as a marked send to the owning capo -
+# CS_HOME is never overridden, since RAW already resolves through this
+# home's own records exactly like any other kind=capo target - and stop:
+# cs_send_close_resolved_keys below skips every key collected here.
+ESCALATION_RELAY_KEYS=
+ESCALATION_RELAY_PREFIX=
+for resolve_key in $RESOLVE_KEYS; do
+  resolve_note=
+  while IFS=$(printf '\t') read -r rk _ rn; do
+    [ "$rk" = "$resolve_key" ] || continue
+    resolve_note=$rn
+    break
+  done <<EOF
+$RESOLVE_OPEN_SET
+EOF
+  escalation_fields=$(cs_pending_reply_capo_escalation_parse "$resolve_note") || continue
+  IFS=$(printf '\t') read -r e_cid e_ctask e_ckey _ <<EOF
+$escalation_fields
+EOF
+  [ "$e_cid" = "$RAW" ] || continue
+  ESCALATION_RELAY_KEYS="${ESCALATION_RELAY_KEYS}${ESCALATION_RELAY_KEYS:+ }$resolve_key"
+  ESCALATION_RELAY_PREFIX="${ESCALATION_RELAY_PREFIX}RELAYED ANSWER for your own task ${e_ctask} decision [key=${e_ckey}]: "
+done
+
 # Close each answered decision in this home's ledger, only after delivery is
 # confirmed. An append failure exits nonzero with the manual close command, so
 # the decision stays open and resurfaces instead of vanishing silently.
+# The closing verb distinguishes a parent-relayed answer from a purely local
+# one, sourced from the SAME from-consigliere marker Task 4's marked send
+# already applies (bin/cs-marker-lib.sh) rather than a new signal - so a
+# capo's own local resolve of a decision the parent relayed down reads
+# differently from one it decided entirely on its own.
 cs_send_close_resolved_keys() {  # <answer-text>
-  local note=$1 k prefix
+  local note=$1 k prefix verb=answered
+  cs_message_from_consigliere "$note" && verb=relayed-from-parent
   note=$(printf '%s' "$note" | tr '\n\r\t' '   ' | LC_ALL=C tr -d '\000-\037\177' \
     | LC_ALL=C sed -E "s/${CS_PENDING_REPLY_CORR_RE}/[corr redacted]/g")
   for k in $RESOLVE_KEYS; do
-    prefix="resolved [key=$k]: answered via cs-send: "
+    case " $ESCALATION_RELAY_KEYS " in
+      *" $k "*) continue ;;
+    esac
+    prefix="resolved [key=$k]: ${verb} via cs-send: "
     cs_cap_line_var "$note" "$((CS_LINE_CAP_DEFAULT - ${#prefix}))"
     if ! printf '%s\n' "$prefix$CS_LINE_CAP_LINE" >> "$RESOLVE_STATUS_FILE"; then
       echo "error: the answer was delivered to '$RAW' ($PANE), but decision key '$k' could not be closed in $RESOLVE_STATUS_FILE. Close it manually with: echo 'resolved [key=$k]: <how it was answered>' >> $RESOLVE_STATUS_FILE - do not resend the answer." >&2
@@ -241,6 +278,11 @@ if [ "${1:-}" = "--key" ]; then
 fi
 
 RAW_TEXT="$*"
+# The relay prefix names which of the CAPO's own decisions this answers, so
+# its own turn can act on the marked message: the capo resolves its own
+# soldier's decision, in its own home, exactly as it owns its own lane today
+# - this send never does that resolving itself.
+[ -z "$ESCALATION_RELAY_PREFIX" ] || RAW_TEXT="${ESCALATION_RELAY_PREFIX}${RAW_TEXT}"
 TEXT=$RAW_TEXT
 PENDING_CORR=
 PENDING_CREATED=0

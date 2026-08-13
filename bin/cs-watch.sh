@@ -729,22 +729,146 @@ capo_worker_homes() {  # -> <capo-id>\t<capo-state-dir>
   done
 }
 
+# One "<key>\t<verb>\t<note>" line per still-open decision belonging to
+# <task>, filtered out of the whole-capo <open-set> (scan_open_decisions's own
+# output shape - <task>\t<key>\t<verb>\t<note> - with the task field stripped
+# since the caller already knows it). Portable line-at-a-time filter, no
+# associative arrays, matching the fold helpers in cs-classify-lib.sh.
+_capo_open_lines_for_task() {  # <open-set> <task>
+  local open=$1 task=$2 ttask key verb note
+  while IFS=$(printf '\t') read -r ttask key verb note; do
+    [ "$ttask" = "$task" ] || continue
+    printf '%s\t%s\t%s\n' "$key" "$verb" "$note"
+  done <<EOF
+$open
+EOF
+}
+
+# 0 if <line> ("<key>\t<verb>\t<note>") appears verbatim in <manifest>
+# (one such line per still-open decision as of the last scan); 1 otherwise.
+_capo_manifest_has_line() {  # <manifest> <line>
+  local manifest=$1 line=$2 l
+  while IFS= read -r l; do
+    [ "$l" = "$line" ] && return 0
+  done <<EOF
+$manifest
+EOF
+  return 1
+}
+
+# 0 if <key> appears as the first field of any line in <manifest>; 1
+# otherwise. Unlike _capo_manifest_has_line, this ignores verb/note - it
+# answers "is this key still open at all," which a partial resolve (one of
+# several open keys on the same task closes while another stays open) needs:
+# the key vanishing is the close signal, regardless of what its note said.
+_capo_manifest_key_present() {  # <manifest> <key>
+  local manifest=$1 key=$2 l lkey
+  while IFS= read -r l; do
+    [ -n "$l" ] || continue
+    lkey=${l%%$'\t'*}
+    [ "$lkey" = "$key" ] && return 0
+  done <<EOF
+$manifest
+EOF
+  return 1
+}
+
 # Boss-relevant worker events inside this home's capos that this home has not
-# surfaced yet. Emits <capo-id>\t<worker-task>\t<status-line>. A capo's OWN
-# parent-facing status file lives in this home and is already covered by the
-# ordinary signal path, so only its workers are read here.
+# surfaced yet. Emits <capo-id>\t<worker-task>\t<key>\t<verb>\t<display-line>,
+# one line per currently-OPEN decision this scan has not already surfaced -
+# folding each capo task file's full history through scan_open_decisions
+# (bin/cs-classify-lib.sh), the SAME whole-file open/resolved fold
+# status_open_decisions applies everywhere else, instead of reading only the
+# last status line. A last-line read silently loses an open needs-decision the
+# moment a later working:/done: append lands, which is the exact mechanism
+# that stalled the overnight casino sweep this fold replaces.
+# Dedup compares against a per-task MANIFEST (every currently-open key's own
+# "<key>\t<verb>\t<note>" line), not a single last-surfaced line's raw text:
+# comparing raw text alone cannot tell "still open, unchanged" apart from "was
+# resolved, then reopened under the same key with the same wording" - both
+# read identical. Rewriting the manifest to exactly today's open set on every
+# pass also means a resolved key's entry is dropped with no separate cleanup
+# pass, so a later reopen has nothing stale left to collide with.
+# A capo's OWN parent-facing status file lives in this home and is already
+# covered by the ordinary signal path, so only its workers are read here.
+# Newly-open decisions are read-only here: writing their manifest entry is
+# _capo_mark_surfaced's job, called by the caller AFTER the wake this pass
+# reports is durably enqueued - the same enqueue-before-suppress ordering the
+# signal path uses below, so a crash between the two re-fires the same wake
+# next poll instead of losing it. A task whose manifest is now fully empty
+# (every previously-open key resolved) is different: nothing is pending to
+# lose, so its stale marker is cleared immediately below rather than left to
+# linger - otherwise a later reopen under the same key and wording would
+# match that leftover marker and wrongly look already-surfaced.
 scan_capo_worker_events() {
-  local cid cstate f task last surfaced
+  local cid cstate open f task old_manifest new_manifest key verb note line kline okey
+  local have_escalation=0
+  command -v cs_pending_reply_capo_escalation_open >/dev/null 2>&1 && have_escalation=1
   while IFS=$(printf '\t') read -r cid cstate; do
     [ -n "$cid" ] || continue
-    while IFS=$(printf '\t') read -r f task last; do
-      [ -n "$f" ] || continue
-      surfaced=$(cat "$(_capo_surfaced_path "$cid" "$task")" 2>/dev/null || true)
-      [ "$surfaced" = "$last" ] && continue
-      printf '%s\t%s\t%s\n' "$cid" "$task" "$last"
-    done < <(scan_boss_relevant_statuses "$cstate")
+    open=$(scan_open_decisions "$cstate")
+    for f in "$cstate"/*.status; do
+      [ -e "$f" ] || continue
+      task=$(basename "$f"); task=${task%.status}
+      old_manifest=$(cat "$(_capo_surfaced_path "$cid" "$task")" 2>/dev/null || true)
+      new_manifest=$(_capo_open_lines_for_task "$open" "$task")
+      # A key present in the OLD manifest but gone from the new one just
+      # resolved on the capo's own side - close its Task 3 escalation record
+      # now, regardless of whether other keys on this task are still open.
+      if [ "$have_escalation" = 1 ] && [ -n "$old_manifest" ]; then
+        while IFS=$(printf '\t') read -r okey verb note; do
+          [ -n "$okey" ] || continue
+          _capo_manifest_key_present "$new_manifest" "$okey" && continue
+          cs_pending_reply_capo_escalation_close "$STATE" "$cid" "$task" "$okey" 2>/dev/null || true
+        done <<EOF
+$old_manifest
+EOF
+      fi
+      if [ -z "$new_manifest" ]; then
+        [ -z "$old_manifest" ] || : > "$(_capo_surfaced_path "$cid" "$task")"
+        continue
+      fi
+      while IFS=$(printf '\t') read -r key verb note; do
+        [ -n "$key" ] || continue
+        kline="${key}"$'\t'"${verb}"$'\t'"${note}"
+        _capo_manifest_has_line "$old_manifest" "$kline" && continue
+        case "$key" in
+          default) line="${verb}: ${note}" ;;
+          *)       line="${verb} [key=${key}]: ${note}" ;;
+        esac
+        if [ "$have_escalation" = 1 ]; then
+          cs_pending_reply_capo_escalation_open "$STATE" "$CS_HOME" "$cid" "$task" "$key" "$verb" "$note" 2>/dev/null || true
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\n' "$cid" "$task" "$key" "$verb" "$line"
+      done <<EOF
+$new_manifest
+EOF
+    done
   done < <(capo_worker_homes)
   return 0
+}
+
+# Persist Task 2's surfaced manifest for <capo-id>/<task> as exactly today's
+# open-decision set: a resolved key's entry drops out with no separate
+# cleanup pass, so a later reopen of the same key has nothing stale left to
+# collide with. Called only after the caller has durably enqueued the wake
+# scan_capo_worker_events reported for this pass (see that function's own
+# ordering note); recomputes the open set itself rather than threading it
+# through the pending-lines stream, which stays one row per decision.
+_capo_mark_surfaced() {  # <capo-id> <task>
+  local cid=$1 task=$2 cstate
+  cstate=$(_capo_state_dir "$cid") || return 0
+  _capo_open_lines_for_task "$(scan_open_decisions "$cstate")" "$task" \
+    > "$(_capo_surfaced_path "$cid" "$task")"
+}
+
+# Resolve a known capo id back to its state directory, for _capo_mark_surfaced.
+_capo_state_dir() {  # <capo-id>
+  local id=$1 cid cstate
+  while IFS=$(printf '\t') read -r cid cstate; do
+    [ "$cid" = "$id" ] && { printf '%s' "$cstate"; return 0; }
+  done < <(capo_worker_homes)
+  return 1
 }
 
 # --- normalized transition shape + status->action policy ---------------------
@@ -1349,13 +1473,13 @@ EOF
   capo_pending=$(scan_capo_worker_events)
   if [ -n "$capo_pending" ]; then
     capo_reason="capo:"
-    while IFS=$(printf '\t') read -r cid ctask cline; do
+    while IFS=$(printf '\t') read -r cid ctask _ _ cline; do
       [ -n "$cid" ] || continue
       capo_reason="$capo_reason $cid/$ctask: $cline"
     done <<EOF
 $capo_pending
 EOF
-    while IFS=$(printf '\t') read -r cid ctask cline; do
+    while IFS=$(printf '\t') read -r cid ctask _ _ cline; do
       [ -n "$cid" ] || continue
       cs_wake_append capo "$cid/$ctask" "$cline" || exit 1
     done <<EOF
@@ -1363,9 +1487,9 @@ $capo_pending
 EOF
     # Enqueue before suppress, exactly as the signal path does: a crash between
     # the two re-fires the wake rather than losing it.
-    while IFS=$(printf '\t') read -r cid ctask cline; do
+    while IFS=$(printf '\t') read -r cid ctask _ _ _; do
       [ -n "$cid" ] || continue
-      printf '%s' "$cline" > "$(_capo_surfaced_path "$cid" "$ctask")"
+      _capo_mark_surfaced "$cid" "$ctask"
     done <<EOF
 $capo_pending
 EOF

@@ -66,4 +66,16 @@ EOF
 [ -z "$missing" ] || fail "AGENTS.md promises slash commands with no matching skill:$missing"
 pass "every slash command AGENTS.md promises the boss resolves to a skill"
 
+# 4. /afk is the one canonical owner of bossless mode: the old orthogonality
+#    claim decisions 1+2 invert must be gone (a specific known-wrong claim this
+#    guards against reintroducing), and a Bossless mode section must exist to
+#    own it. The load-bearing claims' actual substance is a one-time Plan
+#    Compliance Audit concern, not a standing prose-matching regression test:
+#    a meaning-preserving rewrite of that section must not fail this suite.
+AFK_SKILL="$SKILLS/afk/SKILL.md"
+grep -q "still waits for the boss's explicit word" "$AFK_SKILL" \
+  && fail "skills/afk/SKILL.md still carries the old orthogonality claim decisions 1+2 invert"
+grep -q "^## Bossless mode" "$AFK_SKILL" || fail "skills/afk/SKILL.md is missing its Bossless mode section"
+pass "skills/afk/SKILL.md is the one canonical owner of bossless mode's scope and boundaries"
+
 pass "skill inventory is internally consistent"

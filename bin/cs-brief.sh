@@ -423,6 +423,28 @@ case "$EXEC_MODE" in
     ;;
 esac
 
+# Shared by direct-PR and no-mistakes only (local-only never opens a PR, so it
+# is out of this section's scope): the render-then-commit recipe for any
+# bossless-mode auto-decision recorded against this task, per
+# bin/cs-auto-decision-lib.sh's SCHEMA-OWNER header. The ledger lives in THIS
+# consigliere home's own data/, not the target project, so CS_HOME/CS_ROOT are
+# baked in now as concrete absolute paths rather than left for the soldier to
+# resolve inside a different worktree. Sourcing the library pulls in
+# cs-afk-start.sh, which unconditionally calls cs_resolve_root - a live
+# reproduction proved that recomputes STATE/DATA from CS_STATE_OVERRIDE/
+# CS_DATA_OVERRIDE (or CS_HOME), silently stomping a plain STATE=/DATA=
+# assignment, so the override names are the only ones that actually stick.
+# shellcheck disable=SC2016  # single quotes are deliberate: literal brief text; only interpolates the already-resolved $CS_HOME/$CS_ROOT/$ID paths, never re-expanded.
+IFS= read -r -d '' AUTO_DECISIONS_RENDER <<EOF || true
+If any ask-user finding during this task was auto-decided under bossless mode, its record lives in this consigliere home's own ledger, not yet in this project. Render and commit it before you finish, as an ordinary part of your diff:
+\`\`\`
+CS_HOME=$CS_HOME CS_STATE_OVERRIDE=$STATE CS_DATA_OVERRIDE=$DATA bash -c ". $CS_ROOT/bin/cs-auto-decision-lib.sh && cs_auto_decision_render $ID" > /tmp/auto-decisions-$ID.md
+if [ -s /tmp/auto-decisions-$ID.md ]; then mkdir -p docs/auto-decisions && mv /tmp/auto-decisions-$ID.md docs/auto-decisions/$ID.md && git add docs/auto-decisions/$ID.md; fi
+\`\`\`
+Skip this entirely when the temp file ends up empty (no bossless decisions occurred) - never commit an empty file, and never touch the ledger itself.
+EOF
+AUTO_DECISIONS_RENDER=${AUTO_DECISIONS_RENDER%$'\n'}
+
 # Ship task: shape Setup / Rule 1 / Definition of done by the explicit --mode,
 # already validated against the closed set above.
 case "$MODE" in
@@ -433,6 +455,14 @@ case "$MODE" in
 # Definition of done
 This task ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
 The task is complete only when committed on your branch.
+
+$AUTO_DECISIONS_RENDER
+When docs/auto-decisions/$ID.md exists, include this short section in the PR body you write yourself, with its path as a real repo-relative link:
+\`\`\`
+## Auto-decisions (bossless mode)
+See \`docs/auto-decisions/$ID.md\` in this diff.
+\`\`\`
+
 When it is implemented and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file and stop.
 Do NOT run /no-mistakes. The configured merge authority decides whether to merge the PR; consigliere relays the outcome.
 EOF
@@ -461,6 +491,9 @@ Use \`needs-review:\` here, NOT \`done:\` - this mode adds that one state to the
 Consigliere reviews your commit against the task, then instructs you to run \$no-mistakes to validate and ship a PR.
 \`needs-review:\` stays open above you until consigliere acts on it, so an unreviewed commit cannot be mistaken for finished work; \`done:\` would read as complete and could sit unnoticed.
 When consigliere tells you to validate, append \`resolved: {how it was reviewed or unblocked}\` (carrying the same \`[key=<slug>]\` if you opened one) before you start the run.
+
+$AUTO_DECISIONS_RENDER
+If docs/auto-decisions/$ID.md exists, append one more sentence to the same \`--intent\` text below: "N ask-user findings were auto-decided under bossless mode; see \`docs/auto-decisions/$ID.md\` in this diff." (fill in N with \`grep -c '^- \\*\\*\\[' docs/auto-decisions/$ID.md\`). Never call \`gh-axi pr edit\` or any other direct PR-mutation command to add this yourself - no-mistakes owns the PR object end to end in this mode, and the committed file, not this sentence, is the durable evidence.
 
 You drive no-mistakes by responding to its gates, not by implementing fixes.
 Follow the guidance no-mistakes itself provides for the mechanics: it loads when you invoke \$no-mistakes, and \`no-mistakes axi run --help\` plus the \`help\` lines in each \`axi\` response are authoritative and version-matched to the installed binary.

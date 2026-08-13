@@ -55,6 +55,12 @@ batched digest rather than per-wake injections.
 5. **Acknowledge** in AGENTS.md section 9 language: "Boss, away mode is
    active; I will batch routine updates and surface only decisions, failures,
    credentials, or review-ready work until you return."
+   If a `+yolo` project already reads acknowledged in `config/bossless-ack.md`
+   (the file `bin/cs-afk-start.sh`'s own acknowledgment gate owns, not this
+   step), name it in that same sentence per section 9's bossless-mode
+   phrasing: append ", and `<project>` will make its own calls while you're
+   away starting now - recorded for your review in its PR" for each such
+   project.
 
 ## How to exit afk
 
@@ -72,13 +78,38 @@ No `/back` is needed. The first genuine message is the return signal:
 Bias ambiguous cases toward exit: a present boss beats token savings, and a
 false exit is self-correcting (the boss re-runs `/afk`).
 
-## Orthogonal to approval authority
+## Bossless mode - the one boundary this changes
 
-afk changes how aggressively consigliere surfaces things, **not who approves
-what**. "Away" never means "approves more." A PR ready for merge, a
-needs-decision finding, or anything destructive, irreversible, or
-security-sensitive still waits for the boss's explicit word - the daemon just
-batches the notification.
+Away-mode is normally orthogonal to approval authority: "away" means
+consigliere surfaces things less often, never that it approves more.
+That changes only for a project whose `yolo` posture is on, for exactly as
+long as this daemon is armed on it: every ask-user finding for that project -
+including destructive, irreversible, and genuinely security-sensitive ones -
+is classified by the unchanged `ask-user-authority` procedure and then
+auto-decided with a recorded recommendation instead of escalating.
+This is a standing, explicit exception the boss made once, for this feature,
+to the "yolo never overrides the stronger boundaries" rule; it does not
+generalize to any other rule consigliere applies to itself.
+Merge is never included: the PR-merge gate is untouched, and it becomes the
+only remaining checkpoint for that project's work while this mode is active.
+The moment this daemon exits, the project reverts to today's narrower yolo
+behavior - routine auto-decide only, stronger-boundary findings escalate live
+again - and any decision already auto-recorded stays as recorded, never
+retroactively re-opened.
+A capo never independently enters this mode; it has no away-mode state of its
+own.
+The decision is always made by whichever home currently owns the finding
+under the unchanged `ask-user-authority` procedure - a capo for its own
+soldiers, main consigliere for its own - and what changes is only the
+terminal action that home takes once its own `state/.afk` is the active one:
+for a capo-nested finding relayed to main, main decides at the moment it
+would otherwise relay to the boss.
+Every auto-decision is durably recorded and attached to the resulting PR
+(`bin/cs-auto-decision-lib.sh`) - the boss reviews it there, not live.
+The first time this mode would engage for a given project in a session,
+`bin/cs-afk-start.sh` names it explicitly and requires a one-time durable
+acknowledgment before applying it (see that script's own header for the exact
+mechanism and its kill-switch override).
 
 ## Operational-input contract
 
