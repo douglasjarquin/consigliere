@@ -24,10 +24,38 @@
 # text by this library.
 #
 # Sourced by bin/cs-send.sh and bin/cs-watch.sh (via cs_bossless_active /
-# cs_auto_decision_decide, Task 14, added later in this same file). No side
-# effects on source. set -u safe.
-
+# cs_auto_decision_decide below). No side effects on source. set -u safe.
+#
+# cs_bossless_active and cs_auto_decision_decide (this file's other half):
+# cs_bossless_active(task_id) is the one concrete, testable "is bossless
+# active right now for this task" predicate, re-checked fresh on every call,
+# never cached - away-mode can end and the acknowledgment/kill switch
+# (bin/cs-afk-start.sh, Task 16) can change between one finding and the
+# next. It fails closed (false) on any missing, unreadable, or malformed
+# input to any of its checks, and returns true only when ALL of these hold:
+#   1. state/<task_id>.meta's yolo= reads exactly "on"
+#   2. this deciding home's own state/.afk exists
+#   3. the task's recorded project reads "acknowledged" in the bossless-ack
+#      file (bin/cs-afk-start.sh's cs_bossless_ack_status) - a later
+#      "disabled" line (the kill switch) also fails this check, since it is
+#      a DIFFERENT status than "acknowledged", never a special case here
+# cs_auto_decision_decide(...) is the ONLY entry point that records and
+# closes an auto-decision: it re-checks cs_bossless_active itself, so a
+# stale caller belief that bossless is active can never bypass it, and a
+# call site never records and closes via two separate calls.
 _CS_AUTO_DECISION_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null)" || _CS_AUTO_DECISION_LIB_DIR="."
+# shellcheck source=bin/cs-meta-lib.sh
+. "$_CS_AUTO_DECISION_LIB_DIR/cs-meta-lib.sh"
+# cs-afk-start.sh sets `set -eu` at its own top level, which (unlike a
+# function's locals) is NOT scoped to the sourced file - saving and
+# restoring the caller's own shell options keeps a caller without strict
+# mode (e.g. a test harness running under plain `set -u`) from silently
+# gaining errexit just because this library reused that file's functions.
+_cs_auto_decision_saved_opts=$(set +o)
+# shellcheck source=bin/cs-afk-start.sh
+. "$_CS_AUTO_DECISION_LIB_DIR/cs-afk-start.sh"
+eval "$_cs_auto_decision_saved_opts"
+unset _cs_auto_decision_saved_opts
 
 CS_AUTO_DECISION_CATEGORIES='routine contract-expanding destructive irreversible security-sensitive'
 
@@ -105,4 +133,35 @@ EOF
   done <<EOF
 $sorted
 EOF
+}
+
+# See this file's header for the full contract. Fails closed (false) on any
+# missing, unreadable, or malformed input to any check; never cached.
+cs_bossless_active() {  # <task_id>
+  local task_id=$1 meta yolo project name
+  [ -n "$task_id" ] || return 1
+  [ -n "${STATE:-}" ] || return 1
+  meta="$STATE/$task_id.meta"
+  [ -f "$meta" ] || return 1
+  yolo=$(cs_meta_get "$meta" yolo 2>/dev/null || true)
+  [ "$yolo" = on ] || return 1
+  [ -e "$STATE/.afk" ] || return 1
+  project=$(cs_meta_get "$meta" project 2>/dev/null || true)
+  [ -n "$project" ] || return 1
+  name=$(basename "$project")
+  [ "$(cs_bossless_ack_status "$name" 2>/dev/null || true)" = acknowledged ] || return 1
+  return 0
+}
+
+# See this file's header for the full contract: the one entry point that
+# records-then-closes a bossless auto-decision, in that order, and only when
+# cs_bossless_active is true at the moment of THIS call.
+cs_auto_decision_decide() {  # <task_id> <category> <finding_summary> <recommendation> <rationale> <resolve_key>
+  local task_id=$1 category=$2 finding=$3 recommendation=$4 rationale=$5 resolve_key=$6
+  local answer
+  cs_bossless_active "$task_id" || return 1
+  cs_auto_decision_record "$task_id" "$category" "$finding" "$recommendation" "$rationale" || return 1
+  answer="auto-decided (bossless): ${recommendation} - ${rationale}"
+  CS_HOME="$CS_HOME" CS_STATE_OVERRIDE="$STATE" \
+    "$_CS_AUTO_DECISION_LIB_DIR/cs-send.sh" "$task_id" --resolve-key "$resolve_key" "$answer"
 }

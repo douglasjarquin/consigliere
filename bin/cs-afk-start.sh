@@ -69,10 +69,18 @@ CS_AFK_DETACH="${CS_AFK_DETACH:-$CS_AFK_START_DIR/cs-detach.py}"
 # shellcheck source=bin/cs-meta-lib.sh
 . "$CS_AFK_START_DIR/cs-meta-lib.sh"
 
-CS_BOSSLESS_ACK_FILE="${CS_BOSSLESS_ACK_OVERRIDE:-$CS_HOME/config/bossless-ack.md}"
-
 cs_afk_start_usage() {
   sed -n '2,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+# Recomputed on every call, deliberately never a fixed variable snapshotted
+# once at source time: CS_HOME and CS_BOSSLESS_ACK_OVERRIDE can both differ
+# per call in a long-lived process (this file is sourced once by
+# bin/cs-auto-decision-lib.sh, whose whole cs_bossless_active contract is
+# "never cached"), so a stale path computed at load time would silently keep
+# reading the FIRST caller's file forever.
+cs_bossless_ack_file_path() {
+  printf '%s' "${CS_BOSSLESS_ACK_OVERRIDE:-$CS_HOME/config/bossless-ack.md}"
 }
 
 # The last recorded status for <project> in the bossless-ack file:
@@ -81,7 +89,8 @@ cs_afk_start_usage() {
 # exists but cannot be read - a partially-corrupt file must never be trusted
 # for the records that DID parse.
 cs_bossless_ack_status() {  # <project>
-  local project=$1 file=$CS_BOSSLESS_ACK_FILE line p status epoch result=unacknowledged
+  local project=$1 file line p status epoch result=unacknowledged
+  file=$(cs_bossless_ack_file_path)
   [ -e "$file" ] || { printf 'unacknowledged'; return 0; }
   [ -f "$file" ] && [ -r "$file" ] || { printf 'unacknowledged'; return 0; }
   while IFS= read -r line || [ -n "$line" ]; do
@@ -108,10 +117,11 @@ cs_bossless_ack_status() {  # <project>
 # the file is append-only and the LAST record wins, so acknowledging twice is
 # harmless, and this never touches any other project's record.
 cs_bossless_ack_record() {  # <project>
-  local project=$1 dir
-  dir=$(dirname "$CS_BOSSLESS_ACK_FILE")
+  local project=$1 dir file
+  file=$(cs_bossless_ack_file_path)
+  dir=$(dirname "$file")
   mkdir -p "$dir" || return 1
-  printf '%s acknowledged %s\n' "$project" "$(date +%s)" >> "$CS_BOSSLESS_ACK_FILE"
+  printf '%s acknowledged %s\n' "$project" "$(date +%s)" >> "$file"
 }
 
 # Every project name with at least one kind=ship, yolo=on task recorded in
