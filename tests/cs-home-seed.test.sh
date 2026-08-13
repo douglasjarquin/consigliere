@@ -371,6 +371,9 @@ out=$(PATH="$FAKEBIN:$PATH" "$BIN" alpha-capo delta 2>&1) \
   || fail "a successful made gate init must leave the made remote wired onto the clone"
 assert_contains "$(cat "$GATE_LOG")" "gate init" "cs_made_gate_init must run 'made gate init'"
 assert_contains "$(cat "$GATE_LOG")" 'doctor' "cs_made_doctor must run 'made doctor'"
+DELTA_ORIGIN=$(git -C "$CAPO/projects/delta" remote get-url origin)
+assert_contains "$(cat "$GATE_LOG")" "gate init $CAPO/projects/delta $DELTA_ORIGIN" \
+  "made gate init must receive the real target path and origin URL as positional args, not zero args"
 pass "made present: gate init and doctor wire the made remote through the shim"
 
 # 13a. a doctor failure (after a successful gate init) surfaces the same

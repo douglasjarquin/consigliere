@@ -470,7 +470,7 @@ clone_project() {  # <project> <home>
 }
 
 initialize_no_mistakes_project() {  # <home> <project> <created:0|1>
-  local home=$1 project=$2 created=$3 mode dst
+  local home=$1 project=$2 created=$3 mode dst real_remote_url
   mode=$(project_mode_in_home "$home" "$project")
   [ "$mode" = made ] || return 0
   dst="$home/projects/$project"
@@ -485,8 +485,12 @@ initialize_no_mistakes_project() {  # <home> <project> <created:0|1>
     echo "error: made command not found; cannot initialize $project in $home" >&2
     return 1
   }
-  # shellcheck disable=SC2119  # both shims deliberately take no args here
-  ( cd "$dst" && cs_made_gate_init && cs_made_doctor ) || {
+  real_remote_url=$(git -C "$dst" remote get-url origin 2>/dev/null) || {
+    echo "error: seeded project $project at $dst has no origin remote to initialize made against" >&2
+    return 1
+  }
+  # shellcheck disable=SC2119  # cs_made_doctor deliberately takes no args here, cwd already scopes it
+  ( cd "$dst" && cs_made_gate_init "$dst" "$real_remote_url" && cs_made_doctor ) || {
     echo "error: failed to initialize made for $project at $dst" >&2
     return 1
   }
