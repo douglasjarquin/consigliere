@@ -16,44 +16,28 @@ batched digest rather than per-wake injections.
 
 ## What it does
 
-1. **Enter through `bin/cs-afk-start.sh`, run from consigliere's own pane.**
-   It refuses outside a herdr pane (`HERDR_PANE_ID` unset) because that pane
-   id is the daemon's one injection target; it writes the durable
-   `state/.afk` flag, records the pane in `state/.subsuper-target`, clears
-   the prior away session's stale delivery artifacts on a fresh entry only,
-   starts `bin/cs-daemon.sh` detached, and checks it came up (rolling
-   `state/.afk` back if it did not).
-   Re-running while the daemon is alive is a refresh: the current session's
+1. **Enter through `bin/cs-afk-start.sh`.**
+   It writes the durable `state/.afk` flag and clears the prior away
+   session's stale delivery artifacts on a fresh entry only, then returns
+   immediately: the existing watch/monitor/activate triangle already
+   supervises this home the same way it does an attended one, so there is
+   nothing to launch and so nothing to separately certify.
+   Re-running while already away is a refresh: the current session's
    buffered escalations are preserved.
    The flag survives a consigliere restart, so recovery re-enters afk when it
    is present.
 
-   **Starting is not arming.** `cs-afk-start.sh` runs inside this tool call, so
-   it cannot see a daemon that dies when the call ends - the failure that cost
-   five away sessions. It always reports "NOT yet certified".
-
-2. **Certify with `bin/cs-afk-verify.sh`, in a SEPARATE tool call.**
-   Never in the same call as the start: being a later call is the entire
-   mechanism, because only then is the launching process group already gone.
-   It requires a live daemon whose completed-pass counter advances while it
-   watches, and on any failure it stops the daemon, clears `state/.afk`, and
-   exits non-zero.
-   A non-zero exit means away mode is OFF: tell the boss plainly, stay on the
-   ordinary supervision cycle, and do not treat the fleet as watched.
-   Run it on a refresh too - a live pid alone is what used to make a wedged
-   daemon look armed.
-
-3. **The daemon is presence-gated.**
+2. **The daemon is presence-gated.**
    It injects escalations only while `state/.afk` exists, and stays quiet
    otherwise.
 
-4. **Do not separately arm the watcher or a checkpoint.** The daemon manages
+3. **Do not separately arm the watcher or a checkpoint.** The daemon manages
    `bin/cs-watch.sh` as its child; the watcher singleton lock no-ops a stray
    arm harmlessly. The watcher runs the same triage regardless of `state/.afk`,
    so the daemon consumes whatever the watcher enqueues rather than seeing
    every raw wake.
 
-5. **Acknowledge** in AGENTS.md section 9 language: "Boss, away mode is
+4. **Acknowledge** in AGENTS.md section 9 language: "Boss, away mode is
    active; I will batch routine updates and surface only decisions, failures,
    credentials, or review-ready work until you return."
    If a `+yolo` project already reads acknowledged in `config/bossless-ack.md`
