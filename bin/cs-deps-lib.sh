@@ -81,7 +81,7 @@ cs_deps_tools() {
       printf '%s\n' herdr "$(cs_deps_root_harness_binary)" jq gh gh-axi git
       ;;
     optional)
-      printf '%s\n' "$(cs_deps_other_harness_binary)" tasks-axi no-mistakes \
+      printf '%s\n' "$(cs_deps_other_harness_binary)" tasks-axi made \
         lavish-axi chrome-devtools-axi quota-axi
       ;;
     contributor)
@@ -105,7 +105,7 @@ cs_deps_purpose() {
     gh-axi) printf 'the GitHub interface consigliere and its soldiers actually call\n' ;;
     git) printf 'clones, worktrees, branches, and every landing check\n' ;;
     tasks-axi) printf 'backlog backend; without it the backlog is hand-edited (config/backlog-backend.conf)\n' ;;
-    no-mistakes) printf 'delivery pipeline for no-mistakes projects; other delivery modes are unaffected\n' ;;
+    made) printf 'delivery pipeline for made projects; other delivery modes are unaffected\n' ;;
     lavish-axi) printf 'visual review surfaces for structured decisions and reports\n' ;;
     chrome-devtools-axi) printf 'browser work for soldiers that must drive a real page\n' ;;
     quota-axi) printf 'local provider quota headroom before spending a quota window\n' ;;
@@ -127,7 +127,7 @@ cs_deps_hint() {
     gh-axi) printf 'npm i -g gh-axi\n' ;;
     git) printf 'brew install git, or the Xcode command line tools\n' ;;
     tasks-axi) printf 'npm i -g tasks-axi\n' ;;
-    no-mistakes) printf 'install from https://github.com/kunchenguid/no-mistakes (see its README)\n' ;;
+    made) printf 'install from https://github.com/douglasjarquin/made (see its README)\n' ;;
     lavish-axi) printf 'npm i -g lavish-axi\n' ;;
     chrome-devtools-axi) printf 'npm i -g chrome-devtools-axi\n' ;;
     quota-axi) printf 'npm i -g quota-axi\n' ;;
