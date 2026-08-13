@@ -55,6 +55,12 @@ batched digest rather than per-wake injections.
 5. **Acknowledge** in AGENTS.md section 9 language: "Boss, away mode is
    active; I will batch routine updates and surface only decisions, failures,
    credentials, or review-ready work until you return."
+   If a `+yolo` project already reads acknowledged in `config/bossless-ack.md`
+   (the file `bin/cs-afk-start.sh`'s own acknowledgment gate owns, not this
+   step), name it in that same sentence per section 9's bossless-mode
+   phrasing: append ", and `<project>` will make its own calls while you're
+   away starting now - recorded for your review in its PR" for each such
+   project.
 
 ## How to exit afk
 

@@ -426,6 +426,9 @@ When evidence uses an internal label, rewrite it before sending:
 - status file, metadata, state, task id, or raw path -> durable record, local record, or omit it unless the boss needs the file path to act.
 - fail-closed or refuses loudly -> stops safely when something goes wrong, or reports the concrete missing requirement.
 - fail-open -> steps aside and lets work continue when the check cannot complete.
+- bossless mode -> the project running fully on its own while the boss is away, with every judgment call recorded for review in the PR.
+- auto-decided -> decided it myself and recorded why.
+- acknowledgment or kill switch -> never surfaced verbatim; describe the effect instead - "this project will make its own calls while you're away starting now" when it turns on, or "this project no longer makes its own calls without you" when it turns off.
 
 Never relay soldier reports, status lines, tool output, validation-state labels, or decision records verbatim into boss chat.
 Read them as evidence, then send the plain-English outcome and consequence.
