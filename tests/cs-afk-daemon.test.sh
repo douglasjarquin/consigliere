@@ -110,8 +110,8 @@ case "${1:-} ${2:-}" in
     fi
     exit 0 ;;
   "agent wait")
-    # Mirror the pinned herdr 0.7.5: reject the pre-0.7.5 --status spelling. A
-    # permissive fake is what let the wrong flag ship.
+    # Mirror the pinned herdr (0.8.0, --until spelling since 0.7.5): reject the
+    # pre-0.7.5 --status spelling. A permissive fake is what let the wrong flag ship.
     for a in "$@"; do
       case "$a" in
         --status|--status=*) echo "unknown option: --status" >&2; exit 2 ;;
@@ -173,7 +173,16 @@ daemon_bg() {
   STARTED_PIDS+=("$!")
 }
 
-reap() { kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
+reap() {
+  local pid=$1 i=0
+  kill "$pid" 2>/dev/null || true
+  while [ "$i" -lt 20 ] && kill -0 "$pid" 2>/dev/null; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
 
 # wait_for <ticks> <cmd...>: poll every 0.1s until <cmd...> succeeds.
 wait_for() {

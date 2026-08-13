@@ -104,8 +104,9 @@ case "${1:-} ${2:-}" in
       echo '{"result":{"agent":{}}}'
     fi ;;
   "agent wait")
-    # Mirror the pinned herdr 0.7.5: reject the pre-0.7.5 --status spelling. A
-    # fake that accepts any flag is how the wrong flag shipped and stayed shipped.
+    # Mirror the pinned herdr (0.8.0, --until spelling since 0.7.5): reject the
+    # pre-0.7.5 --status spelling. A fake that accepts any flag is how the wrong
+    # flag shipped and stayed shipped.
     for _a in "$@"; do
       case "$_a" in
         --status|--status=*) echo "unknown option: --status" >&2; exit 2 ;;

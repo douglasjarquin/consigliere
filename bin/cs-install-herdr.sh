@@ -9,12 +9,12 @@
 # (CS_HERDR_MIN_PROTOCOL), the one authority that consigliere's runtime also
 # gates on, so the installed build can never satisfy CI while failing the
 # runtime floor. The pinned version is documented in docs/herdr.md
-# ("Verified against herdr 0.7.5 (protocol 17)").
+# ("Verified against herdr 0.8.0 (protocol 19)").
 #
 # Usage:
 #   cs-install-herdr.sh <destination-directory>
 #
-# Pins Herdr v0.7.5 (protocol 17). Selects the official GitHub Releases asset
+# Pins Herdr v0.8.0 (protocol 19). Selects the official GitHub Releases asset
 # for the host OS/arch, downloads with a bounded max size, verifies SHA-256
 # before install, then refuses to finish unless the binary reports the exact
 # pin version and a client protocol at or above the required floor.
@@ -23,9 +23,9 @@ set -eu
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Exact pin - change only with a re-verified real-Herdr matrix and docs/herdr.md.
-CS_HERDR_CI_VERSION=0.7.5
+CS_HERDR_CI_VERSION=0.8.0
 CS_HERDR_CI_TAG="v${CS_HERDR_CI_VERSION}"
-# Bounded download ceiling (bytes). The largest official 0.7.4 asset is under 20 MiB.
+# Bounded download ceiling (bytes). The largest official 0.8.0 asset is under 22 MiB.
 CS_HERDR_CI_MAX_BYTES=25000000
 CS_HERDR_CI_REPO=ogulcancelik/herdr
 
@@ -51,19 +51,19 @@ arch=$(uname -m)
 case "${os}-${arch}" in
   Linux-x86_64)
     ASSET=herdr-linux-x86_64
-    SHA256=3dc83288073e4c2d3c679a30e7be97bcca9141c6fd17dbbb9219142e95c59253
+    SHA256=b872ea7e40fa2cb17e857ac9b62b1bf26db7b403c622f5d2f3f5b35f6e9acd28
     ;;
   Linux-aarch64|Linux-arm64)
     ASSET=herdr-linux-aarch64
-    SHA256=32e763a1499a6b694b1d708e4f062b743be1da9f34fcfa4d212d6db6fe09a8b9
+    SHA256=f647ac66468d9efbc642fe534fb284468f0aea60641606fc008dfc0d82a3ca87
     ;;
   Darwin-arm64)
     ASSET=herdr-macos-aarch64
-    SHA256=37350546b0012555943b92eaf962665de4e264395baeb44227b8015e8ff5b0d6
+    SHA256=d53a9f93fccfdfcc55632927bf51002f5add0aa7990bcdf508ffbd84ac658178
     ;;
   Darwin-x86_64)
     ASSET=herdr-macos-x86_64
-    SHA256=3fe50c4a63dc8102306b1322178628ddb3655cd3ae56d784f094153408d69e62
+    SHA256=77cb5afd6c8fcaaaf3bc28e474ec01c209331ad08094e20d7f8aa9b0bb78d649
     ;;
   *)
     die "unsupported platform ${os}-${arch}; official Herdr assets are linux/macos x86_64 and aarch64"

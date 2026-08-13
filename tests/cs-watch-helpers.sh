@@ -168,12 +168,30 @@ wait_for_exit() {
     sleep 0.1
     i=$((i + 1))
   done
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
+  force_kill "$pid"
   return 124
 }
 
-reap() { kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
+# force_kill <pid>: TERM, then escalate to KILL if still alive after a short
+# bounded poll, then reap. A plain `kill` + `wait` is not enough: bash defers
+# running a script's own signal trap until its current foreground external
+# command (e.g. the CS_SIGNAL_GRACE sleep) returns naturally, so killing a
+# watcher mid-sleep blocks `wait` for that sleep's full remaining duration
+# instead of exiting promptly. SIGKILL bypasses trap handling entirely, so
+# escalating to it bounds every reap to a fraction of a second no matter what
+# the watcher is currently sleeping through.
+force_kill() {
+  local pid=$1 i=0
+  kill "$pid" 2>/dev/null || true
+  while [ "$i" -lt 20 ] && kill -0 "$pid" 2>/dev/null; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
+reap() { force_kill "$1"; }
 
 # wait_mtime_after <file> <epoch> [limit-ticks]: poll until <file>'s mtime is
 # strictly newer than <epoch>; 0 the instant it is, 1 after <limit> ticks.

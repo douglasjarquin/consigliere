@@ -106,7 +106,8 @@ pass "send-keys accepts esc and refuses an unsupported key"
 # version. `agent wait` renamed this flag between 0.7.4 (--status) and 0.7.5
 # (--until); consigliere shipped --status, herdr updated the fleet to 0.7.5, and
 # every steer silently stopped confirming while CI stayed green on the old pin.
-# CI now pins 0.7.5 so this lane exercises the contract the fleet runs.
+# CI now pins the current release (0.8.0) so this lane exercises the exact
+# contract the fleet runs, whatever that pin becomes next.
 #
 # Assert on the MESSAGE, never the exit code: this pane has no agent, so any
 # spelling exits non-zero, and only "unknown option" distinguishes a bad flag
