@@ -154,11 +154,6 @@ esac
 cs_supervision_status "$STATE" "$GRACE"
 [ "$CS_SUP_SUPERVISED" -gt 0 ] || exit 0
 
-# While away mode owns supervision, the daemon (not this home's own activation)
-# is what restarts turns; its own liveness is guarded separately, so do not
-# block here.
-[ -e "$STATE/.afk" ] && exit 0
-
 # Can this home wake itself once this turn ends? These are the DURABLE
 # preconditions bin/cs-activate.sh needs before it will prompt anything; that
 # script owns the live revalidation (the pane still exists, still runs an agent,
