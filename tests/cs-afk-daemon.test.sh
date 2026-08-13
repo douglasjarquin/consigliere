@@ -659,6 +659,137 @@ SH
   pass "cs-afk-verify rolls back and stops a daemon that comes alive but never completes a supervision pass"
 }
 
+# --- 7. bossless acknowledgment gate / kill switch (bin/cs-afk-start.sh) ------
+# Sourced directly (the BASH_SOURCE guard exposes the functions without
+# running main), matching this file's own documented pattern for testing
+# cs-afk-start.sh's helpers.
+
+test_bossless_ack_status_record_and_kill_switch() {
+  local dir ack
+  dir=$(make_case bossless-ack-status)
+  ack="$dir/bossless-ack.md"
+  (
+    CS_BOSSLESS_ACK_OVERRIDE="$ack"
+    export CS_BOSSLESS_ACK_OVERRIDE
+    # shellcheck source=bin/cs-afk-start.sh
+    . "$AFK_START"
+    [ "$(cs_bossless_ack_status myproj)" = unacknowledged ] \
+      || fail "a project with no record must read unacknowledged"
+    cs_bossless_ack_record myproj || fail "recording an acknowledgment should succeed"
+    [ "$(cs_bossless_ack_status myproj)" = acknowledged ] \
+      || fail "myproj must read acknowledged after recording"
+    [ "$(cs_bossless_ack_status otherproj)" = unacknowledged ] \
+      || fail "recording myproj must not affect an unrelated project"
+    printf 'myproj disabled\n' >> "$ack"
+    [ "$(cs_bossless_ack_status myproj)" = disabled ] \
+      || fail "a later disabled line (the kill switch) must win over an earlier acknowledged one"
+  ) || fail "bossless ack status/record/kill-switch subshell failed"
+  pass "cs_bossless_ack_status/record track acknowledgment per project, and a later kill-switch line wins"
+}
+
+test_bossless_ack_corrupt_file_fails_closed() {
+  local dir ack
+  dir=$(make_case bossless-ack-corrupt)
+  ack="$dir/bossless-ack.md"
+  printf 'myproj acknowledged 1700000000\nGARBAGE LINE WITH NO STATUS\n' > "$ack"
+  (
+    CS_BOSSLESS_ACK_OVERRIDE="$ack"
+    export CS_BOSSLESS_ACK_OVERRIDE
+    # shellcheck source=bin/cs-afk-start.sh
+    . "$AFK_START"
+    [ "$(cs_bossless_ack_status myproj)" = unacknowledged ] \
+      || fail "a corrupt file must fail closed even for a record that DID parse"
+  ) || fail "bossless ack corrupt-file subshell failed"
+  pass "a corrupt acknowledgment file fails closed for every project"
+}
+
+test_bossless_unacked_projects_scans_state_meta() {
+  local dir state ack out
+  dir=$(make_case bossless-unacked-scan); state="$dir/state"
+  ack="$dir/bossless-ack.md"
+  mkdir -p "$state/../projects/proj-a" "$state/../projects/proj-b"
+  cs_write_meta "$state/ship-a.meta" "kind=ship" "yolo=on" "project=$dir/projects/proj-a"
+  cs_write_meta "$state/ship-b.meta" "kind=ship" "yolo=on" "project=$dir/projects/proj-b"
+  cs_write_meta "$state/ship-c.meta" "kind=ship" "yolo=off" "project=$dir/projects/proj-a"
+  cs_write_meta "$state/capo.meta" "kind=capo" "yolo=on" "project=$dir/projects/proj-a"
+  out=$(
+    CS_STATE_OVERRIDE="$state" CS_BOSSLESS_ACK_OVERRIDE="$ack"
+    export CS_STATE_OVERRIDE CS_BOSSLESS_ACK_OVERRIDE
+    # shellcheck source=bin/cs-afk-start.sh
+    . "$AFK_START"
+    cs_afk_bossless_unacked_projects
+  )
+  assert_contains "$out" "proj-a" "a yolo=on ship task's project must be reported as unacknowledged"
+  assert_contains "$out" "proj-b" "a second yolo=on ship task's project must also be reported"
+  [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = 2 ] \
+    || fail "yolo=off and kind=capo tasks must not contribute extra projects: $out"
+  out=$(
+    CS_STATE_OVERRIDE="$state" CS_BOSSLESS_ACK_OVERRIDE="$ack"
+    export CS_STATE_OVERRIDE CS_BOSSLESS_ACK_OVERRIDE
+    # shellcheck source=bin/cs-afk-start.sh
+    . "$AFK_START"
+    cs_bossless_ack_record proj-a
+    cs_afk_bossless_unacked_projects
+  )
+  assert_contains "$out" "proj-b" "proj-b must still be unacknowledged"
+  case "$out" in
+    *proj-a*) fail "proj-a must no longer appear once acknowledged: $out" ;;
+  esac
+  pass "cs_afk_bossless_unacked_projects scans state/*.meta for yolo=on ship tasks only, and drops an acknowledged project"
+}
+
+test_afk_start_ack_subcommand_records_durably() {
+  local dir ack out rc
+  dir=$(make_case bossless-ack-cli)
+  ack="$dir/bossless-ack.md"
+  out=$(CS_BOSSLESS_ACK_OVERRIDE="$ack" "$AFK_START" ack myproj 2>&1)
+  rc=$?
+  expect_code 0 "$rc" "cs-afk-start.sh ack <project>"
+  assert_contains "$out" "bossless acknowledged for project 'myproj'" "the ack subcommand did not confirm by name"
+  assert_present "$ack" "the ack subcommand did not create the acknowledgment file"
+  grep -q '^myproj acknowledged [0-9]\+$' "$ack" \
+    || fail "the acknowledgment file does not carry a well-formed record: $(cat "$ack")"
+  out=$(CS_BOSSLESS_ACK_OVERRIDE="$ack" "$AFK_START" ack 2>&1)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "ack with no project name must be refused"
+  pass "cs-afk-start.sh ack <project> durably records the acknowledgment, and refuses with no project name"
+}
+
+test_afk_start_first_engagement_prompts_second_does_not() {
+  local dir state fakebin ack out rc pid
+  dir=$(make_case bossless-first-engagement); state="$dir/state"; fakebin="$dir/fakebin"
+  ack="$dir/bossless-ack.md"
+  : > "$dir/watch-script"
+  cs_write_meta "$state/ship-a.meta" "kind=ship" "yolo=on" "project=$dir/projects/proj-a"
+
+  out=$(env HERDR_PANE_ID=w9:p9 PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
+    CS_BOSSLESS_ACK_OVERRIDE="$ack" CS_WATCH_BIN="$fakebin/cs-watch-stub" \
+    CS_FAKE_WATCH_SCRIPT="$dir/watch-script" CS_FAKE_HERDR_LOG="$dir/herdr.log" \
+    CS_WEDGE_ALARM_EXEC=discard "$AFK_START" 2>&1)
+  rc=$?
+  expect_code 0 "$rc" "cs-afk-start on a fresh +yolo project with no acknowledgment"
+  assert_contains "$out" "bossless mode would newly apply to project 'proj-a'" \
+    "the first engagement must name the unacknowledged project explicitly"
+  assert_present "$state/.afk" "away mode must still arm even with an unacknowledged bossless project"
+  pid=$(cat "$state/.subsuper-daemon.pid" 2>/dev/null || true)
+  if [ -n "$pid" ]; then STARTED_PIDS+=("$pid"); fi
+
+  CS_BOSSLESS_ACK_OVERRIDE="$ack" "$AFK_START" ack proj-a >/dev/null \
+    || fail "acknowledging proj-a should succeed"
+
+  out=$(env HERDR_PANE_ID=w9:p9 PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
+    CS_BOSSLESS_ACK_OVERRIDE="$ack" CS_WATCH_BIN="$fakebin/cs-watch-stub" \
+    CS_FAKE_WATCH_SCRIPT="$dir/watch-script" \
+    "$AFK_START" 2>&1)
+  rc=$?
+  expect_code 0 "$rc" "cs-afk-start refresh after acknowledgment"
+  assert_contains "$out" "daemon already running" "the second run must be the ordinary refresh path"
+  case "$out" in
+    *"would newly apply to project"*) fail "an already-acknowledged project must not be re-prompted: $out" ;;
+  esac
+  pass "the first bossless engagement for a project prompts by name; a later one does not re-prompt after acknowledgment"
+}
+
 test_composer_classifier
 test_routine_wake_self_handled
 test_done_wake_escalates_one_marked_digest
@@ -670,3 +801,8 @@ test_afk_start_refuses_outside_herdr_pane
 test_afk_start_and_return_lifecycle
 test_afk_verify_rolls_back_a_daemon_that_did_not_survive
 test_afk_verify_rolls_back_a_daemon_that_never_completes_a_pass
+test_bossless_ack_status_record_and_kill_switch
+test_bossless_ack_corrupt_file_fails_closed
+test_bossless_unacked_projects_scans_state_meta
+test_afk_start_ack_subcommand_records_durably
+test_afk_start_first_engagement_prompts_second_does_not
