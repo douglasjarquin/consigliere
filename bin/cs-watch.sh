@@ -9,11 +9,10 @@
 # current working signal is never silently swallowed. A declared external-wait
 # pause is the separate idle absorb case and re-surfaces only on its long
 # bounded cadence, although its initial no-verb status signal still surfaces in
-# normal mode. While state/.afk exists, the daemon owns triage and this watcher
-# queues and exits on every wake. Printed reason lines:
+# normal mode. Printed reason lines:
 #   signal: <file>...      status/turn-end signals, surfaced when a listed status
 #                          has a boss-relevant verb OR a no-verb signal's soldier
-#                          is not provably working, unless afk is active
+#                          is not provably working
 #   stale: <pane>          a provably-working stale is ALWAYS absorbed (with a wedge
 #                          timer) regardless of what the status log says - an active
 #                          run-step or busy pane outranks even a boss-relevant log
@@ -36,12 +35,12 @@
 #                          IMMEDIATELY as a stale wake - via the native event
 #                          stream sub-second when the socket is capable, and via
 #                          the poll loop's level read otherwise - never left to
-#                          the wedge timer. Unless afk is active.
+#                          the wedge timer.
 #   check: <script>: <out> authenticated check output, always actionable
 #   check: rejected unauthenticated state checks: <paths>
 #                          unsafe state checks were refused without execution
 #   heartbeat              fleet-scan backstop found an unsurfaced boss-relevant
-#                          status, unless afk is active
+#                          status
 # For normal supervision, resume the supervision protocol after each printed
 # reason. Direct duplicate invocations of this script still no-op through the
 # watcher singleton lock.
@@ -59,8 +58,7 @@ mkdir -p "$STATE"
 # shellcheck source=bin/cs-wake-lib.sh
 . "$SCRIPT_DIR/cs-wake-lib.sh"
 # Shared wake classifier (boss-relevant verbs + signal/stale/heartbeat
-# predicates), the SAME library the away-mode daemon uses, so the triage policy
-# has one definition.
+# predicates), so the triage policy has one definition.
 # shellcheck source=bin/cs-classify-lib.sh
 . "$SCRIPT_DIR/cs-classify-lib.sh"
 # The one herdr layer: captures, native agent busy-state (codex corroboration
@@ -158,11 +156,7 @@ BUSY_REGEX=${CS_BUSY_REGEX:-$CS_CODEX_BUSY_RE}
 # soldier is not provably working, any check, a stale pane whose soldier is not
 # provably working, a provably-working stale past the threshold, or anything
 # unknown) is written to the durable queue and exits, which is what wakes the
-# LLM through the background-task completion. The same classifier
-# (cs-classify-lib.sh) backs the away-mode daemon; while state/.afk exists the
-# daemon owns triage, so this watcher reverts to one-shot (enqueue + exit on
-# every wake) and never double-triages - and never runs the costly
-# provably-working read.
+# LLM through the background-task completion.
 STALE_ESCALATE_SECS=${CS_STALE_ESCALATE_SECS:-240}  # idle secs before a provably-working stale escalates as a possible wedge
 # A busy pane is otherwise UNBOUNDED proof of liveness: the whole stale/wedge
 # machinery below is skipped while pane_is_busy holds, and a busy pane's hash
@@ -203,12 +197,6 @@ EVENT_CAP_FAIL_MAX=${CS_EVENT_CAP_FAIL_MAX:-3}
 _event_cap_key=""
 _event_cap_ok=0
 _event_cap_fails=0
-
-# afk_present: 0 while the away-mode flag exists. When set, the daemon wraps this
-# watcher and owns triage, so the watcher must behave one-shot (enqueue + exit on
-# every wake) and let the daemon classify - never absorb here, or the daemon's
-# digest/injection layer would never see the wake.
-afk_present() { [ -e "$STATE/.afk" ]; }
 
 # Append one line to the triage debug log explaining an absorbed (benign) wake,
 # size-capped so a long benign stretch cannot grow it without bound. Best-effort:
@@ -713,7 +701,7 @@ mark_all_boss_relevant_surfaced() {
   done < <(scan_boss_relevant_statuses "$STATE")
 }
 
-# Cheap heartbeat fleet-scan (the always-on twin of the daemon's catch-all). 0 if
+# Cheap heartbeat fleet-scan, the always-on catch-all backstop. 0 if
 # any boss-relevant status has NOT already been surfaced to consigliere (its
 # content differs from the .hb-surfaced-<task> marker). Pure detect, no side
 # effects: the caller enqueues first, then marks surfaced. Because every
@@ -1449,8 +1437,7 @@ while :; do
     pending=$(printf '%s\n%s' "$pending" "$(scan_signals)")
     files=$(signal_files_of "$pending")
     reason="signal:$files"
-    # Triage: a signal is ACTIONABLE when any of these holds (cheapest first):
-    #   - the away-mode daemon owns triage (afk) and wants every wake;
+    # Triage: a signal is ACTIONABLE when either of these holds (cheapest first):
     #   - any status file carries a boss-relevant verb;
     #   - or it is a no-verb wake (a bare turn-end, a working: note) whose
     #     soldier is NOT provably working - the soldier stopped its turn with no
@@ -1459,14 +1446,14 @@ while :; do
     #     decision, or wedged. Absorbing such a turn-end is exactly the
     #     swallowed-finish this triage guards against.
     # Actionable -> enqueue, advance .seen-* markers, exit. Benign (a no-verb
-    # wake whose soldier IS provably working) in always-on mode -> advance the
-    # markers so it will not re-fire, log, and keep blocking without enqueuing.
-    # The provably-working check is the only costly one (it may run a bounded
+    # wake whose soldier IS provably working) -> advance the markers so it will
+    # not re-fire, log, and keep blocking without enqueuing. The
+    # provably-working check is the only costly one (it may run a bounded
     # made status query - crew_is_provably_working over cs-crew-state.sh, a
     # `made status --json` read, never a log scrape), so the || ordering
-    # evaluates it ONLY for a non-afk, no-boss-verb signal.
+    # evaluates it only for a no-boss-verb signal.
     # shellcheck disable=SC2086  # $files is a space-separated status-path list (ids carry no spaces)
-    if afk_present || signal_reason_is_actionable $files || ! signal_crew_provably_working $files; then
+    if signal_reason_is_actionable $files || ! signal_crew_provably_working $files; then
       while IFS=$(printf '\t') read -r sf sig f; do
         [ -n "$sf" ] || continue
         cs_wake_append signal "$(basename "$f")" "$reason" || exit 1
@@ -1617,13 +1604,6 @@ EOF
             paused) handle_paused_stale "$w" "$task" "$h" ;;
             *)      clear_pause_tracking "$w" ;;
           esac
-        elif afk_present; then
-          # Daemon owns triage: one-shot per distinct stale hash, as before.
-          if [ "$(cat "$sf" 2>/dev/null || true)" != "$h" ]; then
-            cs_wake_append stale "$w" "stale: $w" || exit 1
-            printf '%s' "$h" > "$sf"
-            wake "stale: $w"
-          fi
         elif stale_is_terminal "$w" "$STATE"; then
           # The log's last line is boss-relevant - but that alone is not proof
           # the soldier is actually done: a soldier's own status log gets no new
@@ -1719,7 +1699,7 @@ EOF
       echo 0 > "$cf"
       rm -f "$ssf" "$ewf"
       task=$(pane_to_task "$w" "$STATE")
-      if ! afk_present && status_is_paused_or_boss_held "$(last_status_line "$STATE/$task.status")" && ! pane_is_busy "$bs" "$tail40"; then
+      if status_is_paused_or_boss_held "$(last_status_line "$STATE/$task.status")" && ! pane_is_busy "$bs" "$tail40"; then
         case "$(pause_state_class "$w" "$task")" in
           paused) handle_paused_stale "$w" "$task" "$h" ;;
           *)      clear_pause_tracking "$w" ;;
@@ -1739,16 +1719,11 @@ EOF
   hb=$(( HEARTBEAT * (1 << streak) ))
   [ "$hb" -gt "$HEARTBEAT_MAX" ] && hb=$HEARTBEAT_MAX
   if [ "$(age_of "$STATE/.last-heartbeat")" -ge "$hb" ]; then
-    # Triage: in always-on mode a heartbeat is benign unless the cheap fleet-scan
-    # turns up a boss-relevant status the per-wake path missed. Absorb the
-    # no-change case (advance the schedule and back off exactly as wake() would,
-    # without exiting); the away-mode daemon, when present, owns triage and wants
-    # every heartbeat.
-    if afk_present; then
-      cs_wake_append heartbeat heartbeat heartbeat || exit 1
-      touch "$STATE/.last-heartbeat"
-      wake "heartbeat"
-    elif heartbeat_scan_finds_actionable; then
+    # Triage: a heartbeat is benign unless the cheap fleet-scan turns up a
+    # boss-relevant status the per-wake path missed. Absorb the no-change case
+    # (advance the schedule and back off exactly as wake() would, without
+    # exiting).
+    if heartbeat_scan_finds_actionable; then
       # Backstop: a boss-relevant status the per-wake path absorbed by mistake.
       # Enqueue first, then mark every boss-relevant status surfaced so the next
       # heartbeat does not re-fire them (enqueue-before-suppress preserved).

@@ -29,7 +29,7 @@ test_session_only_recap_boundary() {
 
 test_operational_input_and_side_effect_boundaries() {
   local term
-  for term in System developer tool monitoring 'turn-end guard' 'away-mode daemon' \
+  for term in System developer tool monitoring 'turn-end guard' 'away-supervisor' \
     'launch instruction' 'session-start nudge' from-consigliere; do
     assert_grep "$term" "$SKILL" "rundown does not exclude operational input: $term"
   done

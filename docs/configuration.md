@@ -42,7 +42,7 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 | `config/bossless-ack.md` | portable | per-project bossless-mode acknowledgment / kill switch; `bin/cs-afk-start.sh`'s own header owns the record format and fail-closed parsing |
 | `config/backlog-backend.conf` | portable | absent or `tasks-axi` = tasks-axi against `config/backlog.md`; `manual` = hand-edit the markdown |
 | `config/permission-mode.conf` | portable | optional narrower claude launch permission mode; absent = full autonomy; `bin/cs-harness-lib.sh` owns the two-column schema below. This is a Claude ACCOUNT policy, not a machine property - the record is `<harness> <mode>` with no machine-specific content, so the same file is correct verbatim on every machine that account uses; do not re-derive it as host-specific |
-| `config/wedge-alarm.conf` | portable | away-mode wedge-alarm active-alert directives; absent = auto (macOS Notification Center when available, degrading elsewhere). A boss preference, boss-authored only; the directives are channel selectors that adapt per OS, so the file is portable. The one non-portable use is a `command:` directive naming a machine-local path - keep such a value out of shared dotfiles |
+| `config/wedge-alarm.conf` | portable | wedge-alarm active-alert directives, read through `bin/cs-prompt-lib.sh` by every guarded-prompt caller (currently `bin/cs-activate.sh`, for a failing stretch past `CS_ACTIVATE_WEDGE_MAX_SECS`); absent = auto (macOS Notification Center when available, degrading elsewhere). A boss preference, boss-authored only; the directives are channel selectors that adapt per OS, so the file is portable. The one non-portable use is a `command:` directive naming a machine-local path - keep such a value out of shared dotfiles |
 | `host/capos.md` | host | capo routing table; every record embeds an absolute machine-local home path |
 | `host/harness.conf` | host | pins the root harness (`codex` or `claude`) regardless of environment |
 | `host/upstream.conf` | host | path of the firstmate checkout for `/upstream-review`; absent = `../firstmate` |
@@ -130,10 +130,13 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
   Safe to delete by hand between sessions: the sweeps are idempotent detectors, so the next session start re-derives every finding.
 - `state/.home-pane` - the pane id of THIS home's own agent, written by `bin/cs-session-start.sh` from `HERDR_PANE_ID` (the one place that runs inside the home's own pane). A durable HINT, never an identity: herdr recycles pane ids, so `bin/cs-activate.sh` revalidates that the pane still exists, still runs an agent, and is still rooted in this home before it will prompt anything.
 - `state/.last-activation` - cooldown stamp for `bin/cs-activate.sh`; also the recursion guard, since the turn activation starts drains the queue and may append more wakes.
+- `state/.activate-busy-since` - `bin/cs-activate.sh`'s continuous non-empty-queue stamp, cleared the moment the queue is seen empty; ages past `CS_ACTIVATE_BUSY_MAX_SECS` fire activation even while the queue stays too busy to ever go quiet.
+- `state/.activate-fail-since` - `bin/cs-activate.sh`'s continuous failing-delivery stamp, cleared on a success or an empty queue; while present the retry floor is `CS_ACTIVATE_RETRY_SECS` instead of `CS_ACTIVATE_COOLDOWN_SECS`, and ages past `CS_ACTIVATE_WEDGE_MAX_SECS` fire the wedge alarm once per stretch.
 - `state/.checkpoint-turn` - the per-turn checkpoint counter. `bin/cs-watch-checkpoint.sh` writes it on entry and refuses (exit 3) if it is already there; `bin/cs-turnend-guard.sh` clears it at every turn end and `bin/cs-session-start.sh` clears one left by a turn that died mid-flight. `docs/supervision.md` owns why the limit is mechanical rather than written down. Safe to delete by hand, which only permits one extra checkpoint in the current turn.
 - `state/.activation-stalled` - durable marker that this home cannot self-activate (pane gone, pane recycled to another home, or no agent). Its whole purpose is that a home with the parent removed from the loop fails loudly instead of rotting.
 - `state/procevent/` and `state/procevent-inbox/` - armed blocking sources and their captured results; see `## Process events` below.
-- `state/.subsuper-daemon-beat` - the away daemon's proof that it is supervising, written by `bin/cs-daemon.sh` at the BOTTOM of each loop pass, so the early-continue paths (pane gone, watcher crash backoff) deliberately do not write it. Contents are a strictly increasing pass counter; mtime is its freshness. `bin/cs-afk-verify.sh` requires the counter to ADVANCE before away mode is armed; `bin/cs-monitor.sh` requires it fresh before standing down. A live pid is not proof: it survives a recycled pid and a daemon wedged off its loop.
+- `state/.subsuper-daemon-beat` - dead. It was the away-mode daemon's proof that it was supervising, written by `bin/cs-daemon.sh` at the BOTTOM of each loop pass. `bin/cs-monitor.sh` dropped the stand-down branch that read it, and `bin/cs-daemon.sh` itself is now deleted, so nothing writes or reads this file anymore.
+- `state/.subsuper-inject-wedged` - durable wedge marker, written once per continuous failing stretch by `bin/cs-activate.sh` (past `CS_ACTIVATE_WEDGE_MAX_SECS`); `bin/cs-afk-return.sh` reads it as catch-up evidence on the boss's return.
 
 ## Process events
 
@@ -187,7 +190,7 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_OPEN_DECISIONS_CAP` | cs-wake-drain | maximum open decisions printed per drain; default 32; omitted decisions are marked |
 | `CS_OPEN_DECISIONS_READ_PROBE` | cs-classify-lib | test-only observability seam, unset in production: a file the cursor-backed fold appends `<status-file><TAB><bytes-folded>` to per call, so a test can assert the drain scan stays bounded by new appends |
 | `CS_CHECK_TIMEOUT` | cs-watch | per-check timeout for registered `state/<id>.check.sh` |
-| `CS_STALE_ESCALATE_SECS` | cs-watch, cs-daemon | wedge escalation threshold |
+| `CS_STALE_ESCALATE_SECS` | cs-watch | wedge escalation threshold |
 | `CS_BUSY_TURN_MAX_SECS` | cs-watch | how long a pane may run busy with no completed turn before it enters the wedge timer; default 3600 |
 | `CS_SESSION_START_TIMEOUT` | cs-session-start | hard bound in seconds for the whole digest, which runs as one bounded child because the session-open hooks block session initialization while it runs; on expiry the parent prints the STARTUP TRUNCATED banner naming the stalled stage and every stage that never ran, and still exits 0. A host where the bound cannot be established at all (an unusable `TMPDIR`) gets the separate STARTUP DID NOT RUN banner instead, because a digest that never started is not a digest that stalled. Default 120 |
 | `CS_TIMEOUT_MECHANISM_OVERRIDE` | cs-timeout-lib | set to `bash` to force the dependency-free watchdog fallback; tests use it to exercise the bound on hosts that ship timeout/gtimeout/perl |
@@ -201,11 +204,9 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_SESSION_START_STATUS_TAIL` | cs-session-start | `state/*.status` lines printed per task in the session-start digest; default 5; each line is capped by `bin/cs-line-cap-lib.sh` |
 | `CS_SESSION_START_QUEUED_LIMIT` | cs-session-start | plain queued backlog rows in the session-start digest; default 20; done rows are never listed |
 | `CS_SESSION_START_ACTIVE_LIMIT` | cs-session-start | in-flight, held, and blocked backlog rows per group in the session-start digest; default 40; each row is shown in full and any remainder is disclosed with the targeted follow-up that prints the rest; queued public-followup rows are outside this bound and always print in full |
-| `CS_PAUSE_RESURFACE_SECS` | cs-watch, cs-daemon | declared external-wait recheck cadence |
+| `CS_PAUSE_RESURFACE_SECS` | cs-watch | declared external-wait recheck cadence |
 | `CS_BOARD_SWEEP_LANES` | cs-board-watch | default lane cap baked into a new sweep record; default 3, matching the `contracts` skill |
 | `CS_BOARD_SWEEP_RESURFACE` | cs-board-watch | default seconds before a still-full column is reported again; default 1800. Only a default for `arm`; each record stores its own value |
-| `CS_MAX_DEFER_SECS` | cs-daemon | away-mode escalation max-defer alarm |
-| `CS_AFK_BEAT_STALE` | cs-monitor | seconds before the away daemon's completed-pass counter reads stale and the monitor covers the home instead of standing down; default 180, deliberately above the daemon's own 60s crash backoff |
 | `CS_SPAWN_LAUNCH_WAIT_SECS` | cs-spawn | seconds to wait for an agent to actually appear after the launch line is delivered, before treating the launch as swallowed; default 60 |
 | `CS_SPAWN_HUMAN_GATE_SECS` | cs-spawn | seconds a freshly launched agent may sit in herdr's native `blocked` state before the spawn reports it out loud; short on purpose since this window only has to outlast a startup transient; default 10 |
 | `CS_SPAWN_BASE_FRESHNESS_TIMEOUT_SECS` | cs-spawn | hard bound in seconds for the pre-branch base-freshness refresh through `bin/cs-fleet-sync.sh` when no `--base` was given; on expiry the spawn warns loudly and proceeds on the local HEAD; default 25 |
@@ -218,9 +219,12 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_ACTIVATE_QUIET_SECS` | cs-activate | the wake queue must have been still this long before activating, so one burst of wakes produces one turn; default 180 in the main home and 60 in a capo home, because the longer window is what shrinks the check-then-act composer race in the pane the boss types into |
 | `CS_MONITOR_BIN`, `CS_MONITOR_DETACH_BIN` | cs-monitor-lib | monitor and detacher overrides, tests only |
 | `CS_MONITOR_STALE_SECS` | cs-monitor-lib | a `state/.last-monitor-beat` older than this counts as no monitor at all and triggers a revival; default 60 |
-| `CS_ACTIVATE_COOLDOWN_SECS` | cs-activate | minimum seconds between activations in a home; also the recursion guard; default 600 |
+| `CS_ACTIVATE_COOLDOWN_SECS` | cs-activate | minimum seconds between activations in a home after a SUCCESS; also the recursion guard; default 600 |
+| `CS_ACTIVATE_BUSY_MAX_SECS` | cs-activate | continuous non-empty-queue age that fires activation anyway, for a queue that refills faster than `CS_ACTIVATE_QUIET_SECS` ever goes still; default 300 |
+| `CS_ACTIVATE_RETRY_SECS` | cs-activate | minimum seconds between attempts while the last delivery FAILED, instead of the full cooldown; default 15 |
+| `CS_ACTIVATE_WEDGE_MAX_SECS` | cs-activate | continuous failing-delivery age that fires the wedge alarm once per stretch; default 300 |
 | `CS_PROMPT_CONFIRM_WAIT_MS` | cs-prompt-lib | ms to wait for the idle->working transition that proves a prompt was delivered; default 8000 |
-| `CS_AFK_VERIFY_TICKS` | cs-afk-verify | 0.1s ticks to wait for the counter to advance before rolling away mode back; default 150 |
+| `CS_WEDGE_ALARM_CHANNEL` | cs-prompt-lib | overrides `config/wedge-alarm.conf` with one directive (`off`, `auto`, `osascript`, `herdr`, `command:<cmd>`); shared by every guarded-prompt caller (currently `bin/cs-activate.sh`) |
 | `CS_PROCEVENT_CLAIM_ROOT` | cs-procevent | machine-wide process-event claim root; default `${XDG_STATE_HOME:-~/.local/state}/consigliere/procevent-claims` |
 | `CS_PROCEVENT_MAX_OUTPUT_BYTES` | cs-procevent | cap on one captured result; default 1048576. Over the cap the result is truncated and still captured |
 | `CS_LOCK_HARNESS_RE` | cs-session-pid-lib | test-only harness ancestry override, honored by every caller of that lib (the home lock and the telemetry breadcrumb key) |

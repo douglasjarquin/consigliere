@@ -7,11 +7,9 @@
 #   cs-afk-return.sh check    Re-drain and close the gate only after blockers resolve.
 #   cs-afk-return.sh guard    Read-only refusal while away or catch-up is pending.
 #
-# Ordered shutdown: stop the daemon FIRST (its TERM trap flushes what it can;
-# an unflushable buffer survives in state/.subsuper-escalations), clear
-# state/.afk only after the daemon is confirmed stopped, then drain the
-# durable wake queue and print every buffered escalation and wedge marker as
-# durable catch-up evidence.
+# Clears state/.afk, drains the durable wake queue, and prints any wedge
+# marker (bin/cs-activate.sh) or buffered escalation left over from a prior
+# away session as durable catch-up evidence.
 #
 # Fail-closed catch-up gate: `blocked:` is the soldier protocol's
 # consigliere-actionable verb. Every live task's open blocked decision (the
@@ -35,8 +33,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cs_resolve_root
 GATE="$STATE/.afk-return-catchup"
 LOCK="$STATE/.afk-return-catchup.lock"
-DAEMON_LOCK="$STATE/.subsuper-daemon.lock"
-DAEMON_PIDFILE="$STATE/.subsuper-daemon.pid"
 
 usage() {
   sed -n '2,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -91,7 +87,7 @@ write_pending_seed() {  # fail-closed marker before any lifecycle mutation
   {
     printf 'schema\tcs-afk-return.v1\n'
     printf 'started\t%s\n' "$started"
-    printf 'phase\tstopping-and-draining\n'
+    printf 'phase\tdraining\n'
     preserve_evidence /dev/stdout
   } > "$pending" || { rm -f "$pending"; return 1; }
   mv "$pending" "$GATE"
@@ -135,30 +131,6 @@ clear_delivery_artifacts() {
     "$STATE/.subsuper-inject-wedged"
 }
 
-daemon_pid() {
-  local pid
-  pid=$(cat "$DAEMON_PIDFILE" 2>/dev/null || true)
-  [ -n "$pid" ] || pid=$(cat "$DAEMON_LOCK/pid" 2>/dev/null || true)
-  printf '%s' "$pid"
-}
-
-# Stop the daemon and wait for it to exit. 0 = stopped (or was not running);
-# 1 = still alive after the wait (lifecycle failure; state preserved).
-stop_daemon() {
-  local pid i
-  pid=$(daemon_pid)
-  cs_pid_alive "$pid" || return 0
-  kill -TERM "$pid" 2>/dev/null || true
-  i=0
-  while [ "$i" -lt "${CS_AFK_STOP_WAIT_TICKS:-100}" ]; do
-    cs_pid_alive "$pid" || return 0
-    sleep 0.1
-    i=$((i + 1))
-  done
-  cs_pid_alive "$pid" || return 0
-  return 1
-}
-
 return_guard() {
   if [ -e "$STATE/.afk" ]; then
     printf 'cs-afk-return: away mode is still active; run bin/cs-afk-return.sh before ordinary boss work\n' >&2
@@ -178,14 +150,7 @@ return_reconcile() {
   blockers=$(mktemp "$STATE/.afk-return-blockers.XXXXXX") || { rm -f "$evidence"; return 1; }
   preserve_evidence "$evidence"
 
-  # Ordered shutdown: stop the daemon first (its trap flushes what it can),
-  # then clear the away flag only once the daemon is confirmed stopped.
-  if ! stop_daemon; then
-    lifecycle_ok=0
-    append_evidence lifecycle 'away-mode daemon shutdown failed; lifecycle state preserved for retry' "$evidence"
-  else
-    rm -f "$STATE/.afk"
-  fi
+  rm -f "$STATE/.afk"
 
   drained=$("$SCRIPT_DIR/cs-wake-drain.sh") || {
     append_evidence lifecycle 'durable wake drain failed; retry catch-up before ordinary work' "$evidence"

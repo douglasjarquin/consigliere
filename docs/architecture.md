@@ -16,7 +16,7 @@ Per-harness verified facts live in [`docs/codex.md`](codex.md) and [`docs/claude
 Its current wire form is `U+2063 CONSIGLIERE_OP: v1 <kind>: <body>`, with kinds `launch-brief`, `session-start`, `watcher`, `turn-end-guard`, and `away-supervisor`.
 The compatibility kind `from-consigliere` retains the byte-identical `[cs-from-consigliere]` label followed immediately by U+2063, while the away form retains bare leading U+2063 before its typed header.
 Unmarked input classifies as `boss`; provenance never depends on body prose.
-The U+2063 marker is a **boss-disambiguation aid, not an authenticity control**: it is unforgeable by boss keystrokes (U+2063 has no key), but an agent can emit those bytes verbatim, so a present marker is not proof of consigliere provenance. Where agent-authored text is folded into a trusted envelope — the away-mode daemon distilling soldier status lines into an `away-supervisor` digest — that text is neutralized as quoted DATA first (`cs_operational_input_neutralize`) so a soldier cannot launder a forged marker into trusted framing (docs/operational-input-provenance.md, option C). Full cryptographic integrity on the machine-classified channel (HMAC) is a documented, deferred follow-up.
+The U+2063 marker is a **boss-disambiguation aid, not an authenticity control**: it is unforgeable by boss keystrokes (U+2063 has no key), but an agent can emit those bytes verbatim, so a present marker is not proof of consigliere provenance. SEC-01 (an away-mode digest distilling raw, agent-authored soldier status lines into a trusted envelope) is closed by removal, not continued mitigation: that digest-composition path belonged to the away-mode daemon, which is retired, and every remaining constructor of an `away-supervisor` envelope (`bin/cs-activate.sh`) sends a fixed, consigliere-authored message that never quotes soldier-derived text (docs/operational-input-provenance.md owns the history and the closure note). Full cryptographic integrity on the machine-classified channel (HMAC) is a documented, deferred follow-up, independent of SEC-01.
 `bin/cs-marker-lib.sh` is a thin compatibility entry point for legacy marker callers.
 
 ## Two planes to a running soldier
@@ -36,7 +36,7 @@ Capo homes are the exception: a capo home must survive server restarts and empty
 A zero-token bash watcher (`bin/cs-watch.sh`) sleeps on the fleet, classifies wakes in bash, and wakes consigliere only when something is actionable; actionable wakes are written to the durable `state/.wake-queue` before detector state advances.
 The absorb policy is absorb-only-when-provably-working: a no-verb signal or fresh stale pane is absorbed only with positive working evidence (an attributed no-mistakes run step from `bin/cs-crew-state.sh`, or native-busy corroborated per docs/herdr.md), a declared `paused:` idles on a long bounded cadence, and a provably-working stale escalates past the wedge threshold with a `demand-deep-inspection` marker on repetition.
 Native herdr `blocked` surfaces immediately - sub-second via the socket event splice (`bin/cs-herdr-events.py`, `pane.agent_status_changed`) and on the next poll without it; the poll loop is the permanent fail-closed backstop.
-`bin/cs-classify-lib.sh` is the one owner of the status-verb vocabulary and the keyed decision/activity folds, shared by the watcher and the away-mode daemon, and consumes operational-input types from `bin/cs-operational-input.sh`.
+`bin/cs-classify-lib.sh` is the one owner of the status-verb vocabulary and the keyed decision/activity folds, and consumes operational-input types from `bin/cs-operational-input.sh`.
 Who writes a decision's closing line lives with each writer: consigliere closes at answer time through `bin/cs-send.sh`'s `--resolve-key`, `bin/cs-pending-reply-lib.sh` closes its own capo escalations when the request resolves, and a soldier self-closes only a blocker that cleared without an answer.
 The supervision wait shape is the bounded foreground checkpoint, one per turn ([`docs/supervision.md`](supervision.md)); supervision then outlives the turn through `bin/cs-monitor.sh`, and `bin/cs-activate.sh` starts the next one.
 The harness Stop hook (`bin/cs-turnend-guard.sh`, registered per-harness) is the structural backstop, and blocks a turn end only when that wake-up path is broken.
@@ -65,8 +65,8 @@ Inheritance is deliberately tiny: `config/boss-shared.md` (read-only) and the ba
 
 ## Away mode
 
-`/afk` sets the durable `state/.afk` flag and starts `bin/cs-daemon.sh`, a presence-gated sub-supervisor that self-handles routine wakes in bash and injects batched `away-supervisor` digests into the primary's own pane (recorded at afk-start from `HERDR_PANE_ID`), only into an affirmatively empty composer (`bin/cs-composer-lib.sh` strips codex ghost text before judging emptiness).
-Input classified `boss` means the boss returned; `bin/cs-afk-return.sh` owns ordered shutdown and the fail-closed catch-up gate.
+`/afk` sets the durable `state/.afk` flag and returns immediately: the existing watch/monitor/activate triangle already supervises an away-mode home the same way it does an attended one, so nothing separate is launched (see the `/afk` skill for the entry, exit, and escalation-digest detail).
+Input classified `boss` means the boss returned; `bin/cs-afk-return.sh` clears the away flag and owns the fail-closed catch-up gate.
 
 ## Restart-proof
 

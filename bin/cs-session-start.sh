@@ -677,8 +677,11 @@ holding the lock owns the live cycle.
 EOF
 elif [ "$AFK_PRESENT" -eq 1 ]; then
   cat <<'EOF'
-Away mode is active: the daemon owns supervision. Load /afk and ensure the
-daemon is running; do not start a foreground checkpoint alongside it.
+Away mode is active. This home is supervised exactly like an attended one -
+the persistent monitor keeps the watcher running and bin/cs-activate.sh starts
+the next turn when a wake lands - so the ordinary drain-and-checkpoint cycle
+below still applies. Load /afk for the away-mode framing (batching, escalation
+digests, bossless mode).
 EOF
 else
   cat <<'EOF'
@@ -821,7 +824,7 @@ fi
 
 subsection "AFK"
 if [ -e "$STATE/.afk" ]; then
-  printf 'present - away-mode supervision is active; the daemon owns the watcher.\n'
+  printf 'present - away-mode supervision is active; the watch/monitor/activate triangle covers this home exactly like an attended one.\n'
 else
   printf 'absent\n'
 fi
@@ -875,8 +878,9 @@ holding the lock owns mutable follow-up.
 EOF
 elif [ "$AFK_PRESENT" -eq 1 ]; then
   cat <<'EOF'
-Away mode is active. Follow the supervision block above: load /afk and ensure
-the daemon is running, because the daemon owns watcher supervision.
+Away mode is active. Follow the supervision operating block above (foreground
+checkpoint) exactly as an attended home would; load /afk for the away-mode
+framing on top of it.
 
 EOF
 else

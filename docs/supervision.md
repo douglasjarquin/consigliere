@@ -30,13 +30,12 @@ The checkpoint keeps one legitimate use inside a turn: a single bounded wait for
 
 `bin/cs-watch.sh` is the zero-token classifier: it absorbs benign wakes in bash (no model turn) and exits with a reason line only for actionable ones.
 `bin/cs-monitor.sh` owns that watcher and outlives any single turn, which is the property the checkpoint alone could never provide: a checkpoint exists only while its agent waits on it, so before monitors a home went unwatched the moment its agent started working (2h10m observed on a live capo home).
-The monitor never injects and never reasons - the durable queue is the entire handoff - and it stands down while away mode holds, because that daemon owns the watcher instead.
-That stand-down is earned, not assumed: the daemon needs a live pid AND a completed-pass counter (`state/.subsuper-daemon-beat`) refreshed within `CS_AFK_BEAT_STALE`, or the monitor covers the home itself and records `state/.monitor-afk-orphan`.
-A flag with a dead owner behind it cost 8h11m of unwatched fleet on 2026-08-01.
+The monitor never injects and never reasons - the durable queue is the entire handoff - and it covers an away-mode home exactly like an attended one, with no separate away-mode supervisor to defer to.
+A flag deferred to a dead owner cost 8h11m of unwatched fleet on 2026-08-01, before that owner was retired.
 The monitor also re-execs itself when `bin/cs-monitor.sh` changes on disk, because it runs for days and would otherwise keep executing whatever code existed when it started - that same incident ran a monitor 13 hours older than the fix that would have caught it.
 
 Long-lived supervision processes must be started through `bin/cs-detach.py`, never `nohup ... & disown`.
-Both the monitor and the away daemon are launched from inside an agent's bounded tool call, and `nohup` does not survive that call's process-group teardown.
+The monitor is launched from inside an agent's bounded tool call, and `nohup` does not survive that call's process-group teardown.
 The monitor learned this on 2026-07-30 (213 revivals in seven hours); the away daemon was left on `nohup` until 2026-08-01 and died within a second of arming on all five recorded away sessions.
 A monitor that dies is revived from both ends of a turn - the next checkpoint and the turn-end guard, which share `bin/cs-monitor-lib.sh` - so an unexplained death costs one interval rather than a session; if no monitor can be started at all, the checkpoint says so and watches inline for that bound.
 Wakes are appended durably to `state/.wake-queue` before detector state advances, so a missed process exit is recovered by the next drain.
@@ -75,7 +74,7 @@ Restoring an interrupted drain's queue removes the batch it restored from, becau
   Dedup is per capo, worker task, and decision key against a per-task open-decision manifest (`state/.capo-surfaced-<capo>__<worker>`), not the surfaced line's text, so a standing block wakes the parent once and a resolve-then-reopen under the same key and wording still surfaces again; `bin/cs-watch.sh`'s `scan_capo_worker_events` owns the fold.
 - `heartbeat` - fleet-scan backstop found an unsurfaced boss-relevant status.
 
-`bin/cs-classify-lib.sh` is the single owner of the verb vocabulary shared with the away-mode daemon and delegates machine-input typing to `bin/cs-operational-input.sh`.
+`bin/cs-classify-lib.sh` is the single owner of the verb vocabulary and delegates machine-input typing to `bin/cs-operational-input.sh`.
 `bin/cs-crew-state.sh` is the authoritative current-state read (no-mistakes run-step first, then native agent status, then status-log fallback).
 
 ## Busy evidence policy

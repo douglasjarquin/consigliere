@@ -14,7 +14,7 @@
 #
 # cs_resolve_root computes the repo root from THIS library's own location
 # (<lib dir>/..), not from any caller SCRIPT_DIR variable, so callers that name
-# their script-dir variable differently (CS_AFK_START_DIR, CS_DAEMON_DIR, ...)
+# their script-dir variable differently (CS_AFK_START_DIR, CS_MONITOR_LIB_DIR, ...)
 # resolve identically. The library lives in bin/, so <lib dir>/.. is the root.
 
 # Idempotent guard: sourcing twice must not redefine the function.

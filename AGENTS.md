@@ -121,14 +121,14 @@ state/               volatile runtime signals; gitignored
   procevent/         armed blocking sources supervised outside a turn; bin/cs-procevent.sh
   procevent-inbox/   their captured results, adapter records, and handled acknowledgements
   .wake-queue        durable queued wakes: epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload
-  .afk               durable away-mode flag; present = daemon may inject escalations
+  .afk               durable away-mode flag; present = cs-activate.sh may afk-only-inject and cs-auto-decision-lib.sh may decide bosslessly
   .watch.lock .wake-queue.lock .monitor.lock   watcher, queue, and monitor singleton locks
   .last-watcher-beat watcher liveness beacon; guard scripts read it
   .last-monitor-beat .monitor.log .monitor-stop   persistent monitor liveness, lifecycle log, and stop request; cs-monitor.sh
   .checkpoint-turn   per-turn checkpoint counter; written by cs-watch-checkpoint.sh, cleared at every turn end
   .decision-cursor-*   per-task byte cursor and folded open-decision set bounding the wake drain's open-decision scan to new status appends; written only by cs-classify-lib.sh; safe to delete (forces one full re-fold)
   .hash-* .count-* .stale-* .paused-* .seen-* .last-* .capo-surfaced-*   watcher internals; never touch
-  .subsuper-*        away-mode daemon internals; never touch
+  .subsuper-*        away-mode delivery internals (cs-activate.sh, cs-afk-start.sh, cs-afk-return.sh); never touch
 .no-mistakes/        local validation state and evidence (`.no-mistakes/evidence`); gitignored
 ```
 
@@ -178,7 +178,7 @@ For an ordinary direct report whose endpoint is dead or metadata has no workspac
 For a dead capo direct report, load `capo-provisioning` and reconcile only that capo, never its whole child tree from the main home.
 Each capo reconciles work already in its own home and then idles; recovery never authorizes it to invent work.
 
-If away mode is present, load `/afk` and let its daemon own supervision rather than arming another cycle.
+If away mode is present, load `/afk`; supervision covers it exactly like an attended home (`docs/supervision.md`), so do not arm another cycle.
 Surface only boss-relevant decisions, pre-validation review requests, review-ready PRs, failures, and credential needs; otherwise resume the supervision protocol silently.
 A restart must be a non-event because durable state and live herdr inventory, not conversation memory, are authoritative.
 
@@ -393,10 +393,10 @@ The spawn assertion and generated ship brief must both enforce that project work
 ### Away-mode stub
 
 Invoke the `/afk` skill when the boss says `/afk`, says they are going afk, `state/.afk` exists, an incoming message classifies as `away-supervisor` through `bin/cs-operational-input.sh`, or any `state/.subsuper-*` marker is involved.
-The skill owns the daemon procedure; these safety facts remain inline:
+The skill owns the full contract; these safety facts remain inline:
 
-- Every daemon injection is typed `away-supervisor` and retains the bare leading U+2063 `CS_INJECT_MARK`; unmarked input classifies as boss input.
-- While `state/.afk` exists, the daemon owns supervision; do not arm a separate watcher.
+- Every away-supervisor delivery is typed `away-supervisor` and retains the bare leading U+2063 `CS_INJECT_MARK`; unmarked input classifies as boss input.
+- While `state/.afk` exists, this home is supervised exactly like an attended one (`docs/supervision.md`); do not arm a separate watcher.
 - Input classified `away-supervisor` while away mode is active is internal escalation and does not exit away mode.
 - A message beginning `/afk` refreshes away mode.
 - Input classified `boss` means the boss returned; load `/afk`, run the return owner, and do not process that message as ordinary work until its durable catch-up gate clears.

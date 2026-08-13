@@ -9,12 +9,12 @@
 # marker so no detached process outlives the test.
 #
 # Every wait FOR something is a poll for that positive condition, never a fixed
-# sleep. The three fixed sleeps below are the opposite shape and are deliberate:
+# sleep. The two fixed sleeps below are the opposite shape and are deliberate:
 # each one asserts that something did NOT happen across a window of several
-# monitor cycles (a standing event not re-queued, a stood-down monitor not running
-# a watcher, a torn script not exec'd). A window is the assertion there, so those
-# must not be converted into polls - a slow machine runs fewer cycles inside them,
-# which makes them weaker, never falsely red.
+# monitor cycles (a standing event not re-queued, a torn script not exec'd). A
+# window is the assertion there, so those must not be converted into polls - a
+# slow machine runs fewer cycles inside them, which makes them weaker, never
+# falsely red.
 set -u
 # shellcheck source=tests/cs-watch-helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/cs-watch-helpers.sh"
@@ -115,78 +115,22 @@ test_second_monitor_noops() {
   pass "a second monitor in the same home no-ops through its singleton lock"
 }
 
-# 4. Away mode's FLAG is not its daemon. Deferring to an owner that is not there
-#    left a home unwatched with the flag present and the daemon gone - the exact
-#    combination observed on 2026-07-30.
-test_away_flag_without_a_live_daemon_is_covered() {
+# 4. An away-mode home is covered exactly like an attended one - there is no
+#    separate away-mode supervisor left to defer to.
+test_away_flag_is_covered_like_an_attended_home() {
   local dir state fakebin pid
-  dir=$(make_case afk-orphan); state="$dir/state"; fakebin="$dir/fakebin"
+  dir=$(make_case afk-covered); state="$dir/state"; fakebin="$dir/fakebin"
   : > "$state/.afk"
-  # A pid that cannot be alive: away mode flagged, nobody home.
-  printf '999999\n' > "$state/.subsuper-daemon.pid"
   printf 'blocked: needs a decision\n' > "$state/t1.status"
   monitor_bg "$state" "$fakebin"
   pid=$!
   wait_until 100 test -s "$state/.wake-queue" || {
     kill "$pid" 2>/dev/null || true
     cat "$state/.monitor.log" 2>/dev/null
-    fail "an unattended away flag must not stop the monitor from covering the home"
-  }
-  grep -F 'daemon is NOT alive' "$state/.monitor.log" >/dev/null \
-    || fail "the monitor must say why it covered instead of standing down"
-  monitor_stop "$state" "$pid"
-  pass "an away flag with no live daemon is covered, not deferred to"
-}
-
-# 5. With a LIVE daemon the stand-down still holds, or two supervisors would
-#    both drive the watcher.
-test_away_flag_with_a_live_daemon_still_stands_down() {
-  local dir state fakebin pid sleeper
-  dir=$(make_case afk-live); state="$dir/state"; fakebin="$dir/fakebin"
-  : > "$state/.afk"
-  sleep 120 & sleeper=$!
-  printf '%s\n' "$sleeper" > "$state/.subsuper-daemon.pid"
-  # A supervising daemon proves itself with a fresh completed-pass counter,
-  # never with a pid alone.
-  printf '1\n' > "$state/.subsuper-daemon-beat"
-  printf 'blocked: would wake a watcher\n' > "$state/t1.status"
-  monitor_bg "$state" "$fakebin"
-  pid=$!
-  wait_until 60 test -e "$state/.last-monitor-beat" || {
-    kill "$pid" "$sleeper" 2>/dev/null || true
-    fail "a stood-down monitor must still publish its beacon"
-  }
-  sleep 4
-  [ ! -s "$state/.wake-queue" ] || {
-    kill "$pid" "$sleeper" 2>/dev/null || true
-    fail "the monitor ran a watcher while a LIVE away daemon owned it"
+    fail "an away-mode home must be covered exactly like an attended one"
   }
   monitor_stop "$state" "$pid"
-  kill "$sleeper" 2>/dev/null || true
-  pass "a live away daemon still gets the watcher to itself"
-}
-
-# 6. A pid outlives its usefulness: it stays alive through a recycled pid and
-#    through a daemon wedged off its loop, and either buys a stand-down that
-#    lasts all night. Only a FRESH completed-pass counter earns it.
-test_away_daemon_with_a_stale_beat_is_covered() {
-  local dir state fakebin pid sleeper
-  dir=$(make_case afk-stale-beat); state="$dir/state"; fakebin="$dir/fakebin"
-  : > "$state/.afk"
-  sleep 120 & sleeper=$!
-  printf '%s\n' "$sleeper" > "$state/.subsuper-daemon.pid"
-  printf '1\n' > "$state/.subsuper-daemon-beat"
-  printf 'blocked: would wake a watcher\n' > "$state/t1.status"
-  monitor_bg "$state" "$fakebin" CS_AFK_BEAT_STALE=1
-  pid=$!
-  wait_until 60 test -s "$state/.wake-queue" || {
-    kill "$pid" "$sleeper" 2>/dev/null || true
-    fail "a live pid with a stale pass counter must not stop the monitor covering the home"
-  }
-  assert_present "$state/.monitor-afk-orphan" "the monitor did not record the unattended away flag"
-  monitor_stop "$state" "$pid"
-  kill "$sleeper" 2>/dev/null || true
-  pass "an away daemon whose pass counter went stale is covered, not deferred to"
+  pass "an away-mode home is covered by its own watcher exactly like an attended one"
 }
 
 # Shared fixture for the self-replacement cases: a private bin/ whose
@@ -262,9 +206,7 @@ test_monitor_does_not_exec_a_torn_script() {
 test_event_reaches_the_queue_with_nobody_waiting
 test_standing_event_does_not_grow_the_queue
 test_second_monitor_noops
-test_away_flag_without_a_live_daemon_is_covered
-test_away_flag_with_a_live_daemon_still_stands_down
-test_away_daemon_with_a_stale_beat_is_covered
+test_away_flag_is_covered_like_an_attended_home
 test_monitor_reexecs_when_its_script_changes
 test_monitor_does_not_exec_a_torn_script
 
