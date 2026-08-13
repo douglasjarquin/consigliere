@@ -42,6 +42,13 @@ export CS_HARNESS_OVERRIDE
 : "${CS_TELEMETRY_DISABLE:=1}"
 export CS_TELEMETRY_DISABLE
 
+# Safe-by-default notifier seam: any suite that can cross a wedge-alarm
+# threshold must not fire a real desktop notification just because it forgot
+# to stub CS_WEDGE_ALARM_EXEC itself. A suite that sets its own value (e.g. an
+# alarm-recorder fakebin) still overrides this.
+: "${CS_WEDGE_ALARM_EXEC:=discard}"
+export CS_WEDGE_ALARM_EXEC
+
 # --- reporters --------------------------------------------------------------
 
 fail() {

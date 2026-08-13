@@ -73,3 +73,162 @@ cs_prompt_guarded() {
   esac
   return 1
 }
+
+# --- wedge alarm: the one active-alert channel shared by every guarded-prompt
+# caller. Ported from the away-mode daemon (bin/cs-daemon.sh), which was the
+# only caller before per-home activation (bin/cs-activate.sh) needed it too.
+# Config: config/wedge-alarm.conf (LOCAL, gitignored), one directive per
+# non-empty non-comment line; CS_WEDGE_ALARM_CHANNEL overrides the file with a
+# single directive.
+#   off              disable the active alert (caller's own durable marker remains)
+#   auto | default   platform default: macOS -> osascript; otherwise none
+#   osascript        macOS Notification Center banner
+#   herdr            herdr UI notification (herdr notification show)
+#   command:<cmd>    run <cmd> via sh -c, summary on $1 and stdin
+# Every channel is best-effort: a missing or failing channel logs (via the
+# caller's own log-fn) and is skipped, never propagating a failure to the caller.
+
+CS_WEDGE_ALARM_TIMEOUT_SECS_DEFAULT=10
+
+cs_wedge_alarm_configured_channels() {
+  local cfg line found=
+  if [ -n "${CS_WEDGE_ALARM_CHANNEL:-}" ]; then
+    printf '%s\n' "$CS_WEDGE_ALARM_CHANNEL"
+    return 0
+  fi
+  cfg="${CS_CONFIG_OVERRIDE:-$CS_HOME/config}/wedge-alarm.conf"
+  if [ -f "$cfg" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line#"${line%%[![:space:]]*}"}"
+      line="${line%"${line##*[![:space:]]}"}"
+      [ -n "$line" ] || continue
+      case "$line" in '#'*) continue ;; esac
+      printf '%s\n' "$line"
+      found=1
+    done < "$cfg"
+  fi
+  [ -n "$found" ] || printf 'auto\n'
+}
+
+cs_wedge_alarm_platform_default() {
+  case "$(uname)" in
+    Darwin) command -v osascript >/dev/null 2>&1 && printf 'osascript' ;;
+    *) : ;;
+  esac
+}
+
+# Run one notifier under a watchdog so a hung notifier can never stall the caller.
+cs_wedge_alarm_run_bounded() {  # <logfn> <channel> <cmd...>
+  local logfn=$1 channel=$2 timeout pid start elapsed rc
+  shift 2
+  timeout=${CS_WEDGE_ALARM_TIMEOUT_SECS:-$CS_WEDGE_ALARM_TIMEOUT_SECS_DEFAULT}
+  case "$timeout" in
+    ''|*[!0-9]*|0) timeout=$CS_WEDGE_ALARM_TIMEOUT_SECS_DEFAULT ;;
+  esac
+  "$@" &
+  pid=$!
+  CS_WEDGE_ALARM_NOTIFIER_PID=$pid
+  start=$SECONDS
+  while kill -0 "$pid" 2>/dev/null; do
+    elapsed=$((SECONDS - start))
+    if [ "$elapsed" -ge "$timeout" ]; then
+      cs_wedge_alarm_stop_active_notifier
+      "$logfn" "wedge alarm: ${channel} notifier timed out after ${elapsed}s (limit ${timeout}s)"
+      return 124
+    fi
+    sleep 0.1
+  done
+  if wait "$pid"; then rc=0; else rc=$?; fi
+  CS_WEDGE_ALARM_NOTIFIER_PID=
+  return "$rc"
+}
+
+cs_wedge_alarm_stop_active_notifier() {
+  local pid=${CS_WEDGE_ALARM_NOTIFIER_PID:-}
+  [ -n "$pid" ] || return 0
+  CS_WEDGE_ALARM_NOTIFIER_PID=
+  kill -TERM "$pid" 2>/dev/null || true
+  sleep 0.2
+  kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+}
+
+cs_wedge_alarm_via_osascript() {  # <logfn> <title> <summary>
+  local logfn=$1 title=$2 summary=$3
+  command -v osascript >/dev/null 2>&1 || {
+    "$logfn" "wedge alarm: osascript not found; cannot post a macOS notification"; return 1; }
+  cs_wedge_alarm_run_bounded "$logfn" osascript osascript -e 'on run argv' \
+    -e 'display notification (item 2 of argv) with title (item 1 of argv) sound name "Basso"' \
+    -e 'end run' "$title" "$summary" >/dev/null 2>&1 && return 0
+  "$logfn" "wedge alarm: osascript notification failed"
+  return 1
+}
+
+cs_wedge_alarm_via_herdr() {  # <logfn> <title> <summary>
+  local logfn=$1 title=$2 summary=$3
+  command -v herdr >/dev/null 2>&1 || {
+    "$logfn" "wedge alarm: herdr not found; cannot post a herdr notification"; return 1; }
+  cs_wedge_alarm_run_bounded "$logfn" herdr herdr notification show \
+    "$title" --body "$summary" --sound request >/dev/null 2>&1 && return 0
+  "$logfn" "wedge alarm: herdr notification failed"
+  return 1
+}
+
+cs_wedge_alarm_via_command() {  # <logfn> <cmd> <summary>
+  local logfn=$1 cmd=$2 summary=$3 rc
+  [ -n "$cmd" ] || { "$logfn" "wedge alarm: empty command: channel; nothing to run"; return 1; }
+  cs_wedge_alarm_run_bounded "$logfn" command sh -c "$cmd" cs-wedge-alarm "$summary" \
+    <<< "$summary" >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  "$logfn" "wedge alarm: command channel exited $rc (command redacted)"
+  return 1
+}
+
+# The single execution seam for every notifier channel. CS_WEDGE_ALARM_EXEC,
+# when set, REPLACES the real notifier as `<cmd> <channel> <summary>`; the
+# special value "discard" fires nothing. Tests force this seam so no test can
+# post a real desktop notification.
+cs_wedge_alarm_emit() {  # <logfn> <title> <channel> <summary> [command-directive]
+  local logfn=$1 title=$2 channel=$3 summary=$4 cmd=${5:-} rc exec_override=${CS_WEDGE_ALARM_EXEC:-}
+  case "$exec_override" in
+    '') ;;
+    discard) return 0 ;;
+    *)
+      cs_wedge_alarm_run_bounded "$logfn" "$channel" "$exec_override" "$channel" "$summary" >/dev/null 2>&1
+      rc=$?
+      [ "$rc" -eq 0 ] && return 0
+      "$logfn" "wedge alarm: notifier override exited $rc for channel '$channel'"
+      return 1 ;;
+  esac
+  case "$channel" in
+    osascript) cs_wedge_alarm_via_osascript "$logfn" "$title" "$summary" ;;
+    herdr) cs_wedge_alarm_via_herdr "$logfn" "$title" "$summary" ;;
+    command) cs_wedge_alarm_via_command "$logfn" "$cmd" "$summary" ;;
+  esac
+}
+
+# Fire every configured channel, best-effort; always returns 0. Any `off`
+# directive disables the alert entirely; an unresolvable `auto` logs that the
+# caller's own durable marker is the only signal.
+cs_wedge_alarm_notify() {  # <logfn> <title> <summary>
+  local logfn=$1 title=$2 summary=$3 ch
+  local -a channels=()
+  while IFS= read -r ch; do
+    [ -n "$ch" ] || continue
+    channels+=("$ch")
+  done < <(cs_wedge_alarm_configured_channels)
+  for ch in "${channels[@]}"; do
+    [ "$ch" = off ] && return 0
+  done
+  for ch in "${channels[@]}"; do
+    case "$ch" in auto|default) ch=$(cs_wedge_alarm_platform_default) ;; esac
+    case "$ch" in
+      '') "$logfn" "wedge alarm: no OS-level alert channel on $(uname); the durable marker is the only signal - set config/wedge-alarm.conf (e.g. a command: directive)" ;;
+      osascript|herdr) cs_wedge_alarm_emit "$logfn" "$title" "$ch" "$summary" || true ;;
+      command:*) cs_wedge_alarm_emit "$logfn" "$title" command "$summary" "${ch#command:}" || true ;;
+      *) "$logfn" "wedge alarm: unrecognized active-alert channel directive (redacted); marker still written" ;;
+    esac
+  done
+  return 0
+}

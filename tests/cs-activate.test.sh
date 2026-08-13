@@ -148,14 +148,18 @@ pass "a still-arriving queue waits for quiet"
 #     the main home waits 180s, because every second of quiet is a second the
 #     check-then-act composer race is not entered. A queue that settled 120s ago
 #     separates the two.
-backdate_queue() {  # <dir> <seconds>
+backdate_path() {  # <path> <seconds>
   local back
   back=$(( $(date +%s) - $2 ))
   if [ "$(uname)" = Darwin ]; then
-    touch -mt "$(date -r "$back" '+%Y%m%d%H%M.%S')" "$1/state/.wake-queue"
+    touch -mt "$(date -r "$back" '+%Y%m%d%H%M.%S')" "$1"
   else
-    touch -m -d "@$back" "$1/state/.wake-queue"
+    touch -m -d "@$back" "$1"
   fi
+}
+
+backdate_queue() {  # <dir> <seconds>
+  backdate_path "$1/state/.wake-queue" "$2"
 }
 
 dir=$(make_home main-quiet)
@@ -178,7 +182,7 @@ dir=$(make_home cooldown)
 printf 'always\n' > "$dir/host/activation.conf"
 : > "$dir/state/.last-activation"
 out=$(run_activate "$dir")
-assert_contains "$out" "cooldown" "a recent activation must suppress the next"
+assert_contains "$out" "floor" "a recent activation must suppress the next"
 pass "cooldown suppresses back-to-back activation"
 
 # --- target validation: the C-D1 hazard -------------------------------------
@@ -247,5 +251,119 @@ log3="$dir/prompt.log"
 run_activate "$dir" FAKE_PROMPT_LOG="$log3" FAKE_BUSY=working >/dev/null
 assert_absent "$log3" "a working agent must not be prompted"
 pass "a mid-turn agent is not interrupted"
+
+# --- busy-stretch trigger: fires even while the queue never goes quiet -------
+
+# 16. A queue that keeps refilling faster than QUIET must not starve forever:
+#     once continuous business crosses BUSY_MAX it fires anyway.
+dir=$(make_home busystretch)
+printf 'always\n' > "$dir/host/activation.conf"
+printf 'fresh\n' > "$dir/state/.wake-queue"
+: > "$dir/state/.activate-busy-since"
+backdate_path "$dir/state/.activate-busy-since" 10
+ACT_ARGS=(--status)
+out=$(run_activate "$dir" CS_ACTIVATE_BUSY_MAX_SECS=5)
+assert_contains "$out" "due:" "a continuously busy queue must fire even while still settling"
+pass "the busy-stretch trigger fires when the queue never goes quiet"
+
+# 17. Below BUSY_MAX, a refilling queue still waits - the trigger is a bound,
+#     not a replacement for the ordinary quiet debounce.
+dir=$(make_home busynotyet)
+printf 'always\n' > "$dir/host/activation.conf"
+printf 'fresh\n' > "$dir/state/.wake-queue"
+out=$(run_activate "$dir" CS_ACTIVATE_BUSY_MAX_SECS=300)
+assert_contains "$out" "still settling" "a queue below both bounds must still wait"
+pass "a refilling queue under BUSY_MAX still waits for quiet"
+
+# 18. An empty queue clears both new sidecars along with the old idle path,
+#     so a resolved busy or failing stretch never lingers into the next one.
+#     A --status probe must report the same idle verdict without touching them.
+dir=$(make_home clearsidecars)
+printf 'always\n' > "$dir/host/activation.conf"
+: > "$dir/state/.wake-queue"
+: > "$dir/state/.activate-busy-since"
+: > "$dir/state/.activate-fail-since"
+ACT_ARGS=(--status)
+out=$(run_activate "$dir")
+assert_contains "$out" "queue empty" "an empty queue must still report idle"
+assert_present "$dir/state/.activate-busy-since" "a --status probe must not mutate the busy-stretch sidecar"
+assert_present "$dir/state/.activate-fail-since" "a --status probe must not mutate the fail sidecar"
+ACT_ARGS=()
+run_activate "$dir" >/dev/null
+assert_absent "$dir/state/.activate-busy-since" "an empty queue must clear the busy-stretch sidecar"
+assert_absent "$dir/state/.activate-fail-since" "an empty queue must clear the fail sidecar"
+pass "an empty queue clears both the busy-stretch and fail sidecars"
+
+# --- fail-vs-success cooldown split -----------------------------------------
+
+# 19. A failed delivery (busy composer) must stamp both the cooldown and a
+#     separate fail-since marker, without ever prompting over the composer.
+dir=$(make_home failstamps)
+printf 'always\n' > "$dir/host/activation.conf"
+ACT_ARGS=()
+log=$dir/prompt.log
+run_activate "$dir" FAKE_PROMPT_LOG="$log" FAKE_COMPOSER="$(printf '\342\200\272 dirty')" >/dev/null
+assert_absent "$log" "a busy composer must never be prompted, even on the failure path"
+assert_present "$dir/state/.activate-fail-since" "a failed delivery must stamp the fail-since sidecar"
+assert_present "$dir/state/.last-activation" "a failed attempt must still stamp the cooldown timer"
+pass "a failed delivery stamps the fail-since sidecar without prompting the busy composer"
+
+# 20. While failing, the floor between attempts is the short RETRY_SECS, not
+#     the full 600s cooldown - a failed delivery communicated nothing, so the
+#     healthy-pane reasoning behind the long cooldown does not apply.
+backdate_path "$dir/state/.last-activation" 6
+ACT_ARGS=(--status)
+out=$(run_activate "$dir" CS_ACTIVATE_RETRY_SECS=5)
+assert_contains "$out" "due:" "a failing stretch must retry on the short RETRY_SECS floor, not the 600s cooldown"
+pass "a failing stretch retries on the short RETRY_SECS floor"
+
+# --- wedge alarm -------------------------------------------------------------
+
+# 21. Continuous failure crossing WEDGE_MAX fires the wedge alarm exactly once
+#     and leaves the durable marker bin/cs-afk-return.sh already reads.
+dir=$(make_home wedgefires)
+printf 'always\n' > "$dir/host/activation.conf"
+cat > "$dir/fakebin/alarm-recorder" <<'SH'
+#!/usr/bin/env bash
+printf '%s\t%s\n' "${1:-}" "${2:-}" >> "${CS_FAKE_ALARM_LOG:?}"
+exit 0
+SH
+chmod +x "$dir/fakebin/alarm-recorder"
+: > "$dir/state/.activate-fail-since"
+backdate_path "$dir/state/.activate-fail-since" 10
+ACT_ARGS=()
+log=$dir/prompt.log
+alarmlog=$dir/alarm.log
+run_activate "$dir" FAKE_PROMPT_LOG="$log" FAKE_COMPOSER="$(printf '\342\200\272 dirty')" \
+  CS_ACTIVATE_WEDGE_MAX_SECS=5 CS_WEDGE_ALARM_EXEC="$dir/fakebin/alarm-recorder" \
+  CS_WEDGE_ALARM_CHANNEL=osascript CS_FAKE_ALARM_LOG="$alarmlog" >/dev/null
+assert_absent "$log" "a busy composer must never be prompted even while wedged"
+assert_present "$dir/state/.subsuper-inject-wedged" "continuous failure past WEDGE_MAX must raise the wedge marker"
+assert_present "$alarmlog" "the wedge alarm must fire through the notifier seam"
+assert_grep "osascript" "$alarmlog" "alarm recorder did not receive the configured channel"
+pass "continuous failure crossing WEDGE_MAX fires the wedge alarm and writes the durable marker"
+
+# 22. The alarm fires at most once per continuous-failure stretch: a second
+#     attempt while still wedged must not notify again.
+rm -f "$alarmlog"
+run_activate "$dir" FAKE_PROMPT_LOG="$log" FAKE_COMPOSER="$(printf '\342\200\272 dirty')" \
+  CS_ACTIVATE_WEDGE_MAX_SECS=5 CS_ACTIVATE_RETRY_SECS=0 \
+  CS_WEDGE_ALARM_EXEC="$dir/fakebin/alarm-recorder" CS_WEDGE_ALARM_CHANNEL=osascript \
+  CS_FAKE_ALARM_LOG="$alarmlog" >/dev/null
+assert_absent "$alarmlog" "the wedge alarm must fire at most once per continuous-failure stretch"
+pass "the wedge alarm does not re-fire while the same failure stretch continues"
+
+# 23. A subsequent SUCCESS clears the fail-since sidecar, so a later unrelated
+#     failure starts its own stretch instead of inheriting this one's age.
+dir=$(make_home failclears)
+printf 'always\n' > "$dir/host/activation.conf"
+: > "$dir/state/.activate-fail-since"
+backdate_path "$dir/state/.activate-fail-since" 10
+ACT_ARGS=()
+log=$dir/prompt.log
+run_activate "$dir" FAKE_PROMPT_LOG="$log" >/dev/null
+assert_present "$log" "a healthy pane must still be prompted while a stale fail-since sidecar exists"
+assert_absent "$dir/state/.activate-fail-since" "a successful delivery must clear the fail-since sidecar"
+pass "a successful delivery clears the fail-since sidecar"
 
 pass "cs-activate per-home activation contract"

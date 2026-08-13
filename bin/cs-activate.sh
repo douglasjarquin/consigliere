@@ -45,10 +45,33 @@
 # Exit 0 whether or not it activated: "not due" is the normal case and must not
 # look like a failure to the monitor that calls it every cycle.
 #
+# BUSY-STRETCH TRIGGER. The queue-quiet check above waits for the queue to go
+# still, but a queue that keeps refilling faster than QUIET never goes still -
+# exactly the busiest stretch this exists to cover. state/.activate-busy-since
+# tracks continuous non-emptiness (stamped once when first seen non-empty,
+# cleared the moment it's seen empty) so a second, independent trigger -
+# CS_ACTIVATE_BUSY_MAX_SECS of continuous business, regardless of quietness -
+# fires activation anyway. Either trigger is sufficient.
+#
+# FAIL-VS-SUCCESS COOLDOWN. The 600s cooldown exists to avoid over-prompting a
+# pane that is already healthily handling what it was told to do - that
+# reasoning does not apply to a FAILED delivery, where nothing was actually
+# communicated. state/.activate-fail-since tracks a continuous failing stretch
+# (stamped on the first failure, cleared on success or an empty queue) and
+# while it exists, the floor between attempts is the much shorter
+# CS_ACTIVATE_RETRY_SECS instead of the full cooldown. Once continuous failure
+# crosses CS_ACTIVATE_WEDGE_MAX_SECS, the wedge alarm (bin/cs-prompt-lib.sh,
+# ported from the retired away-mode daemon) fires once per stretch and
+# state/.subsuper-inject-wedged is written for bin/cs-afk-return.sh's existing
+# catch-up evidence to read.
+#
 # Env:
 #   CS_ACTIVATE_QUIET_SECS      queue must have been still this long (default 180
 #                               in the main home, 60 in a capo home)
-#   CS_ACTIVATE_COOLDOWN_SECS   min seconds between activations (default 600)
+#   CS_ACTIVATE_COOLDOWN_SECS   min seconds between activations after a SUCCESS (default 600)
+#   CS_ACTIVATE_BUSY_MAX_SECS   fire anyway after this much continuous business (default 300)
+#   CS_ACTIVATE_RETRY_SECS      min seconds between attempts while FAILING (default 15)
+#   CS_ACTIVATE_WEDGE_MAX_SECS  continuous failure age that fires the wedge alarm (default 300)
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,9 +99,18 @@ QUIET=${CS_ACTIVATE_QUIET_SECS:-$QUIET_DEFAULT}
 case "$QUIET" in ''|*[!0-9]*) QUIET=$QUIET_DEFAULT ;; esac
 COOLDOWN=${CS_ACTIVATE_COOLDOWN_SECS:-600}
 case "$COOLDOWN" in ''|*[!0-9]*) COOLDOWN=600 ;; esac
+BUSY_MAX=${CS_ACTIVATE_BUSY_MAX_SECS:-300}
+case "$BUSY_MAX" in ''|*[!0-9]*) BUSY_MAX=300 ;; esac
+RETRY_SECS=${CS_ACTIVATE_RETRY_SECS:-15}
+case "$RETRY_SECS" in ''|*[!0-9]*) RETRY_SECS=15 ;; esac
+WEDGE_MAX=${CS_ACTIVATE_WEDGE_MAX_SECS:-300}
+case "$WEDGE_MAX" in ''|*[!0-9]*) WEDGE_MAX=300 ;; esac
 
 QUEUE="$STATE/.wake-queue"
 LAST="$STATE/.last-activation"
+BUSY_SINCE="$STATE/.activate-busy-since"
+FAIL_SINCE="$STATE/.activate-fail-since"
+WEDGED="$STATE/.subsuper-inject-wedged"
 PANE_RECORD="$STATE/.home-pane"
 STALLED="$STATE/.activation-stalled"
 LOG="$STATE/.monitor.log"
@@ -87,7 +119,7 @@ STATUS_ONLY=0
 case "${1:-}" in
   '') ;;
   --status) STATUS_ONLY=1 ;;
-  -h|--help) sed -n '2,51p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,74p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) echo "usage: cs-activate.sh [--status]" >&2; exit 2 ;;
 esac
 
@@ -112,24 +144,41 @@ fi
 
 # --- is there work sitting? --------------------------------------------------
 
-[ -s "$QUEUE" ] || { decision "idle: wake queue empty"; exit 0; }
+if [ ! -s "$QUEUE" ]; then
+  [ "$STATUS_ONLY" = 1 ] || rm -f "$BUSY_SINCE" "$FAIL_SINCE" "$WEDGED" 2>/dev/null || true
+  decision "idle: wake queue empty"
+  exit 0
+fi
+if [ "$STATUS_ONLY" = 1 ]; then
+  [ -f "$BUSY_SINCE" ] && busy_age=$(cs_path_age "$BUSY_SINCE") || busy_age=0
+else
+  [ -f "$BUSY_SINCE" ] || : > "$BUSY_SINCE"
+  busy_age=$(cs_path_age "$BUSY_SINCE")
+fi
+case "$busy_age" in ''|*[!0-9]*) busy_age=0 ;; esac
 queue_age=$(cs_path_age "$QUEUE")
 case "$queue_age" in ''|*[!0-9]*) queue_age=0 ;; esac
-if [ "$queue_age" -lt "$QUIET" ]; then
-  # Still arriving. One burst of wakes from one event should produce one turn,
-  # not one per wake.
-  decision "idle: queue still settling (${queue_age}s < ${QUIET}s)"
+if [ "$queue_age" -lt "$QUIET" ] && [ "$busy_age" -lt "$BUSY_MAX" ]; then
+  # Still arriving, and not yet busy long enough to fire anyway. One burst of
+  # wakes from one event should produce one turn, not one per wake - but a
+  # queue that keeps refilling faster than QUIET must not starve forever.
+  decision "idle: queue still settling (${queue_age}s < ${QUIET}s, busy ${busy_age}s < ${BUSY_MAX}s)"
   exit 0
 fi
 
 # --- cooldown, which is also the recursion guard -----------------------------
 # The turn this starts will drain the queue and may append more wakes. Without a
-# floor between activations that is a loop that feeds itself.
+# floor between activations that is a loop that feeds itself. While the last
+# attempt failed, that floor is the much shorter RETRY_SECS instead - a failed
+# delivery communicated nothing, so the healthy-pane reasoning behind the long
+# cooldown does not apply.
+floor=$COOLDOWN
+[ -f "$FAIL_SINCE" ] && floor=$RETRY_SECS
 if [ -e "$LAST" ]; then
   last_age=$(cs_path_age "$LAST")
   case "$last_age" in ''|*[!0-9]*) last_age=999999 ;; esac
-  if [ "$last_age" -lt "$COOLDOWN" ]; then
-    decision "idle: activated ${last_age}s ago (cooldown ${COOLDOWN}s)"
+  if [ "$last_age" -lt "$floor" ]; then
+    decision "idle: attempted ${last_age}s ago (floor ${floor}s)"
     exit 0
   fi
 fi
@@ -176,9 +225,9 @@ rm -f "$STALLED" 2>/dev/null || true
 [ "$STATUS_ONLY" = 0 ] || { decision "due: would prompt '$pane' (${queue_age}s of queued work)"; exit 0; }
 
 # --- activate ----------------------------------------------------------------
-# Stamp BEFORE prompting. A prompt that half-lands must still spend the
-# cooldown; retrying a possibly-delivered activation every cycle is worse than
-# waiting one interval.
+# Stamp BEFORE prompting. A prompt that half-lands must still spend at least
+# the (possibly shortened, see floor above) interval; retrying a
+# possibly-delivered activation every cycle is worse than waiting one.
 : > "$LAST"
 
 body="Your wake queue has been unattended for ${queue_age}s. Drain it with bin/cs-wake-drain.sh and handle what it reports, under the ordinary supervision protocol. This is automated activation, not the boss: do not merge anything, do not answer an ask-user finding, and take no destructive, irreversible, or security-sensitive action."
@@ -189,9 +238,22 @@ EOF
 
 if cs_prompt_guarded "$pane" "$msg" log; then
   log "activated '$pane' after ${queue_age}s of queued work (mode=$mode)"
-else
-  # Deferred or unconfirmed: the queue is durable, so nothing is lost and the
-  # next cycle past the cooldown tries again.
-  log "activation not delivered this cycle; queue remains for the next attempt"
+  rm -f "$FAIL_SINCE" "$WEDGED" 2>/dev/null || true
+  exit 0
+fi
+
+# Deferred or unconfirmed: the queue is durable, so nothing is lost and the
+# next attempt (per the shortened RETRY_SECS floor above) tries again.
+log "activation not delivered this cycle; queue remains for the next attempt"
+[ -f "$FAIL_SINCE" ] || : > "$FAIL_SINCE"
+fail_age=$(cs_path_age "$FAIL_SINCE")
+case "$fail_age" in ''|*[!0-9]*) fail_age=0 ;; esac
+if [ "$fail_age" -ge "$WEDGE_MAX" ] && [ ! -e "$WEDGED" ]; then
+  {
+    printf 'cs activate WEDGED: %ss undelivered as of %s\n' "$fail_age" "$(date '+%Y-%m-%dT%H:%M:%S%z')"
+    printf "'%s' could not accept an activation prompt (queue has %ss of unattended work).\n" "$pane" "$queue_age"
+  } > "$WEDGED" 2>/dev/null || true
+  cs_wedge_alarm_notify log "consigliere: activation WEDGED" \
+    "'$pane' has not accepted an activation prompt for ${fail_age}s (queue has ${queue_age}s of unattended work) - see $WEDGED"
 fi
 exit 0
