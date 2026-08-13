@@ -24,6 +24,20 @@ set -u
 PR_MERGE="$ROOT/bin/cs-pr-merge.sh"
 TMP_ROOT=$(cs_test_tmproot cs-pr-merge)
 
+# The regression-has-teeth scenario below plants a fake caller INSIDE the
+# repo tree (the grep it exercises is scoped to $ROOT, so a fixture outside
+# it would prove nothing) - specifically under bin/, since the assertion's
+# own allow-list deliberately excludes all of tests/ (ordinary test files
+# legitimately reference the script by path with no autonomous call). This
+# scratch path is guaranteed removed here even if an assertion fails
+# mid-test, per tests/lib.sh's own documented override-and-chain pattern.
+CS_PR_MERGE_REGRESSION_SCRATCH="$ROOT/bin/.cs-pr-merge-regression-scratch.sh"
+cs_pr_merge_test_cleanup() {
+  rm -f "$CS_PR_MERGE_REGRESSION_SCRATCH"
+  cs_test_cleanup
+}
+trap cs_pr_merge_test_cleanup EXIT
+
 # Build a fresh sandbox for one test case: a state dir with a task meta, a
 # fake root with a guard stub (cs-pr-check.sh calls it), and a fakebin with a
 # gh-axi mock that records how it was invoked. Echoes the case dir.
@@ -326,6 +340,37 @@ test_parses_pr_url_for_gh_axi() {
   pass "cs-pr-merge parses a GitHub PR URL into gh-axi number and --repo arguments"
 }
 
+# Regression lock-in: bin/cs-pr-merge.sh must have zero autonomous callers
+# anywhere in the repo, so a later change can never silently add one. The
+# only allow-listed non-call reference is bin/cs-merge-local.sh's own
+# error-message pointer, which names the script in a string, never invokes
+# it.
+assert_no_autonomous_pr_merge_callers() {
+  grep -rn "cs-pr-merge\.sh" --include="*.sh" "$ROOT" 2>/dev/null \
+    | grep -v "^$ROOT/bin/cs-pr-merge\.sh:" \
+    | grep -v "^$ROOT/tests/" \
+    | grep -v "^$ROOT/docs/" \
+    | grep -v "^$ROOT/bin/cs-merge-local\.sh:.*merge PR tasks with bin/cs-pr-merge\.sh"
+}
+
+test_zero_autonomous_callers_of_pr_merge() {
+  local hits
+  hits=$(assert_no_autonomous_pr_merge_callers) || true
+  [ -z "$hits" ] || fail "found an autonomous-looking reference to cs-pr-merge.sh outside the allow-list: $hits"
+  pass "bin/cs-pr-merge.sh has zero autonomous callers repo-wide"
+}
+
+test_zero_autonomous_callers_regression_has_teeth() {
+  # shellcheck disable=SC2016  # the literal text "$ROOT" is deliberate fixture content, not an expansion
+  printf '#!/usr/bin/env bash\n"$ROOT/bin/cs-pr-merge.sh" "$@"\n' > "$CS_PR_MERGE_REGRESSION_SCRATCH"
+  [ -n "$(assert_no_autonomous_pr_merge_callers)" ] \
+    || fail "the assertion did not catch a fake new caller of cs-pr-merge.sh"
+  rm -f "$CS_PR_MERGE_REGRESSION_SCRATCH"
+  [ -z "$(assert_no_autonomous_pr_merge_callers)" ] \
+    || fail "the assertion still fails after the fake caller was removed"
+  pass "the zero-autonomous-callers assertion catches a real regression and clears once removed"
+}
+
 test_records_pr_and_head_before_merging
 test_merge_failure_propagates_after_recording
 test_extra_merge_args_forwarded
@@ -337,3 +382,5 @@ test_repo_override_args_refuse_before_recording
 test_explicit_merge_method_not_overridden
 test_method_equals_merge_method_not_overridden
 test_parses_pr_url_for_gh_axi
+test_zero_autonomous_callers_of_pr_merge
+test_zero_autonomous_callers_regression_has_teeth
