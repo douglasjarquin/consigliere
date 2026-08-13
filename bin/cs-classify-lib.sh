@@ -12,7 +12,7 @@
 #
 # There are two documented exceptions. The absorb classification
 # (crew_absorb_class and its working/paused wrappers) is NOT a pure status-file
-# read: it reuses bin/cs-crew-state.sh, which may make a bounded no-mistakes
+# read: it reuses bin/cs-crew-state.sh, which may make a bounded made
 # call, to decide whether a soldier that just stopped its turn or went stale is
 # working, deliberately paused, or neither. Callers run it ONLY on no-verb
 # signal handling and first sighting of a stale hash, never on every wake, so
@@ -40,7 +40,7 @@ cs_input_is_boss() {  # <message>
 
 # The soldier current-state reader used for the "provably working" decision.
 # Overridable so tests can stub the run-step/pane verdict without a real
-# worktree or no-mistakes install; absent, it points at the real sibling script.
+# worktree or an installed `made` CLI; absent, it points at the real sibling script.
 CS_CREW_STATE_BIN="${CS_CREW_STATE_BIN:-$_CS_CLASSIFY_LIB_DIR/cs-crew-state.sh}"
 
 # Boss-relevant status verbs. A status line carrying any of these is work
@@ -88,7 +88,7 @@ last_status_line() {
   grep -v '^[[:space:]]*$' "$f" 2>/dev/null | tail -1
 }
 
-# The pre-validation review verb. A no-mistakes soldier appends
+# The pre-validation review verb. A soldier under made validation appends
 # "needs-review: <what it built>" when its implementation is committed and it
 # is waiting for consigliere to review that commit and trigger validation.
 # It exists because `done:` cannot carry that meaning: `done:` also marks the
@@ -388,7 +388,7 @@ signal_reason_is_actionable() {  # <file> ...
 # Classify WHY an idle/stale soldier MIGHT be safely absorbed instead of
 # surfaced, from bin/cs-crew-state.sh's one authoritative current-state line
 # ("state: <s> · source: <src> · <detail>"). Prints exactly one token:
-#   working - an actively-running no-mistakes step (running/fixing/ci) or a
+#   working - an actively-running made validation step (running/fixing/ci) or a
 #             busy pane; the soldier is legitimately mid-work;
 #   paused  - the authoritative current state is a declared external-wait
 #             pause, which is EXPECTED to idle;
@@ -396,7 +396,7 @@ signal_reason_is_actionable() {  # <file> ...
 # One cs-crew-state.sh read serves BOTH absorb reasons at once. Reading the
 # state authoritatively (not the status log) is what keeps run-step precedence:
 # a soldier that appended paused: but then STARTED a run reports working.
-# NOT a pure read: cs-crew-state.sh may make a bounded no-mistakes call, so
+# NOT a pure read: cs-crew-state.sh may make a bounded made call, so
 # callers run it only on no-verb signal and first-sighting stale paths.
 # CS_CREW_STATE_BIN lets tests stub the verdict.
 crew_absorb_class() {  # <id>
