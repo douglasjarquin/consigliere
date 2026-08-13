@@ -41,8 +41,14 @@ setup_bossless_fixture() {  # <case-name> <task_id> <project> <key>
 }
 
 # 1. record then render round-trip: three categories recorded, rendered
-#    output lists all three with the most severe first.
-DATA="$TMP/record-render/data"
+#    output lists all three with the most severe first. Also proves no
+#    blocking hold is ever created: real tasks-axi backs $CS_HOME here (never
+#    a fake), and a captain hold created via bin/cs-decision-hold.sh's tasks_axi
+#    wrapper always writes $CS_HOME/backlog.md - its absence after every
+#    record() call in this scenario is a real side-effect proof, not a
+#    source-text grep, that no hold of any kind was created.
+CS_HOME="$TMP/record-render"
+DATA="$CS_HOME/data"
 mkdir -p "$DATA"
 cs_auto_decision_record task1 routine "minor fix" "did X" "matches accepted intent" \
   || fail "recording a routine entry should succeed"
@@ -60,15 +66,11 @@ assert_contains "$rendered" "minor fix" "rendered output must list the routine e
 destructive_pos=$(printf '%s\n' "$rendered" | grep -n "deleted stale cache" | cut -d: -f1)
 routine_pos=$(printf '%s\n' "$rendered" | grep -n "minor fix" | cut -d: -f1)
 [ "$destructive_pos" -lt "$routine_pos" ] || fail "the destructive entry must render before the routine one"
-pass "cs_auto_decision_record and cs_auto_decision_render round-trip, most-severe first"
+[ ! -e "$CS_HOME/backlog.md" ] \
+  || fail "cs_auto_decision_record must never create a tasks-axi backlog hold artifact"
+pass "cs_auto_decision_record and cs_auto_decision_render round-trip, most-severe first, with no tasks-axi hold"
 
-# 2. no blocking hold is ever created: the library source never invokes
-#    tasks-axi, under any category.
-[ "$(grep -c 'tasks-axi' "$ROOT/bin/cs-auto-decision-lib.sh")" = 0 ] \
-  || fail "cs-auto-decision-lib.sh must never invoke tasks-axi"
-pass "the auto-decision ledger never creates a tasks-axi hold"
-
-# 3. an invalid category is refused, and nothing is written.
+# 2. an invalid category is refused, and nothing is written.
 DATA="$TMP/invalid-category/data"
 mkdir -p "$DATA"
 cs_auto_decision_record task2 not-a-real-category "x" "y" "z" 2>/dev/null \
@@ -77,22 +79,57 @@ cs_auto_decision_record task2 not-a-real-category "x" "y" "z" 2>/dev/null \
   || fail "a refused record call must not create the ledger file"
 pass "an invalid category is refused before anything is written"
 
-# 4. the ledger file survives a simulated teardown: bin/cs-teardown.sh only
-#    ever reads from data/ (e.g. report.md) and never removes it, matching
-#    the existing "task-scoped notes... survive teardown" placement.
-DATA="$TMP/survives-teardown/data"
-mkdir -p "$DATA"
+# 3. the ledger file survives a REAL bin/cs-teardown.sh run against the scout
+#    task that recorded it (not a simulated one): scout teardown only ever
+#    reads data/<id>/ (e.g. report.md) and never removes it, matching the
+#    existing "task-scoped notes... survive teardown" placement already
+#    proven for report.md. A dedicated fakebin supplies just enough herdr
+#    contract (workspace absent, pane proven gone) for the real teardown
+#    binary to run its scout path to completion; the real tasks-axi (never a
+#    fake) backs bin/cs-decision-hold.sh's own unrelated completion gate.
+CS_HOME="$TMP/survives-teardown"
+STATE="$CS_HOME/state"
+DATA="$CS_HOME/data"
+TEARDOWN_PROJ="$TMP/survives-teardown-proj"
+TEARDOWN_WT="$TMP/survives-teardown-wt"
+mkdir -p "$STATE" "$DATA"
+cs_git_init_commit "$TEARDOWN_PROJ"
+git -C "$TEARDOWN_PROJ" worktree add --quiet -b cs/task3 "$TEARDOWN_WT"
+cs_write_meta "$STATE/task3.meta" "workspace=w99" "pane=w99:p99" "worktree=$TEARDOWN_WT" \
+  "project=$TEARDOWN_PROJ" "kind=scout"
 cs_auto_decision_record task3 security-sensitive "rotated a credential" "rotated it" "expired" \
-  || fail "recording before the simulated teardown should succeed"
+  || fail "recording before the real teardown should succeed"
 log=$(cs_auto_decision_log_path task3)
-[ ! -e "$ROOT/bin/.cs-teardown-would-touch-data-marker" ] \
-  || fail "unexpected leftover marker from a prior run"
-grep -Fq "rm -rf.*\"\$DATA\"" "$ROOT/bin/cs-teardown.sh" 2>/dev/null \
-  && fail "bin/cs-teardown.sh must never remove \$DATA wholesale"
-[ -f "$log" ] || fail "the ledger file must still exist after the (simulated) teardown"
-pass "the auto-decision ledger survives a simulated teardown"
+[ -f "$log" ] || fail "the ledger file must exist before teardown"
+mkdir -p "$DATA/task3"
+echo "# findings" > "$DATA/task3/report.md"
+touch "$STATE/task3.status"
+TEARDOWN_FAKEBIN="$TMP/teardown-fakebin"
+mkdir -p "$TEARDOWN_FAKEBIN"
+cat > "$TEARDOWN_FAKEBIN/herdr" <<'SH'
+#!/usr/bin/env bash
+case "${1:-} ${2:-}" in
+  "workspace list") echo '{"result":{"workspaces":[]}}' ;;
+  "pane list") echo '{"result":{"panes":[]}}' ;;
+  "pane close") echo '{}' ;;
+  "pane get")
+    printf '{"error":{"code":"pane_not_found","message":"pane %s not found"}}\n' "${3:-}" >&2
+    exit 1 ;;
+  *) echo '{}' ;;
+esac
+exit 0
+SH
+chmod +x "$TEARDOWN_FAKEBIN/herdr"
+PATH="$TEARDOWN_FAKEBIN:$PATH" CS_HOME="$CS_HOME" CS_STATE_OVERRIDE="$STATE" CS_DATA_OVERRIDE="$DATA" \
+  "$ROOT/bin/cs-decision-hold.sh" complete task3 --none >/dev/null \
+  || fail "decision inventory completion failed"
+out=$(PATH="$TEARDOWN_FAKEBIN:$PATH" CS_HOME="$CS_HOME" CS_STATE_OVERRIDE="$STATE" CS_DATA_OVERRIDE="$DATA" \
+  "$ROOT/bin/cs-teardown.sh" task3 2>&1) || fail "real teardown of task3 failed: $out"
+assert_contains "$out" "teardown task3 complete" "the real teardown completes"
+assert_present "$log" "the ledger file must still exist after a REAL, not simulated, teardown"
+pass "the auto-decision ledger survives a real bin/cs-teardown.sh run"
 
-# 5. cs_bossless_active refuses on each of the four inputs independently.
+# 4. cs_bossless_active refuses on each of the four inputs independently.
 setup_bossless_fixture yolo-off taskA proj-yolo-off x
 cs_write_meta "$STATE/taskA.meta" "workspace=w1" "pane=w1:p1" "kind=ship" "yolo=off" "project=proj-yolo-off"
 cs_bossless_active taskA && fail "yolo=off must refuse bossless_active"
@@ -110,7 +147,7 @@ printf 'proj-killswitch disabled\n' >> "$CS_BOSSLESS_ACK_OVERRIDE"
 cs_bossless_active taskD && fail "a kill-switch-disabled project must refuse bossless_active"
 pass "cs_bossless_active refuses on each of yolo=off, no state/.afk, unacknowledged, and kill-switch, independently"
 
-# 6. auto-decide records then closes when truly active, in that order.
+# 5. auto-decide records then closes when truly active, in that order.
 setup_bossless_fixture full-active taskE proj-active x
 cs_auto_decision_decide taskE destructive "removed a broken symlink" "removed it" "target no longer existed" x \
   >/dev/null || fail "cs_auto_decision_decide should succeed when bossless is truly active"
@@ -123,7 +160,7 @@ assert_contains "$(cat "$STATE/taskE.status")" "resolved [key=x]: answered via c
   "cs-send.sh's own closing verb (Task 7) and the auto-decided (bossless) marker (Task 14) compose, neither replaces the other"
 pass "cs_auto_decision_decide records then closes, with the exact auto-decided (bossless) prefix"
 
-# 7. auto-decide refuses when the precondition is false, with no partial
+# 6. auto-decide refuses when the precondition is false, with no partial
 #    side effects: no ledger entry, no resolved: line, finding stays open.
 setup_bossless_fixture inactive taskF proj-inactive x
 cs_write_meta "$STATE/taskF.meta" "workspace=w1" "pane=w1:p1" "kind=ship" "yolo=off" "project=proj-inactive"
@@ -135,7 +172,7 @@ assert_contains "$(cat "$STATE/taskF.status")" "needs-decision [key=x]: pick an 
 [ "$(grep -Fc 'resolved' "$STATE/taskF.status")" = 0 ] || fail "an inactive decision must not close the finding"
 pass "cs_auto_decision_decide refuses when inactive, with no partial ledger or resolved-line side effects"
 
-# 8. a ledger write failure blocks closure even when otherwise active.
+# 7. a ledger write failure blocks closure even when otherwise active.
 setup_bossless_fixture ledger-fail taskG proj-ledger-fail x
 chmod 0500 "$DATA"
 cs_auto_decision_decide taskG routine "minor tweak" "did it" "harmless" x 2>/dev/null \
