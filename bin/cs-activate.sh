@@ -145,12 +145,16 @@ fi
 # --- is there work sitting? --------------------------------------------------
 
 if [ ! -s "$QUEUE" ]; then
-  rm -f "$BUSY_SINCE" "$FAIL_SINCE" 2>/dev/null || true
+  rm -f "$BUSY_SINCE" "$FAIL_SINCE" "$WEDGED" 2>/dev/null || true
   decision "idle: wake queue empty"
   exit 0
 fi
-[ -f "$BUSY_SINCE" ] || : > "$BUSY_SINCE"
-busy_age=$(cs_path_age "$BUSY_SINCE")
+if [ "$STATUS_ONLY" = 1 ]; then
+  [ -f "$BUSY_SINCE" ] && busy_age=$(cs_path_age "$BUSY_SINCE") || busy_age=0
+else
+  [ -f "$BUSY_SINCE" ] || : > "$BUSY_SINCE"
+  busy_age=$(cs_path_age "$BUSY_SINCE")
+fi
 case "$busy_age" in ''|*[!0-9]*) busy_age=0 ;; esac
 queue_age=$(cs_path_age "$QUEUE")
 case "$queue_age" in ''|*[!0-9]*) queue_age=0 ;; esac
@@ -234,7 +238,7 @@ EOF
 
 if cs_prompt_guarded "$pane" "$msg" log; then
   log "activated '$pane' after ${queue_age}s of queued work (mode=$mode)"
-  rm -f "$FAIL_SINCE" 2>/dev/null || true
+  rm -f "$FAIL_SINCE" "$WEDGED" 2>/dev/null || true
   exit 0
 fi
 
