@@ -50,9 +50,20 @@ cs_herdr_lab_tripwire_path() { # <session>
 }
 
 cs_herdr_lab_raw() { # <session> <herdr arguments...>
-  local name=$1
+  # --session must precede a subcommand's own "--" trailing-argv separator (e.g. agent start ... -- ARG), or it becomes a literal arg and herdr resolves the wrong session.
+  local name=$1 arg before=() after=() saw_sep=0
   shift
-  HERDR_SESSION="$name" herdr "$@" --session "$name"
+  for arg in "$@"; do
+    if [ "$saw_sep" -eq 0 ] && [ "$arg" = "--" ]; then
+      saw_sep=1
+    fi
+    if [ "$saw_sep" -eq 0 ]; then
+      before+=("$arg")
+    else
+      after+=("$arg")
+    fi
+  done
+  HERDR_SESSION="$name" herdr "${before[@]}" --session "$name" "${after[@]}"
 }
 
 cs_herdr_lab_session_list() { # <session>
