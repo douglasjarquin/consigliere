@@ -8,17 +8,44 @@ Re-verify after codex upgrades; `bin/cs-bootstrap.sh` checks presence only, not 
 
 ## Launch template (the only one)
 
-```
-codex --dangerously-bypass-approvals-and-sandbox \
-  -c "notify=[\"bash\",\"-c\",\"touch state/<id>.turn-ended\"]" \
-  "$(bin/cs-operational-input.sh encode launch-brief < data/<id>/brief.md)"
-```
+An interactive soldier or capo launches via herdr's native `agent start`, not a typed
+shell command: `herdr agent start <id> --kind codex --pane <p> --timeout <ms> --
+--dangerously-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch
+state/<id>.turn-ended\"]"`. Everything after `--` reaches the `codex` binary as
+literal argv, with no shell evaluation, so the notify config VALUE (the JSON-looking
+`notify=[...]` string) needs no shell escaping of its own here - it is one plain argv
+token, built directly by `bin/cs-harness-lib.sh`'s `cs_harness_codex_notify_argv`
+rather than assembled inside a larger quoted shell string.
 
-- The typed `launch-brief` positional prompt starts the supervised interactive session.
+**The brief is NOT part of this call - it cannot be, on either harness.** See
+docs/claude.md's launch template for the full story (live-verified 2026-08-13:
+`agent start`'s trailing argv refuses any token with an embedded newline, and every
+real brief is multi-line); codex's cold launch and capo launch deliver the brief the
+same way claude's do, through `bin/cs-prompt-lib.sh`'s `cs_prompt_guarded` as a
+follow-up prompt after a bare `agent start`, not as a positional argument.
+
+- The `-c` flag and its notify value are two separate argv elements (`-c`, then the
+  value), matching codex's own `-c key=value` config-override CLI convention -
+  identical to how the shell form parsed it, just without a shell doing the parsing.
 - `--dangerously-bypass-approvals-and-sandbox` gives the unattended soldier full autonomy over command approvals and the sandbox.
   It does NOT suppress the directory-trust dialog, which is a separate gate keyed on the repository root; see "Turn-end notify and directory trust" below.
 - The `notify` hook fires at every turn end, touching the task's turn-ended signal for the watcher.
-- A capo launch omits the notify hook (a capo is a supervisor, not a supervised turn-taker) and prefixes `CS_HOME=<home>`.
+- A capo launch omits the notify hook (a capo is a supervisor, not a supervised
+  turn-taker); its env-export pre-step (unconditional `CS_HOME=<home>` and
+  `CS_*_OVERRIDE` clears, typed into the pane and confirmed before `agent start`
+  runs - codex has no `CLAUDE_CONFIG_DIR`-style credential-store concern) is detailed
+  in docs/claude.md's launch template, which owns the shared mechanism.
+- A relaunch's resume attempt (`resume --last`) triggers through `agent start` too,
+  but its own success/failure is discarded - `bin/cs-spawn.sh`'s own process-table
+  stabilization loop, unchanged, is what actually decides resumed vs. falls through
+  to a cold launch (docs/claude.md's launch template owns why, verified live
+  2026-08-13 for claude's equivalent case; codex's own "nothing to resume" behavior
+  is different again - see docs/herdr.md - but the same discard-and-let-the-loop-decide
+  design covers it either way).
+- Headless scout: `codex exec "<brief>"` (process exit = turn end), unchanged - a
+  plain process has no composer or `agent_status` lifecycle for `agent start` to
+  target, so it stays on the shell-string mechanism (`cs_harness_scout_launch`)
+  permanently.
 
 ## Hooks (.codex/hooks.json)
 

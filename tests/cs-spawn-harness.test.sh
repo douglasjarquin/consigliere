@@ -32,16 +32,67 @@ case "${1:-} ${2:-}" in
     git -C "$repo" worktree add -q -b "$branch" "$CS_FAKE_SPAWN_WORKTREE"
     printf '{"result":{"workspace":{"workspace_id":"w1"},"root_pane":{"pane_id":"w1:p1"},"worktree":{"path":"%s","branch":"%s"}}}\n' "$CS_FAKE_SPAWN_WORKTREE" "$branch"
     ;;
-  "pane run") printf '%s' "${4:-}" > "$CS_FAKE_SPAWN_LAUNCH" ;;
-  "agent get")
-    # cs-spawn now requires an agent to actually APPEAR after the launch line,
-    # because `pane run` reports success even when a not-ready shell swallowed
-    # it. CS_FAKE_SPAWN_NO_AGENT=1 reproduces that swallowed launch.
+  "pane run")
+    # A headless scout still types its whole launch line into the pane's shell
+    # (no composer/agent_status lifecycle for agent start to target); capture
+    # it verbatim, same as before.
+    printf 'pane_run=%s\n' "${4:-}" > "$CS_FAKE_SPAWN_LAUNCH" ;;
+  "agent start")
+    # Every interactive soldier/capo launch now goes through native
+    # `agent start <name> --kind <k> --pane <p> --timeout <ms> -- ARGV...`.
+    # Capture the kind and the trailing argv (everything after --), which
+    # reaches the launched binary literally with no shell evaluation.
+    shift 2
+    kind= pane= name=$1; shift
+    argv=()
+    in_argv=0
+    while [ "$#" -gt 0 ]; do
+      if [ "$in_argv" -eq 1 ]; then
+        argv+=("$1")
+      else
+        case "$1" in
+          --kind) kind=$2; shift ;;
+          --pane) pane=$2; shift ;;
+          --) in_argv=1 ;;
+        esac
+      fi
+      shift
+    done
+    {
+      printf 'name=%s\n' "$name"
+      printf 'kind=%s\n' "$kind"
+      printf 'pane=%s\n' "$pane"
+      printf 'argv=%s\n' "${argv[*]}"
+    } > "$CS_FAKE_SPAWN_LAUNCH"
+    # cs-spawn now requires agent start itself to report interactive_ready,
+    # instead of a separate cs_herdr_agent_wait_present poll after `pane run`.
+    # CS_FAKE_SPAWN_NO_AGENT=1 reproduces a launch agent start never confirms.
     if [ "${CS_FAKE_SPAWN_NO_AGENT:-0}" = 1 ]; then
-      printf '{"result":{"agent":{}}}\n'
-    else
-      printf '{"result":{"agent":{"agent":"codex","agent_status":"idle"}}}\n'
-    fi ;;
+      printf '{"error":{"code":"agent_not_ready","message":"timed out"}}\n'
+      exit 1
+    fi
+    printf '{"result":{"agent":{"agent":"%s","agent_status":"idle","interactive_ready":true}}}\n' "$kind"
+    ;;
+  "pane wait-output")
+    # The env-export pre-step's confirmation, always taken for a capo (its
+    # CS_HOME/override-clearing prefix is unconditional).
+    printf '{"result":{"matched":true}}\n' ;;
+  "workspace list") printf '{"result":{"workspaces":[]}}\n' ;;
+  "workspace create") printf '{"result":{"workspace":{"workspace_id":"wcapo"}}}\n' ;;
+  "pane list") printf '{"result":{"panes":[{"pane_id":"wcapo:p1","workspace_id":"wcapo"}]}}\n' ;;
+  "pane get") printf '{"result":{"pane":{"pane_id":"w1:p1","cwd":"%s"}}}\n' "${CS_FAKE_SPAWN_WORKTREE:-}" ;;
+  "pane read")
+    # A generic empty-composer read (codex's glyph, which the classifier
+    # recognizes regardless of which harness is actually running) so
+    # cs_prompt_guarded's post-launch brief delivery proceeds on its first
+    # attempt instead of retrying for its full window every spawn.
+    printf '%s\n' $'\342\200\272 ' ;;
+  "agent get") printf '{"result":{"agent":{"agent":"codex","agent_status":"idle"}}}\n' ;;
+  "pane process-info")
+    printf '{"result":{"process_info":{"shell_pid":10,"foreground_processes":[{"pid":20,"argv0":"codex"}]}}}\n' ;;
+  "agent prompt")
+    printf '%s' "${4:-}" > "${CS_FAKE_SPAWN_PROMPT:-/dev/null}"
+    printf '{"result":{"type":"agent_prompted"}}\n' ;;
   *) printf '{}\n' ;;
 esac
 SH
@@ -83,11 +134,31 @@ spawn_one() {
 # --- codex root: unchanged launch shape, harness=codex ----------------------
 launch=$(spawn_one codex t-codex --mode no-mistakes --yolo off)
 [ "$(cs_meta_get "$HOME_DIR/state/t-codex.meta" harness)" = codex ] || fail "codex meta harness"
-assert_contains "$launch" "codex " "codex root launches codex"
+assert_contains "$launch" "kind=codex" "codex root launches codex"
 assert_contains "$launch" 'notify=' "codex root wires notify turn-end"
 assert_not_contains "$launch" '--settings' "codex root does not use --settings"
 assert_absent "$HOME_DIR/state/t-codex.claude-settings.json" "codex root writes no claude settings file"
 pass "codex root: harness=codex, codex notify launch, no settings file"
+
+# --- capo spawn: unconditional env pre-step, no turn-end wiring --------------
+# The old cs_harness_capo_launch unit test is gone with the function; this is
+# its end-to-end replacement, exercising cs-spawn.sh's own capo argv
+# construction (bin/cs-spawn.sh's capo branch) against a real launch.
+CAPO_HOME="$TMP/capo-home"
+mkdir -p "$CAPO_HOME"
+: > "$CAPO_HOME/.cs-capo-home"
+mkdir -p "$HOME_DIR/data/t-capo"
+printf 'charter\n' > "$HOME_DIR/data/t-capo/brief.md"
+env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude \
+  CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
+  CS_CLAUDE_JSON="$TMP/claude.json" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-t-capo" \
+  "$SPAWN" t-capo "$CAPO_HOME" --capo >/dev/null || fail "capo spawn failed"
+launch=$(cat "$TMP/launch-t-capo")
+[ "$(cs_meta_get "$HOME_DIR/state/t-capo.meta" kind)" = capo ] || fail "capo meta kind"
+assert_contains "$launch" "kind=claude" "capo launches the root harness"
+assert_not_contains "$launch" '--settings' "capo has no turn-end wiring"
+assert_not_contains "$launch" 'notify=' "capo has no turn-end wiring"
+pass "capo spawn: env pre-step confirmed, no turn-end wiring, correct harness"
 
 # --- the harness owns model and reasoning level ------------------------------
 # Consigliere selects neither, on either harness and for every task kind, so no
@@ -131,7 +202,7 @@ pass "--model and --effort are refused as unknown flags"
 # --- claude root: --settings launch, harness=claude, settings file written --
 launch=$(spawn_one claude t-claude --mode no-mistakes --yolo off)
 [ "$(cs_meta_get "$HOME_DIR/state/t-claude.meta" harness)" = claude ] || fail "claude meta harness"
-assert_contains "$launch" "claude " "claude root launches claude"
+assert_contains "$launch" "kind=claude" "claude root launches claude"
 assert_contains "$launch" "--dangerously-skip-permissions" "claude root autonomy flag"
 assert_contains "$launch" "--settings" "claude root wires turn-end via --settings"
 assert_not_contains "$launch" 'notify=' "claude root does not use codex notify"
@@ -149,7 +220,7 @@ pass "claude root: harness=claude, --settings launch, settings file written"
 # resolves the same way for the harness lib as it does for cs-spawn itself.
 printf 'claude auto\n' > "$HOME_DIR/config/permission-mode.conf"
 launch=$(spawn_one claude t-claude-permmode --mode no-mistakes --yolo off)
-assert_contains "$launch" "--permission-mode 'auto'" "configured permission mode reaches the spawn launch"
+assert_contains "$launch" "--permission-mode auto" "configured permission mode reaches the spawn launch as a clean argv token"
 assert_not_contains "$launch" '--dangerously-skip-permissions' "configured mode replaces the bypass flag"
 
 printf 'claude plan\n' > "$HOME_DIR/config/permission-mode.conf"
@@ -211,7 +282,7 @@ assert_contains "$launch" 'cs-telemetry-emit.sh' "an enabled home instruments th
 assert_contains "$launch" '--worker --task' "the worker emitter is called with its task identity"
 assert_not_contains "$launch" '--stdin' "codex notify carries no piped payload, so the emitter must not read stdin"
 case "$launch" in
-  *"touch '$HOME_DIR/state/t-telemetry-codex.turn-ended'; "*) ;;
+  *"touch $HOME_DIR/state/t-telemetry-codex.turn-ended; "*) ;;
   *) fail "the turn-end touch must run first, joined by ';' so telemetry cannot gate it: $launch" ;;
 esac
 

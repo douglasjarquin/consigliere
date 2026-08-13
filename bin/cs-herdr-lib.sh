@@ -33,8 +33,35 @@ cs_herdr_session() {
   printf '%s' "${CS_HERDR_SESSION:-default}"
 }
 
+# cs_herdr_argv_with_session <out-array-name> <session> <herdr arguments...>
+# Populates <out-array-name> with argv plus --session <session> inserted
+# immediately before a trailing "--" separator when one is present (e.g.
+# `agent start ... -- AGENT_ARG...`), else appended at the end. Appending
+# --session after a subcommand's own "--" would make it a literal passthrough
+# arg instead of herdr's own session flag, resolving against the wrong
+# session - the one shared implementation so this is fixed once, for every
+# caller (cs_herdr below and bin/cs-herdr-lab.sh's cs_herdr_lab_raw), not
+# reintroduced independently per caller.
+cs_herdr_argv_with_session() {
+  local -n _cs_herdr_argv_out=$1
+  local session=$2
+  shift 2
+  local arg saw_sep=0
+  _cs_herdr_argv_out=()
+  for arg in "$@"; do
+    if [ "$saw_sep" -eq 0 ] && [ "$arg" = "--" ]; then
+      _cs_herdr_argv_out+=(--session "$session")
+      saw_sep=1
+    fi
+    _cs_herdr_argv_out+=("$arg")
+  done
+  [ "$saw_sep" -eq 1 ] || _cs_herdr_argv_out+=(--session "$session")
+}
+
 cs_herdr() { # <herdr arguments...>
-  herdr "$@" --session "$(cs_herdr_session)"
+  local -a _cs_herdr_call_argv
+  cs_herdr_argv_with_session _cs_herdr_call_argv "$(cs_herdr_session)" "$@"
+  herdr "${_cs_herdr_call_argv[@]}"
 }
 
 cs_herdr_require() {
@@ -161,6 +188,21 @@ cs_herdr_capture() { # <pane_id> [lines] [format]
 
 cs_herdr_run() { # <pane_id> <text>  - text plus Enter, atomic
   cs_herdr pane run "$1" "$2"
+}
+
+# cs_herdr_pane_run_confirmed <pane_id> <line> <timeout-ms> - like
+# cs_herdr_run, but verifies <line> actually ran instead of trusting
+# `pane run`'s return code, which reports success even when a not-yet-ready
+# shell swallows the line. Appends a fresh per-call marker and confirms it
+# with native `pane wait-output`, which searches existing scrollback first -
+# so a stale marker from an earlier call on the same long-lived pane (a
+# capo's home pane; a relaunch's second attempt) could otherwise false-match
+# before the fresh line has actually run.
+cs_herdr_pane_run_confirmed() {
+  local pane=$1 line=$2 timeout_ms=$3 marker
+  marker="CS_LINE_RAN_$$_${RANDOM}_${RANDOM}"
+  cs_herdr_run "$pane" "$line; echo $marker" >/dev/null || return 1
+  cs_herdr pane wait-output "$pane" --match "$marker" --timeout "$timeout_ms" >/dev/null 2>&1
 }
 
 # Agent-aware atomic submit-and-confirm. Preferred over cs_herdr_run for
@@ -331,6 +373,47 @@ cs_herdr_agent_alive() { # <pane_id>  - is a real agent (codex or claude) in the
 
 # Wait for an agent to actually appear in a pane, bounded. rc=1 on timeout.
 #
+# cs_herdr_agent_start_timeout_ms <seconds> - seconds converted to milliseconds
+# for `agent start --timeout`, clamped to herdr's own documented ceiling
+# (`herdr agent start --help`: max 300000). LAUNCH_WAIT and its
+# CS_CONTROL_RESUME_WAIT_SECS sibling are boss-configurable with no upper
+# bound, so a slow-machine or cautious override could exceed what herdr
+# accepts; clamp with a loud note instead of letting the call fail or
+# silently truncating without saying so.
+CS_HERDR_AGENT_START_TIMEOUT_MAX_MS=300000
+cs_herdr_agent_start_timeout_ms() {
+  local secs=$1 ms=$(( $1 * 1000 ))
+  if [ "$ms" -gt "$CS_HERDR_AGENT_START_TIMEOUT_MAX_MS" ]; then
+    echo "cs-herdr: clamping agent start --timeout from ${secs}s to herdr's ${CS_HERDR_AGENT_START_TIMEOUT_MAX_MS}ms ceiling" >&2
+    ms=$CS_HERDR_AGENT_START_TIMEOUT_MAX_MS
+  fi
+  printf '%s' "$ms"
+}
+
+# cs_herdr_agent_start <pane_id> <name> <kind> <timeout-ms> <argv...> - native
+# launch-and-wait-for-interactive_ready, replacing the cs_herdr_run +
+# cs_herdr_agent_wait_present pair for an interactive agent (cold launch,
+# capo, main ship/scout). Trailing <argv...> reaches the launched binary
+# LITERALLY, with no shell evaluation - never pass a shell-quoted string here.
+# On failure, reports herdr's own distinct error code (agent_pane_not_found,
+# agent_kind_mismatch, agent_not_ready, agent_start_failed) instead of a
+# generic timeout, so a caller's message can name what actually went wrong.
+cs_herdr_agent_start() {
+  local pane=$1 name=$2 kind=$3 timeout_ms=$4 out rc code
+  shift 4
+  out=$(cs_herdr agent start "$name" --kind "$kind" --pane "$pane" --timeout "$timeout_ms" -- "$@" 2>&1) && rc=0 || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
+  case "$code" in
+    agent_pane_not_found) echo "cs-herdr: agent start found no pane $pane" >&2 ;;
+    agent_kind_mismatch) echo "cs-herdr: agent start detected the wrong agent kind in pane $pane (wanted $kind)" >&2 ;;
+    agent_not_ready) echo "cs-herdr: agent in pane $pane never became interactive-ready within ${timeout_ms}ms" >&2 ;;
+    agent_start_failed) echo "cs-herdr: agent start failed to launch in pane $pane: $out" >&2 ;;
+    *) echo "cs-herdr: agent start failed for pane $pane: $out" >&2 ;;
+  esac
+  return 1
+}
+
 # A launch line is delivered to a pane's SHELL with `pane run`, and a freshly
 # created worktree pane's shell may not be ready to read yet - the line is then
 # silently swallowed and no re-read can recover it (the same hazard

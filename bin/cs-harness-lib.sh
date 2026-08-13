@@ -160,6 +160,53 @@ cs_harness_autonomy_flag() {
   esac
 }
 
+# cs_harness_autonomy_argv <out-array-name> <h> - like cs_harness_autonomy_flag,
+# but APPENDS discrete unquoted argv tokens instead of returning one shell-quoted
+# string. A native `agent start ... -- ARGV` call passes trailing args as
+# literal argv with no shell evaluation, so cs_harness_shell_quote's quote
+# characters would reach the launched binary literally (herdr would receive
+# the 5-character string 'auto', not auto) - do not reuse
+# cs_harness_autonomy_flag's output as an argv token; use this instead.
+cs_harness_autonomy_argv() {
+  local -n _cs_autonomy_argv_out=$1
+  local h=$2 mode
+  mode=$(cs_harness_permission_mode "$h") || return 1
+  if [ -n "$mode" ]; then
+    _cs_autonomy_argv_out+=(--permission-mode "$mode")
+    return 0
+  fi
+  case "$h" in
+    codex) _cs_autonomy_argv_out+=(--dangerously-bypass-approvals-and-sandbox) ;;
+    claude) _cs_autonomy_argv_out+=(--dangerously-skip-permissions) ;;
+    *) return 1 ;;
+  esac
+}
+
+# cs_harness_resume_argv <out-array-name> <h> - like cs_harness_resume_cmd, but
+# APPENDS discrete argv tokens instead of one string meant for a pane's shell
+# to word-split.
+cs_harness_resume_argv() {
+  local -n _cs_resume_argv_out=$1
+  case "$2" in
+    codex) _cs_resume_argv_out+=(resume --last) ;;
+    claude) _cs_resume_argv_out+=(--continue) ;;
+    *) return 1 ;;
+  esac
+}
+
+# cs_harness_codex_notify_argv <out-array-name> <turnend-path> [telemetry-cmd] -
+# APPENDS codex's turn-end wiring as discrete argv tokens (`-c`, then the
+# notify config value as one literal string). An optional <telemetry-cmd>
+# records the worker's own turn (measurement only), appended after `; ` -
+# never `&& ` - so the turn-end `touch` runs first, unconditionally, and its
+# result is not gated on anything telemetry does.
+cs_harness_codex_notify_argv() {
+  local -n _cs_codex_notify_out=$1
+  local notify="touch $2"
+  [ -n "${3:-}" ] && notify="$notify; $3"
+  _cs_codex_notify_out+=(-c "notify=[\"bash\",\"-c\",\"$notify\"]")
+}
+
 # cs_harness_claude_settings_json <turnend> [telemetry-cmd] - the launch-scoped
 # settings JSON for a claude soldier. Its Stop hook touches the turn-end signal
 # every turn - the exact analog of the codex soldier's `-c notify=[touch
@@ -476,78 +523,6 @@ cs_harness_launch_env() {
   esac
 }
 
-# cs_harness_soldier_launch <h> <sq_op> <sq_brief> <sq_turnend> <sq_settings> [telemetry-cmd]
-# Full launch string for an interactive supervised soldier (or interactive scout).
-# codex wires turn-end inline via `-c notify=`; claude via the --settings Stop hook.
-#
-# An optional <telemetry-cmd> records the worker's own turn (measurement only).
-# On codex it is appended to the notify command after `; ` - never `&& ` - so the
-# turn-end `touch` runs first, unconditionally, and its result is not gated on
-# anything telemetry does. On claude the telemetry command rides the settings file
-# instead (see cs_harness_claude_settings_json), so this builder ignores it there.
-# With no telemetry command both launch strings are byte identical to an
-# uninstrumented soldier's.
-cs_harness_soldier_launch() {
-  local h=$1 sq_op=$2 sq_brief=$3 sq_turnend=$4 sq_settings=$5 telemetry=${6:-}
-  local auto env notify
-  auto=$(cs_harness_autonomy_flag "$h") || return 1
-  env=$(cs_harness_launch_env "$h")
-  notify="touch $sq_turnend"
-  if [ -n "$telemetry" ]; then
-    notify="$notify; $telemetry"
-  fi
-  # The launch STRING is data run later in the pane; its $(...), $?, and \" are
-  # literal and must not expand here. SC2016 disabled deliberately.
-  case "$h" in
-    codex)
-      # shellcheck disable=SC2016
-      printf '%scodex %s -c "notify=[\\"bash\\",\\"-c\\",\\"%s\\"]" "$(%s encode launch-brief < %s)"' \
-        "$env" "$auto" "$notify" "$sq_op" "$sq_brief"
-      ;;
-    claude)
-      # shellcheck disable=SC2016
-      printf '%sclaude %s --settings %s "$(%s encode launch-brief < %s)"' \
-        "$env" "$auto" "$sq_settings" "$sq_op" "$sq_brief"
-      ;;
-    *) return 1 ;;
-  esac
-}
-
-# cs_harness_soldier_resume <h> <sq_turnend> <sq_settings> [telemetry-cmd]
-# The relaunch shape of cs_harness_soldier_launch: identical flags and identical
-# turn-end wiring, with the harness's cwd-keyed resume command in place of the
-# positional brief prompt. A soldier owns a unique worktree cwd, so resuming
-# from it recovers exactly that soldier's own session with its context intact
-# (docs/codex.md, docs/claude.md); bin/cs-spawn.sh --relaunch prefers this over
-# the cold launch and falls back only when no session was resumable.
-cs_harness_soldier_resume() {
-  local h=$1 sq_turnend=$2 sq_settings=$3 telemetry=${4:-}
-  local auto env notify resume
-  auto=$(cs_harness_autonomy_flag "$h") || return 1
-  env=$(cs_harness_launch_env "$h")
-  resume=$(cs_harness_resume_cmd "$h") || return 1
-  notify="touch $sq_turnend"
-  if [ -n "$telemetry" ]; then
-    notify="$notify; $telemetry"
-  fi
-  # The launch STRING is data run later in the pane; its \" is literal and must
-  # not expand here. SC2016 disabled deliberately, as in the builders above.
-  case "$h" in
-    codex)
-      # `resume` is a subcommand, so every flag follows it (verified: codex
-      # 0.147 `codex resume --help` accepts -c and the autonomy flag).
-      # shellcheck disable=SC2016
-      printf '%scodex %s %s -c "notify=[\\"bash\\",\\"-c\\",\\"%s\\"]"' \
-        "$env" "$resume" "$auto" "$notify"
-      ;;
-    claude)
-      printf '%sclaude %s %s --settings %s' \
-        "$env" "$resume" "$auto" "$sq_settings"
-      ;;
-    *) return 1 ;;
-  esac
-}
-
 # cs_harness_scout_launch <h> <sq_op> <sq_brief> <sq_status>
 # Fire-and-forget headless scout: process exit IS the turn end; the launch line
 # appends the terminal done/failed status event.
@@ -564,19 +539,6 @@ cs_harness_scout_launch() {
   # shellcheck disable=SC2016
   printf 'if %s%s %s "$(%s encode launch-brief < %s)"; then echo '\''done: headless scout finished; read the report'\'' >> %s; else echo "failed: %s exited $?" >> %s; fi' \
     "$env" "$bin" "$auto" "$sq_op" "$sq_brief" "$sq_status" "$bin" "$sq_status"
-}
-
-# cs_harness_capo_launch <h> <sq_op> <sq_brief> <sq_home>
-# A capo is a supervisor, not a supervised turn-taker: no turn-end wiring.
-cs_harness_capo_launch() {
-  local h=$1 sq_op=$2 sq_brief=$3 sq_home=$4
-  local auto bin env
-  auto=$(cs_harness_autonomy_flag "$h") || return 1
-  bin=$(cs_harness_binary "$h")
-  env=$(cs_harness_launch_env "$h")
-  # shellcheck disable=SC2016
-  printf '%sCS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME=%s %s %s "$(%s encode launch-brief < %s)"' \
-    "$env" "$sq_home" "$bin" "$auto" "$sq_op" "$sq_brief"
 }
 
 # cs_harness_busy_re <h> - the rendered-banner busy signature used ONLY to

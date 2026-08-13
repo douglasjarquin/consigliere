@@ -256,27 +256,22 @@ test_checkpoint_behavior_is_unchanged_by_telemetry() {
 
 # --- the worker turn-end wiring -----------------------------------------------
 
-launch() { # <harness> [telemetry-cmd]
-  # CS_CONFIG_OVERRIDE is pinned to a nonexistent dir so a real
-  # config/permission-mode.conf on the developer's own machine (e.g. a claude
-  # account policy narrower than full bypass) cannot change the expected
-  # launch string below - the same isolation tests/cs-harness-lib.test.sh uses.
-  CS_HARNESS_OVERRIDE="$1" CS_CONFIG_OVERRIDE="$TMP_ROOT/no-such-config" bash -c "
+codex_notify_argv() { # <turnend-path> [telemetry-cmd] -> the constructed notify config value
+  bash -c "
 set -eu
 . '$ROOT/bin/cs-harness-lib.sh'
-cs_harness_soldier_launch '$1' \"'/op'\" \"'/brief'\" \"'/turnend'\" \"'/settings'\" '${2:-}'"
+declare -a argv=()
+cs_harness_codex_notify_argv argv '$1' '${2:-}'
+printf '%s\n' \"\${argv[1]}\""
 }
 
 test_launch_wiring_is_byte_identical_with_telemetry_off() {
-  local codex claude settings
-  codex=$(launch codex)
-  claude=$(launch claude)
-  # The exact strings an uninstrumented consigliere produced, so a regression in
-  # the optional telemetry argument cannot silently reshape a launch line.
-  [ "$codex" = "codex --dangerously-bypass-approvals-and-sandbox -c \"notify=[\\\"bash\\\",\\\"-c\\\",\\\"touch '/turnend'\\\"]\" \"\$('/op' encode launch-brief < '/brief')\"" ] ||
-    fail "the codex launch line changed with telemetry off:"$'\n'"$codex"
-  [ "$claude" = "claude --dangerously-skip-permissions --settings '/settings' \"\$('/op' encode launch-brief < '/brief')\"" ] ||
-    fail "the claude launch line changed with telemetry off:"$'\n'"$claude"
+  local notify_argv settings
+  notify_argv=$(codex_notify_argv /turnend)
+  # The exact string an uninstrumented consigliere produced, so a regression in
+  # the optional telemetry argument cannot silently reshape the notify value.
+  [ "$notify_argv" = 'notify=["bash","-c","touch /turnend"]' ] ||
+    fail "the codex notify argv changed with telemetry off:"$'\n'"$notify_argv"
   settings=$(bash -c ". '$ROOT/bin/cs-harness-lib.sh'; cs_harness_claude_settings_json /s/t.turn-ended")
   [ "$settings" = '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"touch /s/t.turn-ended"}]}]}}' ] ||
     fail "the claude soldier settings file changed with telemetry off:"$'\n'"$settings"
@@ -284,21 +279,19 @@ test_launch_wiring_is_byte_identical_with_telemetry_off() {
 }
 
 test_worker_turn_end_signal_survives_a_failing_telemetry_command() {
-  local dir tele notify line settings first
+  local dir tele notify notify_argv settings first
   dir="$TMP_ROOT/worker-signal"
   mkdir -p "$dir"
   # A telemetry command that cannot possibly work. The turn-end touch must still
   # land: it is what supervision watches for, and it runs first, joined by `;`
   # rather than `&&` so nothing about telemetry can gate it.
   tele='/nonexistent/telemetry --worker --task t'
-  notify="touch '$dir/turn-ended'; $tele"
-  line=$(CS_HARNESS_OVERRIDE=codex bash -c "
-set -eu
-. '$ROOT/bin/cs-harness-lib.sh'
-cs_harness_soldier_launch codex \"'/op'\" \"'/brief'\" \"'$dir/turn-ended'\" \"''\" '$tele'")
-  assert_contains "$line" "$notify" \
+  notify="touch $dir/turn-ended; $tele"
+  notify_argv=$(codex_notify_argv "$dir/turn-ended" "$tele")
+  assert_contains "$notify_argv" "$notify" \
     "the codex notify command must touch first and only then run telemetry"
-  # Run exactly what codex would run in the pane.
+  # Run exactly what codex would run in the pane (the notify value's third
+  # element, the command codex itself execs via bash -c on the turn-end event).
   bash -c "$notify" >/dev/null 2>&1 || true
   assert_present "$dir/turn-ended" \
     "the turn-end signal must be written even when the telemetry command cannot run"

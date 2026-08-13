@@ -161,9 +161,9 @@ assert_grep 'do the thing' "$home/data/t1/brief.md" "the original brief is prese
 assert_no_grep '^model=' "$home/state/t1.meta" "a relaunch records no model; the harness owns it"
 log=$(cat "$TMP/l-resume")
 assert_line "$log" 'pane send-text w1:p1 /quit' "the old agent is stopped with the harness exit command"
-assert_line "$log" 'pane run w1:p1 codex resume --last' "the replacement resumes the soldier's own session"
+assert_line "$log" 'agent start .*--pane w1:p1.*-- resume --last' "the replacement resumes the soldier's own session"
 assert_line "$log" 'pane run w1:p1 .*you were rebasing' "the note is delivered as one steer"
-assert_no_line "$log" 'encode launch-brief' "a resume must not re-deliver the brief as a prompt"
+assert_no_line "$log" 'CONSIGLIERE_OP: v1 launch-brief' "a resume must not re-deliver the brief as a prompt"
 pass "cs-control relaunch: resume is preferred, journalled to done, and the note is steered in"
 
 # --- 3. cold fallback when nothing is resumable -----------------------------
@@ -177,8 +177,8 @@ assert_contains "$out" "agent replaced via cold" "the report names the cold path
 assert_contains "$out" "progress note carried-in-the-brief" "a cold launch reads the note from the brief"
 [ "$(journal_field "$home" launch_path)" = cold ] || fail "the journal must record the cold path"
 log=$(cat "$TMP/l-cold")
-assert_line "$log" 'pane run w1:p1 codex resume --last' "resume is attempted first"
-assert_line "$log" 'encode launch-brief' "the cold launch carries the brief"
+assert_line "$log" 'agent start .*--pane w1:p1.*-- resume --last' "resume is attempted first"
+assert_line "$log" 'CONSIGLIERE_OP: v1 launch-brief' "the cold launch carries the brief"
 assert_grep 'start from the failing test' "$home/data/t1/brief.md" "the brief carries the note the cold launch reads"
 assert_no_line "$log" 'pane run w1:p1 .*start from the failing test' "the note is not also steered"
 pass "cs-control relaunch: it falls back to a cold launch only once the pane is agent-free again"

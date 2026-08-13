@@ -101,7 +101,7 @@ test_turnend_guard_stamping() {
 }
 
 test_spawn_launch_brief_stamping() {
-  local home repo fakebin worktree launch prompt occurrences
+  local home repo fakebin worktree prompt occurrences
   home="$TMP/spawn-home"
   repo="$TMP/project"
   fakebin="$TMP/fakebin"
@@ -117,6 +117,13 @@ test_spawn_launch_brief_stamping() {
   [ -s "$home/config/projects.md" ] || fail "the project registry fixture was not written"
   [ -s "$home/data/task/brief.md" ] || fail "the brief fixture was not written"
 
+  # An interactive soldier no longer carries the brief in agent start's argv -
+  # it cannot: agent start's trailing argv is refused outright on an embedded
+  # newline (docs/herdr.md), and every real brief is multi-line. The brief is
+  # delivered as a follow-up `agent prompt` instead (bin/cs-prompt-lib.sh's
+  # cs_prompt_guarded), so this fake answers that guard's checks with the same
+  # minimal empty-composer/idle-agent shape tests/cs-activate.test.sh already
+  # established for it, then captures what agent prompt actually receives.
   cat > "$fakebin/herdr" <<'SH'
 #!/usr/bin/env bash
 set -u
@@ -137,43 +144,41 @@ case "${1:-} ${2:-}" in
     git -C "$repo" worktree add -q -b "$branch" "$CS_FAKE_SPAWN_WORKTREE"
     printf '{"result":{"workspace":{"workspace_id":"w1"},"root_pane":{"pane_id":"w1:p1"},"worktree":{"path":"%s","branch":"%s"}}}\n' "$CS_FAKE_SPAWN_WORKTREE" "$branch"
     ;;
-  "pane run")
-    printf '%s' "${4:-}" > "$CS_FAKE_SPAWN_LAUNCH"
+  "agent start")
+    printf '%s' "$*" > "$CS_FAKE_SPAWN_LAUNCH"
+    printf '{"result":{"agent":{"agent":"codex","agent_status":"idle","interactive_ready":true}}}\n'
     ;;
-  "agent get")
-    # cs-spawn requires an agent to actually appear after the launch: `pane run`
-    # reports success even when a not-ready shell swallowed the line.
-    printf '{"result":{"agent":{"agent":"codex","agent_status":"idle"}}}\n' ;;
+  "pane get") printf '{"result":{"pane":{"pane_id":"w1:p1","cwd":"%s"}}}\n' "$CS_FAKE_SPAWN_WORKTREE" ;;
+  "pane read") printf '%s\n' $'\342\200\272 ' ;;
+  "agent get") printf '{"result":{"agent":{"agent":"codex","agent_status":"idle"}}}\n' ;;
+  "pane process-info")
+    printf '{"result":{"process_info":{"shell_pid":10,"foreground_processes":[{"pid":20,"argv0":"codex"}]}}}\n' ;;
+  "agent prompt")
+    printf '%s' "${4:-}" > "$CS_FAKE_SPAWN_PROMPT"
+    printf '{"result":{"type":"agent_prompted"}}\n' ;;
   *) printf '{}\n' ;;
 esac
 SH
-  cat > "$fakebin/codex" <<'SH'
-#!/usr/bin/env bash
-set -u
-last=
-for last do :; done
-printf '%s' "$last" > "$CS_FAKE_CODEX_PROMPT"
-SH
-  chmod +x "$fakebin/herdr" "$fakebin/codex"
+  chmod +x "$fakebin/herdr"
 
-  env PATH="$fakebin:$PATH" CS_HOME="$home" CS_DATA_OVERRIDE="$home/data" \
+  env PATH="$fakebin:$PATH" CS_HARNESS_OVERRIDE=codex CS_HOME="$home" CS_DATA_OVERRIDE="$home/data" \
     CS_STATE_OVERRIDE="$home/state" CS_FAKE_SPAWN_WORKTREE="$worktree" \
-    CS_FAKE_SPAWN_LAUNCH="$TMP/spawn.launch" \
+    CS_FAKE_SPAWN_LAUNCH="$TMP/spawn.launch" CS_FAKE_SPAWN_PROMPT="$TMP/spawn.prompt" \
     "$SPAWN" task "$repo" --mode local-only --yolo off >/dev/null || fail "spawn fixture failed"
-  launch=$(cat "$TMP/spawn.launch")
-  (
-    cd "$worktree" || exit 1
-    env PATH="$fakebin:$PATH" CS_FAKE_CODEX_PROMPT="$TMP/spawn.prompt" bash -c "$launch"
-  ) || fail "captured spawn launch command failed"
+  assert_no_grep 'CONSIGLIERE_OP' "$TMP/spawn.launch" \
+    "agent start's argv must never carry the encoded brief (it cannot hold multi-line text)"
   prompt=$(cat "$TMP/spawn.prompt")
   [ "$(cs_operational_input_kind "$prompt")" = launch-brief ] || fail "spawn prompt lacks launch-brief kind"
   [ "$(cs_operational_input_body "$prompt")" = "$(cat "$home/data/task/brief.md")" ] \
     || fail "spawn prompt lost brief body"
-  # The launch strings are owned by cs-harness-lib.sh: one per launch path per
-  # harness - soldier(codex), soldier(claude), scout, capo = 4. Every path must
-  # stamp the typed launch-brief kind through cs-operational-input.
+  # Interactive soldier/capo launches now compute the encoded brief directly in
+  # cs-spawn.sh's own shell (one call per launch context: ship, capo, and the
+  # relaunch cold-launch fallback = 3); only the headless scout, which stays on
+  # the shell-string mechanism permanently, still stamps it via cs-harness-lib.sh.
   occurrences=$(grep -c 'encode launch-brief' "$ROOT/bin/cs-harness-lib.sh")
-  [ "$occurrences" -eq 4 ] || fail "not every launch path (soldier codex/claude, scout, capo) stamps launch-brief"
+  [ "$occurrences" -eq 1 ] || fail "the headless scout must be the only cs-harness-lib.sh launch path stamping launch-brief"
+  occurrences=$(grep -c 'encode launch-brief' "$ROOT/bin/cs-spawn.sh")
+  [ "$occurrences" -eq 3 ] || fail "ship, capo, and the relaunch cold-launch fallback must each stamp launch-brief directly"
   pass "spawn passes a typed launch-brief prompt on every launch path"
 }
 
