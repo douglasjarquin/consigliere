@@ -11,7 +11,9 @@
 #   cs-herdr-lab.sh teardown <session>
 #
 # Session names must begin with "cs-lab-" and can never be "default".
-# Every herdr call made here carries a trailing --session <session>.
+# Every herdr call made here carries --session <session>, inserted before the
+# caller's own trailing "--" argv separator when present (else appended at
+# the end); see cs_herdr_lab_raw.
 # The run command rejects caller-supplied --session flags, any leading option
 # before the subcommand, all session lifecycle operations, and every server
 # operation.
