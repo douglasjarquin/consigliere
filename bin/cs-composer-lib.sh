@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# bin/cs-composer-lib.sh - composer-emptiness classifier for the away-mode daemon
-# (bin/cs-daemon.sh). Sourced, never executed. Requires bin/cs-herdr-lib.sh to be
-# sourced first (cs_herdr_capture).
+# bin/cs-composer-lib.sh - composer-emptiness classifier backing the composer
+# guard every guarded-prompt caller shares (bin/cs-prompt-lib.sh). Sourced,
+# never executed. Requires bin/cs-herdr-lib.sh to be sourced first
+# (cs_herdr_capture).
 #
 # HARNESSES: recognizes both agent prompt glyphs - codex `›` and claude `❯`
 # (distinct codepoints, so recognition is universal, no harness plumbing). codex
@@ -9,17 +10,18 @@
 # empty composer (verified 2.1.218, 2026-07-24) is a bare `❯` between horizontal
 # rules with NO ghost text, so the ghost strip is a no-op there and harmless.
 #
-# WHY: the daemon injects an escalation digest into consigliere's own pane, so
-# it must know the agent composer is AFFIRMATIVELY empty first. Typing into a
-# half-typed boss line merges two messages; typing into a dead shell could
-# EXECUTE the digest. Only 'empty' authorizes injection; 'pending' and
-# 'unknown' both defer (the buffered escalation survives for the next tick).
+# WHY: a guarded-prompt caller (bin/cs-activate.sh, via bin/cs-prompt-lib.sh)
+# injects into consigliere's own pane, so it must know the agent composer is
+# AFFIRMATIVELY empty first. Typing into a half-typed boss line merges two
+# messages; typing into a dead shell could EXECUTE the injected text. Only
+# 'empty' authorizes injection; 'pending' and 'unknown' both defer (the
+# buffered delivery survives for the next tick).
 #
 # GHOST TEXT (ported upstream incident, 2026-07-08, recorded in docs/codex.md):
 # codex fills an otherwise-empty composer with a de-emphasized inline
 # suggestion after the bare `›` prompt. A plain capture cannot tell that ghost
 # apart from text a human typed, so a naive reader classifies the idle pane as
-# 'pending' forever and the daemon wedges overnight. cs_composer_strip_ghost is
+# 'pending' forever and the caller wedges overnight. cs_composer_strip_ghost is
 # the ANSI-aware extractor of REAL typed content: it drops dim/faint runs
 # (SGR 2, how codex styles its ghost suggestion) and dark/muted TRUECOLOR
 # foreground runs (luminance below CS_COMPOSER_GHOST_LUMA_MAX on a dark theme),
@@ -28,8 +30,8 @@
 # DOCUMENTED FAILURE DIRECTION: if the transport strips ANSI styling (so ghost
 # text arrives as plain bytes), ghost becomes indistinguishable from typed
 # input and classifies 'pending'. That fails toward DEFER, never toward a
-# wrong injection; a persistent defer is surfaced by the daemon's max-defer
-# wedge alarm (CS_MAX_DEFER_SECS) instead of wedging silently.
+# wrong injection; a persistent defer is surfaced by the caller's own max-defer
+# wedge alarm instead of wedging silently.
 #
 # PIPELINE: capture with ANSI -> locate the composer row structurally on
 # ANSI-stripped rows -> extract real typed content from the raw styled row ->
@@ -47,8 +49,8 @@
 # Claude's `❯` (U+276F) is also the prompt character of common shell themes
 # (pure, starship, p10k), so the glyph sets are NOT disjoint: a pane whose agent
 # exited to a login shell draws the very same `❯`, and reading it as an empty
-# agent composer is what would let the daemon type a digest into a dead shell
-# and EXECUTE it (reproduced from real bytes, docs/claude.md).
+# agent composer is what would let a guarded-prompt caller type into a dead
+# shell and EXECUTE it (reproduced from real bytes, docs/claude.md).
 #
 # What proves a composer is the SHAPE THE HARNESS DRAWS, per harness:
 #   bordered box (`│ … │`)  - the harness drawing its own prompt; a shell cannot

@@ -5,9 +5,9 @@
 #
 # The three guards ahead of the prompt attempt (pane exists, busy state,
 # composer state) are covered by cs-composer-lib.sh's and cs-herdr-lib.sh's own
-# tests and by tests/cs-afk-daemon.test.sh's end-to-end scenarios; this file
-# stubs them to a fixed pass so only the changed submit-confirm behavior is
-# under test.
+# tests and by tests/cs-afk-start.test.sh, tests/cs-afk-return.test.sh, and
+# tests/cs-activate.test.sh's end-to-end scenarios; this file stubs them to a
+# fixed pass so only the changed submit-confirm behavior is under test.
 set -u
 
 # shellcheck source=tests/lib.sh

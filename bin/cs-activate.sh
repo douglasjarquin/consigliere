@@ -2,8 +2,8 @@
 # cs-activate.sh - make THIS home's own agent take a turn when its wake queue
 # has sat unattended. The single owner of per-home activation policy.
 #
-# WHY THIS EXISTS. Watchers, monitors, and the away daemon can all OBSERVE, but
-# only an agent can ACT, and an agent acts only when something starts a turn.
+# WHY THIS EXISTS. Watchers and monitors can OBSERVE, but only an agent can
+# ACT, and an agent acts only when something starts a turn.
 # Until now the only thing that started a turn in a capo home was the PARENT
 # consigliere injecting into the capo's pane. So when the parent froze on
 # 2026-08-01, both capo homes kept their watchers and monitors perfectly healthy,

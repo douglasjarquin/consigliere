@@ -74,7 +74,7 @@ Restoring an interrupted drain's queue removes the batch it restored from, becau
   Dedup is per capo, worker task, and decision key against a per-task open-decision manifest (`state/.capo-surfaced-<capo>__<worker>`), not the surfaced line's text, so a standing block wakes the parent once and a resolve-then-reopen under the same key and wording still surfaces again; `bin/cs-watch.sh`'s `scan_capo_worker_events` owns the fold.
 - `heartbeat` - fleet-scan backstop found an unsurfaced boss-relevant status.
 
-`bin/cs-classify-lib.sh` is the single owner of the verb vocabulary shared with the away-mode daemon and delegates machine-input typing to `bin/cs-operational-input.sh`.
+`bin/cs-classify-lib.sh` is the single owner of the verb vocabulary and delegates machine-input typing to `bin/cs-operational-input.sh`.
 `bin/cs-crew-state.sh` is the authoritative current-state read (no-mistakes run-step first, then native agent status, then status-log fallback).
 
 ## Busy evidence policy

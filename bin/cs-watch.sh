@@ -58,8 +58,7 @@ mkdir -p "$STATE"
 # shellcheck source=bin/cs-wake-lib.sh
 . "$SCRIPT_DIR/cs-wake-lib.sh"
 # Shared wake classifier (boss-relevant verbs + signal/stale/heartbeat
-# predicates), the SAME library the away-mode daemon uses, so the triage policy
-# has one definition.
+# predicates), so the triage policy has one definition.
 # shellcheck source=bin/cs-classify-lib.sh
 . "$SCRIPT_DIR/cs-classify-lib.sh"
 # The one herdr layer: captures, native agent busy-state (codex corroboration
@@ -670,7 +669,7 @@ mark_all_boss_relevant_surfaced() {
   done < <(scan_boss_relevant_statuses "$STATE")
 }
 
-# Cheap heartbeat fleet-scan (the always-on twin of the daemon's catch-all). 0 if
+# Cheap heartbeat fleet-scan, the always-on catch-all backstop. 0 if
 # any boss-relevant status has NOT already been surfaced to consigliere (its
 # content differs from the .hb-surfaced-<task> marker). Pure detect, no side
 # effects: the caller enqueues first, then marks surfaced. Because every

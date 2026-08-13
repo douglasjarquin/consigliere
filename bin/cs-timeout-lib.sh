@@ -40,8 +40,8 @@
 #   - bin/cs-watch.sh run_check_process: an exec-replacement runner whose perl
 #     tier forwards HUP/INT/TERM to the owned check process group, because
 #     cs_active_check_stop stops a check from OUTSIDE mid-flight.
-#   - bin/cs-daemon.sh wedge_alarm_run_bounded: a polling watchdog that records
-#     the notifier pid so the daemon can stop it externally at shutdown.
+#   - bin/cs-prompt-lib.sh cs_wedge_alarm_run_bounded: a polling watchdog that
+#     records the notifier pid so a caller can stop it externally on timeout.
 # Any NEW plain "run this command with a deadline" call belongs here.
 #
 # No side effects on source. set -u / set -e safe.
