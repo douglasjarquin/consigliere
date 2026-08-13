@@ -208,7 +208,6 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_BOARD_SWEEP_LANES` | cs-board-watch | default lane cap baked into a new sweep record; default 3, matching the `contracts` skill |
 | `CS_BOARD_SWEEP_RESURFACE` | cs-board-watch | default seconds before a still-full column is reported again; default 1800. Only a default for `arm`; each record stores its own value |
 | `CS_MAX_DEFER_SECS` | cs-daemon | away-mode escalation max-defer alarm |
-| `CS_AFK_BEAT_STALE` | cs-monitor | seconds before the away daemon's completed-pass counter reads stale and the monitor covers the home instead of standing down; default 180, deliberately above the daemon's own 60s crash backoff |
 | `CS_SPAWN_LAUNCH_WAIT_SECS` | cs-spawn | seconds to wait for an agent to actually appear after the launch line is delivered, before treating the launch as swallowed; default 60 |
 | `CS_SPAWN_HUMAN_GATE_SECS` | cs-spawn | seconds a freshly launched agent may sit in herdr's native `blocked` state before the spawn reports it out loud; short on purpose since this window only has to outlast a startup transient; default 10 |
 | `CS_SPAWN_BASE_FRESHNESS_TIMEOUT_SECS` | cs-spawn | hard bound in seconds for the pre-branch base-freshness refresh through `bin/cs-fleet-sync.sh` when no `--base` was given; on expiry the spawn warns loudly and proceeds on the local HEAD; default 25 |
