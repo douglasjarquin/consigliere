@@ -24,8 +24,8 @@
 #   pid            agent process pid; default 4242
 #   session        agent_session.value; empty = unreported
 #   cwd            pane cwd; empty = unreported
-#   composer       the composer row `pane read` renders; default the claude
-#                  empty glyph
+#   composer       the composer row `pane read` renders; default codex's
+#                  empty glyph (this fixture's agent is codex throughout)
 #   procinfo_fail  non-empty: `pane process-info` fails (table unreadable), so
 #                  the husk predicate must refuse rather than report a husk
 #   proc_absent    non-empty: the process table is readable but holds NO agent
@@ -45,16 +45,23 @@
 #                  the composer comes back empty)
 #   gone_at_enter  the Enter number that removes the agent, so a fixture can tell
 #                  the flush Enter apart from the exit command's Enter
-#   on_run         which `pane run` brings an agent up: `up` = the first (the
-#                  resume succeeded), `second` = only the second (nothing was
-#                  resumable, so the cold launch is what starts an agent),
-#                  absent = none ever comes up
+#   on_run         which `agent start` call brings an agent up: `up` = the
+#                  first (the resume succeeded), `second` = only the second
+#                  (nothing was resumable, so the cold launch is what starts
+#                  an agent), absent = none ever comes up. cs-spawn.sh's
+#                  relaunch triggers a resume via a fire-and-forget `agent
+#                  start` (its own result discarded) and, only if the
+#                  process-table loop below never sees it stabilize, a
+#                  cold-launch `agent start` whose result DOES gate the spawn.
 #   run_agent      the agent name a launch brings up; default codex
 #   run_pid        the pid a launch brings up; default the current pid + 1, so a
 #                  relaunch's process-identity proof passes. Set it equal to
 #                  `pid` to model a pane that never actually changed hands.
 #   run_session    the agent_session.value a launch brings up; absent leaves the
 #                  recorded one, which is what a real RESUME does
+#   starts         written by the fake: how many `agent start` calls it has
+#                  seen (separate from `runs`, which still counts `pane run` -
+#                  the env-export pre-step's mechanism, unrelated to launching)
 #   runs           written by the fake: how many `pane run` calls it has seen
 #   log            every call is appended here as one line
 cs_control_fake_herdr() {
@@ -101,7 +108,16 @@ case "$1 $2" in
     ;;
   "pane read")
     composer=$(read_state composer)
-    [ -n "$composer" ] || composer='❯'
+    # Codex's actual empty-composer glyph, matching the codex agent this
+    # fixture models throughout: a bare ❯ with a non-rule row above it
+    # classifies as unknown rather than empty to cs_composer_state, while
+    # this glyph classifies as empty, which is what a real idle codex pane
+    # yields. The readers are the suite's PRE-EXISTING composer paths
+    # (cs_control_stop's pending-flush check and cs-control.sh's interrupt
+    # report) - bin/cs-spawn.sh's brief delivery never consults the
+    # composer; it reads cs_herdr_agent_busy_state and confirms via
+    # agent prompt.
+    [ -n "$composer" ] || composer=$'\342\200\272 '
     printf 'some transcript line\n%s\n' "$composer"
     ;;
   "pane send-keys")
@@ -134,15 +150,16 @@ case "$1 $2" in
     echo '{}'
     ;;
   "pane send-text") echo '{}' ;;
-  "pane run")
-    runs=$(read_state runs)
-    case "$runs" in ''|*[!0-9]*) runs=0 ;; esac
-    runs=$((runs + 1))
-    printf '%s\n' "$runs" > "$S/runs"
+  "pane wait-output") echo '{}' ;;
+  "agent start")
+    starts=$(read_state starts)
+    case "$starts" in ''|*[!0-9]*) starts=0 ;; esac
+    starts=$((starts + 1))
+    printf '%s\n' "$starts" > "$S/starts"
     bring_up=0
     case "$(read_state on_run)" in
-      up) [ "$runs" -ge 1 ] && bring_up=1 ;;
-      second) [ "$runs" -ge 2 ] && bring_up=1 ;;
+      up) [ "$starts" -ge 1 ] && bring_up=1 ;;
+      second) [ "$starts" -ge 2 ] && bring_up=1 ;;
     esac
     if [ "$bring_up" = 1 ]; then
       agent=$(read_state run_agent)
@@ -158,7 +175,17 @@ case "$1 $2" in
       printf '%s\n' "$newpid" > "$S/pid"
       newsession=$(read_state run_session)
       [ -n "$newsession" ] && printf '%s\n' "$newsession" > "$S/session"
+      printf '{"result":{"agent":{"agent":"%s","agent_status":"idle","interactive_ready":true}}}\n' "$agent"
+    else
+      printf '{"error":{"code":"agent_not_ready","message":"timed out"}}\n' >&2
+      exit 1
     fi
+    ;;
+  "pane run")
+    runs=$(read_state runs)
+    case "$runs" in ''|*[!0-9]*) runs=0 ;; esac
+    runs=$((runs + 1))
+    printf '%s\n' "$runs" > "$S/runs"
     echo '{}'
     ;;
   *) echo '{}' ;;

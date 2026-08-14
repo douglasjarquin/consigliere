@@ -11,9 +11,9 @@
 #   cs-herdr-lab.sh teardown <session>
 #
 # Session names must begin with "cs-lab-" and can never be "default".
-# Every herdr call made here carries --session <session>, inserted before the
-# caller's own trailing "--" argv separator when present (else appended at
-# the end); see cs_herdr_lab_raw.
+# Every herdr call made here carries --session <session>, placed by the
+# shared cs_herdr_argv_with_session (bin/cs-herdr-lib.sh) so a caller's own
+# trailing "--" argv separator is never mistaken for the session flag's home.
 # The run command rejects caller-supplied --session flags, any leading option
 # before the subcommand, all session lifecycle operations, and every server
 # operation.
@@ -27,6 +27,9 @@
 # Ported from firstmate's fm-herdr-lab.sh; the guard structure is deliberate
 # and safety-load-bearing - do not simplify it.
 set -u
+
+# shellcheck source=bin/cs-herdr-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cs-herdr-lib.sh"
 
 cs_herdr_lab_error() {
   echo "cs-herdr-lab: $*" >&2
@@ -52,20 +55,11 @@ cs_herdr_lab_tripwire_path() { # <session>
 }
 
 cs_herdr_lab_raw() { # <session> <herdr arguments...>
-  # --session must precede a subcommand's own "--" trailing-argv separator (e.g. agent start ... -- ARG), or it becomes a literal arg and herdr resolves the wrong session.
-  local name=$1 arg before=() after=() saw_sep=0
+  local name=$1
+  local -a argv
   shift
-  for arg in "$@"; do
-    if [ "$saw_sep" -eq 0 ] && [ "$arg" = "--" ]; then
-      saw_sep=1
-    fi
-    if [ "$saw_sep" -eq 0 ]; then
-      before+=("$arg")
-    else
-      after+=("$arg")
-    fi
-  done
-  HERDR_SESSION="$name" herdr "${before[@]+"${before[@]}"}" --session "$name" "${after[@]+"${after[@]}"}"
+  cs_herdr_argv_with_session argv "$name" "$@"
+  HERDR_SESSION="$name" herdr "${argv[@]}"
 }
 
 cs_herdr_lab_session_list() { # <session>

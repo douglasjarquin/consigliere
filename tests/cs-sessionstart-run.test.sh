@@ -53,6 +53,7 @@ TMP=$(cs_test_tmproot cs-sessionstart-run)
 RUN="$ROOT/bin/cs-sessionstart-run.sh"
 SESSION_START="$ROOT/bin/cs-session-start.sh"
 BASE_PATH=${CS_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
+BASH_BIN_DIR=$(dirname "$(command -v bash)")
 FIXTURE_PID=$PPID
 cs_git_identity
 
@@ -187,11 +188,12 @@ mechanism=$(CS_TIMEOUT_MECHANISM_OVERRIDE=bash bash -c '. "$1"; cs_timeout_mecha
 status=0
 out=$(CS_TIMEOUT_MECHANISM_OVERRIDE=bash CS_SESSION_START_TIMEOUT=3 \
   CS_ROOT_OVERRIDE="$ROOT_DIR" CS_HOME="$HOME_DIR" \
-  PATH="$HANGBIN:$BASE_PATH" "$SESSION_START") || status=$?
+  PATH="$HANGBIN:$BASH_BIN_DIR:$BASE_PATH" "$SESSION_START") || status=$?
 expect_code 0 "$status" "a truncated session start must still exit 0 so the session can open"
 assert_contains "$out" "SESSION START - $HOME_DIR" "the truncated digest lost the output it had already produced"
 assert_contains "$out" 'lock acquired' "the truncated digest lost a stage that had completed"
 assert_contains "$out" 'STARTUP TRUNCATED' "a truncated session start did not say so"
+assert_not_contains "$out" 'BASH_FLOOR:' "ordinary truncation must not trigger the fatal bash-floor blocker"
 assert_contains "$out" 'RUNTIME BOUND' "the truncation banner did not name the bound it hit"
 assert_contains "$out" 'STALLED during the "bootstrap" stage' "the truncation banner did not name the stalled stage"
 assert_contains "$out" 'wake-queue supervision read-once fleet-state network-checks context next-step' \

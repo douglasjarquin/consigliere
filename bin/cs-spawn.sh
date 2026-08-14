@@ -94,7 +94,7 @@
 #     agent or start outside the copy holding the work.
 #   - Refuses a kind=capo task (capo-provisioning owns a home's lifecycle) and a
 #     headless scout (no interactive agent to replace).
-#   - Prefers the harness resume command (cs_harness_resume_cmd) so the
+#   - Prefers the harness resume invocation (cs_harness_resume_argv) so the
 #     soldier's own session and context survive: both harnesses key sessions by
 #     cwd and every soldier owns a unique worktree cwd. It falls back to a cold
 #     launch with the brief only once the pane is positively agent-free again,
@@ -188,6 +188,52 @@ report_human_gate() {  # <pane> <harness> <subject>
     "$subject" "$detail" "$pane" >&2
 }
 
+# _cs_spawn_env_export_confirmed <pane> <env-prefix-string>: exports a
+# non-empty space-separated VAR=val prefix (the same shape cs_harness_launch_env
+# returns) into the pane and confirms it landed before the caller starts an
+# agent there - `agent start`'s trailing argv has no shell prefix-assignment
+# support and neither it nor `worktree create` has an --env flag, so this
+# pre-step is how a launch's environment reaches the agent at all. A no-op
+# (success) when the prefix is empty.
+_cs_spawn_env_export_confirmed() {
+  local pane=$1 prefix=$2
+  [ -n "$prefix" ] || return 0
+  cs_herdr_pane_run_confirmed "$pane" "export $prefix" "$(cs_herdr_agent_start_timeout_ms "$ENV_STEP_WAIT")"
+}
+
+# _cs_spawn_deliver_brief <pane> <encoded-brief>: delivers the brief as the
+# agent's first prompt on a pane cs-spawn.sh just bare-started itself (agent
+# start with no positional argument - see above). Deliberately does NOT go
+# through bin/cs-prompt-lib.sh's general-purpose cs_prompt_guarded: its
+# composer-empty check (live-verified 2026-08-13) misreads a genuinely fresh
+# claude session as "unknown" forever, because the VERY FIRST frame after
+# launch shows a project-title banner where the classifier expects a rule
+# immediately above the composer glyph - a frame shape distinct from every
+# case its own test suite covers, and one that never resolves on its own
+# since nothing changes the render until a first prompt actually lands. That
+# check exists to stop a prompt from concatenating onto text something ELSE
+# already typed, a risk that cannot apply here: this pane was created by this
+# same spawn moments ago and nothing else has ever had the chance to type into
+# it. The busy/blocked check still applies (cheap, unaffected by the same
+# blind spot, and a real signal), and cs_herdr_agent_prompt_confirmed's own
+# idle->working confirmation is still what proves the turn actually started.
+# Retries because a prompt sent within ~40s of agent start can be silently
+# lost while herdr still reports interactive_ready (measured on both
+# harnesses, bin/cs-prompt-lib.sh); that same confirmation catches a miss, so
+# retrying is safe.
+_cs_spawn_deliver_brief() {
+  local pane=$1 brief=$2 start=$SECONDS bs
+  while [ $((SECONDS - start)) -lt "$BRIEF_DELIVER_WAIT" ]; do
+    bs=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null) || bs=unknown
+    case "$bs" in
+      busy|blocked) : ;;
+      *) cs_herdr_agent_prompt_confirmed "$pane" "$brief" >/dev/null 2>&1 && return 0 ;;
+    esac
+    sleep "$BRIEF_DELIVER_RETRY_SECS"
+  done
+  return 1
+}
+
 KIND=ship
 MODE=
 YOLO=
@@ -204,6 +250,20 @@ case "$LAUNCH_WAIT" in ''|*[!0-9]*|0) LAUNCH_WAIT=60 ;; esac
 # absorbed the slow part of a cold start.
 HUMAN_GATE_WAIT=${CS_SPAWN_HUMAN_GATE_SECS:-10}
 case "$HUMAN_GATE_WAIT" in ''|*[!0-9]*) HUMAN_GATE_WAIT=10 ;; esac
+# Seconds to wait for the pre-agent-start environment export (CLAUDE_CONFIG_DIR
+# under a work/personal account split; a capo's CS_HOME and override clears) to
+# be confirmed on the pane before starting the agent. Short on purpose: the
+# export itself is near-instant once the shell is ready to read it.
+ENV_STEP_WAIT=${CS_SPAWN_ENV_STEP_WAIT_SECS:-10}
+case "$ENV_STEP_WAIT" in ''|*[!0-9]*|0) ENV_STEP_WAIT=10 ;; esac
+# Seconds to keep retrying brief delivery after a bare agent start. A prompt
+# sent within ~40s of agent start can be silently lost while herdr still
+# reports interactive_ready (bin/cs-prompt-lib.sh, measured on both harnesses);
+# this window is generous enough to retry past it.
+BRIEF_DELIVER_WAIT=${CS_SPAWN_BRIEF_DELIVER_WAIT_SECS:-50}
+case "$BRIEF_DELIVER_WAIT" in ''|*[!0-9]*|0) BRIEF_DELIVER_WAIT=50 ;; esac
+BRIEF_DELIVER_RETRY_SECS=${CS_SPAWN_BRIEF_DELIVER_RETRY_SECS:-5}
+case "$BRIEF_DELIVER_RETRY_SECS" in ''|*[!0-9]*|0) BRIEF_DELIVER_RETRY_SECS=5 ;; esac
 ISSUE=
 RELAUNCH=0
 POS=()
@@ -548,18 +608,19 @@ if [ "$RELAUNCH" -eq 1 ]; then
   esac
 
   R_TURNEND="$STATE/$ID.turn-ended"
-  sq_brief=$(shell_quote "$BRIEF")
-  sq_turnend=$(shell_quote "$R_TURNEND")
   R_TELEMETRY=
   case "$R_HARNESS" in
     claude) R_TELEMETRY=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" stdin) ;;
     codex) R_TELEMETRY=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" nostdin) ;;
   esac
-  sq_settings=''
+  SETTINGS_FILE=''
   if [ "$R_HARNESS" = claude ]; then
     SETTINGS_FILE="$STATE/$ID.claude-settings.json"
-    cs_harness_claude_settings_json "$R_TURNEND" "$R_TELEMETRY" > "$SETTINGS_FILE"
-    sq_settings=$(shell_quote "$SETTINGS_FILE")
+    cs_harness_claude_settings_json "$R_TURNEND" "$R_TELEMETRY" > "$SETTINGS_FILE" || {
+      rm -f "$SETTINGS_FILE"
+      echo "error: turn-end path $R_TURNEND cannot be embedded safely in claude's Stop hook command (it carries a quote or backslash); the pane is untouched" >&2
+      exit 1
+    }
     cs_harness_claude_trust_dir "$R_WT_REAL" || {
       echo "error: could not pre-trust claude worktree $R_WT_REAL; the pane is untouched" >&2
       exit 1
@@ -577,6 +638,15 @@ if [ "$RELAUNCH" -eq 1 ]; then
 
   spawn_codegraph_prep "$R_PROJ_REAL" "$R_WT_REAL"
 
+  # CLAUDE_CONFIG_DIR under a work/personal account split, exported once here
+  # (this pane's shell keeps it for both the resume attempt and any cold-launch
+  # fallback below) rather than per-attempt - see _cs_spawn_env_export_confirmed.
+  R_ENV_PREFIX=$(cs_harness_launch_env "$R_HARNESS")
+  if ! _cs_spawn_env_export_confirmed "$R_PANE" "$R_ENV_PREFIX"; then
+    echo "error: could not confirm $ID's launch environment landed on pane $R_PANE before relaunching; the export line was typed at the pane's shell but never confirmed executed, and no replacement agent was started" >&2
+    exit 1
+  fi
+
   # Resume first. The wait is generous for a slow cold start, and breaks out as
   # soon as the pane is positively agent-free again - which is what a harness
   # that had nothing to resume leaves behind once it exits.
@@ -586,14 +656,36 @@ if [ "$RELAUNCH" -eq 1 ]; then
   case "$R_RESUME_GRACE" in ''|*[!0-9]*) R_RESUME_GRACE=6 ;; esac
   # A harness with nothing to resume still RUNS for a second or two before it
   # prints its refusal and exits, and herdr's detector sees an agent in that
-  # window (measured: `claude --continue` with no recorded session). So a resume
-  # counts only once the agent is still there after a settle, and it must be a
-  # real agent PROCESS, not just herdr's belief about the pane.
+  # window (measured: `claude --continue` with no recorded session; live-verified
+  # this session that native `agent start` is fooled by the exact same window -
+  # docs/herdr.md). So a resume counts only once the agent is still there after
+  # a settle, and it must be a real agent PROCESS, not just herdr's belief about
+  # the pane. `agent start` below is used only to TRIGGER the resume command
+  # with correct argv; this loop, unchanged, is what actually decides resumed
+  # vs falls through to a cold launch.
   R_RESUME_CONFIRM=${CS_CONTROL_RESUME_CONFIRM_SECS:-4}
   case "$R_RESUME_CONFIRM" in ''|*[!0-9]*) R_RESUME_CONFIRM=4 ;; esac
   r_agent_running() { cs_herdr_agent_alive "$R_PANE" && cs_control_agent_pid "$R_PANE" >/dev/null 2>&1; }
-  R_LAUNCH=$(cs_harness_soldier_resume "$R_HARNESS" "$sq_turnend" "$sq_settings" "$R_TELEMETRY")
-  cs_herdr_run "$R_PANE" "$R_LAUNCH" >/dev/null
+  declare -a RESUME_ARGV=()
+  cs_harness_resume_argv RESUME_ARGV "$R_HARNESS" || { echo "error: unsupported harness '$R_HARNESS' for $ID" >&2; exit 1; }
+  cs_harness_autonomy_argv RESUME_ARGV "$R_HARNESS" || { echo "error: unsupported harness '$R_HARNESS' for $ID" >&2; exit 1; }
+  if [ "$R_HARNESS" = claude ]; then
+    RESUME_ARGV+=(--settings "$SETTINGS_FILE")
+  elif [ "$R_HARNESS" = codex ]; then
+    cs_harness_codex_notify_argv RESUME_ARGV "$R_TURNEND" "$R_TELEMETRY" || {
+      echo "error: turn-end path $R_TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash); no replacement agent was started" >&2
+      exit 1
+    }
+  fi
+  # A short trigger timeout on purpose: its own result is not the resume
+  # decision (the loop below is), so it must not block waiting for the
+  # false-positive-prone interactive_ready read a genuine slow resume can take
+  # longer than this to reach.
+  R_NATIVE_NAME=$(cs_herdr_agent_name "$ID") || {
+    echo "error: could not derive a native agent name for '$ID'; no replacement agent was started" >&2
+    exit 1
+  }
+  cs_herdr agent start "$R_NATIVE_NAME" --kind "$R_HARNESS" --pane "$R_PANE" --timeout 2000 -- "${RESUME_ARGV[@]}" >/dev/null 2>&1 || true
   R_PATH=resume
   waited=0
   resumed=0
@@ -613,10 +705,19 @@ if [ "$RELAUNCH" -eq 1 ]; then
       exit 1
     fi
     R_PATH=cold
-    R_LAUNCH=$(cs_harness_soldier_launch "$R_HARNESS" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings" "$R_TELEMETRY")
-    cs_herdr_run "$R_PANE" "$R_LAUNCH" >/dev/null
-    if ! cs_herdr_agent_wait_present "$R_PANE" "$LAUNCH_WAIT"; then
-      echo "error: no session was resumable for '$ID' and the cold launch brought up no agent within ${LAUNCH_WAIT}s; pane $R_PANE and worktree $R_WT_REAL are untouched" >&2
+    encoded_brief=$("$SCRIPT_DIR/cs-operational-input.sh" encode launch-brief < "$BRIEF") || { echo "error: could not encode the launch brief for $ID" >&2; exit 1; }
+    declare -a COLD_ARGV=()
+    cs_harness_autonomy_argv COLD_ARGV "$R_HARNESS" || { echo "error: unsupported harness '$R_HARNESS' for $ID" >&2; exit 1; }
+    if [ "$R_HARNESS" = claude ]; then
+      COLD_ARGV+=(--settings "$SETTINGS_FILE")
+    elif [ "$R_HARNESS" = codex ]; then
+      cs_harness_codex_notify_argv COLD_ARGV "$R_TURNEND" "$R_TELEMETRY" || {
+        echo "error: turn-end path $R_TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash); no cold launch was attempted" >&2
+        exit 1
+      }
+    fi
+    if ! cs_herdr_agent_start "$R_PANE" "$ID" "$R_HARNESS" "$(cs_herdr_agent_start_timeout_ms "$LAUNCH_WAIT")" "${COLD_ARGV[@]}"; then
+      echo "error: no session was resumable for '$ID' and the cold launch brought up no agent within ${LAUNCH_WAIT}s; no replacement is running on pane $R_PANE and the work is preserved in $R_WT_REAL" >&2
       exit 1
     fi
     # Same stability requirement as the resume path: report a running agent only
@@ -626,6 +727,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
       echo "error: the cold launch of '$ID' started an agent that did not stay on pane $R_PANE; the worktree $R_WT_REAL is untouched" >&2
       exit 1
     fi
+    _cs_spawn_deliver_brief "$R_PANE" "$encoded_brief" ||
+      echo "warning: the cold launch of '$ID' started an agent on pane $R_PANE but its brief was never confirmed delivered within ${BRIEF_DELIVER_WAIT}s - steer it manually" >&2
   fi
 
   report_human_gate "$R_PANE" "$R_HARNESS" "$ID"
@@ -665,17 +768,35 @@ if [ "$KIND" = capo ]; then
     "harness=$HARNESS" \
     "home=$HOME_ABS"
 
-  sq_brief=$(shell_quote "$BRIEF")
-  sq_home=$(shell_quote "$HOME_ABS")
-  LAUNCH=$(cs_harness_capo_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_home")
-  cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
-  # `pane run` reports success even when a not-yet-ready shell swallowed the
-  # line, so a capo could be recorded as provisioned while its pane sits at a
-  # bare prompt forever. Require the agent to actually appear.
-  if ! cs_herdr_agent_wait_present "$PANE" "$LAUNCH_WAIT"; then
-    echo "error: capo $ID launched into $PANE but no agent appeared within ${LAUNCH_WAIT}s; the launch line was likely swallowed by a shell that was not ready. The home and its workspace are left intact - retry the spawn." >&2
+  encoded_brief=$("$SCRIPT_DIR/cs-operational-input.sh" encode launch-brief < "$BRIEF") || {
+    echo "error: could not encode the charter brief for capo $ID" >&2
+    exit 1
+  }
+  # Unconditional, every capo launch: clear any inherited override so the capo
+  # never picks up the ROOT session's overrides, then point CS_HOME at its own
+  # home. `agent start`'s trailing argv has no shell prefix-assignment support
+  # and neither it nor `worktree create` has an --env flag, so this must land
+  # via its own confirmed pane-shell export before the agent starts.
+  ENV_PREFIX="$(cs_harness_launch_env "$HARNESS")CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME=$(shell_quote "$HOME_ABS")"
+  if ! _cs_spawn_env_export_confirmed "$PANE" "$ENV_PREFIX"; then
+    echo "error: could not confirm capo $ID's launch environment landed on pane $PANE before starting the agent; the home and its workspace are left intact - retry the spawn" >&2
     exit 1
   fi
+  # A capo is a supervisor, not a supervised turn-taker: no turn-end wiring on
+  # either harness.
+  declare -a AGENT_ARGV=()
+  cs_harness_autonomy_argv AGENT_ARGV "$HARNESS" || { echo "error: unsupported harness '$HARNESS' for capo $ID" >&2; exit 1; }
+  # The colon is native-only identity syntax: it normalizes into Herdr's n
+  # namespace, keeping capo foo distinct from ship/scout task id capo-foo.
+  # Metadata, paths, and operator-facing IDs stay keyed by the raw capo ID;
+  # capo relaunch is refused, so this native-only delimiter does not alter any
+  # relaunch identity path.
+  if ! cs_herdr_agent_start "$PANE" "capo:$ID" "$HARNESS" "$(cs_herdr_agent_start_timeout_ms "$LAUNCH_WAIT")" "${AGENT_ARGV[@]}"; then
+    echo "error: capo $ID launched into $PANE but no agent appeared within ${LAUNCH_WAIT}s. The home and its workspace are left intact - retry the spawn." >&2
+    exit 1
+  fi
+  _cs_spawn_deliver_brief "$PANE" "$encoded_brief" ||
+    echo "warning: capo $ID's agent started but its charter brief was never confirmed delivered within ${BRIEF_DELIVER_WAIT}s on pane $PANE - steer it manually" >&2
   report_human_gate "$PANE" "$HARNESS" "capo $ID"
   # TELEMETRY, measurement only: attribute this turn to dispatch. A capo is a
   # supervisor, not a supervised turn-taker, so its launch carries no turn-end
@@ -820,7 +941,6 @@ META_LINES+=("harness=$HARNESS")
 cs_meta_write "$STATE/$ID.meta" "${META_LINES[@]}"
 
 sq_brief=$(shell_quote "$BRIEF")
-sq_turnend=$(shell_quote "$TURNEND")
 # TELEMETRY, measurement only. Resolved HERE, at spawn, so a soldier launched
 # while telemetry is off carries a byte-identical launch line and settings file:
 # with no command to add, every builder below produces exactly what it produced
@@ -841,18 +961,29 @@ if [ "$HEADLESS" -eq 1 ]; then
   # exec / claude -p); the launch line appends the terminal status event, so
   # completion surfaces through the watcher's ordinary signal path with no
   # special classification. No turn-end hook: process exit IS the turn end.
+  # A headless process has no composer or agent_status lifecycle, so it stays
+  # on the shell-string mechanism permanently; `agent start` does not apply.
   sq_status=$(shell_quote "$STATE/$ID.status")
   LAUNCH=$(cs_harness_scout_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_status")
+  cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
+  # No launch verification follows, deliberately. `pane run` hands the line to
+  # the pane's SHELL and reports success whether or not the shell was ready to
+  # read it, and a headless scout takes no pane agent, so herdr agent detection
+  # is not a valid signal for it; its swallowed-launch case is instead caught
+  # by the absence of the terminal done:/failed: status event its launch line
+  # appends, via the ordinary stale path - slower, but not silent.
 else
   # Interactive supervised soldier. codex wires turn-end inline via -c notify;
   # claude via a launch-scoped --settings Stop hook written per-soldier here
   # (claude resolves a repo .claude/settings.json to the main checkout, so a
   # worktree file would pollute the boss's project and not isolate the soldier).
-  sq_settings=''
+  SETTINGS_FILE=''
   if [ "$HARNESS" = claude ]; then
     SETTINGS_FILE="$STATE/$ID.claude-settings.json"
-    cs_harness_claude_settings_json "$TURNEND" "$TELEMETRY_HOOK" > "$SETTINGS_FILE"
-    sq_settings=$(shell_quote "$SETTINGS_FILE")
+    cs_harness_claude_settings_json "$TURNEND" "$TELEMETRY_HOOK" > "$SETTINGS_FILE" || {
+      rm -f "$SETTINGS_FILE"
+      abort_task "turn-end path $TURNEND cannot be embedded safely in claude's Stop hook command (it carries a quote or backslash)"
+    }
     # Interactive claude blocks at the folder-trust dialog for a fresh worktree;
     # pre-trust it so the unattended soldier can take its first turn.
     cs_harness_claude_trust_dir "$WT_REAL" || abort_task "could not pre-trust claude worktree $WT_REAL"
@@ -863,31 +994,43 @@ else
     cs_harness_codex_trust_dir "$WT_REAL" || abort_task "could not pre-trust codex worktree $WT_REAL"
   fi
   spawn_codegraph_prep "$PROJ_ABS" "$WT_REAL"
-  LAUNCH=$(cs_harness_soldier_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings" "$TELEMETRY_HOOK")
-fi
-cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
 
-# Verify the launch actually started something. `pane run` hands the line to the
-# pane's SHELL and reports success whether or not the shell was ready to read
-# it; a freshly created worktree pane frequently is not, and the line is then
-# lost with no way to recover it from the buffer. Without this check cs-spawn
-# prints "spawned", consigliere records the task as under way, and the pane sits
-# at a prompt until the stale timer eventually notices - a soldier that reported
-# success and never existed.
-#
-# Interactive soldiers are gated on agent detection. A HEADLESS scout is not: it
-# runs `codex exec` / `claude -p`, a plain process rather than an interactive
-# agent taking the pane, so herdr agent detection is not a valid signal for it.
-# Its swallowed-launch case is caught instead by the absence of the terminal
-# done:/failed: status event its launch line appends, via the ordinary stale
-# path - slower, but not silent. Gating headless properly needs a verified
-# process-level signal and is deliberately not guessed at here.
-if [ "$HEADLESS" -eq 0 ] && ! cs_herdr_agent_wait_present "$PANE" "$LAUNCH_WAIT"; then
-  abort_task "launched $ID into $PANE but no agent appeared within ${LAUNCH_WAIT}s; the launch line was likely swallowed by a shell that was not ready"
-fi
-# A headless scout takes no pane agent at all, so herdr's agent state says
-# nothing about it and the human-gate report does not apply.
-if [ "$HEADLESS" -eq 0 ]; then
+  encoded_brief=$("$SCRIPT_DIR/cs-operational-input.sh" encode launch-brief < "$BRIEF") || abort_task "could not encode the launch brief for $ID"
+
+  # CLAUDE_CONFIG_DIR under a work/personal account split, only when this home
+  # itself runs under one. `agent start`'s trailing argv has no shell
+  # prefix-assignment support and neither it nor `worktree create` has an
+  # --env flag, so this must land via its own confirmed pane-shell export
+  # before the agent starts - skipped entirely when there is nothing to export.
+  ENV_PREFIX=$(cs_harness_launch_env "$HARNESS")
+  if ! _cs_spawn_env_export_confirmed "$PANE" "$ENV_PREFIX"; then
+    abort_task "could not confirm $ID's launch environment landed on pane $PANE before starting the agent"
+  fi
+
+  declare -a AGENT_ARGV=()
+  cs_harness_autonomy_argv AGENT_ARGV "$HARNESS" || abort_task "unsupported harness '$HARNESS' for $ID"
+  if [ "$HARNESS" = claude ]; then
+    AGENT_ARGV+=(--settings "$SETTINGS_FILE")
+  elif [ "$HARNESS" = codex ]; then
+    cs_harness_codex_notify_argv AGENT_ARGV "$TURNEND" "$TELEMETRY_HOOK" ||
+      abort_task "turn-end path $TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash)"
+  fi
+
+  # Verify the launch actually started an agent. Native `agent start` waits
+  # for interactive_ready itself instead of the old cs_herdr_run + hand-rolled
+  # poll pair, and reports a distinct failure (agent_pane_not_found,
+  # agent_kind_mismatch, agent_not_ready, agent_start_failed) instead of a
+  # generic timeout. Without this check cs-spawn prints "spawned", consigliere
+  # records the task as under way, and the pane sits at a prompt until the
+  # stale timer eventually notices - a soldier that reported success and never
+  # existed. The brief carries no launch argument here (agent start's trailing
+  # argv cannot hold multi-line text - docs/herdr.md); it is delivered as a
+  # follow-up prompt just below.
+  if ! cs_herdr_agent_start "$PANE" "$ID" "$HARNESS" "$(cs_herdr_agent_start_timeout_ms "$LAUNCH_WAIT")" "${AGENT_ARGV[@]}"; then
+    abort_task "launched $ID into $PANE but no agent appeared within ${LAUNCH_WAIT}s"
+  fi
+  _cs_spawn_deliver_brief "$PANE" "$encoded_brief" ||
+    echo "warning: $ID's agent started but its brief was never confirmed delivered within ${BRIEF_DELIVER_WAIT}s on pane $PANE - steer it manually" >&2
   report_human_gate "$PANE" "$HARNESS" "$KIND $ID"
 fi
 

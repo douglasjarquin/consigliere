@@ -19,7 +19,9 @@
 # truncated tail may take, and the read-once contract precedes both.
 #
 # The digest always exits 0 and prints its context section even when the session
-# lock is refused, so these cases do not depend on acquiring a lock.
+# lock is refused, so these cases do not depend on acquiring a lock. The single
+# exception is bootstrap's fatal BASH_FLOOR blocker, pinned at the end of this
+# file: that one refuses the session with a non-zero exit.
 set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -636,5 +638,26 @@ assert_contains "$out" 'targeted follow-up that disclosure names' \
 assert_not_contains "$out" 'read config/backlog.md for the rest' \
   "a remainder line still advised the bulk read the contract forbids"
 pass "the read-once contract covers every disclosed backlog remainder without sanctioning a bulk read"
+
+# --- bootstrap's fatal BASH_FLOOR blocker refuses the whole session -----------
+# Every ordinary bootstrap problem stays a soft digest line; the bash floor is
+# the one session-fatal blocker (bin/cs-session-start.sh states why beside the
+# rc check). Driven end to end through a symlink-farm bin whose cs-deps-lib.sh
+# declares a floor no real bash meets, so the real bootstrap refusal and the
+# real session-start rc handling both fire.
+FLOORBIN="$TMP/floor-bin"
+mkdir -p "$FLOORBIN"
+for f in "$ROOT"/bin/*; do ln -s "$f" "$FLOORBIN/$(basename "$f")"; done
+rm "$FLOORBIN/cs-deps-lib.sh"
+sed 's/^BASH_FLOOR_MAJOR=.*/BASH_FLOOR_MAJOR=99/; s/^BASH_FLOOR_MINOR=.*/BASH_FLOOR_MINOR=9/' \
+  "$ROOT/bin/cs-deps-lib.sh" > "$FLOORBIN/cs-deps-lib.sh"
+HOME_DIR=$(fresh_home floor)
+rc=0
+out=$(CS_HOME="$HOME_DIR" "$FLOORBIN/cs-session-start.sh" 2>/dev/null) || rc=$?
+[ "$rc" -eq 78 ] || fail "a fatal BASH_FLOOR blocker must refuse the session with exit 78, got $rc"
+assert_contains "$out" 'BASH_FLOOR:' "the digest shows the blocker line"
+assert_contains "$out" 'SESSION START REFUSED' "the refusal is stated in the digest"
+assert_not_contains "$out" 'WAKE QUEUE' "no stage after the refusal may run"
+pass "session start refuses on the bash-floor blocker instead of proceeding"
 
 pass "cs-session-start digest composition"

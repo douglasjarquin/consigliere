@@ -57,10 +57,9 @@ case "${1:-}" in
     ;;
 esac
 
-# Stock macOS ships bash 3.2; every script in this repo stays compatible with it,
-# so that is the floor rather than whatever the developer's newer bash provides.
-BASH_FLOOR_MAJOR=3
-BASH_FLOOR_MINOR=2
+# The bash floor (BASH_FLOOR_MAJOR/MINOR) comes from bin/cs-deps-lib.sh,
+# sourced above: one owner for the same floor bin/cs-bootstrap.sh gates on,
+# with the nameref rationale recorded beside the constants there.
 
 PROBLEMS=0
 
