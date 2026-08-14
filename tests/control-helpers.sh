@@ -186,26 +186,6 @@ case "$1 $2" in
     case "$runs" in ''|*[!0-9]*) runs=0 ;; esac
     runs=$((runs + 1))
     printf '%s\n' "$runs" > "$S/runs"
-    bring_up=0
-    case "$(read_state on_run)" in
-      up) [ "$runs" -ge 1 ] && bring_up=1 ;;
-      second) [ "$runs" -ge 2 ] && bring_up=1 ;;
-    esac
-    if [ "$bring_up" = 1 ]; then
-      agent=$(read_state run_agent)
-      [ -n "$agent" ] || agent=codex
-      printf '%s\n' "$agent" > "$S/agent"
-      printf 'idle\n' > "$S/status"
-      newpid=$(read_state run_pid)
-      if [ -z "$newpid" ]; then
-        newpid=$(read_state pid)
-        case "$newpid" in ''|*[!0-9]*) newpid=4242 ;; esac
-        newpid=$((newpid + 1))
-      fi
-      printf '%s\n' "$newpid" > "$S/pid"
-      newsession=$(read_state run_session)
-      [ -n "$newsession" ] && printf '%s\n' "$newsession" > "$S/session"
-    fi
     echo '{}'
     ;;
   *) echo '{}' ;;

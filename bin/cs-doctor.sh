@@ -57,14 +57,9 @@ case "${1:-}" in
     ;;
 esac
 
-# The argv builders (bin/cs-harness-lib.sh) and cs_herdr (bin/cs-herdr-lib.sh)
-# use namerefs (`local -n`), a bash 4.3 feature, so 4.3 is the floor. Every
-# script here runs via `#!/usr/bin/env bash`, which resolves to a modern bash
-# in practice (5.3 on the maintainer's machine) - stock macOS /bin/bash 3.2
-# was never the interpreter, and the old 3.2 floor was aspirational rather
-# than observed.
-BASH_FLOOR_MAJOR=4
-BASH_FLOOR_MINOR=3
+# The bash floor (BASH_FLOOR_MAJOR/MINOR) comes from bin/cs-deps-lib.sh,
+# sourced above: one owner for the same floor bin/cs-bootstrap.sh gates on,
+# with the nameref rationale recorded beside the constants there.
 
 PROBLEMS=0
 

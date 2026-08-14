@@ -26,9 +26,11 @@
 #   TANGLE: ...                the primary checkout is on a named non-default
 #                              branch (cs-tangle-lib.sh owns classification);
 #                              resolve without touching unlanded work.
-#   BASH_FLOOR: ...            the running bash is below bin/cs-doctor.sh's
+#   BASH_FLOOR: ...            the running bash is below bin/cs-deps-lib.sh's
 #                              declared floor. This one REFUSES (exit 1)
-#                              instead of reporting and continuing: the
+#                              instead of reporting and continuing - the only
+#                              blocker that does - and bin/cs-session-start.sh
+#                              honours that exit by refusing the session: the
 #                              nameref argv builders fail OPEN below the
 #                              floor, so continuing would dispatch soldiers
 #                              with an empty autonomy argv.
@@ -86,15 +88,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # A pre-floor bash fails OPEN in the nameref argv builders (`local -n` errors,
 # the caller's array stays empty, rc stays 0), so a soldier would launch with
 # no autonomy flag and cs_herdr would drop --session from every call. Refuse
-# here, at the gate every home runs. bin/cs-doctor.sh owns the floor; it is
-# read rather than duplicated, the same way bin/cs-install-herdr.sh reads
-# CS_HERDR_MIN_PROTOCOL from its owner.
-BASH_FLOOR_MAJOR=$(awk -F= '/^BASH_FLOOR_MAJOR=/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "$SCRIPT_DIR/cs-doctor.sh")
-BASH_FLOOR_MINOR=$(awk -F= '/^BASH_FLOOR_MINOR=/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "$SCRIPT_DIR/cs-doctor.sh")
+# here, at the gate every home runs. bin/cs-deps-lib.sh owns the floor, beside
+# the axi-family floors this gate and bin/cs-doctor.sh both read.
+# shellcheck source=bin/cs-deps-lib.sh
+. "$SCRIPT_DIR/cs-deps-lib.sh"
 case "${BASH_FLOOR_MAJOR:-}" in ''|*[!0-9]*) BASH_FLOOR_MAJOR= ;; esac
 case "${BASH_FLOOR_MINOR:-}" in ''|*[!0-9]*) BASH_FLOOR_MINOR= ;; esac
 if [ -z "$BASH_FLOOR_MAJOR" ] || [ -z "$BASH_FLOOR_MINOR" ]; then
-  printf 'BASH_FLOOR: could not read BASH_FLOOR_MAJOR/BASH_FLOOR_MINOR from bin/cs-doctor.sh; refusing to run on an unverified interpreter.\n' >&2
+  printf 'BASH_FLOOR: bin/cs-deps-lib.sh did not provide BASH_FLOOR_MAJOR/BASH_FLOOR_MINOR; refusing to run on an unverified interpreter.\n' >&2
   exit 1
 fi
 if [ "${BASH_VERSINFO[0]}" -lt "$BASH_FLOOR_MAJOR" ] ||

@@ -926,11 +926,11 @@ if [ "$HEADLESS" -eq 1 ]; then
   sq_status=$(shell_quote "$STATE/$ID.status")
   LAUNCH=$(cs_harness_scout_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_status")
   cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
-  # Verify the launch actually started something. `pane run` hands the line to
+  # No launch verification follows, deliberately. `pane run` hands the line to
   # the pane's SHELL and reports success whether or not the shell was ready to
-  # read it. A headless scout takes no pane agent, so herdr agent detection is
-  # not a valid signal for it; its swallowed-launch case is instead caught by
-  # the absence of the terminal done:/failed: status event its launch line
+  # read it, and a headless scout takes no pane agent, so herdr agent detection
+  # is not a valid signal for it; its swallowed-launch case is instead caught
+  # by the absence of the terminal done:/failed: status event its launch line
   # appends, via the ordinary stale path - slower, but not silent.
 else
   # Interactive supervised soldier. codex wires turn-end inline via -c notify;
