@@ -60,3 +60,7 @@ CS_FAKE_WAIT_FAIL=1 cs_herdr_pane_run_confirmed w1:p1 ':' 1000 \
   && fail "an unmatched wait-output must fail the confirmation, not swallow it"
 
 pass "pane_run_confirmed's marker is producible only by executing the typed line"
+
+[ "$(cs_herdr_agent_start_timeout_ms 08)" = 8000 ] ||
+  fail "agent start timeout seconds with a leading zero must be decimal 8000ms"
+pass "agent start timeout treats leading-zero seconds as decimal"

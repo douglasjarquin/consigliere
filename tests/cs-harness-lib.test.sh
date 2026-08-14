@@ -238,6 +238,11 @@ bad=$'tmp/state\nbad/t.turn-ended'
 json=$(cs_harness_claude_settings_json "$bad" 2>/dev/null) \
   && fail "a newline-bearing turn-end path must be refused, not emitted malformed"
 [ -z "$json" ] || fail "a newline-bearing path must emit nothing"
+for bad_telemetry in 'quo"te' 'back\\slash' $'printf ok\nbad'; do
+  json=$(cs_harness_claude_settings_json /tmp/t.turn-ended "$bad_telemetry" 2>/dev/null) \
+    && fail "telemetry carrying $bad_telemetry must be refused, not emitted malformed"
+  [ -z "$json" ] || fail "refused telemetry must emit nothing"
+done
 pass "the claude settings json quotes the turn-end path for the hook shell and fails closed on unsafe characters"
 
 # --- claude folder trust pre-seed -------------------------------------------

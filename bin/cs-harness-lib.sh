@@ -247,6 +247,11 @@ cs_harness_claude_settings_json() {
     *'"'*|*\\*|*[[:cntrl:]]*) return 1 ;;
   esac
   if [ -n "$telemetry" ]; then
+    case "$telemetry" in
+      *'"'*|*\\*|*[[:cntrl:]]*) return 1 ;;
+    esac
+  fi
+  if [ -n "$telemetry" ]; then
     printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"%s"},{"type":"command","command":"%s"}]}]}}\n' \
       "$touch_cmd" "$telemetry"
     return 0
