@@ -1,0 +1,66 @@
+
+=== primary checkout: build its codegraph index (what a real project has) ===
+  ┌  Initializing CodeGraph
+  │
+  ◆  Initialized in /var/folders/5j/n805d0vn43g2bjt7ykqmyxmm0000gn/T/cg-e2e.1GFBfK/proj
+  │
+  Scanning files...
+  Parsing code...
+  Resolving refs...
+  Linking dynamic dispatch...
+  │
+  ◆  Indexed 2 files
+  │
+  ●  7 nodes, 9 edges in 117ms
+  │
+  └  Done
+  
+  primary index file: /var/folders/5j/n805d0vn43g2bjt7ykqmyxmm0000gn/T//cg-e2e.1GFBfK/proj/.codegraph/codegraph.db
+
+=== BASELINE: plain `git worktree add` - the problem this feature exists for ===
+  worktree has NO .codegraph at all - the soldier's first turn is index-less
+  a query from that worktree:
+    ✗ CodeGraph not initialized in /private/var/folders/5j/n805d0vn43g2bjt7ykqmyxmm0000gn/T/cg-e2e.1GFBfK/wt-baseline
+
+=== SPAWN: bin/cs-spawn.sh t-index <project> --mode made (real codegraph on PATH) ===
+  notice: built codegraph index in /private/var/folders/5j/n805d0vn43g2bjt7ykqmyxmm0000gn/T/cg-e2e.1GFBfK/wt-t-index
+  spawned t-index kind=ship mode=made yolo=off workspace=w1 pane=w1:p1 worktree=/private/var/folders/5j/n805d0vn43g2bjt7ykqmyxmm0000gn/T/cg-e2e.1GFBfK/wt-t-index
+
+=== the spawned worktree, right after the spawn ===
+  .
+  ..
+  .gitignore
+  codegraph.db
+  
+  CodeGraph Status
+  
+  Project: /private/var/folders/5j/n805d0vn43g2bjt7ykqmyxmm0000gn/T/cg-e2e.1GFBfK/wt-t-index
+  
+  Index Statistics:
+    Files:     2
+    Nodes:     7
+    Edges:     9
+    DB Size:   0.15 MB
+    Backend:   node:sqlite — built-in (full WAL)
+    Journal:   wal
+
+=== the soldier's first turn can query its own worktree index ===
+  
+  Callers of "compute_total" (3):
+  
+  function    checkout
+    orders.py:9
+  
+  function    daily_report
+    report.py:4
+  
+  file        report.py
+    report.py:1
+  
+
+=== KILL SWITCH: CS_SPAWN_CODEGRAPH_PREP=off ===
+  spawned t-off kind=ship mode=made yolo=off workspace=w1 pane=w1:p1 worktree=/private/var/folders/5j/n805d0vn43g2bjt7ykqmyxmm0000gn/T/cg-e2e.1GFBfK/wt-t-off
+  worktree has no .codegraph - prep did not run, spawn still completed
+  launch line delivered to the pane: codex --dangerously-bypass-approvals-and-sandbox -c "notify=[\"bash\",\"-c\",\"touch '/var/folders/5j/n805d0vn43g2bjt7yk
+
+=== DONE ===
