@@ -124,7 +124,8 @@ cs_test_cleanup() {
     case "$leaf" in
       */*|.|..) continue ;;
     esac
-    rm -rf "$d"
+    rm -rf "$d" 2>/dev/null ||
+      { chmod -R u+rwX "$d" 2>/dev/null; rm -rf "$d" 2>/dev/null; } || true
   done < "$CS_TEST_REGISTRY"
   rm -f "$CS_TEST_REGISTRY"
 }

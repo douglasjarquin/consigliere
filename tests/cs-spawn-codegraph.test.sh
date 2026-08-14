@@ -45,10 +45,17 @@ case "${1:-} ${2:-}" in
     else
       git -C "$repo" worktree add -q -b "$branch" "$CS_FAKE_SPAWN_WORKTREE"
     fi
-    if [ -n "${CS_FAKE_SPAWN_SEED_INDEX:-}" ]; then
-      mkdir -p "$CS_FAKE_SPAWN_WORKTREE/.codegraph"
-      printf 'seeded-db\n' > "$CS_FAKE_SPAWN_WORKTREE/.codegraph/codegraph.db"
-    fi
+    case "${CS_FAKE_SPAWN_SEED_INDEX:-}" in
+      '') ;;
+      lock)
+        mkdir -p "$CS_FAKE_SPAWN_WORKTREE/.codegraph"
+        printf 'interrupted\n' > "$CS_FAKE_SPAWN_WORKTREE/.codegraph/codegraph.lock"
+        ;;
+      *)
+        mkdir -p "$CS_FAKE_SPAWN_WORKTREE/.codegraph"
+        printf 'seeded-db\n' > "$CS_FAKE_SPAWN_WORKTREE/.codegraph/codegraph.db"
+        ;;
+    esac
     printf '{"result":{"workspace":{"workspace_id":"w1"},"root_pane":{"pane_id":"w1:p1"},"worktree":{"path":"%s","branch":"%s"}}}\n' "$CS_FAKE_SPAWN_WORKTREE" "$branch"
     ;;
   "pane run") printf '%s' "${4:-}" > "$CS_FAKE_SPAWN_LAUNCH" ;;
@@ -70,6 +77,9 @@ SH
 # write-denied directory, the portable stand-in for a detached codegraph
 # worker still writing while the cleanup walks the tree), so the cleanup's own
 # failure is exercised rather than assumed.
+# It also short-circuits on an existing .codegraph the way real init does -
+# "Already initialized", exit 0, nothing rebuilt - which is what makes a
+# leftover from an earlier run dangerous rather than self-healing.
 make_fake_codegraph() {
   cat > "$1/codegraph" <<'SH'
 #!/usr/bin/env bash
@@ -82,6 +92,11 @@ log=${CS_FAKE_CODEGRAPH_LOG:-/dev/null}
 } >> "$log"
 target=
 [ "${1:-}" = init ] && target=${2:-}
+rc=${CS_FAKE_CODEGRAPH_EXIT:-0}
+if [ -n "$target" ] && [ "$rc" = 0 ] && [ -e "$target/.codegraph" ]; then
+  printf 'Already initialized\n'
+  exit 0
+fi
 if [ -n "$target" ]; then
   mkdir -p "$target/.codegraph"
   printf 'indexing\n' > "$target/.codegraph/codegraph.lock"
@@ -92,7 +107,6 @@ if [ -n "$target" ]; then
   fi
 fi
 [ -n "${CS_FAKE_CODEGRAPH_SLEEP:-}" ] && sleep "$CS_FAKE_CODEGRAPH_SLEEP"
-rc=${CS_FAKE_CODEGRAPH_EXIT:-0}
 if [ "$rc" = 0 ] && [ -n "$target" ]; then
   rm -f "$target/.codegraph/codegraph.lock"
   printf 'built-db\n' > "$target/.codegraph/codegraph.db"
@@ -273,18 +287,34 @@ else
   REPO11=$(codegraph_repo case11 yes yes)
   LOG11="$TMP/codegraph-case11.log"
   out=$(spawn_case t-case11 "$REPO11" "$LOG11" "$FAKEBIN:$PATH" \
-    CS_FAKE_CODEGRAPH_EXIT=3 CS_FAKE_CODEGRAPH_WEDGE=1) ||
+    CS_FAKE_CODEGRAPH_EXIT=3 CS_FAKE_CODEGRAPH_WEDGE=1)
+  rc11=$?
+  WT11_REAL=$(cd "$TMP/wt-t-case11" 2>/dev/null && pwd -P) || WT11_REAL="$TMP/wt-t-case11"
+  chmod 700 "$WT11_REAL/.codegraph/wedged" 2>/dev/null || true
+  [ "$rc11" = 0 ] ||
     fail "a spawn whose half-written index cannot be removed must still succeed: $out"
-  WT11_REAL=$(cd "$TMP/wt-t-case11" && pwd -P)
   assert_present "$HOME_DIR/state/t-case11.meta" "the spawn must complete even when the cleanup cannot"
   assert_present "$TMP/launch-t-case11" "the launch line must still be delivered to the task pane"
   [ -e "$WT11_REAL/.codegraph" ] ||
     fail "fixture bug: this case only means anything while the leftover survives the cleanup"
   assert_contains "$out" "could not be removed" \
     "a leftover the cleanup could not take must be named, not reported as a clean worktree"
-  chmod 700 "$WT11_REAL/.codegraph/wedged"
   pass "cs-spawn codegraph prep: a cleanup that cannot finish is reported, never fatal"
 fi
+
+# --- 12. an interrupted index from an earlier run is rebuilt, not adopted ----
+
+REPO12=$(codegraph_repo case12 yes yes)
+LOG12="$TMP/codegraph-case12.log"
+out=$(spawn_case t-case12 "$REPO12" "$LOG12" "$FAKEBIN:$PATH" CS_FAKE_SPAWN_SEED_INDEX=lock) ||
+  fail "a spawn over a worktree carrying an interrupted index must succeed: $out"
+WT12_REAL=$(cd "$TMP/wt-t-case12" && pwd -P)
+[ -f "$WT12_REAL/.codegraph/codegraph.db" ] ||
+  fail "a lock-only leftover must be rebuilt into a real index, not adopted as one"
+[ -e "$WT12_REAL/.codegraph/codegraph.lock" ] &&
+  fail "the interrupted run's lock must not survive the rebuild"
+assert_contains "$out" "built codegraph index" "the rebuild must be reported as the build it actually was"
+pass "cs-spawn codegraph prep: an interrupted index from an earlier run is rebuilt, never adopted"
 
 # --- 9. a failed prep never destroys an index the worktree already had ------
 

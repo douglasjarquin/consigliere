@@ -49,6 +49,11 @@ A later `codegraph init` at that path prints "Already initialized" and repairs n
 Fail-open then means no index rather than a broken one, and the next prep run - a relaunch - rebuilds from scratch.
 An index the worktree already carried is never removed on failure: that one came from a completed earlier run, and the warning says so instead of claiming the worktree has no index.
 
+The same judgement runs BEFORE `codegraph init` as well, and that is what actually makes the invariant hold.
+An existing `<worktree>/.codegraph` counts as an index only when it holds a `codegraph.db` and no `codegraph.lock`; anything else is removed first, so init rebuilds instead of short-circuiting.
+Without that pre-clean, a leftover the previous cleanup could not remove would be adopted forever: the next prep run would see the directory, `codegraph init` would answer "Already initialized" with exit 0, the failure-path cleanup (gated on a non-zero exit) would never run, and the operator would be told an index was built over a locked, truncated one.
+When the pre-clean itself cannot remove the leftover, the prep says so rather than claiming a build.
+
 The removal itself is best-effort, and deliberately so: `bin/cs-spawn.sh` runs under `set -eu`, the prep step sits after the worktree exists and before the launch line is delivered, so a removal that exited non-zero would abort the whole spawn.
 That is not hypothetical - codegraph runs work outside the launching process group (a `codegraph ... serve --mcp` process observed on this machine with PPID 1 and its own PGID), so the timeout's group kill does not necessarily stop everything writing under `<worktree>/.codegraph`, and a removal walking a tree that is still being written can fail.
 When the leftover survives, the warning names it (`a half-written codegraph index remains at ...`) instead of claiming a clean worktree.

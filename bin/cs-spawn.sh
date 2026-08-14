@@ -435,8 +435,13 @@ shell_quote() {
 # can rebuild - while an index the worktree already had survives untouched.
 # That removal is best-effort and reported, never fatal: a spawn is already
 # holding a created worktree by this point, so nothing here may abort it.
+# Because it can fail, a leftover can outlive it, so the SAME judgement runs
+# before init too: an existing .codegraph counts as an index only with a
+# codegraph.db and no codegraph.lock, and anything else is removed first, since
+# init short-circuits on "Already initialized" and would otherwise report a
+# build it never did over a locked, truncated index.
 spawn_codegraph_prep() {  # <project-abs> <worktree-real>
-  local proj_abs=$1 wt_real=$2 timeout out rc had_index aftermath
+  local proj_abs=$1 wt_real=$2 timeout out rc had_index stale aftermath
   [ "${CS_SPAWN_CODEGRAPH_PREP:-}" = off ] && return 0
   command -v codegraph >/dev/null 2>&1 || return 0
   [ -n "$proj_abs" ] && [ -f "$proj_abs/.codegraph/codegraph.db" ] || return 0
@@ -452,7 +457,15 @@ spawn_codegraph_prep() {  # <project-abs> <worktree-real>
   timeout=${CS_SPAWN_CODEGRAPH_TIMEOUT_SECS:-10}
   case "$timeout" in ''|*[!0-9]*|0) timeout=10 ;; esac
   had_index=no
-  [ -e "$wt_real/.codegraph" ] && had_index=yes
+  stale=no
+  if [ -e "$wt_real/.codegraph" ]; then
+    if [ -f "$wt_real/.codegraph/codegraph.db" ] && [ ! -e "$wt_real/.codegraph/codegraph.lock" ]; then
+      had_index=yes
+    else
+      rm -rf "${wt_real:?}/.codegraph" 2>/dev/null || true
+      [ -e "$wt_real/.codegraph" ] && stale=yes
+    fi
+  fi
   out=$(cs_run_timed "$timeout" codegraph init "$wt_real" 2>&1) && rc=0 || rc=$?
   aftermath='the worktree has no codegraph index'
   if [ "$rc" != 0 ] && [ "$had_index" = no ]; then
@@ -463,7 +476,13 @@ spawn_codegraph_prep() {  # <project-abs> <worktree-real>
     aftermath="the worktree keeps the codegraph index it already had"
   fi
   case "$rc" in
-    0) echo "notice: built codegraph index in $wt_real" >&2 ;;
+    0)
+      if [ "$stale" = yes ]; then
+        echo "warn: an unusable codegraph index at $wt_real/.codegraph could not be removed, so codegraph init had nothing to rebuild" >&2
+      else
+        echo "notice: built codegraph index in $wt_real" >&2
+      fi
+      ;;
     124) echo "warn: codegraph init did not finish within ${timeout}s in $wt_real; $aftermath" >&2 ;;
     "$CS_TIMEOUT_UNAVAILABLE") echo "warn: could not run codegraph init under a time bound; skipping codegraph index prep in $wt_real" >&2 ;;
     *) echo "warn: codegraph init exited $rc in $wt_real; $aftermath (output: ${out//$'\n'/ })" >&2 ;;
