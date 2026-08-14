@@ -73,7 +73,8 @@ A real nested claude agent (`herdr agent start ... --kind claude`) produced thre
 The first two both happened in the FIRST lab, the only one with `bin/cs-herdr-events.py` attached, and each arrived as the ordinary `status\t<pane>\t<ws>\tblocked\tclaude` projected line, decoded identically to the pre-filter unfiltered stream.
 The third happened in the SECOND lab, which had no reader attached and was observed only through direct `agent get`/`pane read` polling, so it independently corroborates the manifest match rather than re-proving push delivery.
 That single reader lab attached one blocked-only filter, and `@subscribed` plus exactly one such line was the reader's full captured output for each of its two transitions.
-The pane being IDLE at subscribe time is INFERRED from that capture rather than observed: no Evidence 1 observation recorded the pane's status at subscribe time, and Evidence 2's initial-event rule means a non-idle pane matching the filter would have produced an extra line.
+What that capture supports is INFERRED, not observed: no Evidence 1 observation recorded the pane's status at subscribe time, and Evidence 2's initial-event rule fires only for a pane already matching the subscription's own filter.
+With a blocked-only filter, the absence of an extra line therefore rules out exactly one thing - the pane was NOT already blocked at subscribe time - and says nothing about whether it was working, done, or unknown.
 So the single-line capture is a property of the pane's state at subscribe time, not a general rule.
 The poll-path fallback is unchanged and stays the permanent backstop (`cs-watch.sh`'s poll pass reads `pane_busy_state` every cycle regardless of push capability) - this verification only closes the "does the filter actually deliver" open item, per data/stow-synthesis-survey/report.md S2.
 
@@ -160,6 +161,17 @@ $ herdr pane get w1:p1 --session cs-lab-ctlcodex
 - Multi-pane push (`events.subscribe` -> `pane.agent_status_changed`) is socket-only; no CLI subcommand.
 - `bin/cs-herdr-events.py` is the raw AF_UNIX subscriber (ported from firstmate's herdr-eventwait.py); the watcher splices it in when the socket is capable and keeps the poll loop as the permanent backstop.
 - `pane.agent_status_changed` accepts an optional `agent_status` filter in the subscription request itself (`src/api/schema/events.rs`, herdr source, verified 2026-08-12) - a supervisor can subscribe to blocked-only (or any single-status) transitions per pane instead of receiving and locally triaging every transition. **Adopted 2026-08-13**: `bin/cs-herdr-events.py` subscribes twice per pane, `agent_status:blocked` (wake) and `agent_status:working` (dedupe-marker clear), dropping only `idle`/`done`; see "Blocked detection covers claude/codex permission prompts natively" above for the live end-to-end verification.
+
+### Which subscription kinds are pane-scoped (SOURCE-VERIFIED 2026-08-13, herdr 0.8.0 source, NOT live-probed)
+
+Only two of the four kinds `bin/cs-herdr-events.py` subscribes are actually per-pane.
+`PaneAgentStatusChanged` and `PaneOutputMatched` declare a `pane_id` field in the subscription schema (`src/api/schema/events.rs`, herdr source), and the status kind resolves to a pane-bound active subscription that probes that pane.
+`PaneExited {}` and `PaneAgentDetected {}` declare NO fields at all, and `ActiveSubscription::new` turns each into a bare event subscription keyed only by event kind (`src/api/subscriptions.rs`, herdr source), so its poll returns every hub event of that kind regardless of pane.
+The subscription enum is `#[serde(tag = "type")]` without `deny_unknown_fields`, so the `pane_id` this reader sends alongside those two kinds is accepted and silently discarded rather than rejected - those subscriptions are session-global.
+This was established by reading the herdr source only; no live probe of cross-pane delivery was run, so it is recorded as source-verified rather than live-verified.
+
+Known gap that follows from it: `bin/cs-watch.sh`'s drain loop does not check an incoming event's pane against the panes this home is watching, so an unrelated pane exiting elsewhere in a shared herdr session can surface as an actionable wake.
+That is pre-existing behavior, independent of the `agent_status` filter change, and is tracked as separate follow-up work rather than fixed here.
 
 ## Known gaps / watch list
 

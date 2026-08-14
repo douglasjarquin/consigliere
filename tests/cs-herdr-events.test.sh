@@ -14,6 +14,15 @@
 # cs-herdr-events.py sends, so a regression that silently drops either filter
 # (or widens back to every edge) fails here instead of only in a live lab.
 #
+# Scope limit, so nothing here is read as more than it proves: only
+# `pane.agent_status_changed` and `pane.output_matched` actually declare
+# `pane_id` in herdr's subscription schema. `pane.exited` and
+# `pane.agent_detected` declare NO fields, so the `pane_id` the reader sends
+# alongside them is accepted and silently ignored and those subscriptions are
+# session-global (docs/herdr.md, "Which subscription kinds are pane-scoped").
+# The assertions below therefore pin only the count and the absence of an
+# `agent_status` filter for those two kinds, never pane scoping.
+#
 # tests/cs-watch-triage.test.sh separately covers cs_watch_wait_transition's
 # BASH-side decode of whatever the reader prints; that suite fakes the reader
 # entirely and never touches the real subscribe payload, so the two suites do
@@ -119,17 +128,18 @@ test_status_subscription_is_filtered_to_blocked() {
   ' >/dev/null || fail "status subscriptions must be exactly blocked + working: $req"
 
   # pane.exited and pane.agent_detected stay unfiltered - only the status kind
-  # narrows, never the other two kinds this reader also relies on.
+  # narrows, never the other two kinds this reader also relies on. Their
+  # pane_id is ignored by the server, so it is deliberately not asserted.
   printf '%s' "$req" | jq -e '
     .params.subscriptions
-    | map(select(.type == "pane.exited" and .pane_id == "w1:p1" and (has("agent_status") | not)))
+    | map(select(.type == "pane.exited" and (has("agent_status") | not)))
     | length == 1
-  ' >/dev/null || fail "pane.exited subscription changed shape: $req"
+  ' >/dev/null || fail "pane.exited must be requested exactly once and unfiltered: $req"
   printf '%s' "$req" | jq -e '
     .params.subscriptions
-    | map(select(.type == "pane.agent_detected" and .pane_id == "w1:p1" and (has("agent_status") | not)))
+    | map(select(.type == "pane.agent_detected" and (has("agent_status") | not)))
     | length == 1
-  ' >/dev/null || fail "pane.agent_detected subscription changed shape: $req"
+  ' >/dev/null || fail "pane.agent_detected must be requested exactly once and unfiltered: $req"
 
   # A filtered event the server actually sends still decodes exactly like the
   # old unfiltered stream did - the filters narrow the WIRE, not the projected

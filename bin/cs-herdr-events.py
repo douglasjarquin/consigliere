@@ -9,7 +9,9 @@ one projected line per event to stdout, flushing each so the bash caller can
 react sub-second. The bash side normalizes each line, applies the single-owner
 policy table (bin/cs-watch.sh), decides when to stop, and kills this reader.
 
-Subscribed kinds, all per pane:
+Subscribed kinds, one request each per pane (only the two kinds carrying a
+`pane_id` in herdr's schema are actually pane-scoped server-side; see
+docs/herdr.md, "Which subscription kinds are pane-scoped"):
   pane.agent_status_changed  subscribed TWICE, each filtered server-side: once
                              to agent_status=blocked and once to
                              agent_status=working. `blocked` is the wake edge
