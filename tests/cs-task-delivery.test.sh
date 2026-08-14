@@ -47,7 +47,7 @@ mkdir -p "$DATA" "$STATE" "$HOME_DIR/config"
 printf 'manual\n' > "$HOME_DIR/config/backlog-backend.conf"   # deterministic offline listing
 export CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$DATA" CS_STATE_OVERRIDE="$STATE"
 
-# `strict` is registered no-mistakes (the most rigor), `relaxed` local-only (the
+# `strict` is registered made (the most rigor), `relaxed` local-only (the
 # least). `unregistered` deliberately has no entry, which is the consigliere repo's
 # own situation: no standing posture to deviate from, and nothing to warn about.
 cat > "$HOME_DIR/config/projects.md" <<'EOF'
@@ -125,7 +125,7 @@ refuse() {
 
 refuse "ship brief with no --mode" "$BRIEF_BIN" b-nomode strict
 assert_contains "$OUT" "--mode" "the missing-mode refusal names the flag"
-assert_contains "$OUT" "no-mistakes|direct-PR|local-only" "the refusal names the closed set"
+assert_contains "$OUT" "made|direct-PR|local-only" "the refusal names the closed set"
 assert_absent "$DATA/b-nomode" "a refused scaffold leaves no task directory behind"
 
 refuse "ship brief with an out-of-set --mode" "$BRIEF_BIN" b-badmode strict --mode yolo-mode
@@ -135,9 +135,9 @@ pass "cs-brief.sh refuses a ship scaffold with a missing or out-of-set --mode"
 
 # --- 2. --mode is refused where there is no delivery mode to state ------------
 
-refuse "scout brief with --mode" "$BRIEF_BIN" b-scoutmode strict --scout --mode no-mistakes
+refuse "scout brief with --mode" "$BRIEF_BIN" b-scoutmode strict --scout --mode made
 assert_contains "$OUT" "applies only to ship briefs" "the scout refusal explains why"
-refuse "capo charter with --mode" "$BRIEF_BIN" b-capomode --capo strict --mode no-mistakes
+refuse "capo charter with --mode" "$BRIEF_BIN" b-capomode --capo strict --mode made
 assert_contains "$OUT" "applies only to ship briefs" "the capo refusal explains why"
 pass "cs-brief.sh refuses --mode on a scout or capo scaffold"
 
@@ -147,7 +147,7 @@ pass "cs-brief.sh refuses --mode on a scout or capo scaffold"
 # fell through to the positional collector and was silently ignored.
 for variant in "--yolo on" "--yolo=on"; do
   # shellcheck disable=SC2086  # deliberate word split: each variant is a flag form
-  refuse "ship brief with $variant" "$BRIEF_BIN" b-yolo strict --mode no-mistakes $variant
+  refuse "ship brief with $variant" "$BRIEF_BIN" b-yolo strict --mode made $variant
   assert_contains "$OUT" "not a brief flag" "the yolo refusal names the rule ($variant)"
 done
 refuse "scout brief with --yolo" "$BRIEF_BIN" b-yolo-scout strict --scout --yolo off
@@ -162,7 +162,7 @@ pass "cs-brief.sh refuses --yolo on every scaffold instead of ignoring it"
 # cross-check depends on these exact bytes surviving in both directions.
 [ "$CS_DELIVERY_CONTRACT_PREFIX" = 'Delivery contract: mode=' ] \
   || fail "the delivery-contract line prefix changed: '$CS_DELIVERY_CONTRACT_PREFIX'"
-for mode in no-mistakes direct-PR local-only; do
+for mode in made direct-PR local-only; do
   "$BRIEF_BIN" "c-$mode" strict --mode "$mode" >/dev/null || fail "ship scaffold ($mode) failed"
   B="$DATA/c-$mode/brief.md"
   assert_grep "Delivery contract: mode=$mode" "$B" "brief records the contract line ($mode)"
@@ -191,14 +191,14 @@ pass "scout and capo scaffolds carry no delivery contract at all"
 # --- 5. cs-spawn.sh requires an in-set --mode and --yolo on a ship spawn ------
 
 mkdir -p "$DATA/s-flags"
-cs_delivery_contract_line no-mistakes > "$DATA/s-flags/brief.md"
+cs_delivery_contract_line made > "$DATA/s-flags/brief.md"
 
 run_spawn s-flags "$REPO"
 [ "$RC" -ne 0 ] || fail "a ship spawn with no --mode must refuse"
 assert_contains "$OUT" "requires --mode" "the missing-mode refusal names the flag"
 assert_absent "$STATE/s-flags.meta" "a refused spawn publishes no metadata"
 
-run_spawn s-flags "$REPO" --mode no-mistakes
+run_spawn s-flags "$REPO" --mode made
 [ "$RC" -ne 0 ] || fail "a ship spawn with no --yolo must refuse"
 assert_contains "$OUT" "requires --yolo" "the missing-yolo refusal names the flag"
 
@@ -206,7 +206,7 @@ run_spawn s-flags "$REPO" --mode sometimes --yolo off
 [ "$RC" -ne 0 ] || fail "an out-of-set --mode must refuse"
 assert_contains "$OUT" "got 'sometimes'" "the invalid-mode refusal quotes the value"
 
-run_spawn s-flags "$REPO" --mode no-mistakes --yolo maybe
+run_spawn s-flags "$REPO" --mode made --yolo maybe
 [ "$RC" -ne 0 ] || fail "an out-of-set --yolo must refuse"
 assert_contains "$OUT" "got 'maybe'" "the invalid-yolo refusal quotes the value"
 
@@ -216,7 +216,7 @@ pass "cs-spawn.sh refuses a ship spawn with a missing or out-of-set --mode/--yol
 
 # --- 6. posture flags are refused for a scout or capo spawn ------------------
 
-run_spawn c-scout "$REPO" --scout --mode no-mistakes
+run_spawn c-scout "$REPO" --scout --mode made
 [ "$RC" -ne 0 ] || fail "--mode on a scout spawn must refuse"
 assert_contains "$OUT" "applies only to ship spawns" "the scout --mode refusal explains why"
 run_spawn c-scout "$REPO" --scout --yolo on
@@ -226,7 +226,7 @@ assert_contains "$OUT" "applies only to ship spawns" "the scout --yolo refusal e
 CAPO_HOME="$TMP/capo-home"
 mkdir -p "$CAPO_HOME"
 : > "$CAPO_HOME/.cs-capo-home"
-run_spawn c-capo "$CAPO_HOME" --capo --mode no-mistakes
+run_spawn c-capo "$CAPO_HOME" --capo --mode made
 [ "$RC" -ne 0 ] || fail "--mode on a capo spawn must refuse"
 assert_contains "$OUT" "applies only to ship spawns" "the capo --mode refusal explains why"
 run_spawn c-capo "$CAPO_HOME" --capo --yolo off
@@ -253,14 +253,14 @@ pass "a brief/spawn delivery-mode mismatch refuses before anything is created"
 # --- 8. a pre-contract ship brief warns once and launches on the flag --------
 mkdir -p "$DATA/s-legacy"
 printf 'implement the fixture\n' > "$DATA/s-legacy/brief.md"
-run_spawn s-legacy "$REPO" --mode no-mistakes --yolo off
+run_spawn s-legacy "$REPO" --mode made --yolo off
 [ "$RC" -eq 0 ] || fail "a pre-contract brief must launch, not refuse: $OUT"
 assert_contains "$OUT" "carries no 'Delivery contract: mode=<mode>' line" \
   "the compatibility path names what is missing"
-assert_contains "$OUT" "launching on --mode no-mistakes" "the warning names the mode it launched on"
+assert_contains "$OUT" "launching on --mode made" "the warning names the mode it launched on"
 [ "$(printf '%s\n' "$OUT" | grep -c "carries no 'Delivery contract")" = 1 ] \
   || fail "the pre-contract brief must warn exactly once"
-[ "$(cs_meta_get "$STATE/s-legacy.meta" mode)" = no-mistakes ] || fail "s-legacy meta mode"
+[ "$(cs_meta_get "$STATE/s-legacy.meta" mode)" = made ] || fail "s-legacy meta mode"
 [ "$(cs_meta_get "$STATE/s-legacy.meta" yolo)" = off ] || fail "s-legacy meta yolo"
 # Positive control for the "never reaches herdr worktree create" assertions above:
 # a spawn that DOES proceed records that call, so their absence means something.
@@ -268,11 +268,11 @@ assert_grep 'worktree create' "$CALLS" "a proceeding spawn records the worktree 
 pass "a ship brief scaffolded before the contract warns once and launches on the flag"
 
 # --- 9. a ship spawn records the stated posture; a scout records none --------
-run_spawn c-no-mistakes "$REPO" --mode no-mistakes --yolo on
+run_spawn c-made "$REPO" --mode made --yolo on
 [ "$RC" -eq 0 ] || fail "matched ship spawn failed: $OUT"
-assert_contains "$OUT" "kind=ship mode=no-mistakes yolo=on" "the spawn reports the recorded posture"
-[ "$(cs_meta_get "$STATE/c-no-mistakes.meta" mode)" = no-mistakes ] || fail "ship meta mode"
-[ "$(cs_meta_get "$STATE/c-no-mistakes.meta" yolo)" = on ] || fail "ship meta yolo"
+assert_contains "$OUT" "kind=ship mode=made yolo=on" "the spawn reports the recorded posture"
+[ "$(cs_meta_get "$STATE/c-made.meta" mode)" = made ] || fail "ship meta mode"
+[ "$(cs_meta_get "$STATE/c-made.meta" yolo)" = on ] || fail "ship meta yolo"
 
 run_spawn c-scout "$REPO" --scout
 [ "$RC" -eq 0 ] || fail "scout spawn failed: $OUT"
@@ -308,24 +308,24 @@ cs_git_init_commit "$RELAXED"
 UNREG="$TMP/unregistered"
 cs_git_init_commit "$UNREG"
 
-# strict is registered no-mistakes; shipping it local-only is less rigor.
+# strict is registered made; shipping it local-only is less rigor.
 "$BRIEF_BIN" d-down strict --mode local-only >/dev/null || fail "d-down scaffold failed"
 run_spawn d-down "$REPO" --mode local-only --yolo off
 [ "$RC" -eq 0 ] || fail "a downward deviation must continue, not refuse: $OUT"
 assert_contains "$OUT" "notice:" "a downward deviation prints a notice"
-assert_contains "$OUT" "standing registry posture is no-mistakes" "the notice names the standing posture"
+assert_contains "$OUT" "standing registry posture is made" "the notice names the standing posture"
 assert_contains "$OUT" "advisory" "the notice says the registry is advisory"
 
 # Same mode as the registry: nothing to report.
-"$BRIEF_BIN" d-same strict --mode no-mistakes >/dev/null || fail "d-same scaffold failed"
-run_spawn d-same "$REPO" --mode no-mistakes --yolo off
+"$BRIEF_BIN" d-same strict --mode made >/dev/null || fail "d-same scaffold failed"
+run_spawn d-same "$REPO" --mode made --yolo off
 [ "$RC" -eq 0 ] || fail "a matching mode must spawn: $OUT"
 assert_not_contains "$OUT" "notice:" "a mode matching the registry prints no notice"
 
-# relaxed is registered local-only; shipping it no-mistakes is MORE rigor, which
+# relaxed is registered local-only; shipping it made is MORE rigor, which
 # is never worth a notice.
-"$BRIEF_BIN" d-up relaxed --mode no-mistakes >/dev/null || fail "d-up scaffold failed"
-run_spawn d-up "$RELAXED" --mode no-mistakes --yolo off
+"$BRIEF_BIN" d-up relaxed --mode made >/dev/null || fail "d-up scaffold failed"
+run_spawn d-up "$RELAXED" --mode made --yolo off
 [ "$RC" -eq 0 ] || fail "an upward deviation must spawn: $OUT"
 assert_not_contains "$OUT" "notice:" "more rigor than the registry prints no notice"
 pass "a downward registry deviation is a notice and never blocks the spawn"

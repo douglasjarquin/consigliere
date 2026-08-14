@@ -16,10 +16,7 @@ projects/
 # Python bytecode caches (bin/cs-detach.py) — build artifacts, never tracked.
 __pycache__/
 
-# graft's local graph cache — regenerable, not committed (run `graft build`).
-# Left unanchored on purpose: graft's own ensureGitignored (dist/context/node-file.js:69-91)
-# matches only literal "graft/", so an anchored /graft/ self-reverts on the next
-# `graft build` at the repo root. The unanchored line also matches skills/graft/,
-# so the line below re-admits the committed skill.
-graft/
-!skills/graft/
+# codegraph's local index - a directory (or a symlink to a central per-user
+# store) holding the graph database; codegraph's own .gitignore inside it
+# only covers its own contents, never the project root.
+.codegraph

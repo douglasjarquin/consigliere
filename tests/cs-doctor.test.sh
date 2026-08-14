@@ -109,9 +109,9 @@ for tool in $(cs_deps_tools required) $(cs_deps_tools optional) claude \
 done
 pass 'every inventory tool has a purpose and an install suggestion'
 
-assert_contains "$(cs_deps_hint no-mistakes)" \
-  'https://github.com/kunchenguid/no-mistakes' \
-  'the no-mistakes install suggestion names its repository'
+assert_contains "$(cs_deps_hint made)" \
+  'https://github.com/douglasjarquin/made' \
+  'the made install suggestion names its repository'
 
 # --- the axi floors: doctor gates the builds session start would refuse -------
 #

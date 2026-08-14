@@ -39,7 +39,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# A no-mistakes gate agent must never start a fleet session for the home it is
+# A made gate agent must never start a fleet session for the home it is
 # validating; the primary-scope check below already excludes its linked gate
 # worktree, and the env marker is the cheap fail-closed first line.
 [ -z "${NO_MISTAKES_GATE:-}" ] || exit 0

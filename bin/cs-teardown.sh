@@ -45,8 +45,8 @@
 # steps run BEFORE the worktree is removed, its branch deleted, or the workspace
 # closed, both scoped to this exact task so they can never touch another task's
 # run or processes:
-#   1. Conclude a no-mistakes run parked at a gate that belongs to this task's
-#      exact branch AND current head (bin/cs-nm-run-lib.sh owns that attribution,
+#   1. Conclude a made run parked at a gate that belongs to this task's
+#      exact branch AND current head (bin/cs-made-run-lib.sh owns that attribution,
 #      the same contract cs-crew-state.sh uses). The run is aborted cd'd into the
 #      worktree so the daemon resolves it, and the abort is CONFIRMED by
 #      re-reading the run. Otherwise an orphaned run holds a fleet slot forever.
@@ -84,8 +84,10 @@ esac
 . "$SCRIPT_DIR/cs-meta-lib.sh"
 # shellcheck source=bin/cs-harness-lib.sh
 . "$SCRIPT_DIR/cs-harness-lib.sh"
-# shellcheck source=bin/cs-nm-run-lib.sh
-. "$SCRIPT_DIR/cs-nm-run-lib.sh"
+# shellcheck source=bin/cs-made-run-lib.sh
+. "$SCRIPT_DIR/cs-made-run-lib.sh"
+# shellcheck source=bin/cs-made-lib.sh
+. "$SCRIPT_DIR/cs-made-lib.sh"
 # shellcheck source=bin/cs-lock-lib.sh
 CS_LOCK_LOG_PREFIX="cs-teardown" . "$SCRIPT_DIR/cs-lock-lib.sh"
 
@@ -113,7 +115,7 @@ PROJ=$(cs_meta_get "$META" project || true)
 PANE=$(cs_meta_get "$META" pane || true)
 WS=$(cs_meta_get "$META" workspace || true)
 KIND=$(cs_meta_get "$META" kind || echo ship)
-MODE=$(cs_meta_get "$META" mode || echo no-mistakes)
+MODE=$(cs_meta_get "$META" mode || echo made)
 PR_URL=$(cs_meta_get "$META" pr || true)
 HOME_PATH=$(cs_meta_get "$META" home || true)
 HARNESS=$(cs_meta_get "$META" harness 2>/dev/null || true)
@@ -122,7 +124,7 @@ HARNESS=$(cs_meta_get "$META" harness 2>/dev/null || true)
 STALE_LOCK_MIN_AGE=${CS_TEARDOWN_STALE_LOCK_MIN_AGE:-30}
 TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED=3
 
-# Bounded timeout (seconds) for the pre-teardown no-mistakes run query.
+# Bounded timeout (seconds) for the pre-teardown made run query.
 NM_TIMEOUT=${CS_TEARDOWN_NM_TIMEOUT:-10}
 case "$NM_TIMEOUT" in ''|*[!0-9]*) NM_TIMEOUT=10 ;; esac
 NM_READ_ATTEMPTS=3
@@ -399,10 +401,10 @@ require_pane_gone() { # <what-is-being-retained>
 # herdr workspace is closed. Both are idempotent: a retried teardown after a
 # partial first attempt finds nothing left parked and no surviving process.
 
-# Conclude a no-mistakes run parked at a gate that belongs to this task's exact
+# Conclude a made run parked at a gate that belongs to this task's exact
 # branch AND current head. Teardown can otherwise remove a task whose pipeline
 # run is still parked at a post-CI approval gate, leaving an orphaned run holding
-# a fleet slot indefinitely. Attribution is bin/cs-nm-run-lib.sh's contract, the
+# a fleet slot indefinitely. Attribution is bin/cs-made-run-lib.sh's contract, the
 # same owner cs-crew-state.sh uses: a run on another branch, or on this branch at
 # a rewritten or diverged head, is never touched. The abort is issued cd'd into
 # the worktree so the daemon resolves the run itself (teardown never names a run
@@ -410,14 +412,14 @@ require_pane_gone() { # <what-is-being-retained>
 # non-zero only when a parked run is still parked after the abort.
 conclude_nm_run() {
   local branch current_branch status_out coarse_status attempt readable=0
-  CS_NM_CONCLUDE_FAILURE=""
-  [ "$MODE" = no-mistakes ] || return 0
+  CS_MADE_CONCLUDE_FAILURE=""
+  [ "$MODE" = made ] || return 0
   branch=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || return 0
   [ -n "$branch" ] || return 0
 
   status_out=""
   for ((attempt = 1; attempt <= NM_READ_ATTEMPTS; attempt++)); do
-    if status_out=$(cs_nm_axi_status_read "$WT" "$NM_TIMEOUT"); then
+    if status_out=$(cs_made_axi_status_read "$WT" "$NM_TIMEOUT"); then
       readable=1
       break
     fi
@@ -425,18 +427,18 @@ conclude_nm_run() {
     [ "$attempt" -lt "$NM_READ_ATTEMPTS" ] && sleep "$NM_READ_RETRY"
   done
   if [ "$readable" -eq 0 ]; then
-    CS_NM_CONCLUDE_FAILURE="could not verify that no orphaned no-mistakes run remains for this task because the daemon did not answer; retry once it responds"
+    CS_MADE_CONCLUDE_FAILURE="could not verify that no orphaned made run remains for this task because the daemon did not answer; retry once it responds"
     return 1
   fi
 
-  if cs_nm_status_is_attributed "$WT" "$branch" "$status_out"; then
-    cs_nm_run_is_gate_parked "$status_out" || return 0
+  if cs_made_status_is_attributed "$WT" "$branch" "$status_out"; then
+    cs_made_run_is_gate_parked "$status_out" || return 0
   else
-    if ! coarse_status=$(cs_nm_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT"); then
-      CS_NM_CONCLUDE_FAILURE="could not verify that no orphaned no-mistakes run remains for this task because the runs list did not answer; retry once it responds"
+    if ! coarse_status=$(cs_made_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT"); then
+      CS_MADE_CONCLUDE_FAILURE="could not verify that no orphaned made run remains for this task because the runs list did not answer; retry once it responds"
       return 1
     fi
-    if cs_nm_run_status_is_active "$coarse_status"; then
+    if cs_made_run_status_is_active "$coarse_status"; then
       :
     else
       return 0
@@ -444,39 +446,39 @@ conclude_nm_run() {
   fi
 
   current_branch=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || {
-    CS_NM_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this no-mistakes run; retry"
+    CS_MADE_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this made run; retry"
     return 1
   }
   if [ "$current_branch" != "$branch" ]; then
-    CS_NM_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this no-mistakes run; retry"
+    CS_MADE_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this made run; retry"
     return 1
   fi
-  if cs_nm_status_is_attributed "$WT" "$branch" "$status_out"; then
+  if cs_made_status_is_attributed "$WT" "$branch" "$status_out"; then
     :
-  elif cs_nm_run_status_is_active "$coarse_status"; then
-    if ! coarse_status=$(cs_nm_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT") \
-       || ! cs_nm_run_status_is_active "$coarse_status"; then
-      CS_NM_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this no-mistakes run; retry"
+  elif cs_made_run_status_is_active "$coarse_status"; then
+    if ! coarse_status=$(cs_made_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT") \
+       || ! cs_made_run_status_is_active "$coarse_status"; then
+      CS_MADE_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this made run; retry"
       return 1
     fi
   else
-    CS_NM_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this no-mistakes run; retry"
+    CS_MADE_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this made run; retry"
     return 1
   fi
 
-  echo "note: concluding this task's no-mistakes run parked at a gate before cleanup." >&2
-  ( cd "$WT" && no-mistakes axi abort ) >/dev/null 2>&1 || true
+  echo "note: concluding this task's made run parked at a gate before cleanup." >&2
+  cs_made_abort "$WT" >/dev/null 2>&1 || true
   local confirmation_readable=0 parked_seen=0
   for ((attempt = 1; attempt <= NM_READ_ATTEMPTS; attempt++)); do
-    if status_out=$(cs_nm_axi_status_read "$WT" "$NM_TIMEOUT"); then
+    if status_out=$(cs_made_axi_status_read "$WT" "$NM_TIMEOUT"); then
       confirmation_readable=1
-      if [ -n "$status_out" ] && cs_nm_status_is_attributed "$WT" "$branch" "$status_out"; then
-        if ! cs_nm_run_is_gate_parked "$status_out"; then
+      if [ -n "$status_out" ] && cs_made_status_is_attributed "$WT" "$branch" "$status_out"; then
+        if ! cs_made_run_is_gate_parked "$status_out"; then
           return 0
         fi
         parked_seen=1
-      elif [ -n "$status_out" ] && coarse_status=$(cs_nm_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT"); then
-        if ! cs_nm_run_status_is_active "$coarse_status"; then
+      elif [ -n "$status_out" ] && coarse_status=$(cs_made_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT"); then
+        if ! cs_made_run_status_is_active "$coarse_status"; then
           return 0
         fi
         parked_seen=1
@@ -485,11 +487,11 @@ conclude_nm_run() {
     [ "$attempt" -lt "$NM_READ_ATTEMPTS" ] && sleep "$NM_READ_RETRY"
   done
   if [ "$confirmation_readable" -eq 0 ]; then
-    CS_NM_CONCLUDE_FAILURE="abort was issued, but teardown could not confirm that this task's no-mistakes run stopped; retry after the daemon responds"
+    CS_MADE_CONCLUDE_FAILURE="abort was issued, but teardown could not confirm that this task's made run stopped; retry after the daemon responds"
   elif [ "$parked_seen" -eq 1 ]; then
-    CS_NM_CONCLUDE_FAILURE="this task's no-mistakes run is still parked at a gate after an abort attempt"
+    CS_MADE_CONCLUDE_FAILURE="this task's made run is still parked at a gate after an abort attempt"
   else
-    CS_NM_CONCLUDE_FAILURE="abort was issued, but teardown could not positively confirm that this task's no-mistakes run stopped; retry after the daemon responds"
+    CS_MADE_CONCLUDE_FAILURE="abort was issued, but teardown could not positively confirm that this task's made run stopped; retry after the daemon responds"
   fi
   return 1
 }
@@ -569,12 +571,12 @@ reap_leaked_processes() { # <root...>
 # under --force, where the boss's explicit discard authority downgrades the
 # refusal to a named warning, matching every other proof in this script.
 conclude_and_reap() {
-  # A scout never drives a no-mistakes run of its own; only conclude for ships.
+  # A scout never drives a made run of its own; only conclude for ships.
   if [ "$KIND" = ship ] && ! conclude_nm_run; then
     if [ "$FORCE" = "--force" ]; then
-      echo "WARNING: ${CS_NM_CONCLUDE_FAILURE:-no-mistakes run conclusion was not confirmed}; --force is proceeding. Check it by hand." >&2
+      echo "WARNING: ${CS_MADE_CONCLUDE_FAILURE:-made run conclusion was not confirmed}; --force is proceeding. Check it by hand." >&2
     else
-      echo "REFUSED: ${CS_NM_CONCLUDE_FAILURE:-no-mistakes run conclusion was not confirmed}." >&2
+      echo "REFUSED: ${CS_MADE_CONCLUDE_FAILURE:-made run conclusion was not confirmed}." >&2
       echo "Nothing was removed. Retry once the daemon responds, or get the boss's explicit OK to discard, then --force." >&2
       return 1
     fi
@@ -881,7 +883,7 @@ fi
 # the worktree, the branch, and every durable record intact for a plain rerun.
 require_pane_gone "task $ID's records" || exit 1
 
-# Conclude this task's parked no-mistakes run and reap any leaked task processes
+# Conclude this task's parked made run and reap any leaked task processes
 # BEFORE the worktree is removed, its branch deleted, or the workspace closed, so
 # a torn-down task can never strand an orphaned run holding a fleet slot or leave
 # descendants pinning CPU under a worktree that no longer exists.

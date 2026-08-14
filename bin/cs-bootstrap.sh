@@ -22,6 +22,8 @@
 #                              the same builds this dispatch gate does.
 #   HERDR_DOWN / HERDR_PROTOCOL:  the herdr server is unreachable or below the
 #                              minimum protocol (docs/herdr.md).
+#   MADE_DOWN                  the made daemon is unreachable; start it with
+#                              made daemon start before dispatching.
 #   NEEDS_GH_AUTH              gh is present but not authenticated.
 #   TANGLE: ...                the primary checkout is on a named non-default
 #                              branch (cs-tangle-lib.sh owns classification);
@@ -188,6 +190,24 @@ EOF
       elif [ "$proto" -lt "$CS_HERDR_MIN_PROTOCOL" ] 2>/dev/null; then
         printf 'HERDR_PROTOCOL: server protocol %s below required %s; update herdr (docs/herdr.md).\n' "$proto" "$CS_HERDR_MIN_PROTOCOL"
       fi
+    fi
+  fi
+
+  # --- made daemon health -------------------------------------------------
+  # Local: made's daemon is reached over a local unix socket (internal/api),
+  # so this probe never leaves the machine either.
+  if command -v made >/dev/null 2>&1; then
+    # shellcheck source=bin/cs-made-lib.sh
+    . "$SCRIPT_DIR/cs-made-lib.sh"
+    # `made status --json` fails BOTH when the daemon is unreachable and when
+    # the daemon is healthy but has run nothing yet ("no runs found") - unlike
+    # herdr's status probe above, a nonzero exit here is not on its own proof
+    # of an unreachable daemon. Grepping stderr for made's own
+    # "daemon not reachable" wording (cmd/made/status.go) tells the two apart.
+    # shellcheck disable=SC2119  # cs_made_status with no run-id means "latest"
+    made_err=$(cs_made_status 2>&1 >/dev/null) || true
+    if printf '%s' "$made_err" | grep -q 'daemon not reachable'; then
+      printf 'MADE_DOWN: cannot reach the made daemon; start it (made daemon start) before dispatching.\n'
     fi
   fi
 }

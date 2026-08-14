@@ -108,6 +108,16 @@ assert_contains "$out" "malformed capo registry entry" "validate names the malfo
 cp "$TMP/reg-restore" "$REG"
 pass "registry validate refuses a malformed row instead of skipping it"
 
+# 3c. a local-only project is refused for capo routing before any mutation -
+#     capo routes only make sense for a made or direct-PR project.
+cs_capo_fixture_project "$TMP" "$HOME_DIR" iota
+printf -- '- iota [local-only] - local fixture (added 2026-01-01)\n' >> "$HOME_DIR/config/projects.md"
+out=$("$BIN" iota-capo iota 2>&1) && fail "seeding a local-only project must refuse"
+assert_contains "$out" "capo routes support only made and direct-PR projects" \
+  "the local-only refusal names the supported modes"
+assert_absent "$TMP/capos/iota-capo" "a refused local-only seed creates no home"
+pass "cs-home-seed.sh refuses to route a local-only project to a capo"
+
 # 4. transactional rollback on a forced mid-seed failure (second project's
 #    origin dangles, so its clone fails AFTER the home worktree and the first
 #    project clone were created)
@@ -280,5 +290,102 @@ assert_contains "$out" "CAPO_SYNC: capo alpha-capo: skipped: unsafe host/ for ac
 rm "$CAPO/host"
 mv "$TMP/capo-host" "$CAPO/host"
 pass "sweep rejects a symlinked host directory"
+
+# 11. no-mistakes-mode project remote check now looks for `made`, not
+#     `no-mistakes` (Task 25: made gate init replaces no-mistakes as the
+#     per-project gate remote). Both cases stay inside initialize_no_mistakes_
+#     project's created=0 (preexisting clone) branch, so neither exercises the
+#     no-mistakes/made init-and-doctor call further down (Task 31's territory).
+cs_capo_fixture_project "$TMP" "$HOME_DIR" gamma
+printf -- '- gamma - gamma project (added 2026-01-01)\n' >> "$HOME_DIR/config/projects.md"
+GAMMA_ORIGIN=$(git -C "$HOME_DIR/projects/gamma" remote get-url origin)
+
+# 11a. a preexisting destination clone that already carries a `made` remote
+#      (as `made gate init` would have left behind) is recognized as already
+#      initialized: the seed succeeds and the made remote is left untouched.
+git clone -q "$GAMMA_ORIGIN" "$CAPO/projects/gamma"
+git -C "$CAPO/projects/gamma" remote add made "$TMP/gamma-made.git"
+out=$("$BIN" alpha-capo gamma 2>&1) || fail "seeding an already made-gated project must succeed: $out"
+[ "$(git -C "$CAPO/projects/gamma" remote get-url made)" = "$TMP/gamma-made.git" ] \
+  || fail "an existing made remote must survive re-seed untouched"
+git -C "$CAPO/projects/gamma" remote get-url no-mistakes >/dev/null 2>&1 \
+  && fail "a made-gated project must never grow a no-mistakes remote"
+pass "a preexisting made remote satisfies no-mistakes-mode initialization"
+
+# 11b. a preexisting clone carrying only a legacy `no-mistakes` remote (no
+#      `made` remote) is no longer considered initialized: the old remote
+#      name must not satisfy the check.
+rm -rf "$CAPO/projects/gamma"
+git clone -q "$GAMMA_ORIGIN" "$CAPO/projects/gamma"
+git -C "$CAPO/projects/gamma" remote add no-mistakes "$TMP/gamma-legacy.git"
+out=$("$BIN" alpha-capo gamma 2>&1) && fail "a legacy no-mistakes-only remote must no longer satisfy initialization"
+assert_contains "$out" "is not initialized for made; refusing to mutate preexisting clone" \
+  "the refusal must name the made remote, not no-mistakes"
+pass "a legacy no-mistakes remote no longer satisfies made-mode initialization"
+
+# 12. made absent: initializing a BRAND-NEW made-mode project (created=1)
+#     refuses cleanly. Test 11 only exercised created=0 (preexisting clone);
+#     this is the init-and-doctor call itself (Task 31's territory).
+cs_capo_fixture_project "$TMP" "$HOME_DIR" delta
+printf -- '- delta - delta project (added 2026-01-01)\n' >> "$HOME_DIR/config/projects.md"
+
+# A PATH stripped of any directory carrying a real `made` binary, so this
+# refusal is hermetic regardless of what happens to be installed on the
+# machine running the suite (a prepended fakebin can only add a stub; it
+# cannot guarantee an absence if a real `made` sits elsewhere on PATH).
+path_without_made() {
+  local IFS=: dir out=
+  for dir in $PATH; do
+    [ -x "$dir/made" ] && continue
+    out="$out:$dir"
+  done
+  printf '%s\n' "${out#:}"
+}
+NOMADE_PATH=$(path_without_made)
+
+out=$(PATH="$NOMADE_PATH" "$BIN" alpha-capo delta 2>&1) \
+  && fail "seeding a made-mode project without made on PATH must fail"
+assert_contains "$out" "error: made command not found; cannot initialize delta in $CAPO" \
+  "the missing-made refusal must name the project and the home"
+assert_absent "$CAPO/projects/delta" "rollback must remove the created project clone"
+pass "made absent: initializing a brand-new made-mode project refuses cleanly"
+
+# 13. made present: `made gate init && made doctor` runs through the shim
+#     (cs_made_gate_init / cs_made_doctor) from inside the project's own
+#     directory, and a success wires the made remote onto the fresh clone.
+FAKEBIN=$(cs_fakebin "$TMP")
+GATE_LOG="$TMP/made-gate.log"
+: > "$GATE_LOG"
+cat > "$FAKEBIN/made" <<SH
+#!/usr/bin/env bash
+printf '%s\t%s\n' "\$(pwd)" "\$*" >> "$GATE_LOG"
+case "\$1" in
+  gate) [ "\$2" = init ] && git remote add made "$TMP/delta-made.git" ;;
+  doctor) exit "\${MADE_DOCTOR_EXIT:-0}" ;;
+esac
+SH
+chmod +x "$FAKEBIN/made"
+out=$(PATH="$FAKEBIN:$PATH" "$BIN" alpha-capo delta 2>&1) \
+  || fail "seeding a made-mode project with made present must succeed: $out"
+[ "$(git -C "$CAPO/projects/delta" remote get-url made)" = "$TMP/delta-made.git" ] \
+  || fail "a successful made gate init must leave the made remote wired onto the clone"
+assert_contains "$(cat "$GATE_LOG")" "gate init" "cs_made_gate_init must run 'made gate init'"
+assert_contains "$(cat "$GATE_LOG")" 'doctor' "cs_made_doctor must run 'made doctor'"
+DELTA_ORIGIN=$(git -C "$CAPO/projects/delta" remote get-url origin)
+assert_contains "$(cat "$GATE_LOG")" "gate init $CAPO/projects/delta $DELTA_ORIGIN" \
+  "made gate init must receive the real target path and origin URL as positional args, not zero args"
+pass "made present: gate init and doctor wire the made remote through the shim"
+
+# 13a. a doctor failure (after a successful gate init) surfaces the same
+#      initialize-failed error, not a silent partial state.
+cs_capo_fixture_project "$TMP" "$HOME_DIR" epsilon
+printf -- '- epsilon - epsilon project (added 2026-01-01)\n' >> "$HOME_DIR/config/projects.md"
+out=$(PATH="$FAKEBIN:$PATH" MADE_DOCTOR_EXIT=1 "$BIN" alpha-capo epsilon 2>&1) \
+  && fail "a failing made doctor must fail the seed"
+assert_contains "$out" "error: failed to initialize made for epsilon at $CAPO/projects/epsilon" \
+  "the doctor-failure refusal must name the project and destination"
+assert_absent "$CAPO/projects/epsilon" "rollback must remove the project clone on a doctor failure"
+pass "a failing made doctor surfaces the initialize-failed error"
+rm -f "$FAKEBIN/made"
 
 pass "cs-home-seed provisioning, rollback, and sweep behavior"

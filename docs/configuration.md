@@ -217,8 +217,8 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_SPAWN_LAUNCH_WAIT_SECS` | cs-spawn | seconds to wait for an agent to actually appear after the launch line is delivered, before treating the launch as swallowed; default 60 |
 | `CS_SPAWN_HUMAN_GATE_SECS` | cs-spawn | seconds a freshly launched agent may sit in herdr's native `blocked` state before the spawn reports it out loud; short on purpose since this window only has to outlast a startup transient; default 10 |
 | `CS_SPAWN_BASE_FRESHNESS_TIMEOUT_SECS` | cs-spawn | hard bound in seconds for the pre-branch base-freshness refresh through `bin/cs-fleet-sync.sh` when no `--base` was given; on expiry the spawn warns loudly and proceeds on the local HEAD; default 25 |
-| `CS_SPAWN_GRAFT_TIMEOUT_SECS` | cs-spawn | hard bound in seconds for the `graft build <worktree>` prep call at spawn and relaunch; on expiry the spawn warns loudly and proceeds with no graft index in the worktree; default 10, see `docs/graft.md` for the measurement behind it |
-| `CS_SPAWN_GRAFT_PREP` | cs-spawn | set to `off` to disable the graft index prep step entirely, independent of graft's own `GRAFT_NO_SEED`/`GRAFT_NO_REFRESH`; default on |
+| `CS_SPAWN_CODEGRAPH_TIMEOUT_SECS` | cs-spawn | hard bound in seconds for the `codegraph init <worktree>` prep call at spawn and relaunch; on expiry the spawn warns loudly and proceeds with no codegraph index in the worktree; default 10, see `docs/codegraph.md` for the measurement behind it |
+| `CS_SPAWN_CODEGRAPH_PREP` | cs-spawn | set to `off` to disable the codegraph index prep step entirely; default on |
 | `CS_CONTROL_INTERRUPT_WAIT_SECS` | cs-control-lib | seconds to wait for a cancelled turn to actually stop before the interrupt is reported unconfirmed; default 15 |
 | `CS_CONTROL_EXIT_WAIT_SECS` | cs-control-lib | seconds to wait for the agent process to leave the pane after the exit command; default 30 |
 | `CS_CONTROL_EXIT_SETTLE` | cs-control-lib | pre-Enter settle for a harness whose completion popup would swallow the exit command's Enter (codex); default 1.5 |

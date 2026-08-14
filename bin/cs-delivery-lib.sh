@@ -18,7 +18,7 @@
 
 # Human-facing spelling of each closed set, for usage and error messages.
 # shellcheck disable=SC2034  # consumed by the sourcing scripts' messages
-CS_DELIVERY_MODES='no-mistakes|direct-PR|local-only'
+CS_DELIVERY_MODES='made|direct-PR|local-only'
 # shellcheck disable=SC2034  # consumed by the sourcing scripts' messages
 CS_DELIVERY_YOLOS='on|off'
 
@@ -27,7 +27,7 @@ CS_DELIVERY_YOLOS='on|off'
 CS_DELIVERY_CONTRACT_PREFIX='Delivery contract: mode='
 
 cs_delivery_mode_valid() { # <mode> -> 0 iff it is one of the three delivery modes
-  case "${1:-}" in no-mistakes|direct-PR|local-only) return 0 ;; esac
+  case "${1:-}" in made|direct-PR|local-only) return 0 ;; esac
   return 1
 }
 
@@ -36,12 +36,12 @@ cs_delivery_yolo_valid() { # <yolo> -> 0 iff it is on or off
   return 1
 }
 
-# Rigor rank, most to least: no-mistakes, direct-PR, local-only. Used only to
+# Rigor rank, most to least: made, direct-PR, local-only. Used only to
 # decide whether an explicit mode deviates DOWNWARD from a project's standing
 # registry posture, which is a notice, never a refusal.
 cs_delivery_mode_rigor() { # <mode> -> rank on stdout (0 for anything unknown)
   case "${1:-}" in
-    no-mistakes) printf '3\n' ;;
+    made) printf '3\n' ;;
     direct-PR)   printf '2\n' ;;
     local-only)  printf '1\n' ;;
     *)           printf '0\n' ;;

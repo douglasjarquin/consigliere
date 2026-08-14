@@ -329,5 +329,45 @@ assert_contains "$ev_fail" 'supervision continues on the poll loop' \
 [ ! -e "$EV_HOME/state/.herdr-events" ] \
   || fail 'a failed install left a spool behind, arming the watcher onto a dead transport'
 pass 'the herdr event plugin sweep installs silently and degrades to an advisory'
+# --- MADE_DOWN: made daemon health, mirroring the HERDR_DOWN probe -----------
+# `made status --json` also fails cleanly when the daemon IS up but has run
+# nothing yet, so the fixture below must distinguish that from an unreachable
+# daemon: the fake made prints made's own "daemon not reachable" stderr text
+# only in the down case, per cmd/made/status.go.
+
+cat > "$FAKEBIN/made" <<'SH'
+#!/usr/bin/env bash
+case "$MADE_TEST_MODE" in
+  down)
+    echo "made status: daemon not reachable: dial unix /made.sock: connect: no such file or directory" >&2
+    exit 1
+    ;;
+  no-runs)
+    echo "made status: status: no runs found" >&2
+    exit 1
+    ;;
+  up)
+    printf '{"schema_version":1,"run_id":"run-1","repo":"acme/widgets","branch":"main","state":"passed","stages":[],"pending_findings":[]}\n'
+    exit 0
+    ;;
+esac
+SH
+chmod +x "$FAKEBIN/made"
+
+out=$(MADE_TEST_MODE=down run_bootstrap)
+assert_line "$out" '^MADE_DOWN: cannot reach the made daemon' \
+  'an unreachable made daemon reports MADE_DOWN clearly'
+pass "MADE_DOWN fires when the made daemon is unreachable"
+
+out=$(MADE_TEST_MODE=up run_bootstrap)
+assert_no_line "$out" '^MADE_DOWN' 'a reachable made daemon with a run must stay silent'
+pass "a healthy made daemon triggers no MADE_DOWN"
+
+out=$(MADE_TEST_MODE=no-runs run_bootstrap)
+assert_no_line "$out" '^MADE_DOWN' \
+  'a healthy but idle made daemon (no runs yet) must never be mistaken for MADE_DOWN'
+pass "a healthy idle made daemon (no runs found) triggers no MADE_DOWN"
+
+rm -f "$FAKEBIN/made"
 
 printf 'ok - cs-bootstrap axi version floors and network phase split\n'

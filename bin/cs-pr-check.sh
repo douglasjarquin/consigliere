@@ -2,7 +2,7 @@
 # Record a PR-ready task: store one validated canonical pr=<url> and GitHub's
 # exact pr_head=<sha> when available, then atomically arm a static merge poll.
 # The poll's authenticated sidecar records hold by default. For a board issue
-# in no-mistakes mode, an armed sweep's release-green-prs policy changes that
+# in made mode, an armed sweep's release-green-prs policy changes that
 # token to release-reviewed-green at the exact recorded head. Capacity remains
 # a live decision by bin/cs-board-capacity.sh; this script does not merge,
 # close, clean up, discard, or move the task's board card.
@@ -76,7 +76,7 @@ case "$TASK_ISSUE" in
   ''|0|0*|*[!0-9]*) TASK_ISSUE= ;;
 esac
 if [ "$GREEN_PR_POLICY" = release-green-prs ] \
-  && [ "$TASK_MODE" = no-mistakes ] \
+  && [ "$TASK_MODE" = made ] \
   && [ -n "$TASK_ISSUE" ] \
   && cs_pr_head_valid "$PR_HEAD"; then
   CAPACITY_TOKEN=release-reviewed-green

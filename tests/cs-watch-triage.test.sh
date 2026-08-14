@@ -853,6 +853,7 @@ test_event_splice_blocked_edge_and_dedupe_clear() {
 
   # A working edge only: the pre-seeded escalation marker must be CLEARED (so a
   # later blocked edge re-escalates) and the wait must report a clean timeout.
+  export CS_FAKE_HERDR_AGENT_STATUS=idle
   marker="$state/.herdr-escalated-pane-ev-1"
   : > "$marker"
   spool_append "$state" status pane-ev-1 ws-1 working codex

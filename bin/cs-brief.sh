@@ -6,7 +6,7 @@
 # description, acceptance criteria, and context, and may adjust other sections
 # when the task genuinely deviates (e.g. working an existing external PR
 # instead of shipping a new one).
-# Usage: cs-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--exec-mode <ultrawork|plan-first>] [--issue <n>] [--herdr-lab]
+# Usage: cs-brief.sh <task-id> <repo-name> --mode <made|direct-PR|local-only> [--exec-mode <ultrawork|plan-first>] [--issue <n>] [--herdr-lab]
 #        cs-brief.sh <task-id> <repo-name> --scout [--herdr-lab]
 #        cs-brief.sh <task-id> --capo {<project>...|--no-projects}
 #   --mode is REQUIRED on a ship scaffold and refused on --scout and --capo,
@@ -60,7 +60,7 @@
 # The line sits at the very end, past every section a caller edits when it fills
 # in {TASK}, so filling the brief in cannot clobber it.
 # The three modes:
-#   no-mistakes  implement -> needs-review: (consigliere reviews the commit and
+#   made         implement -> needs-review: (consigliere reviews the commit and
 #                triggers validation) -> pipeline -> PR -> boss merge.
 #                The commit is reported as needs-review, never done: a keyed
 #                open state keeps an unreviewed commit visible, where done:
@@ -383,8 +383,8 @@ The report is the only thing that survives, so anything worth keeping must be in
    A decision or blocker you opened stays open until a \`resolved\` line carrying its exact key lands; a later \`done:\` or \`working:\` line never closes it, even when the answer is what started that work.
    Consigliere's reply normally writes that closing line at answer time; when a blocker or wait clears WITHOUT a reply from consigliere, append \`resolved: {how it cleared}\` yourself (add the same \`[key=<slug>]\` if you opened it with one) as you resume.
 $BOSS_INTERVENTION_RULE
-7. Never stop, restart, or update the shared \`no-mistakes\` daemon - it is one instance serving
-   every lane/home, so restarting it kills other lanes' in-flight pipeline runs. On ANY no-mistakes
+7. Never stop, restart, or update the shared \`made\` daemon - it is one instance serving
+   every lane/home, so restarting it kills other lanes' in-flight pipeline runs. On ANY made
    daemon error, append \`blocked: {the daemon error}\` and stop; only consigliere manages the daemon.
 
 # Definition of done
@@ -423,7 +423,7 @@ case "$EXEC_MODE" in
     ;;
 esac
 
-# Shared by direct-PR and no-mistakes only (local-only never opens a PR, so it
+# Shared by direct-PR and made only (local-only never opens a PR, so it
 # is out of this section's scope): the render-then-commit recipe for any
 # bossless-mode auto-decision recorded against this task, per
 # bin/cs-auto-decision-lib.sh's SCHEMA-OWNER header. The ledger lives in THIS
@@ -453,7 +453,7 @@ case "$MODE" in
     RULE1='1. Never push to the default branch (push only your `cs/'"$ID"'` branch). Never merge a PR.'
     IFS= read -r -d '' DOD <<EOF || true
 # Definition of done
-This task ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
+This task ships **direct-PR**: you raise the PR yourself, without the made pipeline.
 The task is complete only when committed on your branch.
 
 $AUTO_DECISIONS_RENDER
@@ -464,7 +464,7 @@ See \`docs/auto-decisions/$ID.md\` in this diff.
 \`\`\`
 
 When it is implemented and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file and stop.
-Do NOT run /no-mistakes. The configured merge authority decides whether to merge the PR; consigliere relays the outcome.
+Do NOT run /made. The configured merge authority decides whether to merge the PR; consigliere relays the outcome.
 EOF
     ;;
   local-only)
@@ -479,33 +479,33 @@ When it is implemented and committed, append \`done: ready in branch cs/$ID\` to
 The configured merge authority approves the ready branch, then consigliere merges it into local \`main\` through the guarded fast-forward path.
 EOF
     ;;
-  *)  # no-mistakes; the closed-set validation above admits nothing else
+  *)  # made; the closed-set validation above admits nothing else
     SETUP2="
-2. Run \`no-mistakes doctor\`; if it reports the repo is not initialized here, run \`no-mistakes init\`."
+2. Run \`made doctor\`; if it reports the repo is not initialized here, run \`made gate init\`."
     RULE1='1. Never push to the default branch. Never merge a PR.'
     IFS= read -r -d '' DOD <<EOF || true
 # Definition of done
 The task is complete only when committed on your branch.
 When you believe it is complete, append \`needs-review: {summary of what you built}\` to the status file and stop.
 Use \`needs-review:\` here, NOT \`done:\` - this mode adds that one state to the list in rule 4.
-Consigliere reviews your commit against the task, then instructs you to run \$no-mistakes to validate and ship a PR.
+Consigliere reviews your commit against the task, then instructs you to run \$made to validate and ship a PR.
 \`needs-review:\` stays open above you until consigliere acts on it, so an unreviewed commit cannot be mistaken for finished work; \`done:\` would read as complete and could sit unnoticed.
 When consigliere tells you to validate, append \`resolved: {how it was reviewed or unblocked}\` (carrying the same \`[key=<slug>]\` if you opened one) before you start the run.
 
 $AUTO_DECISIONS_RENDER
-If docs/auto-decisions/$ID.md exists, append one more sentence to the same \`--intent\` text below: "N ask-user findings were auto-decided under bossless mode; see \`docs/auto-decisions/$ID.md\` in this diff." (fill in N with \`grep -c '^- \\*\\*\\[' docs/auto-decisions/$ID.md\`). Never call \`gh-axi pr edit\` or any other direct PR-mutation command to add this yourself - no-mistakes owns the PR object end to end in this mode, and the committed file, not this sentence, is the durable evidence.
+If docs/auto-decisions/$ID.md exists, append one more sentence to the same \`--intent\` text below: "N ask-user findings were auto-decided under bossless mode; see \`docs/auto-decisions/$ID.md\` in this diff." (fill in N with \`grep -c '^- \\*\\*\\[' docs/auto-decisions/$ID.md\`). Never call \`gh-axi pr edit\` or any other direct PR-mutation command to add this yourself - made owns the PR object end to end in this mode, and the committed file, not this sentence, is the durable evidence.
 
-You drive no-mistakes by responding to its gates, not by implementing fixes.
-Follow the guidance no-mistakes itself provides for the mechanics: it loads when you invoke \$no-mistakes, and \`no-mistakes axi run --help\` plus the \`help\` lines in each \`axi\` response are authoritative and version-matched to the installed binary.
+You drive made by responding to its gates, not by implementing fixes.
+Follow the guidance made itself provides for the mechanics: it loads when you invoke \$made, and \`made doctor\` plus \`made status --json\` are authoritative and version-matched to the installed binary.
 When you start the run, make \`--intent\` preserve all relevant content from this brief's \`# Task\` section plus every later accepted consigliere requirement, clarification, constraint, exclusion, and supersession, carrying only each requirement's current accepted form; retain the direct requirements instead of substituting a summary of your diff, and leave out generic operational, status, delivery, and other scaffold boilerplate unless it is task-specific.
 Do not hand-edit, commit, or fix findings yourself while a run is active - the pipeline applies every fix.
 
 Two consigliere-specific rules layer on top of that guidance:
 - ask-user findings are not yours to answer: escalate to consigliere (rule 6) and stop.
-  When the decision comes back, feed it to the gate with \`no-mistakes axi respond\` and let the pipeline apply it - do not route the question to "the user" or implement the fix yourself.
+  When the decision comes back, feed it to the gate with \`made review\` and let the pipeline apply it - do not route the question to "the user" or implement the fix yourself.
 - Avoid \`--yes\`: the boss, not you, owns the ask-user decisions it would silently auto-resolve.
 
-After \$no-mistakes reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), append \`done: PR {url} checks green\` and stop. You are finished.
+After \$made reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), append \`done: PR {url} checks green\` and stop. You are finished.
 In this mode \`done:\` means exactly that green-PR state and nothing else.
 EOF
     ;;
@@ -530,14 +530,14 @@ This task ships local-only (no PR), so you cannot close the issue with a PR keyw
 Do the work as usual; consigliere closes issue #$ISSUE after it lands the approved local merge.
 Do NOT close the issue yourself and do NOT move its board card - the board's own workflow handles the card once the issue is closed.
 EOF
-  elif [ "$MODE" = no-mistakes ]; then
+  elif [ "$MODE" = made ]; then
     IFS= read -r -d '' ISSUE_SECTION <<EOF || true
 # Board issue #$ISSUE - THE PR MUST CLOSE IT
 This task implements GitHub issue #$ISSUE.
 The merged PR MUST close this issue via the GitHub closing keyword \`Closes #$ISSUE\`, so that the board's built-in workflow moves its card to Done. This is a hard requirement, not a nicety: if the PR does not close the issue, the card is stranded in In Progress.
-You do NOT open the PR - the no-mistakes pipeline owns push and PR creation. So do not try to create or find a PR to satisfy this; instead route the closing keyword into the material the pipeline builds the PR from:
-- Put the line \`Closes #$ISSUE\` in your commit message body before you run no-mistakes.
-- Include "This PR closes #$ISSUE." in the \`--intent\` you pass to \`no-mistakes axi run\`, so the pipeline's PR step writes the closing keyword into the PR description.
+You do NOT open the PR - the made pipeline owns push and PR creation. So do not try to create or find a PR to satisfy this; instead route the closing keyword into the material the pipeline builds the PR from:
+- Put the line \`Closes #$ISSUE\` in your commit message body before you run \$made.
+- Include "This PR closes #$ISSUE." in the \`--intent\` you pass when you invoke \$made, so the pipeline's PR step writes the closing keyword into the PR description.
 Do NOT edit the project board yourself and do NOT close the issue by hand - the merge does both through \`Closes #$ISSUE\`.
 EOF
   else
@@ -596,8 +596,8 @@ $RULE1
    A decision or blocker you opened stays open until a \`resolved\` line carrying its exact key lands; a later \`done:\` or \`working:\` line never closes it, even when the answer is what started that work.
    Consigliere's reply normally writes that closing line at answer time; when a blocker or wait clears WITHOUT a reply from consigliere, append \`resolved: {how it cleared}\` yourself (add the same \`[key=<slug>]\` if you opened it with one) as you resume.
 $BOSS_INTERVENTION_RULE
-7. Never stop, restart, or update the shared \`no-mistakes\` daemon - it is one instance serving
-   every lane/home, so restarting it kills other lanes' in-flight pipeline runs. On ANY no-mistakes
+7. Never stop, restart, or update the shared \`made\` daemon - it is one instance serving
+   every lane/home, so restarting it kills other lanes' in-flight pipeline runs. On ANY made
    daemon error, append \`blocked: {the daemon error}\` and stop; only consigliere manages the daemon.
 
 # Project memory

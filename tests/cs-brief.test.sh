@@ -20,37 +20,37 @@ BIN="$ROOT/bin/cs-brief.sh"
 # is just a string the scaffold echoes back. A registry entry here would only
 # suggest the scaffold still consults one.
 
-# ship, --mode no-mistakes
-out=$("$BIN" t1 alpha --mode no-mistakes)
-assert_contains "$out" "mode=no-mistakes" "ship scaffold reports mode"
+# ship, --mode made
+out=$("$BIN" t1 alpha --mode made)
+assert_contains "$out" "mode=made" "ship scaffold reports mode"
 B="$TMP/data/t1/brief.md"
 assert_present "$B" "ship brief written"
 assert_grep 'Verify isolation before anything else' "$B" "isolation assertion present"
 assert_grep 'cs/t1' "$B" "task branch named"
 assert_grep 'blocked: launched outside the isolated task worktree' "$B" "isolation stop instruction"
-assert_grep 'no-mistakes doctor' "$B" "no-mistakes setup step present"
+assert_grep 'made doctor' "$B" "made setup step present"
 assert_grep 'Herdr lifecycle declaration - NOT ENABLED' "$B" "unguarded herdr declaration present"
-assert_grep 'checks green' "$B" "no-mistakes definition of done"
+assert_grep 'checks green' "$B" "made definition of done"
 # The implementation commit is reported as needs-review, never done: a keyed
 # open state keeps an unreviewed commit visible, where done: read as finished.
-assert_grep 'needs-review: {summary of what you built}' "$B" "no-mistakes commit reports needs-review"
-assert_grep 'this mode adds that one state to the list in rule 4' "$B" "no-mistakes brief forbids done: at the commit"
+assert_grep 'needs-review: {summary of what you built}' "$B" "made commit reports needs-review"
+assert_grep 'this mode adds that one state to the list in rule 4' "$B" "made brief forbids done: at the commit"
 assert_no_grep 'done: {summary}' "$B" "the ambiguous commit-time done: is gone"
 # The pipeline reviews against --intent, so a soldier that passes a diff summary
 # instead of the accepted contract gets reviewed against less than it agreed to.
 # shellcheck disable=SC2016  # literal grep patterns; backticks are brief markup, not expansion
 assert_grep 'make `--intent` preserve all relevant content' "$B" \
-  "no-mistakes brief requires --intent to carry the accepted task contract"
+  "made brief requires --intent to carry the accepted task contract"
 assert_grep "carrying only each requirement's current accepted form" "$B" \
-  "no-mistakes brief requires superseded requirements to carry their current form"
+  "made brief requires superseded requirements to carry their current form"
 assert_grep 'retain the direct requirements instead of substituting a summary of your diff' "$B" \
-  "no-mistakes brief forbids a diff summary in place of the requirements"
+  "made brief forbids a diff summary in place of the requirements"
 assert_grep 'leave out generic operational, status, delivery, and other scaffold boilerplate' "$B" \
-  "no-mistakes brief excludes scaffold boilerplate from --intent"
-pass "ship brief (no-mistakes) scaffold"
+  "made brief excludes scaffold boilerplate from --intent"
+pass "ship brief (made) scaffold"
 
 # refuse overwrite
-if "$BIN" t1 alpha --mode no-mistakes >/dev/null 2>&1; then
+if "$BIN" t1 alpha --mode made >/dev/null 2>&1; then
   fail "second scaffold for t1 must refuse"
 fi
 pass "existing brief refuses overwrite"
@@ -60,7 +60,7 @@ pass "existing brief refuses overwrite"
 B="$TMP/data/t2/brief.md"
 assert_grep 'direct-PR' "$B" "direct-PR named"
 assert_grep 'done: PR {url}' "$B" "direct-PR done signal"
-assert_no_grep 'no-mistakes doctor' "$B" "no pipeline setup in direct-PR"
+assert_no_grep 'made doctor' "$B" "no pipeline setup in direct-PR"
 pass "ship brief (direct-PR) scaffold"
 
 # local-only shaping
@@ -73,12 +73,12 @@ pass "ship brief (local-only) scaffold"
 # needs-review is mode-specific: direct-PR and local-only have no pre-validation
 # review step, so their briefs must not mention it.
 for t in t2 t3; do
-  assert_no_grep 'needs-review' "$TMP/data/$t/brief.md" "no needs-review outside no-mistakes ($t)"
+  assert_no_grep 'needs-review' "$TMP/data/$t/brief.md" "no needs-review outside made ($t)"
   # shellcheck disable=SC2016  # literal grep pattern; backticks are brief markup, not expansion
   assert_no_grep 'make `--intent` preserve all relevant content' "$TMP/data/$t/brief.md" \
-    "no --intent contract outside no-mistakes ($t)"
+    "no --intent contract outside made ($t)"
 done
-pass "needs-review appears only in no-mistakes briefs"
+pass "needs-review appears only in made briefs"
 
 # scout
 "$BIN" t4 alpha --scout >/dev/null
@@ -101,14 +101,14 @@ done
 pass "ship and scout briefs carry the unmarked-boss-message rule"
 
 # herdr-lab section
-"$BIN" t5 alpha --mode no-mistakes --herdr-lab >/dev/null
+"$BIN" t5 alpha --mode made --herdr-lab >/dev/null
 B="$TMP/data/t5/brief.md"
 assert_grep 'HARD SAFETY CONTRACT' "$B" "herdr-lab contract present"
 assert_grep 'cs-herdr-lab.sh' "$B" "lab helper referenced"
 pass "herdr-lab guarded brief"
 
 # --issue linkage: PR-mode brief carries the hard Closes contract
-"$BIN" t7 alpha --mode no-mistakes --issue 42 >/dev/null
+"$BIN" t7 alpha --mode made --issue 42 >/dev/null
 B="$TMP/data/t7/brief.md"
 assert_grep 'Board issue #42' "$B" "issue section present"
 assert_grep 'Closes #42' "$B" "PR must close the issue"
@@ -124,7 +124,7 @@ pass "ship brief --issue local-only variant"
 
 # --issue rejected on scout and non-numeric
 if "$BIN" t9 alpha --scout --issue 5 >/dev/null 2>&1; then fail "--issue on scout must refuse"; fi
-if "$BIN" t10 alpha --mode no-mistakes --issue abc >/dev/null 2>&1; then fail "non-numeric --issue must refuse"; fi
+if "$BIN" t10 alpha --mode made --issue abc >/dev/null 2>&1; then fail "non-numeric --issue must refuse"; fi
 pass "--issue misuse refusals"
 
 # capo charter
@@ -149,7 +149,7 @@ pass "capo project-list gating"
 if "$BIN" c4 --capo alpha --herdr-lab >/dev/null 2>&1; then
   fail "--herdr-lab on capo must refuse"
 fi
-if "$BIN" t6 alpha --mode no-mistakes --no-projects >/dev/null 2>&1; then
+if "$BIN" t6 alpha --mode made --no-projects >/dev/null 2>&1; then
   fail "--no-projects on ship must refuse"
 fi
 pass "flag misuse refusals"
@@ -235,21 +235,21 @@ CLAUDE_CONFIG_DIR="$NO_OMO_CLAUDE" CS_HARNESS_OVERRIDE=claude "$BIN" e9 alpha --
 assert_absent "$TMP/data/e9" "a refused claude plan-first-no-omo scaffold leaves no task directory behind"
 pass "the omo guard refuses plan-first and warns-but-proceeds on ultrawork when the plugin is absent"
 
-# no-mistakes (t1): render/commit recipe uses the override vars cs_resolve_root
+# made (t1): render/commit recipe uses the override vars cs_resolve_root
 # actually honors - a plain STATE=/DATA= assignment is silently stomped, since
 # sourcing cs-auto-decision-lib.sh pulls in cs-afk-start.sh's unconditional
 # cs_resolve_root call, reproduced live during implementation - plus the
 # --intent pointer-line instruction and an explicit ban on a direct PR edit.
 B="$TMP/data/t1/brief.md"
-assert_grep 'CS_STATE_OVERRIDE=' "$B" "no-mistakes brief's render recipe sets CS_STATE_OVERRIDE"
-assert_grep 'CS_DATA_OVERRIDE=' "$B" "no-mistakes brief's render recipe sets CS_DATA_OVERRIDE"
-assert_grep 'cs_auto_decision_render t1' "$B" "no-mistakes brief renders this task's own ledger"
-assert_grep 'docs/auto-decisions/t1.md' "$B" "no-mistakes brief names the committed evidence file"
-assert_grep 'ask-user findings were auto-decided under bossless mode' "$B" "no-mistakes brief appends the --intent pointer sentence"
+assert_grep 'CS_STATE_OVERRIDE=' "$B" "made brief's render recipe sets CS_STATE_OVERRIDE"
+assert_grep 'CS_DATA_OVERRIDE=' "$B" "made brief's render recipe sets CS_DATA_OVERRIDE"
+assert_grep 'cs_auto_decision_render t1' "$B" "made brief renders this task's own ledger"
+assert_grep 'docs/auto-decisions/t1.md' "$B" "made brief names the committed evidence file"
+assert_grep 'ask-user findings were auto-decided under bossless mode' "$B" "made brief appends the --intent pointer sentence"
 # shellcheck disable=SC2016  # literal grep pattern; backticks are brief markup, not expansion
-assert_grep 'Never call `gh-axi pr edit`' "$B" "no-mistakes brief forbids a direct PR-edit call for this evidence"
-assert_no_grep '## Auto-decisions (bossless mode)' "$B" "no-mistakes brief never asks the soldier to write PR-body markdown itself"
-pass "no-mistakes brief attaches bossless evidence via committed file + intent pointer, never a PR edit"
+assert_grep 'Never call `gh-axi pr edit`' "$B" "made brief forbids a direct PR-edit call for this evidence"
+assert_no_grep '## Auto-decisions (bossless mode)' "$B" "made brief never asks the soldier to write PR-body markdown itself"
+pass "made brief attaches bossless evidence via committed file + intent pointer, never a PR edit"
 
 # direct-PR (t2): same committed-file recipe, plus the short PR-body section
 # since this mode's own soldier writes the PR body itself.
@@ -262,7 +262,7 @@ assert_grep 'See `docs/auto-decisions/t2.md` in this diff' "$B" "direct-PR brief
 pass "direct-PR brief attaches bossless evidence via committed file + a short PR-body section"
 
 # local-only (t3): out of Task 15's scope per the plan's own QA scenarios (only
-# direct-PR and no-mistakes are covered, since local-only never opens a PR).
+# direct-PR and made are covered, since local-only never opens a PR).
 assert_no_grep 'auto-decided under bossless mode' "$TMP/data/t3/brief.md" \
   "local-only brief carries no bossless-evidence instructions (out of scope)"
 pass "local-only brief is untouched by the bossless-evidence attachment step"

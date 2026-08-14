@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a soldier in a herdr-native task worktree, or a capo
 # in its isolated consigliere home.
-# Usage: cs-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--base <ref>] [--issue <n>]
+# Usage: cs-spawn.sh <task-id> <project-dir> --mode <made|direct-PR|local-only> --yolo <on|off> [--base <ref>] [--issue <n>]
 #        cs-spawn.sh <task-id> <project-dir> --scout [--headless] [--base <ref>]
 #        cs-spawn.sh <task-id> <capo-home> --capo
 #        cs-spawn.sh --relaunch <task-id>
@@ -70,16 +70,17 @@
 #     CS_SPAWN_HUMAN_GATE_SECS (default 10) bounds the settle window. Applies to
 #     ship, scout, capo, and relaunch; a headless scout takes no pane agent, so
 #     herdr's agent state says nothing about it and it is exempt.
-#   - Graft index prep (interactive ship/scout spawn and relaunch, both
-#     harnesses): when the project's primary checkout carries a built graft
-#     index (graft/.graph/wiring.json) and the worktree's committed ignore
-#     rules already exclude graft/, runs `graft build <worktree>` so the
-#     soldier's first turn has a working index (herdr worktree create
-#     propagates no untracked/ignored files, so the index would otherwise be
-#     lost). Fail-open and time-bounded by CS_SPAWN_GRAFT_TIMEOUT_SECS
-#     (default 10, docs/graft.md): no graft binary, no primary index, an unclean ignore
-#     guard, or an exhausted bound all warn (or stay silent) and never block
-#     the spawn. CS_SPAWN_GRAFT_PREP=off disables it entirely.
+#   - Codegraph index prep (interactive ship/scout spawn and relaunch, both
+#     harnesses): when the project's primary checkout carries a built
+#     codegraph index (.codegraph/codegraph.db) and the worktree's committed
+#     ignore rules already exclude .codegraph, runs `codegraph init
+#     <worktree>` so the soldier's first turn has a working index (codegraph
+#     indexes by absolute path, so a worktree at a new path never inherits
+#     the primary's index on its own). Fail-open and time-bounded by
+#     CS_SPAWN_CODEGRAPH_TIMEOUT_SECS (default 10, docs/codegraph.md): no
+#     codegraph binary, no primary index, an unclean ignore guard, or an
+#     exhausted bound all warn (or stay silent) and never block the spawn.
+#     CS_SPAWN_CODEGRAPH_PREP=off disables it entirely.
 #
 # Relaunch mechanics (--relaunch <task-id>):
 #   - ADOPTS the endpoint and worktree recorded in state/<id>.meta instead of
@@ -410,48 +411,81 @@ shell_quote() {
   printf "'"
 }
 
-# spawn_graft_prep <project-abs> <worktree-real>: build the project's graft
-# index into a fresh task worktree, fail-open. herdr's worktree create
-# propagates no untracked/ignored files (src/worktree.rs:228-265), so a
-# worktree starts with none of the primary's graft/ index even when one
-# exists; graft's own seedGraph only copies the query graph and only on its
-# own next invocation, so this is the synchronous trigger that gets the full
-# built surface (INDEX.md, per-file cards) there before the agent's first
-# turn. Every negative case is a silent or warned no-op, in the order graft's
-# own writer risk requires checking them: the kill switch, the binary, the
-# primary's index, then the worktree's committed ignore rules (graft's
-# ensureGitignored/ensureSearchable write .gitignore/.ignore into the build
-# root when its own entries are absent, so an unclean guard here would dirty
-# a soldier's tree on its first build). Only `graft build` runs, positionally
-# against $wt_real, never `--dir` (which disables seeding) or `--deep`, and
-# never against $proj_abs.
-spawn_graft_prep() {  # <project-abs> <worktree-real>
-  local proj_abs=$1 wt_real=$2 timeout out rc
-  [ "${CS_SPAWN_GRAFT_PREP:-}" = off ] && return 0
-  command -v graft >/dev/null 2>&1 || return 0
-  [ -n "$proj_abs" ] && [ -f "$proj_abs/graft/.graph/wiring.json" ] || return 0
-  # The trailing slash matters: git's dir-only ignore pattern "graft/" only
-  # matches a bare "graft" query when that path already exists on disk as a
-  # directory (verified empirically), which a fresh worktree never has - this
-  # guard would otherwise always report "not ignored" for exactly the
-  # worktrees this feature targets. "graft/" asserts "this is a directory"
-  # without requiring it to exist.
-  if ! git -C "$wt_real" check-ignore -q graft/; then
-    echo "warn: $wt_real's committed rules do not ignore graft/; skipping graft index build there (graft's own gitignore writer would otherwise dirty the worktree)" >&2
+# spawn_codegraph_prep <project-abs> <worktree-real>: build the project's
+# codegraph index into a fresh task worktree, fail-open. codegraph indexes by
+# absolute path in a store keyed to that path (docs/codegraph.md), so a
+# worktree at a new path never inherits the primary's index automatically -
+# unlike graft, codegraph has no built-in worktree seeding. `codegraph init`
+# is itself idempotent (a second run detects "Already initialized" and
+# no-ops in well under a second, verified in docs/codegraph.md), so this
+# needs no existence guard of its own before calling it - re-running on
+# relaunch is cheap. Every negative case is a silent or warned no-op: the
+# kill switch, the binary, the primary's index, then the worktree's committed
+# ignore rules (codegraph's own .gitignore lives INSIDE .codegraph/ and never
+# touches the project root, but the root itself still needs a committed rule
+# for the directory - or symlink - itself; both `.codegraph` and `.codegraph/`
+# count as that rule, so the guard asks in both forms - git matches a
+# directory-only pattern against a path that does not exist yet, which is
+# every fresh worktree, only when the query carries the slash too). Only
+# `codegraph init` runs,
+# positionally against $wt_real, never against $proj_abs. A failed or killed
+# init leaves a locked, truncated index that no later run repairs
+# (docs/codegraph.md), so an index this call created and did not finish is
+# removed again - leaving a worktree with no index, which the next prep run
+# can rebuild - while an index the worktree already had survives untouched.
+# That removal is best-effort and reported, never fatal: a spawn is already
+# holding a created worktree by this point, so nothing here may abort it.
+# Because it can fail, a leftover can outlive it, so the SAME judgement runs
+# before init too: an existing .codegraph counts as an index only with a
+# codegraph.db and no codegraph.lock, and anything else is removed first, since
+# init short-circuits on "Already initialized" and would otherwise report a
+# build it never did over a locked, truncated index.
+spawn_codegraph_prep() {  # <project-abs> <worktree-real>
+  local proj_abs=$1 wt_real=$2 timeout out rc had_index stale aftermath
+  [ "${CS_SPAWN_CODEGRAPH_PREP:-}" = off ] && return 0
+  command -v codegraph >/dev/null 2>&1 || return 0
+  [ -n "$proj_abs" ] && [ -f "$proj_abs/.codegraph/codegraph.db" ] || return 0
+  if ! git -C "$wt_real" check-ignore -q .codegraph 2>/dev/null &&
+     ! git -C "$wt_real" check-ignore -q .codegraph/ 2>/dev/null; then
+    echo "warn: $wt_real's committed rules do not ignore .codegraph; skipping codegraph index build there" >&2
     return 0
   fi
   if [ -z "$wt_real" ] || [ "$wt_real" = "$proj_abs" ]; then
-    echo "warn: refusing to run graft build against the primary checkout; skipping graft index prep" >&2
+    echo "warn: refusing to run codegraph init against the primary checkout; skipping codegraph index prep" >&2
     return 0
   fi
-  timeout=${CS_SPAWN_GRAFT_TIMEOUT_SECS:-10}
+  timeout=${CS_SPAWN_CODEGRAPH_TIMEOUT_SECS:-10}
   case "$timeout" in ''|*[!0-9]*|0) timeout=10 ;; esac
-  out=$(cs_run_timed "$timeout" env -u GRAFT_API_KEY graft build "$wt_real" 2>&1) && rc=0 || rc=$?
+  had_index=no
+  stale=no
+  if [ -e "$wt_real/.codegraph" ]; then
+    if [ -f "$wt_real/.codegraph/codegraph.db" ] && [ ! -e "$wt_real/.codegraph/codegraph.lock" ]; then
+      had_index=yes
+    else
+      rm -rf "${wt_real:?}/.codegraph" 2>/dev/null || true
+      [ -e "$wt_real/.codegraph" ] && stale=yes
+    fi
+  fi
+  out=$(cs_run_timed "$timeout" codegraph init "$wt_real" 2>&1) && rc=0 || rc=$?
+  aftermath='the worktree has no codegraph index'
+  if [ "$rc" != 0 ] && [ "$had_index" = no ]; then
+    [ -e "$wt_real/.codegraph" ] && { rm -rf "${wt_real:?}/.codegraph" 2>/dev/null || true; }
+    [ -e "$wt_real/.codegraph" ] &&
+      aftermath="a half-written codegraph index remains at $wt_real/.codegraph and could not be removed"
+  elif [ "$rc" != 0 ]; then
+    aftermath="the worktree keeps the codegraph index it already had"
+  fi
   case "$rc" in
-    0) echo "notice: built graft index in $wt_real" >&2 ;;
-    124) echo "warn: graft build did not finish within ${timeout}s in $wt_real; the worktree has no graft index" >&2 ;;
-    "$CS_TIMEOUT_UNAVAILABLE") echo "warn: could not run graft build under a time bound; skipping graft index prep in $wt_real" >&2 ;;
-    *) echo "warn: graft build exited $rc in $wt_real; the worktree has no graft index (output: ${out//$'\n'/ })" >&2 ;;
+    0)
+      if [ "$stale" = yes ]; then
+        echo "warn: an unusable codegraph index at $wt_real/.codegraph could not be removed, so codegraph init had nothing to rebuild" >&2
+      else
+        echo "notice: built codegraph index in $wt_real" >&2
+      fi
+      ;;
+    124) echo "warn: codegraph init did not finish within ${timeout}s in $wt_real; $aftermath" >&2 ;;
+    "$CS_TIMEOUT_UNAVAILABLE") echo "warn: could not run codegraph init under a time bound; skipping codegraph index prep in $wt_real" >&2 ;;
+    *) echo "warn: codegraph init exited $rc in $wt_real; $aftermath (output: ${out//$'\n'/ })" >&2 ;;
   esac
 }
 
@@ -541,10 +575,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     }
   fi
 
-  # A relaunch must not depend on the original spawn having built the index
-  # (it may predate this feature, or have failed open the first time), so it
-  # re-runs the same idempotent prep call.
-  spawn_graft_prep "$R_PROJ_REAL" "$R_WT_REAL"
+  spawn_codegraph_prep "$R_PROJ_REAL" "$R_WT_REAL"
 
   # Resume first. The wait is generous for a slow cold start, and breaks out as
   # soon as the pane is positively agent-free again - which is what a harness
@@ -831,7 +862,7 @@ else
     # unattended soldier needs the dialog gone before launch, not escalated after.
     cs_harness_codex_trust_dir "$WT_REAL" || abort_task "could not pre-trust codex worktree $WT_REAL"
   fi
-  spawn_graft_prep "$PROJ_ABS" "$WT_REAL"
+  spawn_codegraph_prep "$PROJ_ABS" "$WT_REAL"
   LAUNCH=$(cs_harness_soldier_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_turnend" "$sq_settings" "$TELEMETRY_HOOK")
 fi
 cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
