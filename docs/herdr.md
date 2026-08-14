@@ -52,7 +52,7 @@ This is the same rule already applied to tab labels below: scope to this home's 
 - Mid-turn status reads `working`; after the turn ends it reads `idle`.
 - `done` is not a fourth state layered on top of idle: herdr's own source maps `(Idle, seen=false) -> Done` and `(Idle, seen=true) -> Idle` (`src/app/api_helpers.rs`, herdr source, verified 2026-08-12) - "done" means the agent went idle and the pane has not been read since.
 
-### Blocked detection covers claude/codex permission prompts natively (verified against herdr source, 2026-08-12)
+### Blocked detection covers claude/codex permission prompts natively (herdr source 2026-08-12; live-verified end to end 2026-08-13, herdr 0.8.0/protocol 19)
 
 Herdr's own detection manifests carry `state = "blocked"` rules that fire on the exact permission-prompt text this fleet cares about, not just on generic "waiting on a human" text:
 
