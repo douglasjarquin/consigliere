@@ -15,8 +15,7 @@ FAKEBIN=$(cs_fakebin "$TMP")
 
 # A hermetic PATH. The scripts need a handful of ordinary utilities, so those are
 # symlinked into their own dir; every consigliere dependency is then explicitly
-# present or absent in the fixture, never inherited from the developer's machine
-# (a stock macOS /usr/bin already ships git, python3, and sometimes jq).
+# present or absent in the fixture, never inherited from the developer's machine.
 TOOLS="$TMP/tools"
 mkdir -p "$TOOLS"
 for util in bash env awk sed grep head cat tr uname dirname basename readlink mkdir; do
@@ -40,14 +39,14 @@ pass '--help and argument validation'
 
 bare_out=$(PATH="$BASE_PATH" "$DOCTOR" 2>&1)
 expect_code 1 "$?" 'missing required dependencies exit 1'
-for tool in herdr codex jq gh gh-axi git; do
+for tool in herdr codex jq gh gh-axi git python3; do
   assert_line "$bare_out" "^  MISSING +$tool +-" "bare machine reports $tool missing"
 done
 assert_contains "$bare_out" 'npm i -g gh-axi' 'a missing tool carries an install suggestion'
 assert_contains "$bare_out" 'installs nothing' 'the verdict repeats that nothing was installed'
 assert_line "$bare_out" '^  SKIP +herdr server' 'the server check skips, not fails, when herdr is absent'
 assert_line "$bare_out" '^  SKIP +gh auth' 'the auth check skips, not fails, when gh is absent'
-assert_line "$bare_out" '^6 required problems' 'the verdict counts every required gap'
+assert_line "$bare_out" '^7 required problems' 'the verdict counts every required gap'
 pass 'bare machine: required gaps fail with suggestions, dependent checks skip'
 
 # --- optional and contributor gaps never fail --------------------------------
@@ -142,6 +141,41 @@ assert_line "$floor_out" "^  WARN +quota-axi +${quota_under//./\\.} +below the $
   'a below-floor optional axi build warns rather than failing the run'
 rm -f "$FAKEBIN/gh-axi" "$FAKEBIN/quota-axi"
 pass 'doctor gates the axi floors it shares with bootstrap'
+
+python_floor=$(cs_deps_tool_floor python3)
+python_under=$(cs_test_version_below "$python_floor") ||
+  fail "no below-floor fixture is derivable from the python3 floor $python_floor"
+cs_fake_version_tool "$FAKEBIN" python3 CS_TEST_PYTHON3_VERSION "$python_under"
+export CS_TEST_PYTHON3_VERSION
+python_out=$(PATH="$BASE_PATH" "$DOCTOR" 2>&1)
+expect_code 1 "$?" 'a below-floor python3 keeps the preflight failing'
+assert_line "$python_out" "^  MISSING +python3 +${python_under//./\\.} +below the ${python_floor//./\\.} floor" \
+  'doctor reports an unsupported python3 as a required gap'
+assert_contains "$python_out" 'Python 3.11+' 'the python3 gap states its upgrade floor'
+assert_contains "$python_out" tomllib 'the python3 gap names the missing stdlib capability'
+
+CS_TEST_PYTHON3_VERSION=$python_floor
+python_out=$(PATH="$BASE_PATH" "$DOCTOR" 2>&1)
+assert_line "$python_out" "^  ok +python3 +${python_floor//./\\.}" \
+  'an at-floor python3 passes the doctor capability gate'
+pass 'doctor gates the Python tomllib capability and version floor'
+
+cat > "$FAKEBIN/python3" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --version ]; then
+  printf 'Python 3.12.0\n'
+  exit 0
+fi
+exit 1
+SH
+chmod +x "$FAKEBIN/python3"
+python_out=$(PATH="$BASE_PATH" "$DOCTOR" 2>&1)
+expect_code 1 "$?" 'a Python without tomllib keeps the preflight failing'
+assert_line "$python_out" '^  MISSING +python3 +3\.12\.0 +stdlib tomllib unavailable' \
+  'doctor distinguishes a missing tomllib capability from a version gap'
+rm -f "$FAKEBIN/python3"
+unset CS_TEST_PYTHON3_VERSION
+pass 'doctor rejects a supported-version Python without tomllib'
 
 # --- config section: the user-owned tree ---------------------------------------
 # Migration state, symlink-target visibility, and the two loss tripwires

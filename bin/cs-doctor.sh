@@ -82,16 +82,17 @@ problem() {
   PROBLEMS=$((PROBLEMS + 1))
 }
 
-# below_floor <tool> - true when the below-floor classification cs-deps-lib.sh
+# below_floor <tool> - true when the below-floor/capability classification cs-deps-lib.sh
 # owns applies to <tool>. Sets FLOOR and FLOOR_VERSION for the caller's report
-# line, so this report and the session-start gate describe the same build with
-# the same version and the same floor.
+# line, plus FLOOR_REASON for a capability-specific diagnostic, so this report
+# and the session-start gate describe the same build with the same reason.
 FLOOR=
 FLOOR_VERSION=
+FLOOR_REASON=
 below_floor() {
   local gap
-  gap=$(cs_deps_axi_gap "$1") || return 1
-  IFS=$'\t' read -r FLOOR_VERSION FLOOR <<< "$gap"
+  gap=$(cs_deps_tool_gap "$1") || return 1
+  IFS=$'\t' read -r FLOOR_VERSION FLOOR FLOOR_REASON <<< "$gap"
 }
 
 # --- header -------------------------------------------------------------------
@@ -113,7 +114,11 @@ while IFS= read -r tool; do
   [ -n "$tool" ] || continue
   if version=$(cs_deps_version "$tool"); then
     if below_floor "$tool"; then
-      report MISSING "$tool" "$FLOOR_VERSION" "below the $FLOOR floor; session start refuses to dispatch until it is upgraded"
+      if [ "$FLOOR_REASON" = tomllib ]; then
+        report MISSING "$tool" "$FLOOR_VERSION" "stdlib tomllib unavailable; Python $FLOOR+ is required before dispatch"
+      else
+        report MISSING "$tool" "$FLOOR_VERSION" "below the $FLOOR floor; session start refuses to dispatch until it is upgraded"
+      fi
       suggest "$(cs_deps_hint "$tool")"
       problem
     else
@@ -318,7 +323,7 @@ EOF
 
 # --- contributor --------------------------------------------------------------
 
-heading 'CONTRIBUTOR - only needed to change this repo (lint, tests, detached monitor handoff)'
+heading 'CONTRIBUTOR - only needed to change this repo (lint)'
 pinned_shellcheck=$("$SCRIPT_DIR/cs-lint.sh" --required-version 2>/dev/null || true)
 while IFS= read -r tool; do
   [ -n "$tool" ] || continue

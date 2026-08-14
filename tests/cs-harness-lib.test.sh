@@ -10,6 +10,79 @@ set -u
 
 TMP=$(cs_test_tmproot cs-harness)
 
+UNSUPPORTED_PY_BIN="$TMP/unsupported-python-bin"
+mkdir -p "$UNSUPPORTED_PY_BIN"
+cat > "$UNSUPPORTED_PY_BIN/python3" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --version ]; then
+  printf 'Python 3.9.6\n'
+  exit 0
+fi
+printf 'ModuleNotFoundError: No module named tomllib\n' >&2
+exit 1
+SH
+chmod +x "$UNSUPPORTED_PY_BIN/python3"
+
+UNSUPPORTED_CLAUDE_JSON="$TMP/unsupported-claude.json"
+unsupported_claude_out=$(PATH="$UNSUPPORTED_PY_BIN:$PATH" \
+  CS_CLAUDE_JSON="$UNSUPPORTED_CLAUDE_JSON" \
+  cs_harness_claude_trust_dir /tmp/unsupported-claude 2>&1) &&
+  fail 'claude trust must refuse unsupported Python'
+assert_contains "$unsupported_claude_out" 'stdlib tomllib' \
+  'claude trust names the missing tomllib capability'
+[ ! -e "$UNSUPPORTED_CLAUDE_JSON" ] || fail 'claude trust mutated config before the Python preflight'
+
+UNSUPPORTED_CODEX_TOML="$TMP/unsupported-home/.codex/config.toml"
+unsupported_codex_out=$(PATH="$UNSUPPORTED_PY_BIN:$PATH" \
+  CS_CODEX_TOML="$UNSUPPORTED_CODEX_TOML" \
+  cs_harness_codex_trust_dir /tmp/unsupported-codex 2>&1) &&
+  fail 'codex trust must refuse unsupported Python'
+assert_contains "$unsupported_codex_out" 'stdlib tomllib' \
+  'codex trust names the missing tomllib capability'
+[ ! -e "$UNSUPPORTED_CODEX_TOML" ] || fail 'codex trust created config before the Python preflight'
+[ ! -d "$TMP/unsupported-home" ] || fail 'codex trust created a config directory before the Python preflight'
+pass 'unsupported Python fails closed before harness trust mutation'
+
+LOW_VERSION_PY_BIN="$TMP/low-version-python-bin"
+mkdir -p "$LOW_VERSION_PY_BIN"
+cat > "$LOW_VERSION_PY_BIN/python3" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --version ]; then
+  printf 'Python 3.10.13\n'
+  exit 0
+fi
+case "${3:-}" in
+  *sys.version_info*)
+    exit 1
+    ;;
+esac
+exit 0
+SH
+chmod +x "$LOW_VERSION_PY_BIN/python3"
+
+LOW_VERSION_CODEX_TOML="$TMP/low-version-home/.codex/config.toml"
+low_version_codex_out=$(PATH="$LOW_VERSION_PY_BIN:$PATH" \
+  CS_CODEX_TOML="$LOW_VERSION_CODEX_TOML" \
+  cs_harness_codex_trust_dir /tmp/low-version-codex 2>&1) &&
+  fail 'Python below the version floor must refuse codex trust even when tomllib appears importable'
+assert_contains "$low_version_codex_out" 'Python 3.11+' \
+  'below-floor Python trust failure names the version floor'
+[ ! -e "$LOW_VERSION_CODEX_TOML" ] || fail 'below-floor Python trust created config before the version preflight'
+[ ! -d "$TMP/low-version-home" ] || fail 'below-floor Python trust created a config directory before the version preflight'
+pass 'below-floor Python fails closed before harness trust mutation'
+
+SHADOW_TOMLLIB_DIR="$TMP/shadow-tomllib"
+mkdir -p "$SHADOW_TOMLLIB_DIR"
+cat > "$SHADOW_TOMLLIB_DIR/tomllib.py" <<'PY'
+raise RuntimeError("operator-local tomllib shadow")
+PY
+SHADOW_CODEX_TOML="$TMP/shadow-home/.codex/config.toml"
+PYTHONPATH="$SHADOW_TOMLLIB_DIR" CS_CODEX_TOML="$SHADOW_CODEX_TOML" \
+  cs_harness_codex_trust_dir /tmp/shadowed-codex ||
+  fail 'codex trust must use isolated Python imports'
+[ -f "$SHADOW_CODEX_TOML" ] || fail 'isolated codex trust did not create config'
+pass 'harness Python probes and TOML mutation ignore operator-local module shadowing'
+
 # --- root detection precedence ----------------------------------------------
 # lib.sh exports CS_HARNESS_OVERRIDE=codex; each case controls the inputs it needs.
 
