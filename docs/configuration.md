@@ -111,6 +111,7 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
   A `kind=scout` records NEITHER, because a report deliverable has no mode to honour and no approval posture to apply, which is why `cs-promote.sh` is where a promoted scout first states both.
   `kind=capo` records `mode=capo`, `yolo=off`, and `home=`.
   `cs-spawn.sh` also records `issue=` for board-driven work and `headless=1` for a headless scout (`codex exec` / `claude -p`); `cs-pr-check.sh` appends `pr=` and any available `pr_head=`.
+  Herdr pane state labels and tokens are optional display metadata only; `state/<id>.meta` remains authoritative when the display report is unavailable or stale.
 - `state/<id>.status` - appended by soldiers; wake events, never current state. `bin/cs-classify-lib.sh` owns the verb vocabulary.
 - Pending-reply records (including capo-decision-escalation records) - see `bin/cs-pending-reply-lib.sh`'s `SCHEMA-OWNER` header comment for the full field list.
 - Auto-decision ledger (`data/<task_id>/auto-decisions.log`) - see `bin/cs-auto-decision-lib.sh`'s `SCHEMA-OWNER` header comment for the full field list.

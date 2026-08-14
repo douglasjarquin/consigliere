@@ -33,6 +33,13 @@ case "${1:-} ${2:-}" in
     printf '{"result":{"workspace":{"workspace_id":"w1"},"root_pane":{"pane_id":"w1:p1"},"worktree":{"path":"%s","branch":"%s"}}}\n' "$CS_FAKE_SPAWN_WORKTREE" "$branch"
     ;;
   "pane run") printf '%s' "${4:-}" > "$CS_FAKE_SPAWN_LAUNCH" ;;
+  "pane report-metadata")
+    printf '%s\n' "$*" > "$CS_FAKE_SPAWN_METADATA"
+    if [ "${CS_FAKE_SPAWN_REPORT_METADATA_FAIL:-0}" = 1 ]; then
+      cp "$CS_FAKE_SPAWN_META" "$CS_FAKE_SPAWN_META_BEFORE"
+      exit 1
+    fi
+    ;;
   "agent get")
     # cs-spawn now requires an agent to actually APPEAR after the launch line,
     # because `pane run` reports success even when a not-ready shell swallowed
@@ -76,6 +83,10 @@ spawn_one() {
     CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
     CS_CLAUDE_JSON="$TMP/claude.json" \
     CS_FAKE_SPAWN_WORKTREE="$wt" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-$id" \
+    CS_FAKE_SPAWN_METADATA="$TMP/metadata-$id" \
+    CS_FAKE_SPAWN_META="$HOME_DIR/state/$id.meta" \
+    CS_FAKE_SPAWN_META_BEFORE="$TMP/meta-before-$id" \
+    CS_FAKE_SPAWN_REPORT_METADATA_FAIL="${CS_FAKE_SPAWN_REPORT_METADATA_FAIL:-0}" \
     "$SPAWN" "$id" "$REPO" "$@" >/dev/null || fail "spawn ($harness) failed"
   cat "$TMP/launch-$id"
 }
@@ -83,6 +94,13 @@ spawn_one() {
 # --- codex root: unchanged launch shape, harness=codex ----------------------
 launch=$(spawn_one codex t-codex --mode made --yolo off)
 [ "$(cs_meta_get "$HOME_DIR/state/t-codex.meta" harness)" = codex ] || fail "codex meta harness"
+assert_present "$TMP/metadata-t-codex" "spawn reports display metadata for the task pane"
+assert_grep '--source cs-spawn' "$TMP/metadata-t-codex" "display metadata uses the non-reserved spawn source"
+assert_grep '--state-label working=task=t-codex mode=made' "$TMP/metadata-t-codex" \
+  "display metadata labels the task id and delivery mode"
+assert_grep '--token task_id=t-codex' "$TMP/metadata-t-codex" "display metadata carries the task token"
+assert_grep '--token delivery_mode=made' "$TMP/metadata-t-codex" "display metadata carries the delivery mode"
+assert_grep '--ttl-ms ' "$TMP/metadata-t-codex" "display metadata carries a bounded TTL"
 assert_contains "$launch" "codex " "codex root launches codex"
 assert_contains "$launch" 'notify=' "codex root wires notify turn-end"
 assert_not_contains "$launch" '--settings' "codex root does not use --settings"
@@ -166,6 +184,25 @@ assert_contains "$output" "not a usable claude launch permission mode" "unusable
 assert_absent "$HOME_DIR/state/t-permmode-invalid.meta" "unusable mode writes no metadata"
 rm -f "$HOME_DIR/config/permission-mode.conf"
 pass "config/permission-mode.conf selects the claude launch mode and blocks an unusable one"
+
+mkdir -p "$HOME_DIR/data/t-report-metadata-failure"
+printf 'implement the fixture\nDelivery contract: mode=made\n' \
+  > "$HOME_DIR/data/t-report-metadata-failure/brief.md"
+CS_FAKE_SPAWN_REPORT_METADATA_FAIL=1 \
+  spawn_one codex t-report-metadata-failure --mode made --yolo off >/dev/null \
+  || fail "a display metadata failure must not fail the spawn"
+assert_present "$TMP/metadata-t-report-metadata-failure" \
+  "a display metadata failure still attempted the report"
+assert_grep '--state-label working=task=t-report-metadata-failure mode=made' \
+  "$TMP/metadata-t-report-metadata-failure" \
+  "the failed display report used the task label contract"
+assert_grep '--token delivery_mode=made' \
+  "$TMP/metadata-t-report-metadata-failure" \
+  "the failed display report used the delivery token contract"
+cmp -s "$TMP/meta-before-t-report-metadata-failure" \
+  "$HOME_DIR/state/t-report-metadata-failure.meta" \
+  || fail "a display metadata failure changed the durable task record"
+pass "display metadata failure stays best-effort and does not block spawn"
 
 # --- the swallowed launch ----------------------------------------------------
 # `pane run` hands the launch line to the pane's SHELL and reports success
