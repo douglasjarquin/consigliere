@@ -868,6 +868,60 @@ test_event_splice_blocked_edge_and_dedupe_clear() {
   pass "the event splice returns spooled blocked edges and clears the dedupe marker on working"
 }
 
+# Records for one pane inside a single drained batch are in time order, so a
+# `working` edge behind a `blocked` edge means the pane is no longer waiting on
+# the human. Escalating the superseded `blocked` would wake the boss for nothing
+# AND arm that pane's dedupe marker with no `working` edge left to clear it,
+# which would then suppress the pane's next genuine block on the fast path.
+test_event_splice_supersedes_a_blocked_edge_within_one_batch() {
+  local dir state fakebin rec rc marker
+  dir=$(make_case event-supersede); state="$dir/state"; fakebin="$dir/fakebin"
+  export CS_FAKE_HERDR_AGENT_STATUS=working   # level reconcile sees no blocked pane
+
+  spool_append "$state" status pane-sup-1 ws-1 blocked codex
+  spool_append "$state" status pane-sup-1 ws-1 working codex
+  rec=$(
+    cd "$dir" || exit 2
+    # shellcheck disable=SC1090,SC1091
+    PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
+    PATH="$fakebin:$PATH" cs_watch_wait_transition 1 "$state" pane-sup-1
+  ); rc=$?
+  expect_code 1 "$rc" "a blocked edge superseded by a working edge in the same batch was escalated"
+  [ -z "$rec" ] || fail "a superseded blocked edge produced a record: $rec"
+  marker="$state/.herdr-escalated-pane-sup-1"
+  [ ! -e "$marker" ] || fail "a superseded escalation left the dedupe marker armed"
+
+  # The pane is genuinely blocked again on a later batch: the fast path must
+  # still escalate it, which is exactly what an armed marker would have blocked.
+  spool_append "$state" status pane-sup-1 ws-1 blocked codex
+  rec=$(
+    cd "$dir" || exit 2
+    # shellcheck disable=SC1090,SC1091
+    PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
+    PATH="$fakebin:$PATH" cs_watch_wait_transition 1 "$state" pane-sup-1
+  ); rc=$?
+  expect_code 0 "$rc" "the next genuine block after a superseded edge was not escalated"
+  [ "$(printf '%s' "$rec" | cut -f1)" = pane-sup-1 ] || fail "re-block record pane_id wrong: $rec"
+
+  # A hold for a DIFFERENT pane is untouched by the supersede.
+  dir=$(make_case event-supersede-other); state="$dir/state"; fakebin="$dir/fakebin"
+  spool_append "$state" status pane-sup-1 ws-1 blocked codex
+  spool_append "$state" status pane-sup-1 ws-1 working codex
+  spool_append "$state" status pane-sup-2 ws-1 blocked claude
+  rec=$(
+    cd "$dir" || exit 2
+    # shellcheck disable=SC1090,SC1091
+    PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
+    PATH="$fakebin:$PATH" cs_watch_wait_transition 1 "$state" pane-sup-1 pane-sup-2
+  ); rc=$?
+  expect_code 0 "$rc" "a second pane's blocked edge in the same batch was lost"
+  [ "$(printf '%s' "$rec" | cut -f1)" = pane-sup-2 ] || fail "expected the other pane's record, got: $rec"
+  [ ! -e "$state/.herdr-escalated-pane-sup-1" ] \
+    || fail "the superseded pane's marker was armed while another pane escalated"
+  unset CS_FAKE_HERDR_AGENT_STATUS
+  pass "a working edge behind a blocked edge in one batch cancels that pane's escalation"
+}
+
 test_event_splice_without_the_plugin_falls_back_to_polling() {
   local dir state fakebin rec rc
   dir=$(make_case event-nopluging); state="$dir/state"; fakebin="$dir/fakebin"
@@ -875,14 +929,12 @@ test_event_splice_without_the_plugin_falls_back_to_polling() {
   # No spool: this machine has no event plugin installed. The wait must report
   # the transport unusable so the caller sleeps its own budget - supervision
   # continues on the poll loop, which is the permanent fail-closed backstop.
-  set +e
   rec=$(
     cd "$dir" || exit 2
     # shellcheck disable=SC1090,SC1091
     PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
     PATH="$fakebin:$PATH" cs_watch_wait_transition 1 "$state" pane-ev-1
   ); rc=$?
-  set -e
   expect_code 2 "$rc" "an absent event spool must report the transport unusable"
   [ -z "$rec" ] || fail "an absent transport produced a record: $rec"
   unset CS_FAKE_HERDR_AGENT_STATUS
@@ -942,14 +994,12 @@ test_event_splice_ignores_foreign_panes_and_unknown_kinds() {
   # An unknown kind is IGNORED, never misread as a status edge, which is what
   # lets the hook add a kind before this side knows about it.
   spool_append "$state" brand-new-kind pane-ev-9 ws-1 blocked codex
-  set +e
   rec=$(
     cd "$dir" || exit 2
     # shellcheck disable=SC1090,SC1091
     PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
     PATH="$fakebin:$PATH" cs_watch_wait_transition 1 "$state" pane-ev-9
   ); rc=$?
-  set -e
   expect_code 1 "$rc" "a foreign pane or unknown kind must leave a clean bounded wait"
   [ -z "$rec" ] || fail "a foreign pane or unknown kind produced a record: $rec"
   unset CS_FAKE_HERDR_AGENT_STATUS
@@ -1202,6 +1252,7 @@ test_heartbeat_no_change_absorbed
 test_heartbeat_backstop_surfaces_unsurfaced_status
 test_beacon_stays_fresh_while_absorbing
 test_event_splice_blocked_edge_and_dedupe_clear
+test_event_splice_supersedes_a_blocked_edge_within_one_batch
 test_event_splice_without_the_plugin_falls_back_to_polling
 test_event_splice_drains_edges_that_fired_with_no_watcher_running
 test_event_splice_level_reconcile_catches_already_blocked

@@ -1034,7 +1034,7 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
   # absent workspace_id) and shift the remaining columns. `cut` preserves them.
   # $SECONDS is a bash builtin, so the tick loop costs no extra process to
   # know the time.
-  local started=$SECONDS first=
+  local started=$SECONDS first='' first_pane=''
   while :; do
     # A drained batch is consumed whether or not it holds an actionable edge,
     # so EVERY line in it is applied before returning: stopping at the first hit
@@ -1042,6 +1042,15 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
     # edges that clear other panes' dedupe markers. Only the first actionable
     # record is handed up; a second one keeps its marker uncommitted and
     # surfaces on the next wait.
+    #
+    # Records for ONE pane are in time order inside a batch, so a later record
+    # for the pane whose escalation is being held SUPERSEDES it: the hold is
+    # dropped and that later record's own policy stands. Without this, a
+    # `blocked` then `working` pair drained together would escalate a pane the
+    # same batch already proved is working, and the caller's commit would then
+    # arm a dedupe marker no `working` edge is left to clear - suppressing the
+    # pane's NEXT genuine block on the fast path. A hold for a different pane is
+    # untouched.
     while IFS= read -r line; do
       [ -n "$line" ] || continue
       kind=$(printf '%s' "$line" | cut -f1)
@@ -1058,8 +1067,13 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
       status=$(printf '%s' "$line" | cut -f4)
       agent=$(printf '%s' "$line" | cut -f5)
       record=$(cs_transition_normalize "$p" "$ws" "$status" "$agent")
+      if [ -n "$first_pane" ] && [ "$p" = "$first_pane" ]; then
+        first=
+        first_pane=
+      fi
       if hit=$(cs_transition_apply "$state" "$record") && [ -z "$first" ]; then
         first=$hit
+        first_pane=$p
       fi
     done < <(cs_event_drain "$spool" "$cursor")
     if [ -n "$first" ]; then

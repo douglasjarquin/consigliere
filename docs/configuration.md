@@ -209,6 +209,9 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_SESSION_START_QUEUED_LIMIT` | cs-session-start | plain queued backlog rows in the session-start digest; default 20; done rows are never listed |
 | `CS_SESSION_START_ACTIVE_LIMIT` | cs-session-start | in-flight, held, and blocked backlog rows per group in the session-start digest; default 40; each row is shown in full and any remainder is disclosed with the targeted follow-up that prints the rest; queued public-followup rows are outside this bound and always print in full |
 | `CS_PAUSE_RESURFACE_SECS` | cs-watch | declared external-wait recheck cadence |
+| `CS_EVENT_SPOOL_TICK` | cs-watch | how often the bounded event wait re-reads the spool, in seconds; default 0.5. The direct trade between blocked-escalation latency and the idle cost of a watcher with panes but no events - each tick is one `stat` plus the `sleep` |
+| `CS_EVENT_SPOOL_MAX_BYTES` | cs-herdr-event-lib | size cap for `state/.herdr-events`; default 262144. An append past the cap TRUNCATES the spool, so the edges in it are dropped rather than delivered; the watcher's level reconcile is what covers that gap |
+| `CS_EVENT_PLUGIN_DISABLE` | cs-herdr-event-plugin | set to `1` to make install and uninstall no-ops that report `disabled`. herdr's plugin registry is global to the user, so `tests/lib.sh` sets it for every suite to keep a throwaway temp home out of the developer's real registry |
 | `CS_BOARD_SWEEP_LANES` | cs-board-watch | default lane cap baked into a new sweep record; default 3, matching the `contracts` skill |
 | `CS_BOARD_SWEEP_RESURFACE` | cs-board-watch | default seconds before a still-full column is reported again; default 1800. Only a default for `arm`; each record stores its own value |
 | `CS_SPAWN_LAUNCH_WAIT_SECS` | cs-spawn | seconds to wait for an agent to actually appear after the launch line is delivered, before treating the launch as swallowed; default 60 |
