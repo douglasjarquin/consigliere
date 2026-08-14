@@ -9,13 +9,44 @@ one projected line per event to stdout, flushing each so the bash caller can
 react sub-second. The bash side normalizes each line, applies the single-owner
 policy table (bin/cs-watch.sh), decides when to stop, and kills this reader.
 
-Subscribed kinds, all per pane:
-  pane.agent_status_changed  every status edge (working/idle/blocked/done)
+Subscribed kinds, one request each per pane (only the two kinds carrying a
+`pane_id` in herdr's schema are actually pane-scoped server-side; see
+docs/herdr.md, "Which subscription kinds are pane-scoped"):
+  pane.agent_status_changed  subscribed TWICE, each filtered server-side: once
+                             to agent_status=blocked and once to
+                             agent_status=working. `blocked` is the wake edge
+                             (herdr's native manifests already classify a
+                             claude/codex permission prompt as this state, so
+                             no pattern hunting is needed - docs/herdr.md,
+                             "Blocked detection covers claude/codex permission
+                             prompts natively"). `working` is the edge that
+                             CLEARS the bash side's per-pane escalation dedupe
+                             marker (bin/cs-watch.sh cs_transition_apply,
+                             absorb), and it must stay on the wire: the poll
+                             pass and the reconnect level-reconcile only sample
+                             pane state once per poll cycle, so a working
+                             window that opens and closes inside one drain
+                             window (back-to-back permission prompts) is
+                             observable ONLY as a pushed edge. `idle`/`done`
+                             stay filtered off the wire: both map to `defer`
+                             in cs_transition_policy, a pure no-op on the
+                             fast path.
   pane.exited                the pane's process ended - a soldier that is gone
                              rather than quiet, which polling could only infer
                              from a later "pane not found"
   pane.agent_detected        an agent appeared in the pane, so a relaunch is a
-                             fact instead of an inference
+                             fact instead of an inference; UNFILTERED, since
+                             the kind takes no filter. The DELIVERED payload
+                             (`EventData::PaneAgentDetected`, herdr source
+                             src/api/schema/events.rs - a different enum from
+                             the `Subscription` and `EventMatch` enums in the
+                             same file) carries pane_id, workspace_id, an
+                             optional agent, a `released` flag, and an
+                             optional `final_status`, and NO `agent_status`.
+                             So field 4 below is always empty for this kind,
+                             cs_transition_policy takes its `fallback` arm on
+                             an empty status, and the agent-detected line is
+                             inert on the fast path today.
   pane.output_matched        the pane rendered text matching a requested
                              pattern (see CS_HERDR_EVENT_PATTERNS)
 
@@ -24,12 +55,14 @@ as `name=regex` pairs separated by newlines. Absent, no output subscription is
 requested. A pattern the server rejects fails the whole subscribe (exit 3) so a
 typo is loud rather than a subscription that silently never fires.
 
-Wire protocol (verified live: herdr 0.7.5, protocol 17, newline-delimited JSON.
+Wire protocol (verified live: herdr 0.7.5, protocol 17, newline-delimited JSON;
+the agent_status filter re-verified live at herdr 0.8.0, protocol 19, docs/herdr.md.
 Every kind below was confirmed to return subscription_started against a real
 pane; pane.output_changed is NOT subscribable and the server names the accepted
 set in its rejection):
   request : {"id","method":"events.subscribe","params":{"subscriptions":[
-             {"type":"pane.agent_status_changed","pane_id":P},
+             {"type":"pane.agent_status_changed","pane_id":P,"agent_status":"blocked"},
+             {"type":"pane.agent_status_changed","pane_id":P,"agent_status":"working"},
              {"type":"pane.exited","pane_id":P},
              {"type":"pane.agent_detected","pane_id":P},
              {"type":"pane.output_matched","pane_id":P,"source":"recent",
@@ -47,7 +80,12 @@ which subscription produced a line:
   @subscribed
   status\t<pane_id>\t<workspace_id>\t<agent_status>\t<agent>
   exited\t<pane_id>\t<workspace_id>\t<exit_status>\t
+                             (`EventData::PaneExited` carries only pane_id and
+                             workspace_id, so field 4 is empty in practice;
+                             the bash `exited` branch ignores it)
   agent-detected\t<pane_id>\t<workspace_id>\t<agent_status>\t<agent>
+                             (no `agent_status` in the delivered payload, so
+                             field 4 is empty in practice - see above)
   output\t<pane_id>\t<workspace_id>\t<pattern_name>\t<matched_line>
 
 Exit status:
@@ -160,7 +198,14 @@ def main(argv):
     patterns = _patterns()
     subscriptions = []
     for pane in panes:
-        subscriptions.append({"type": "pane.agent_status_changed", "pane_id": pane})
+        for status in ("blocked", "working"):
+            subscriptions.append(
+                {
+                    "type": "pane.agent_status_changed",
+                    "pane_id": pane,
+                    "agent_status": status,
+                }
+            )
         subscriptions.append({"type": "pane.exited", "pane_id": pane})
         subscriptions.append({"type": "pane.agent_detected", "pane_id": pane})
         for name, regex in patterns:

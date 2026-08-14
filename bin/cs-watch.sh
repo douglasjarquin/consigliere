@@ -1118,8 +1118,20 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
     case "$kind" in
       status|agent-detected)
         # An agent appearing in a pane is a relaunch fact rather than an
-        # inference, but it is projected through the same status policy: the
-        # detected event carries the agent's current status.
+        # inference, and it is projected through the same status policy even
+        # though herdr's delivered `EventData::PaneAgentDetected` payload
+        # carries no `agent_status` at all. Field 4 of an `agent-detected`
+        # line is therefore always empty, cs_transition_policy takes its
+        # `fallback` arm, and that half of this branch is inert today - it
+        # can neither wake nor clear a marker. `status` lines
+        # are server-filtered to the two edge-triggered statuses this policy
+        # table acts on: cs-herdr-events.py subscribes
+        # pane.agent_status_changed twice per pane, once with
+        # agent_status=blocked (the actionable wake) and once with
+        # agent_status=working (the absorb edge that clears the per-pane
+        # dedupe marker, so back-to-back prompts re-escalate immediately).
+        # Only `idle`/`done` are dropped, and both are defer here.
+        # `agent-detected` stays unfiltered because its kind takes no filter.
         record=$(cs_transition_normalize "$p" "$ws" "$status" "$agent")
         if hit=$(cs_transition_apply "$state" "$record"); then
           printf '%s' "$hit"
