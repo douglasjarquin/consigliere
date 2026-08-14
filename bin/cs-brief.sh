@@ -215,6 +215,60 @@ shell_quote() {
   printf "'"
 }
 
+arm_plan_progress_check() {
+  local check trust tmp
+  [ "$EXEC_MODE" = plan-first ] || return 0
+
+  case "$ID" in
+    ''|.*|*[!A-Za-z0-9._-]*)
+      echo "error: plan-first progress checks require a path-safe task id" >&2
+      return 1
+      ;;
+  esac
+  [ -d "$STATE" ] || mkdir -p "$STATE" || {
+    echo "error: state directory is unavailable" >&2
+    return 1
+  }
+  [ ! -L "$STATE" ] || {
+    echo "error: state directory is unavailable" >&2
+    return 1
+  }
+  check="$STATE/$ID.check.sh"
+  trust="$STATE/$ID.check-trust"
+  if [ -e "$check" ] || [ -L "$check" ] || [ -e "$trust" ] || [ -L "$trust" ]; then
+    echo "error: state check is already present for $ID" >&2
+    return 1
+  fi
+
+  umask 077
+  tmp=$(mktemp "$STATE/.cs-plan-progress-check.XXXXXX") || {
+    echo "error: cannot stage plan progress check" >&2
+    return 1
+  }
+  if ! {
+    {
+      printf '%s\n' '#!/usr/bin/env bash' 'set -u'
+      printf 'CS_STATE_OVERRIDE=%s\n' "$(shell_quote "$STATE")"
+      printf '%s\n' 'export CS_STATE_OVERRIDE'
+      printf 'exec %s %s\n' \
+        "$(shell_quote "$SCRIPT_DIR/cs-plan-progress-check.sh")" \
+        "$(shell_quote "$ID")"
+    } > "$tmp" \
+      && chmod 0700 "$tmp" \
+      && mv -f -- "$tmp" "$check"
+  }; then
+    rm -f -- "$tmp" 2>/dev/null || true
+    echo "error: cannot publish plan progress check" >&2
+    return 1
+  fi
+  rm -f -- "$STATE/$ID.plan-progress"
+  "$SCRIPT_DIR/cs-check-register.sh" "$ID" >/dev/null || {
+    rm -f -- "$check" "$trust"
+    echo "error: could not bind plan progress check" >&2
+    return 1
+  }
+}
+
 STATUS_FILE=$(shell_quote "$STATE/$ID.status")
 
 if [ "$KIND" = capo ]; then
@@ -553,6 +607,8 @@ EOF
 else
   ISSUE_SECTION=""
 fi
+
+arm_plan_progress_check
 
 cat > "$BRIEF" <<EOF
 You are a soldier: an autonomous worker agent managed by consigliere. Work on your own; do not wait for a human.
