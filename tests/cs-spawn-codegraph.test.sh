@@ -276,7 +276,7 @@ assert_contains "$out" "did not finish within 1s" "an expired bound must be repo
 assert_present "$HOME_DIR/state/t-case5.meta" "the spawn must still complete after the timeout"
 WT5_REAL=$(cd "$TMP/wt-t-case5" && pwd -P)
 [ -e "$WT5_REAL/.codegraph" ] &&
-  fail "a killed codegraph init must leave no half-written index behind, found $(ls -A "$WT5_REAL/.codegraph" | tr '\n' ' ')"
+  fail "a killed codegraph init must leave no half-written index behind, found $(find "$WT5_REAL/.codegraph" -maxdepth 1 | tr '\n' ' ')"
 pass "cs-spawn codegraph prep: a codegraph init that outlives its bound is fail-open and loud"
 
 # --- 11. a cleanup that cannot finish never takes the spawn down ------------
