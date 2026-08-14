@@ -13,7 +13,7 @@ projects/
 # Executor worktrees (Agent isolation) — never tracked.
 .claude/worktrees/
 
-# Python bytecode caches (bin/cs-herdr-events.py) — build artifacts, never tracked.
+# Python bytecode caches (bin/cs-detach.py) — build artifacts, never tracked.
 __pycache__/
 
 # codegraph's local index - a directory (or a symlink to a central per-user

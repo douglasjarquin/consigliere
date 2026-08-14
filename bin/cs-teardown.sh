@@ -28,6 +28,11 @@
 # shared external source (bin/cs-procevent.sh retire-home is the bounded
 # retirement it runs first); --force is the approved discard path. Removing the
 # home never touches anything under projects/ clones.
+# For the same outlives-the-home reason, a capo's herdr event-transport
+# registration is unlinked before the home is removed
+# (bin/cs-herdr-event-plugin.sh uninstall, whose header owns the mechanics);
+# unlike the retirements above that step is fail-open, because it costs
+# escalation latency, never supervision.
 #
 # The herdr `worktree remove` runs only AFTER these proofs pass; its own
 # dirty-refusal is a backstop, never the safety mechanism. A ship remove that
@@ -797,6 +802,20 @@ if [ "$KIND" = capo ]; then
       fi
       echo "WARNING: capo $ID's blocking sources could not all be retired; --force is removing the home anyway." >&2
     fi
+  fi
+  # Same reason, same ordering: herdr's plugin registry is GLOBAL to the user, so
+  # this home's event-transport registration outlives the home too, and its id is
+  # derived from the home path - once the directory is gone the id can no longer
+  # be computed and the entry is unreachable forever, leaving herdr dispatching
+  # every pane's status edge to a deleted hook. Unlike the retirements above this
+  # is fail-open on purpose: the registration costs escalation latency, never
+  # supervision, so a herdr hiccup must not block a retirement whose own safety
+  # proofs have already passed.
+  if [ -x "$SCRIPT_DIR/cs-herdr-event-plugin.sh" ]; then
+    CS_HOME="$HOME_PATH" CS_STATE_OVERRIDE="$HOME_PATH/state" \
+      CS_HOST_OVERRIDE="$HOME_PATH/host" CS_DATA_OVERRIDE="$HOME_PATH/data" \
+      CS_CONFIG_OVERRIDE="$HOME_PATH/config" \
+      "$SCRIPT_DIR/cs-herdr-event-plugin.sh" uninstall >/dev/null 2>&1 || true
   fi
   [ -n "$PANE" ] && cs_herdr_pane_close "$PANE" >/dev/null 2>&1 || true
   require_pane_gone "capo $ID's home and records" || exit 1

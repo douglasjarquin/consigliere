@@ -484,14 +484,9 @@ cs_herdr_submit_confirm() { # <pane_id> [timeout-ms]
 }
 
 # --- events ----------------------------------------------------------------
-
-cs_herdr_socket_path() {
-  cs_herdr status --json 2>/dev/null | jq -r '.server.socket // empty'
-}
-
-cs_herdr_events_capable() {
-  local sock
-  command -v python3 >/dev/null 2>&1 || return 1
-  sock=$(cs_herdr_socket_path)
-  [ -n "$sock" ] && [ -S "$sock" ]
-}
+#
+# Push events reach this fleet through herdr's own server-side plugin
+# `[[events]]` hook, not through a subscriber consigliere runs: the hook writes
+# each `pane.agent_status_changed` edge into a per-home spool
+# (bin/cs-herdr-event-lib.sh) that the watcher drains. Nothing here connects to
+# the control socket, so there is no capability probe to own.
