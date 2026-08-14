@@ -918,6 +918,29 @@ test_event_splice_supersedes_a_blocked_edge_within_one_batch() {
   [ "$(printf '%s' "$rec" | cut -f1)" = pane-sup-2 ] || fail "expected the other pane's record, got: $rec"
   [ ! -e "$state/.herdr-escalated-pane-sup-1" ] \
     || fail "the superseded pane's marker was armed while another pane escalated"
+
+  # The same batch with the superseded pane's records BRACKETING the other
+  # pane's block: the second pane's escalation was already held when the
+  # supersede arrived, so a per-batch (rather than per-pane) hold would drop a
+  # genuine block and cost a full poll cycle to recover it.
+  dir=$(make_case event-supersede-bracket); state="$dir/state"; fakebin="$dir/fakebin"
+  spool_append "$state" status pane-sup-1 ws-1 blocked codex
+  spool_append "$state" status pane-sup-2 ws-1 blocked claude
+  spool_append "$state" status pane-sup-1 ws-1 working codex
+  rec=$(
+    cd "$dir" || exit 2
+    # shellcheck disable=SC1090,SC1091
+    PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
+    PATH="$fakebin:$PATH" cs_watch_wait_transition 1 "$state" pane-sup-1 pane-sup-2
+  ); rc=$?
+  expect_code 0 "$rc" "a blocked edge bracketed by a superseded pane's edges was lost"
+  [ "$(printf '%s' "$rec" | cut -f1)" = pane-sup-2 ] || fail "expected the bracketed pane's record, got: $rec"
+  [ "$(printf '%s' "$rec" | cut -f4)" = blocked ] || fail "bracketed record to_status wrong: $rec"
+  [ ! -e "$state/.herdr-escalated-pane-sup-1" ] \
+    || fail "the superseded pane's marker was armed in the bracketed order"
+  # The caller commits the escalated pane's marker, not the wait.
+  [ ! -e "$state/.herdr-escalated-pane-sup-2" ] \
+    || fail "the wait committed the escalated pane's dedupe marker itself"
   unset CS_FAKE_HERDR_AGENT_STATUS
   pass "a working edge behind a blocked edge in one batch cancels that pane's escalation"
 }
