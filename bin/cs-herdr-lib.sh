@@ -412,7 +412,7 @@ cs_herdr_agent_name() {
     [a-z]*) ;;
     *) name="a-$name" ;;
   esac
-  if [ "${#name}" -gt 32 ]; then
+  if [ "$name" != "$logical" ] || [ "${#name}" -gt 32 ]; then
     suffix=$(printf '%s' "$logical" | cksum | cut -d ' ' -f1)
     keep=$((32 - ${#suffix} - 1))
     name="${name:0:keep}-${suffix}"

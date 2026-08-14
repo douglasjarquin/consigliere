@@ -168,8 +168,19 @@ assert_absent "$HOME_DIR/state/t-codex.claude-settings.json" "codex root writes 
 pass "codex root: harness=codex, codex notify launch, no settings file"
 
 launch=$(spawn_one codex Foo.Bar --mode made --yolo off)
-assert_contains "$launch" "name=foo-bar" "native agent names normalize task ids to Herdr's lowercase charset"
+assert_contains "$launch" "name=foo-bar-" "native agent names normalize task ids to Herdr's lowercase charset"
 pass "a task id outside Herdr's agent-name charset reaches native agent start safely"
+
+dot_launch=$launch
+hyphen_launch=$(spawn_one codex Foo-Bar --mode made --yolo off)
+dot_name=$(printf '%s\n' "$dot_launch" | sed -n 's/^name=//p')
+hyphen_name=$(printf '%s\n' "$hyphen_launch" | sed -n 's/^name=//p')
+[ "$dot_name" != "$hyphen_name" ] || fail "distinct accepted task ids must not collide as native agent names"
+[ -f "$HOME_DIR/state/Foo.Bar.meta" ] || fail "dot task id was not preserved in its metadata path"
+[ -f "$HOME_DIR/state/Foo-Bar.meta" ] || fail "hyphen task id was not preserved in its metadata path"
+[ "$(cs_meta_get "$HOME_DIR/state/Foo.Bar.meta" kind)" = ship ] || fail "dot task metadata was not written"
+[ "$(cs_meta_get "$HOME_DIR/state/Foo-Bar.meta" kind)" = ship ] || fail "hyphen task metadata was not written"
+pass "distinct task ids receive distinct native names while task ids remain unchanged"
 
 # --- capo spawn: unconditional env pre-step, no turn-end wiring --------------
 # The old cs_harness_capo_launch unit test is gone with the function; this is
