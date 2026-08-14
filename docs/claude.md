@@ -28,8 +28,11 @@ an embedded newline, live-verified 2026-08-13 with a minimal two-byte repro
 (`"a\nb"`); every real brief is multi-line. Instead, `bin/cs-spawn.sh` starts the
 agent bare (autonomy + `--settings` only), then delivers the brief as a follow-up
 prompt via `cs_herdr_agent_prompt_confirmed` (`bin/cs-herdr-lib.sh`) - native
-`agent prompt --wait --until working`, the same primitive every other prompt into
-an agent's pane uses, so a multi-line brief needs no new delivery mechanism.
+`agent prompt --wait --until working`. Existing panes use that primitive through
+`cs_prompt_guarded`; the fresh-pane `_cs_spawn_deliver_brief` path calls it directly
+because the first frame has no composer state the guard can validate. `cs-send.sh`
+remains on plain `pane run` plus `cs_herdr_submit_confirm`, so it does not use
+`agent prompt`.
 
 `bin/cs-spawn.sh`'s `_cs_spawn_deliver_brief` deliberately does NOT go through
 `bin/cs-prompt-lib.sh`'s general-purpose `cs_prompt_guarded` guard, checking only
