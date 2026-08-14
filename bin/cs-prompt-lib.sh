@@ -125,7 +125,7 @@ cs_wedge_alarm_run_bounded() {  # <logfn> <channel> <cmd...>
   case "$timeout" in
     ''|*[!0-9]*|0) timeout=$CS_WEDGE_ALARM_TIMEOUT_SECS_DEFAULT ;;
   esac
-  "$@" &
+  "$@" >/dev/null 2>&1 &
   pid=$!
   CS_WEDGE_ALARM_NOTIFIER_PID=$pid
   start=$SECONDS
@@ -159,7 +159,7 @@ cs_wedge_alarm_via_osascript() {  # <logfn> <title> <summary>
     "$logfn" "wedge alarm: osascript not found; cannot post a macOS notification"; return 1; }
   cs_wedge_alarm_run_bounded "$logfn" osascript osascript -e 'on run argv' \
     -e 'display notification (item 2 of argv) with title (item 1 of argv) sound name "Basso"' \
-    -e 'end run' "$title" "$summary" >/dev/null 2>&1 && return 0
+    -e 'end run' "$title" "$summary" && return 0
   "$logfn" "wedge alarm: osascript notification failed"
   return 1
 }
@@ -169,7 +169,7 @@ cs_wedge_alarm_via_herdr() {  # <logfn> <title> <summary>
   command -v herdr >/dev/null 2>&1 || {
     "$logfn" "wedge alarm: herdr not found; cannot post a herdr notification"; return 1; }
   cs_wedge_alarm_run_bounded "$logfn" herdr herdr notification show \
-    "$title" --body "$summary" --sound request >/dev/null 2>&1 && return 0
+    "$title" --body "$summary" --sound request && return 0
   "$logfn" "wedge alarm: herdr notification failed"
   return 1
 }
@@ -178,7 +178,7 @@ cs_wedge_alarm_via_command() {  # <logfn> <cmd> <summary>
   local logfn=$1 cmd=$2 summary=$3 rc
   [ -n "$cmd" ] || { "$logfn" "wedge alarm: empty command: channel; nothing to run"; return 1; }
   cs_wedge_alarm_run_bounded "$logfn" command sh -c "$cmd" cs-wedge-alarm "$summary" \
-    <<< "$summary" >/dev/null 2>&1
+    <<< "$summary"
   rc=$?
   [ "$rc" -eq 0 ] && return 0
   "$logfn" "wedge alarm: command channel exited $rc (command redacted)"
@@ -195,7 +195,7 @@ cs_wedge_alarm_emit() {  # <logfn> <title> <channel> <summary> [command-directiv
     '') ;;
     discard) return 0 ;;
     *)
-      cs_wedge_alarm_run_bounded "$logfn" "$channel" "$exec_override" "$channel" "$summary" >/dev/null 2>&1
+      cs_wedge_alarm_run_bounded "$logfn" "$channel" "$exec_override" "$channel" "$summary"
       rc=$?
       [ "$rc" -eq 0 ] && return 0
       "$logfn" "wedge alarm: notifier override exited $rc for channel '$channel'"
