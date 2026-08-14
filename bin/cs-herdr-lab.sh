@@ -11,7 +11,9 @@
 #   cs-herdr-lab.sh teardown <session>
 #
 # Session names must begin with "cs-lab-" and can never be "default".
-# Every herdr call made here carries a trailing --session <session>.
+# Every herdr call made here carries --session <session>, inserted before the
+# caller's own trailing "--" argv separator when present (else appended at
+# the end); see cs_herdr_lab_raw.
 # The run command rejects caller-supplied --session flags, any leading option
 # before the subcommand, all session lifecycle operations, and every server
 # operation.
@@ -50,9 +52,20 @@ cs_herdr_lab_tripwire_path() { # <session>
 }
 
 cs_herdr_lab_raw() { # <session> <herdr arguments...>
-  local name=$1
+  # --session must precede a subcommand's own "--" trailing-argv separator (e.g. agent start ... -- ARG), or it becomes a literal arg and herdr resolves the wrong session.
+  local name=$1 arg before=() after=() saw_sep=0
   shift
-  HERDR_SESSION="$name" herdr "$@" --session "$name"
+  for arg in "$@"; do
+    if [ "$saw_sep" -eq 0 ] && [ "$arg" = "--" ]; then
+      saw_sep=1
+    fi
+    if [ "$saw_sep" -eq 0 ]; then
+      before+=("$arg")
+    else
+      after+=("$arg")
+    fi
+  done
+  HERDR_SESSION="$name" herdr "${before[@]+"${before[@]}"}" --session "$name" "${after[@]+"${after[@]}"}"
 }
 
 cs_herdr_lab_session_list() { # <session>
