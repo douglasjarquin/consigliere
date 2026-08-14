@@ -88,7 +88,7 @@ A real nested claude agent launched with `--permission-mode default` in a fresh 
 - Subscribing fresh to a pane ALREADY working emitted an immediate initial working event, about 1ms after the acknowledgement.
 
 The last two observations correct a claim this section previously stated as general: the server emits an initial event for a pane already in a state the subscription matches, so a reader attaching to an already-blocked or already-working pane immediately receives one extra line for that current state.
-"`@subscribed` plus exactly one line" therefore holds only for a pane that is idle at subscribe time.
+"`@subscribed` plus exactly one line" therefore holds for a pane whose status at subscribe time matches NO subscribed filter, which under the shipped blocked-plus-working shape means a pane that is neither blocked nor working - idle, done, and unknown all produce no initial event.
 That initial-event behavior is largely not a new capability for this supervisor: `cs_watch_wait_transition` already walks the panes on every reconnect, reading each pane's status and routing it through `cs_transition_apply` until it finds an actionable one, which clears the per-pane escalation dedupe marker on `working` before the stream is drained at all.
 That walk is not guaranteed to sample every pane on a given reconnect: it stops at the first actionable pane and skips any pane whose status read comes back empty, so a later pane's stale marker can survive that reconnect.
 The initial event therefore delivers the same clear through the stream, agreeing with the reconcile where the reconcile reached, and still carrying real value for the panes it did not reach.

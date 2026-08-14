@@ -35,8 +35,18 @@ docs/herdr.md, "Which subscription kinds are pane-scoped"):
                              rather than quiet, which polling could only infer
                              from a later "pane not found"
   pane.agent_detected        an agent appeared in the pane, so a relaunch is a
-                             fact instead of an inference; UNFILTERED - the
-                             agent's status at detection time still matters
+                             fact instead of an inference; UNFILTERED, since
+                             the kind takes no filter. The DELIVERED payload
+                             (`EventData::PaneAgentDetected`, herdr source
+                             src/api/schema/events.rs - a different enum from
+                             the `Subscription` and `EventMatch` enums in the
+                             same file) carries pane_id, workspace_id, an
+                             optional agent, a `released` flag, and an
+                             optional `final_status`, and NO `agent_status`.
+                             So field 4 below is always empty for this kind,
+                             cs_transition_policy takes its `fallback` arm on
+                             an empty status, and the agent-detected line is
+                             inert on the fast path today.
   pane.output_matched        the pane rendered text matching a requested
                              pattern (see CS_HERDR_EVENT_PATTERNS)
 
@@ -70,7 +80,12 @@ which subscription produced a line:
   @subscribed
   status\t<pane_id>\t<workspace_id>\t<agent_status>\t<agent>
   exited\t<pane_id>\t<workspace_id>\t<exit_status>\t
+                             (`EventData::PaneExited` carries only pane_id and
+                             workspace_id, so field 4 is empty in practice;
+                             the bash `exited` branch ignores it)
   agent-detected\t<pane_id>\t<workspace_id>\t<agent_status>\t<agent>
+                             (no `agent_status` in the delivered payload, so
+                             field 4 is empty in practice - see above)
   output\t<pane_id>\t<workspace_id>\t<pattern_name>\t<matched_line>
 
 Exit status:
