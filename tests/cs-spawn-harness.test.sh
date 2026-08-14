@@ -252,18 +252,24 @@ pass "native spawn fails closed without attempting agent start when both digest 
 # The old cs_harness_capo_launch unit test is gone with the function; this is
 # its end-to-end replacement, exercising cs-spawn.sh's own capo argv
 # construction (bin/cs-spawn.sh's capo branch) against a real launch.
+cross_kind_ship_launch=$(spawn_one codex capo-foo --mode made --yolo off)
+cross_kind_ship_name=$(printf '%s\n' "$cross_kind_ship_launch" | sed -n 's/^name=//p')
 CAPO_HOME="$TMP/capo-home"
 mkdir -p "$CAPO_HOME"
 : > "$CAPO_HOME/.cs-capo-home"
-mkdir -p "$HOME_DIR/data/t-capo"
-printf 'charter\n' > "$HOME_DIR/data/t-capo/brief.md"
+mkdir -p "$HOME_DIR/data/foo"
+printf 'charter\n' > "$HOME_DIR/data/foo/brief.md"
 env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude CLAUDE_CONFIG_DIR="$TMP/work-claude" \
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
-  CS_CLAUDE_JSON="$TMP/claude.json" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-t-capo" \
-  CS_FAKE_SPAWN_PROMPT="$TMP/prompt-t-capo" CS_FAKE_SPAWN_PANE_RUN="$TMP/panerun-t-capo" \
-  "$SPAWN" t-capo "$CAPO_HOME" --capo >/dev/null || fail "capo spawn failed"
-launch=$(cat "$TMP/launch-t-capo")
-[ "$(cs_meta_get "$HOME_DIR/state/t-capo.meta" kind)" = capo ] || fail "capo meta kind"
+  CS_CLAUDE_JSON="$TMP/claude.json" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-foo" \
+  CS_FAKE_SPAWN_PROMPT="$TMP/prompt-foo" CS_FAKE_SPAWN_PANE_RUN="$TMP/panerun-foo" \
+  "$SPAWN" foo "$CAPO_HOME" --capo >/dev/null || fail "capo spawn failed"
+launch=$(cat "$TMP/launch-foo")
+capo_native_name=$(printf '%s\n' "$launch" | sed -n 's/^name=//p')
+[ "$(cs_meta_get "$HOME_DIR/state/foo.meta" kind)" = capo ] || fail "capo meta kind"
+[ "$cross_kind_ship_name" != "$capo_native_name" ] \
+  || fail "ship capo-foo and capo foo must not collide as native agent names"
+assert_contains "$launch" "name=n-capo-foo-" "capo native names use a delimiter that lands in the normalized namespace"
 assert_contains "$launch" "kind=claude" "capo launches the root harness"
 assert_not_contains "$launch" '--settings' "capo has no turn-end wiring"
 assert_not_contains "$launch" 'notify=' "capo has no turn-end wiring"
@@ -273,13 +279,13 @@ assert_not_contains "$launch" 'CONSIGLIERE_OP' "the charter never rides agent st
 # state/data. One exact substring pins the content AND the order: credential
 # store first, then the override clears, then the capo's own home.
 CAPO_ABS=$(cd "$CAPO_HOME" && pwd -P)
-assert_contains "$(cat "$TMP/panerun-t-capo")" \
+assert_contains "$(cat "$TMP/panerun-foo")" \
   "export CLAUDE_CONFIG_DIR='$TMP/work-claude' CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME='$CAPO_ABS'" \
   "the capo env pre-step must export the credential store, the override clears, and its own home, in that order"
-prompt=$(cat "$TMP/prompt-t-capo")
+prompt=$(cat "$TMP/prompt-foo")
 [ "$(printf '%s' "$prompt" | "$ROOT/bin/cs-operational-input.sh" kind)" = launch-brief ] \
   || fail "the capo charter prompt lacks the launch-brief kind"
-[ "$(printf '%s' "$prompt" | "$ROOT/bin/cs-operational-input.sh" body)" = "$(cat "$HOME_DIR/data/t-capo/brief.md")" ] \
+[ "$(printf '%s' "$prompt" | "$ROOT/bin/cs-operational-input.sh" body)" = "$(cat "$HOME_DIR/data/foo/brief.md")" ] \
   || fail "the capo charter prompt lost the charter body"
 pass "capo spawn: env pre-step confirmed with its content, no turn-end wiring, correct harness, charter delivered as a typed follow-up prompt"
 

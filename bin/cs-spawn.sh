@@ -786,7 +786,12 @@ if [ "$KIND" = capo ]; then
   # either harness.
   declare -a AGENT_ARGV=()
   cs_harness_autonomy_argv AGENT_ARGV "$HARNESS" || { echo "error: unsupported harness '$HARNESS' for capo $ID" >&2; exit 1; }
-  if ! cs_herdr_agent_start "$PANE" "capo-$ID" "$HARNESS" "$(cs_herdr_agent_start_timeout_ms "$LAUNCH_WAIT")" "${AGENT_ARGV[@]}"; then
+  # The colon is native-only identity syntax: it normalizes into Herdr's n
+  # namespace, keeping capo foo distinct from ship/scout task id capo-foo.
+  # Metadata, paths, and operator-facing IDs stay keyed by the raw capo ID;
+  # capo relaunch is refused, so this native-only delimiter does not alter any
+  # relaunch identity path.
+  if ! cs_herdr_agent_start "$PANE" "capo:$ID" "$HARNESS" "$(cs_herdr_agent_start_timeout_ms "$LAUNCH_WAIT")" "${AGENT_ARGV[@]}"; then
     echo "error: capo $ID launched into $PANE but no agent appeared within ${LAUNCH_WAIT}s. The home and its workspace are left intact - retry the spawn." >&2
     exit 1
   fi
