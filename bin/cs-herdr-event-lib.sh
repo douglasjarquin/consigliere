@@ -34,13 +34,22 @@ cs_event_cursor_path() {  # <state_dir>
   printf '%s/.herdr-events-cursor' "$1"
 }
 
+# Portable file size. macOS (BSD) stat uses `-f <fmt>`; Linux (GNU) stat uses
+# `-c <fmt>`. The platform is resolved ONCE at source time and the wrapper
+# defined accordingly - the same shape as bin/cs-classify-lib.sh's
+# _cs_decision_file_ident and bin/cs-watch.sh's stat_sig. This runs on every
+# spool append and on every tick of the watcher's bounded wait, so a per-call
+# `uname` fork would double the idle cost of the very loop the spool exists to
+# keep cheap.
+if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
+  _cs_event_stat_size() { LC_ALL=C stat -f %z "$1" 2>/dev/null; }
+else
+  _cs_event_stat_size() { LC_ALL=C stat -c %s "$1" 2>/dev/null; }
+fi
+
 cs_event_file_size() {  # <path>
   local size
-  if [ "$(uname)" = Darwin ]; then
-    size=$(LC_ALL=C stat -f %z "$1" 2>/dev/null)
-  else
-    size=$(LC_ALL=C stat -c %s "$1" 2>/dev/null)
-  fi
+  size=$(_cs_event_stat_size "$1")
   case "${size:-}" in
     ''|*[!0-9]*) printf '0'; return 1 ;;
   esac
@@ -75,9 +84,11 @@ cs_event_record() {  # <kind> <pane_id> <workspace_id> <field3> <field4>
 # half-written one. The drain relies on that (it consumes only up to the last
 # newline in the file).
 cs_event_append() {  # <spool> <record>
-  local spool=$1 record=$2 size
+  local spool=$1 record=$2 dir size
   [ -n "$record" ] || return 1
-  mkdir -p "$(dirname "$spool")" 2>/dev/null || return 1
+  dir=${spool%/*}
+  [ "$dir" != "$spool" ] || dir=.
+  [ -d "$dir" ] || mkdir -p "$dir" 2>/dev/null || return 1
   if size=$(cs_event_file_size "$spool") && [ "$size" -gt "$CS_EVENT_SPOOL_MAX_BYTES" ]; then
     : > "$spool" 2>/dev/null || return 1
   fi
@@ -95,7 +106,11 @@ cs_event_append() {  # <spool> <record>
 cs_event_drain() {  # <spool> <cursor_file>
   local spool=$1 cursor_file=$2 size cursor chunk
   size=$(cs_event_file_size "$spool") || return 1
-  cursor=$(cat "$cursor_file" 2>/dev/null) || cursor=0
+  cursor=0
+  # `read` is a builtin: the idle tick of the watcher's bounded wait reads this
+  # cursor every time round, and `cat` would fork a process per tick for one
+  # short line.
+  [ ! -r "$cursor_file" ] || IFS= read -r cursor < "$cursor_file" || true
   case "$cursor" in
     ''|*[!0-9]*) cursor=0 ;;
   esac

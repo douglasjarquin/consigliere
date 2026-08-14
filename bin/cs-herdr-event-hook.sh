@@ -11,10 +11,13 @@
 # CONTEXT's pane, not the event's, so the pane identity is read from the payload.
 #
 # This runs on herdr's hot path, so it parses the payload with bash's own regex
-# engine and forks nothing: herdr's server may have been started by launchd with
-# a minimal PATH, and a hook that needed `jq` there would silently never record
-# anything. The fields this transport reads (pane id, workspace id, agent status,
-# agent name) are flat scalar tokens, so a full JSON parser buys nothing.
+# engine: herdr's server may have been started by launchd with a minimal PATH,
+# and a hook that needed `jq` there would silently never record anything. The
+# fields this transport reads (pane id, workspace id, agent status, agent name)
+# are flat scalar tokens, so a full JSON parser buys nothing. The only external
+# program the whole path execs is the one `stat` the spool append runs for its
+# rotation check; everything else is builtins and a handful of short-lived
+# subshells for the field extractions.
 #
 # It is SILENT AND SUCCESSFUL on everything it cannot use - an unrelated kind, an
 # unparseable payload, a payload with no pane, an unwritable spool. A hook that

@@ -118,6 +118,7 @@ $ herdr pane get w1:p1 --session cs-lab-ctlcodex
 Push escalation reaches this fleet through herdr's own server-side plugin `[[events]]` hook, not through a subscriber consigliere runs.
 `bin/cs-herdr-event-plugin.sh` installs a per-home manifest, herdr runs `bin/cs-herdr-event-hook.sh` once per `pane.agent_status_changed` edge inside the server's process tree, and the hook appends one record to that home's `state/.herdr-events` spool, which `bin/cs-watch.sh` drains from a persisted cursor.
 The poll loop remains the permanent fail-closed backstop, and a machine with no plugin installed has no spool, so the watcher simply keeps polling.
+Because that registry is global to the user and each id carries a digest of its home path, `bin/cs-teardown.sh` unlinks a capo's plugin BEFORE removing the capo home: after the directory is gone the id can no longer be derived, and the stale entry would have herdr dispatching every pane's status edge on the machine to a deleted hook (see the stale-entry outage recorded below).
 
 The socket-subscriber facts below (`events.subscribe` and its accepted specs) are still accurate about the API; consigliere no longer uses them.
 

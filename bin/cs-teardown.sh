@@ -796,6 +796,20 @@ if [ "$KIND" = capo ]; then
       echo "WARNING: capo $ID's blocking sources could not all be retired; --force is removing the home anyway." >&2
     fi
   fi
+  # Same reason, same ordering: herdr's plugin registry is GLOBAL to the user, so
+  # this home's event-transport registration outlives the home too, and its id is
+  # derived from the home path - once the directory is gone the id can no longer
+  # be computed and the entry is unreachable forever, leaving herdr dispatching
+  # every pane's status edge to a deleted hook. Unlike the retirements above this
+  # is fail-open on purpose: the registration costs escalation latency, never
+  # supervision, so a herdr hiccup must not block a retirement whose own safety
+  # proofs have already passed.
+  if [ -x "$SCRIPT_DIR/cs-herdr-event-plugin.sh" ]; then
+    CS_HOME="$HOME_PATH" CS_STATE_OVERRIDE="$HOME_PATH/state" \
+      CS_HOST_OVERRIDE="$HOME_PATH/host" CS_DATA_OVERRIDE="$HOME_PATH/data" \
+      CS_CONFIG_OVERRIDE="$HOME_PATH/config" \
+      "$SCRIPT_DIR/cs-herdr-event-plugin.sh" uninstall >/dev/null 2>&1 || true
+  fi
   [ -n "$PANE" ] && cs_herdr_pane_close "$PANE" >/dev/null 2>&1 || true
   require_pane_gone "capo $ID's home and records" || exit 1
   [ -n "$WS" ] && cs_herdr workspace close "$WS" >/dev/null 2>&1 || true

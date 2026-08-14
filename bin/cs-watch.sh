@@ -979,11 +979,13 @@ cs_watch_events_capable() {
   [ -e "$(cs_event_spool_path "$STATE")" ]
 }
 
-# How often the bounded wait re-checks the spool. Each tick costs one stat and
-# one read of a local file, so this is the trade between escalation latency and
-# the idle cost of a watcher with panes but no events; half a second keeps a
-# blocked soldier's wake sub-second in practice (the hook itself runs the moment
-# herdr sees the edge).
+# How often the bounded wait re-checks the spool. An idle tick costs two
+# short-lived processes - one `stat` of the spool and the `sleep` itself; the
+# cursor is read with bash's own `read`, and the drain's `tail` runs only when
+# the spool actually grew. That is the trade between escalation latency and the
+# idle cost of a watcher with panes but no events; half a second keeps a blocked
+# soldier's wake sub-second in practice (the hook itself runs the moment herdr
+# sees the edge).
 EVENT_SPOOL_TICK=${CS_EVENT_SPOOL_TICK:-0.5}
 
 # cs_watch_wait_transition: the bounded event wait. Blocks up to <timeout_secs>
