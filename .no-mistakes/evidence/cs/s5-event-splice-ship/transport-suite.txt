@@ -1,0 +1,15 @@
+cs-test-run: running tests/cs-herdr-event-transport.test.sh
+ok - the spool hands each appended record to the drain exactly once
+ok - the spool survives a watcher gap and a truncation without losing the next edge
+ok - the spool is size-capped, so an unattended home cannot fill its disk
+ok - an event for a retired home is dropped instead of rebuilding its directories
+ok - record fields are sanitized so one event is always exactly one 5-field line
+ok - the hook projects a live pane.agent_status_changed payload into the spool
+ok - the hook stays silent and exits 0 on kinds and payloads it cannot use
+ok - install writes a machine-local per-home manifest and links it into herdr
+ok - install is idempotent: an unchanged, already-linked plugin is left alone
+ok - install reports a concrete blocker when herdr is absent, leaving no half-armed transport
+ok - uninstall unlinks the plugin and removes both the manifest and the spool
+ok - CS_EVENT_PLUGIN_DISABLE keeps a test run out of the user's global herdr registry
+ok - each home gets its own stable plugin id, so capo homes never overwrite each other
+CS_TEST_RUN total=1 failed=0 gate_skip=0

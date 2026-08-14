@@ -1,0 +1,8 @@
+=== live herdr 0.8.0 payload -> real hook -> spool record (2026-08-14T01:26:46Z) ===
+herdr version: herdr 0.8.0   protocol: 19
+captured live over the control socket (read-only, no plugin linked):
+  {"data":{"agent":"claude","agent_status":"done","pane_id":"w82:p1","workspace_id":"w82"},"event":"pane.agent_status_changed"}
+hook exit: 0
+spool record written by the hook:
+  status<TAB>w82:p1<TAB>w82<TAB>done<TAB>claude
+still nothing in the user global herdr plugin registry: 0 entries

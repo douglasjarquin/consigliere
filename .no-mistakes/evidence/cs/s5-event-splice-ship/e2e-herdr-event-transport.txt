@@ -1,0 +1,62 @@
+
+=== 1. install this home's plugin (fake herdr CLI, no global registry touched) ===
+installed consigliere-events-ff49975c
+--- manifest written to host/herdr-plugin/herdr-plugin.toml ---
+id = "consigliere-events-ff49975c"
+name = "Consigliere event transport (/var/folders/5j/n805d0vn43g2bjt7ykqmyxmm0000gn/T//cs-s5-e2e.ho5RCw/home-a)"
+version = "1"
+min_herdr_version = "0.8.0"
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["/Users/douglasjarquin/.no-mistakes/worktrees/cb19a45d4913/01KZYQ92DDGPH2HQTV4TBRF3P9/bin/cs-herdr-event-hook.sh", "/var/folders/5j/n805d0vn43g2bjt7ykqmyxmm0000gn/T//cs-s5-e2e.ho5RCw/home-a/state"]
+--- herdr CLI calls made by install ---
+plugin link /var/folders/5j/n805d0vn43g2bjt7ykqmyxmm0000gn/T//cs-s5-e2e.ho5RCw/home-a/host/herdr-plugin
+--- spool (the watcher capability gate) ---
+-rw-r--r--@ 1 douglasjarquin  staff  0 Aug 13 21:24 /var/folders/5j/n805d0vn43g2bjt7ykqmyxmm0000gn/T//cs-s5-e2e.ho5RCw/home-a/state/.herdr-events
+
+=== 2. re-install is idempotent, and a second home gets its own plugin id ===
+installed consigliere-events-ff49975c
+--- herdr CLI calls on re-install (no second link) ---
+plugin list --json
+--- fake herdr registry after two installs ---
+consigliere-events-ff49975c  ->  /var/folders/5j/n805d0vn43g2bjt7ykqmyxmm0000gn/T//cs-s5-e2e.ho5RCw/home-a/host/herdr-plugin/herdr-plugin.toml
+home A plugin id: consigliere-events-ff49975c
+home B plugin id: consigliere-events-6b9697d8
+
+=== 3. FAST PATH: herdr fires the hook, the boss is woken sub-second (poll=60s) ===
+watcher running (pid 58790), poll budget 60s, no wake yet: <silent>
+herdr dispatches pane.agent_status_changed(blocked) at t=0
+--- spool line herdr's hook appended ---
+status<TAB>w7Z:p1<TAB>w7Z<TAB>blocked<TAB>claude
+boss wake latency from event to watcher output: 0.70s (poll budget was 60s)
+--- watcher stdout (what the boss sees) ---
+stale: w7Z:p1 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)
+--- queued wake ---
+1786670652	1	stale	w7Z:p1	stale: w7Z:p1 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)
+1
+--- cursor advanced past the consumed record ---
+cursor=33 spool_bytes=33
+
+=== 4. DURABILITY: an edge that fires while NO watcher runs is still delivered ===
+no watcher process is running:
+  (none for this home)
+edge spooled while nothing was listening: status<TAB>w7Z:p1<TAB>w7Z<TAB>blocked<TAB>claude
+the next watcher start drained the backlog and woke the boss:
+stale: w7Z:p1 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)
+
+=== 5. FAIL-OPEN: no plugin on this machine, supervision unchanged ===
+spool present? no
+with no transport at all the poll loop still escalated:
+stale: w7Z:p1 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)
+
+=== 6. uninstall removes the manifest and the capability gate ===
+removed consigliere-events-ff49975c
+plugin unlink consigliere-events-ff49975c
+registry entries after uninstall: 0
+manifest present? no   spool present? no
+
+=== 7. a retired home cannot be rebuilt by a stale registration ===
+hook exit=0   retired home recreated? no
+
+=== done ===

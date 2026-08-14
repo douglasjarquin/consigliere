@@ -1,0 +1,2 @@
+ACK: subscription_started
+LIVE_EVENT {"data":{"agent":"claude","agent_status":"done","pane_id":"w82:p1","workspace_id":"w82"},"event":"pane.agent_status_changed"}
