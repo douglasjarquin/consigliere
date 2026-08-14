@@ -62,7 +62,9 @@ CS_DEPS_LIB_SOURCED=1
 # runs via `#!/usr/bin/env bash`, which resolves to a modern bash in practice
 # (5.3 on the maintainer's machine) - stock macOS /bin/bash 3.2 was never the
 # interpreter, and the retired 3.2 floor was aspirational, not observed.
+# shellcheck disable=SC2034  # consumed by the sourcing scripts' gates and reports
 BASH_FLOOR_MAJOR=4
+# shellcheck disable=SC2034  # consumed by the sourcing scripts' gates and reports
 BASH_FLOOR_MINOR=3
 
 CS_DEPS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

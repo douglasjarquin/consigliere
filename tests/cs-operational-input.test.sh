@@ -101,7 +101,7 @@ test_turnend_guard_stamping() {
 }
 
 test_spawn_launch_brief_stamping() {
-  local home repo fakebin worktree prompt occurrences
+  local home repo fakebin worktree prompt
   home="$TMP/spawn-home"
   repo="$TMP/project"
   fakebin="$TMP/fakebin"
