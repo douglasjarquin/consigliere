@@ -182,6 +182,16 @@ hyphen_name=$(printf '%s\n' "$hyphen_launch" | sed -n 's/^name=//p')
 [ "$(cs_meta_get "$HOME_DIR/state/Foo-Bar.meta" kind)" = ship ] || fail "hyphen task metadata was not written"
 pass "distinct task ids receive distinct native names while task ids remain unchanged"
 
+collision_a='a.a-A.a.a-a.a-a-A.A-a-a-a.a-A.A.A.a.a.A-'
+collision_b='a-a-A.a-A-A-a-A.A-A-a-a.A.a.A-a.a.A.a-A-'
+collision_a_launch=$(spawn_one codex "$collision_a" --mode made --yolo off)
+collision_b_launch=$(spawn_one codex "$collision_b" --mode made --yolo off)
+collision_a_name=$(printf '%s\n' "$collision_a_launch" | sed -n 's/^name=//p')
+collision_b_name=$(printf '%s\n' "$collision_b_launch" | sed -n 's/^name=//p')
+[ "$collision_a_name" != "$collision_b_name" ] \
+  || fail "distinct accepted task ids must not collide under the native-name suffix"
+pass "native names remain distinct beyond the 32-bit checksum collision domain"
+
 # --- capo spawn: unconditional env pre-step, no turn-end wiring --------------
 # The old cs_harness_capo_launch unit test is gone with the function; this is
 # its end-to-end replacement, exercising cs-spawn.sh's own capo argv

@@ -413,7 +413,14 @@ cs_herdr_agent_name() {
     *) name="a-$name" ;;
   esac
   if [ "$name" != "$logical" ] || [ "${#name}" -gt 32 ]; then
-    suffix=$(printf '%s' "$logical" | cksum | cut -d ' ' -f1)
+    if command -v shasum >/dev/null 2>&1; then
+      suffix=$(printf '%s' "$logical" | shasum -a 256 2>/dev/null | awk '{print substr($1,1,16)}')
+    elif command -v sha256sum >/dev/null 2>&1; then
+      suffix=$(printf '%s' "$logical" | sha256sum 2>/dev/null | awk '{print substr($1,1,16)}')
+    else
+      echo "cs-herdr: shasum or sha256sum is required to derive a native agent name" >&2
+      return 1
+    fi
     keep=$((32 - ${#suffix} - 1))
     name="${name:0:keep}-${suffix}"
   fi
