@@ -108,10 +108,15 @@ case "$1 $2" in
     ;;
   "pane read")
     composer=$(read_state composer)
-    # Codex's actual empty-composer glyph (a bare ❯ alone does not classify as
-    # empty to cs_composer_state - nothing in this suite exercised that verdict
-    # before bin/cs-spawn.sh's post-launch brief delivery, _cs_spawn_deliver_brief,
-    # which bypasses cs_prompt_guarded, started reading this pane).
+    # Codex's actual empty-composer glyph, matching the codex agent this
+    # fixture models throughout: a bare ❯ with a non-rule row above it
+    # classifies as unknown rather than empty to cs_composer_state, while
+    # this glyph classifies as empty, which is what a real idle codex pane
+    # yields. The readers are the suite's PRE-EXISTING composer paths
+    # (cs_control_stop's pending-flush check and cs-control.sh's interrupt
+    # report) - bin/cs-spawn.sh's brief delivery never consults the
+    # composer; it reads cs_herdr_agent_busy_state and confirms via
+    # agent prompt.
     [ -n "$composer" ] || composer=$'\342\200\272 '
     printf 'some transcript line\n%s\n' "$composer"
     ;;

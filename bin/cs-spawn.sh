@@ -612,7 +612,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # fallback below) rather than per-attempt - see _cs_spawn_env_export_confirmed.
   R_ENV_PREFIX=$(cs_harness_launch_env "$R_HARNESS")
   if ! _cs_spawn_env_export_confirmed "$R_PANE" "$R_ENV_PREFIX"; then
-    echo "error: could not confirm $ID's launch environment landed on pane $R_PANE before relaunching; the pane is untouched" >&2
+    echo "error: could not confirm $ID's launch environment landed on pane $R_PANE before relaunching; the export line was typed at the pane's shell but never confirmed executed, and no replacement agent was started" >&2
     exit 1
   fi
 

@@ -280,4 +280,33 @@ assert_not_contains "$owned" 'NETWORK_CHECKS:' \
 rm -f "$PART_HOME/state/.lock"
 pass 'a deferred worker sweeps only while state/.lock still names the session that asked'
 
+# --- the bash floor refuses the whole bootstrap, fail closed ------------------
+# Below bin/cs-doctor.sh's floor the nameref argv builders fail OPEN (empty
+# argv, rc 0), so the gate must refuse (exit 1, BASH_FLOOR line) rather than
+# report and continue. A pre-floor bash cannot be summoned portably, so the
+# refusal machinery is driven the other way: a doctored owner whose floor no
+# real bash meets, through a symlink farm so bootstrap resolves everything
+# else unchanged. An owner the floor cannot be read from must refuse the same
+# way - an unverified interpreter is not a verified one.
+FLOORBIN="$TMP/floor-bin"
+mkdir -p "$FLOORBIN"
+for f in "$ROOT"/bin/*; do ln -s "$f" "$FLOORBIN/$(basename "$f")"; done
+rm "$FLOORBIN/cs-doctor.sh"
+printf 'BASH_FLOOR_MAJOR=99\nBASH_FLOOR_MINOR=9\n' > "$FLOORBIN/cs-doctor.sh"
+rc=0
+out=$(PATH="$BASE_PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$ROOT" \
+  CS_BOOTSTRAP_DETECT_ONLY=1 "$FLOORBIN/cs-bootstrap.sh" 2>&1) || rc=$?
+expect_code 1 "$rc" 'a bash below the floor must refuse the bootstrap'
+assert_contains "$out" 'BASH_FLOOR:' 'the refusal carries its named blocker'
+assert_contains "$out" '99.9' 'the refusal names the required floor'
+assert_not_contains "$out" 'MISSING:' 'nothing after the refusal may run'
+
+printf 'not parseable\n' > "$FLOORBIN/cs-doctor.sh"
+rc=0
+out=$(PATH="$BASE_PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$ROOT" \
+  CS_BOOTSTRAP_DETECT_ONLY=1 "$FLOORBIN/cs-bootstrap.sh" 2>&1) || rc=$?
+expect_code 1 "$rc" 'an unreadable floor must refuse, not assume'
+assert_contains "$out" 'BASH_FLOOR:' 'the unreadable-floor refusal carries the same blocker'
+pass 'the bash floor is enforced fail-closed at the bootstrap gate'
+
 printf 'ok - cs-bootstrap axi version floors and network phase split\n'
