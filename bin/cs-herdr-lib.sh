@@ -435,7 +435,7 @@ cs_herdr_agent_name() {
 cs_herdr_agent_start() {
   local pane=$1 name=$2 kind=$3 timeout_ms=$4 out rc code
   shift 4
-  name=$(cs_herdr_agent_name "$name")
+  name=$(cs_herdr_agent_name "$name") || return 1
   out=$(cs_herdr agent start "$name" --kind "$kind" --pane "$pane" --timeout "$timeout_ms" -- "$@" 2>&1) && rc=0 || rc=$?
   [ "$rc" -eq 0 ] && return 0
   code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)

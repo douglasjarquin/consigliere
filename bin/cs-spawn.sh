@@ -681,7 +681,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # decision (the loop below is), so it must not block waiting for the
   # false-positive-prone interactive_ready read a genuine slow resume can take
   # longer than this to reach.
-  cs_herdr agent start "$(cs_herdr_agent_name "$ID")" --kind "$R_HARNESS" --pane "$R_PANE" --timeout 2000 -- "${RESUME_ARGV[@]}" >/dev/null 2>&1 || true
+  R_NATIVE_NAME=$(cs_herdr_agent_name "$ID") || {
+    echo "error: could not derive a native agent name for '$ID'; no replacement agent was started" >&2
+    exit 1
+  }
+  cs_herdr agent start "$R_NATIVE_NAME" --kind "$R_HARNESS" --pane "$R_PANE" --timeout 2000 -- "${RESUME_ARGV[@]}" >/dev/null 2>&1 || true
   R_PATH=resume
   waited=0
   resumed=0

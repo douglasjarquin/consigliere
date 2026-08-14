@@ -44,6 +44,7 @@ case "${1:-} ${2:-}" in
     # `agent start <name> --kind <k> --pane <p> --timeout <ms> -- ARGV...`.
     # Capture the kind and the trailing argv (everything after --), which
     # reaches the launched binary literally with no shell evaluation.
+    printf 'name=%s\n' "${3:-}" >> "${CS_FAKE_SPAWN_AGENT_START_CALLS:-/dev/null}"
     shift 2
     kind= pane= name=$1; shift
     argv=()
@@ -202,6 +203,31 @@ fallback_name=$(printf '%s\n' "$fallback_launch" | sed -n 's/^name=//p')
 [ "$fallback_name" != "foo-baz-" ] || fail "a failed shasum must not produce an empty native-name suffix"
 rm -f "$FAKEBIN/shasum"
 pass "a failed shasum falls through without emitting an empty native-name suffix"
+
+cat > "$FAKEBIN/shasum" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+cat > "$FAKEBIN/sha256sum" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+chmod +x "$FAKEBIN/shasum" "$FAKEBIN/sha256sum"
+no_digest_id=Foo.NoDigest
+mkdir -p "$HOME_DIR/data/$no_digest_id"
+printf 'implement the fixture\nDelivery contract: mode=made\n' > "$HOME_DIR/data/$no_digest_id/brief.md"
+no_digest_calls="$TMP/no-digest-agent-start"
+if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
+  CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
+  CS_CLAUDE_JSON="$TMP/claude.json" CS_FAKE_SPAWN_WORKTREE="$TMP/wt-no-digest" \
+  CS_FAKE_SPAWN_LAUNCH="$TMP/launch-no-digest" CS_FAKE_SPAWN_AGENT_START_CALLS="$no_digest_calls" \
+  "$SPAWN" "$no_digest_id" "$REPO" --mode made --yolo off 2>&1); then
+  fail "spawn must fail closed when neither digest command yields a native name"
+fi
+assert_contains "$output" "shasum or sha256sum is required" "no valid digest has a named failure"
+assert_absent "$no_digest_calls" "no native agent start is attempted without a valid digest"
+rm -f "$FAKEBIN/shasum" "$FAKEBIN/sha256sum"
+pass "native spawn fails closed without attempting agent start when both digest commands fail"
 
 # --- capo spawn: unconditional env pre-step, no turn-end wiring --------------
 # The old cs_harness_capo_launch unit test is gone with the function; this is
