@@ -60,17 +60,23 @@ pass() {
   printf 'ok - %s\n' "$1"
 }
 
-cs_git_disable_commit_signing() {
+# cs_git_env_config <key> <value> pins one git setting for every git run in
+# this test process and its children, so host config never leaks into a test:
+# commit.gpgsign so fixture commits never want a signing key, and
+# core.excludesFile so the host's global ignore file cannot decide what
+# `git check-ignore` and `git add` see.
+cs_git_env_config() {
   local index=${GIT_CONFIG_COUNT:-0}
   case "$index" in
     ''|*[!0-9]*) fail "GIT_CONFIG_COUNT must be a non-negative integer" ;;
   esac
-  export "GIT_CONFIG_KEY_$index=commit.gpgsign"
-  export "GIT_CONFIG_VALUE_$index=false"
+  export "GIT_CONFIG_KEY_$index=$1"
+  export "GIT_CONFIG_VALUE_$index=$2"
   export GIT_CONFIG_COUNT=$((index + 1))
 }
 
-cs_git_disable_commit_signing
+cs_git_env_config commit.gpgsign false
+cs_git_env_config core.excludesFile /dev/null
 
 # --- self-cleaning temp root ------------------------------------------------
 #

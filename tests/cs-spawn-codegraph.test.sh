@@ -45,6 +45,10 @@ case "${1:-} ${2:-}" in
     else
       git -C "$repo" worktree add -q -b "$branch" "$CS_FAKE_SPAWN_WORKTREE"
     fi
+    if [ -n "${CS_FAKE_SPAWN_SEED_INDEX:-}" ]; then
+      mkdir -p "$CS_FAKE_SPAWN_WORKTREE/.codegraph"
+      printf 'seeded-db\n' > "$CS_FAKE_SPAWN_WORKTREE/.codegraph/codegraph.db"
+    fi
     printf '{"result":{"workspace":{"workspace_id":"w1"},"root_pane":{"pane_id":"w1:p1"},"worktree":{"path":"%s","branch":"%s"}}}\n' "$CS_FAKE_SPAWN_WORKTREE" "$branch"
     ;;
   "pane run") printf '%s' "${4:-}" > "$CS_FAKE_SPAWN_LAUNCH" ;;
@@ -57,7 +61,11 @@ SH
 
 # make_fake_codegraph <dir> - records every invocation's argv to
 # CS_FAKE_CODEGRAPH_LOG, then optionally sleeps (CS_FAKE_CODEGRAPH_SLEEP, for
-# the timeout case) before exiting CS_FAKE_CODEGRAPH_EXIT (default 0).
+# the timeout case) before exiting CS_FAKE_CODEGRAPH_EXIT (default 0). It
+# models real init's on-disk staging too: a lock file inside the target's
+# .codegraph the whole time it works, replaced by codegraph.db only when it
+# gets to exit 0 - so an interrupted or failed run leaves the same unusable
+# half-written index behind that codegraph itself does.
 make_fake_codegraph() {
   cat > "$1/codegraph" <<'SH'
 #!/usr/bin/env bash
@@ -68,8 +76,19 @@ log=${CS_FAKE_CODEGRAPH_LOG:-/dev/null}
   for a in "$@"; do printf ' %s' "$a"; done
   printf '\n'
 } >> "$log"
+target=
+[ "${1:-}" = init ] && target=${2:-}
+if [ -n "$target" ]; then
+  mkdir -p "$target/.codegraph"
+  printf 'indexing\n' > "$target/.codegraph/codegraph.lock"
+fi
 [ -n "${CS_FAKE_CODEGRAPH_SLEEP:-}" ] && sleep "$CS_FAKE_CODEGRAPH_SLEEP"
-exit "${CS_FAKE_CODEGRAPH_EXIT:-0}"
+rc=${CS_FAKE_CODEGRAPH_EXIT:-0}
+if [ "$rc" = 0 ] && [ -n "$target" ]; then
+  rm -f "$target/.codegraph/codegraph.lock"
+  printf 'built-db\n' > "$target/.codegraph/codegraph.db"
+fi
+exit "$rc"
 SH
   chmod +x "$1/codegraph"
 }
@@ -161,6 +180,8 @@ WT1_REAL=$(cd "$TMP/wt-t-case1" && pwd -P)
 assert_present "$LOG1" "codegraph must have been invoked when the primary carries a built index"
 log1=$(cat "$LOG1")
 assert_line "$log1" "^argv: init $WT1_REAL\$" "codegraph init must run positionally against the worktree root, nothing else"
+[ -f "$WT1_REAL/.codegraph/codegraph.db" ] ||
+  fail "a successful prep must leave the built index in the worktree"
 pass "cs-spawn codegraph prep: fires positionally against the worktree root"
 
 # --- 8. build-target assertion: the primary is never the build target -------
@@ -212,7 +233,24 @@ out=$(spawn_case t-case5 "$REPO5" "$LOG5" "$FAKEBIN:$PATH" \
   fail "a codegraph init that outlives its bound must still let the spawn succeed: $out"
 assert_contains "$out" "did not finish within 1s" "an expired bound must be reported loudly"
 assert_present "$HOME_DIR/state/t-case5.meta" "the spawn must still complete after the timeout"
+WT5_REAL=$(cd "$TMP/wt-t-case5" && pwd -P)
+[ -e "$WT5_REAL/.codegraph" ] &&
+  fail "a killed codegraph init must leave no half-written index behind, found $(ls -A "$WT5_REAL/.codegraph" | tr '\n' ' ')"
 pass "cs-spawn codegraph prep: a codegraph init that outlives its bound is fail-open and loud"
+
+# --- 9. a failed prep never destroys an index the worktree already had ------
+
+REPO9=$(codegraph_repo case9 yes yes)
+LOG9="$TMP/codegraph-case9.log"
+out=$(spawn_case t-case9 "$REPO9" "$LOG9" "$FAKEBIN:$PATH" \
+  CS_FAKE_SPAWN_SEED_INDEX=1 CS_FAKE_CODEGRAPH_EXIT=3) ||
+  fail "a spawn whose codegraph init fails must still succeed: $out"
+WT9_REAL=$(cd "$TMP/wt-t-case9" && pwd -P)
+[ -f "$WT9_REAL/.codegraph/codegraph.db" ] ||
+  fail "a failed prep must never delete an index the worktree already carried"
+assert_contains "$out" "keeps the codegraph index it already had" \
+  "a failed prep over an existing index must not claim the worktree has none"
+pass "cs-spawn codegraph prep: a failed prep leaves a pre-existing worktree index intact"
 
 # --- 6. CS_SPAWN_CODEGRAPH_PREP=off: the kill switch is total ---------------
 

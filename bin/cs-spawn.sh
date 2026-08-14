@@ -424,9 +424,13 @@ shell_quote() {
 # ignore rules (codegraph's own .gitignore lives INSIDE .codegraph/ and never
 # touches the project root, but the root itself still needs a committed rule
 # for the directory - or symlink - itself). Only `codegraph init` runs,
-# positionally against $wt_real, never against $proj_abs.
+# positionally against $wt_real, never against $proj_abs. A failed or killed
+# init leaves a locked, truncated index that no later run repairs
+# (docs/codegraph.md), so an index this call created and did not finish is
+# removed again - leaving a worktree with no index, which the next prep run
+# can rebuild - while an index the worktree already had survives untouched.
 spawn_codegraph_prep() {  # <project-abs> <worktree-real>
-  local proj_abs=$1 wt_real=$2 timeout out rc
+  local proj_abs=$1 wt_real=$2 timeout out rc had_index aftermath
   [ "${CS_SPAWN_CODEGRAPH_PREP:-}" = off ] && return 0
   command -v codegraph >/dev/null 2>&1 || return 0
   [ -n "$proj_abs" ] && [ -f "$proj_abs/.codegraph/codegraph.db" ] || return 0
@@ -440,12 +444,20 @@ spawn_codegraph_prep() {  # <project-abs> <worktree-real>
   fi
   timeout=${CS_SPAWN_CODEGRAPH_TIMEOUT_SECS:-10}
   case "$timeout" in ''|*[!0-9]*|0) timeout=10 ;; esac
+  had_index=no
+  [ -e "$wt_real/.codegraph" ] && had_index=yes
   out=$(cs_run_timed "$timeout" codegraph init "$wt_real" 2>&1) && rc=0 || rc=$?
+  aftermath='the worktree has no codegraph index'
+  if [ "$rc" != 0 ] && [ "$had_index" = no ] && [ -e "$wt_real/.codegraph" ]; then
+    rm -rf "${wt_real:?}/.codegraph"
+  elif [ "$rc" != 0 ] && [ "$had_index" = yes ]; then
+    aftermath="the worktree keeps the codegraph index it already had"
+  fi
   case "$rc" in
     0) echo "notice: built codegraph index in $wt_real" >&2 ;;
-    124) echo "warn: codegraph init did not finish within ${timeout}s in $wt_real; the worktree has no codegraph index" >&2 ;;
+    124) echo "warn: codegraph init did not finish within ${timeout}s in $wt_real; $aftermath" >&2 ;;
     "$CS_TIMEOUT_UNAVAILABLE") echo "warn: could not run codegraph init under a time bound; skipping codegraph index prep in $wt_real" >&2 ;;
-    *) echo "warn: codegraph init exited $rc in $wt_real; the worktree has no codegraph index (output: ${out//$'\n'/ })" >&2 ;;
+    *) echo "warn: codegraph init exited $rc in $wt_real; $aftermath (output: ${out//$'\n'/ })" >&2 ;;
   esac
 }
 

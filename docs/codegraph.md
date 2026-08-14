@@ -38,6 +38,17 @@ $ codegraph init "$(pwd -P)"        # second run, same path
 
 `spawn_codegraph_prep` therefore needs no existence guard of its own before calling `codegraph init` - a relaunch re-running the same call is already cheap.
 
+## An interrupted init leaves an unusable index, and a re-run will not repair it
+
+Idempotence covers only a *completed* init.
+Killing `codegraph init`'s process group mid-run - exactly what `cs_run_timed` does when `CS_SPAWN_CODEGRAPH_TIMEOUT_SECS` expires (`bin/cs-timeout-lib.sh`) - leaves `.codegraph/codegraph.lock` beside a truncated database.
+`codegraph status` then reports that the last index run never finished and the index is truncated, and `codegraph unlock --help` states a stale lock blocks indexing.
+A later `codegraph init` at that path prints "Already initialized" and repairs nothing, so nothing in codegraph's own CLI clears the state on its own.
+
+`spawn_codegraph_prep` therefore removes `<worktree>/.codegraph` when its own `codegraph init` fails or times out **and** the worktree had no `.codegraph` before that call.
+Fail-open then really means no index rather than a broken one, and the next prep run - a relaunch - rebuilds from scratch.
+An index the worktree already carried is never removed on failure: that one came from a completed earlier run, and the warning says so instead of claiming the worktree has no index.
+
 ## Committed-ignore guard: simpler than graft's
 
 Graft's committed-ignore guard needed a trailing-slash query (`graft/`, not `graft`) because git's directory-only ignore patterns only match a bare non-existent path when the pattern itself ends in `/`.
