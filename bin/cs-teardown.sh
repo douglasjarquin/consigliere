@@ -28,6 +28,11 @@
 # shared external source (bin/cs-procevent.sh retire-home is the bounded
 # retirement it runs first); --force is the approved discard path. Removing the
 # home never touches anything under projects/ clones.
+# For the same outlives-the-home reason, a capo's herdr event-transport
+# registration is unlinked before the home is removed
+# (bin/cs-herdr-event-plugin.sh uninstall, whose header owns the mechanics);
+# unlike the retirements above that step is fail-open, because it costs
+# escalation latency, never supervision.
 #
 # The herdr `worktree remove` runs only AFTER these proofs pass; its own
 # dirty-refusal is a backstop, never the safety mechanism. A ship remove that
