@@ -84,8 +84,9 @@ Native `idle`/`unknown` is corroborated against the `esc to interrupt` rendered-
 
 ## Event push splice
 
-When the herdr socket is capable, the watcher replaces its poll sleep with a bounded native event wait (`bin/cs-herdr-events.py`, a raw AF_UNIX subscriber for `pane.agent_status_changed`), surfacing `blocked` sub-second.
-The poll loop remains live every cycle as the permanent fail-closed backstop.
+When this home's herdr event plugin is installed, the watcher replaces its poll sleep with a bounded wait on the spool that plugin feeds, surfacing `blocked` sub-second.
+herdr itself runs the hook (`bin/cs-herdr-event-hook.sh`) on every `pane.agent_status_changed` edge, so edges that fire while no watcher is running are still waiting in `state/.herdr-events` when one starts; `bin/cs-herdr-event-plugin.sh` owns the install and `bin/cs-herdr-event-lib.sh` the spool contract.
+A machine without the plugin has no spool and simply keeps polling, and the poll loop remains live every cycle as the permanent fail-closed backstop either way.
 
 ## Structural backstop
 

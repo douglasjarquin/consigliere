@@ -42,6 +42,14 @@ export CS_HARNESS_OVERRIDE
 : "${CS_TELEMETRY_DISABLE:=1}"
 export CS_TELEMETRY_DISABLE
 
+# Safe-by-default herdr plugin seam: herdr's plugin registry is GLOBAL to the
+# user, so a suite that runs bootstrap with a real herdr on PATH would link a
+# plugin for its own throwaway temp home into the developer's live registry and
+# leave it there pointing at a deleted directory. Every suite therefore runs with
+# the install disabled; the transport suite re-enables it against a fake herdr.
+: "${CS_EVENT_PLUGIN_DISABLE:=1}"
+export CS_EVENT_PLUGIN_DISABLE
+
 # Safe-by-default notifier seam: any suite that can cross a wedge-alarm
 # threshold must not fire a real desktop notification just because it forgot
 # to stub CS_WEDGE_ALARM_EXEC itself. A suite that sets its own value (e.g. an
@@ -60,17 +68,23 @@ pass() {
   printf 'ok - %s\n' "$1"
 }
 
-cs_git_disable_commit_signing() {
+# cs_git_env_config <key> <value> pins one git setting for every git run in
+# this test process and its children, so host config never leaks into a test:
+# commit.gpgsign so fixture commits never want a signing key, and
+# core.excludesFile so the host's global ignore file cannot decide what
+# `git check-ignore` and `git add` see.
+cs_git_env_config() {
   local index=${GIT_CONFIG_COUNT:-0}
   case "$index" in
     ''|*[!0-9]*) fail "GIT_CONFIG_COUNT must be a non-negative integer" ;;
   esac
-  export "GIT_CONFIG_KEY_$index=commit.gpgsign"
-  export "GIT_CONFIG_VALUE_$index=false"
+  export "GIT_CONFIG_KEY_$index=$1"
+  export "GIT_CONFIG_VALUE_$index=$2"
   export GIT_CONFIG_COUNT=$((index + 1))
 }
 
-cs_git_disable_commit_signing
+cs_git_env_config commit.gpgsign false
+cs_git_env_config core.excludesFile /dev/null
 
 # --- self-cleaning temp root ------------------------------------------------
 #
@@ -118,7 +132,8 @@ cs_test_cleanup() {
     case "$leaf" in
       */*|.|..) continue ;;
     esac
-    rm -rf "$d"
+    rm -rf "$d" 2>/dev/null ||
+      { chmod -R u+rwX "$d" 2>/dev/null; rm -rf "$d" 2>/dev/null; } || true
   done < "$CS_TEST_REGISTRY"
   rm -f "$CS_TEST_REGISTRY"
 }

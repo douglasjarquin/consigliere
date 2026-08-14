@@ -28,6 +28,20 @@ case "$1 ${2:-}" in
   "pane close")
     [ -n "${CS_TEST_QUIESCE_CLEAN_FILE:-}" ] && rm -f "$CS_TEST_QUIESCE_CLEAN_FILE"
     echo '{}' ;;
+  # The event-transport unlink, recorded with whether the home it belongs to was
+  # still on disk at that moment: the plugin id is derived from the home path, so
+  # an unlink attempted after the removal could not name the right entry at all.
+  "plugin unlink")
+    if [ -d "${CS_TEST_PLUGIN_HOME:-/nonexistent}" ]; then
+      printf '%s\thome-present\n' "$3" >> "${CS_TEST_PLUGIN_LOG:-/dev/null}"
+    else
+      printf '%s\thome-gone\n' "$3" >> "${CS_TEST_PLUGIN_LOG:-/dev/null}"
+    fi
+    if [ "${CS_TEST_PLUGIN_UNLINK_FAIL:-}" = 1 ]; then
+      echo '{"error":{"code":"internal_error","message":"boom"}}' >&2
+      exit 1
+    fi
+    echo '{}' ;;
   # Presence is answered from the response BODY, and herdr puts the error body
   # on stderr with a non-zero exit (verified 0.7.5/protocol 17), so these arms
   # reproduce the real stream and status, not a convenient stdout stand-in.
@@ -53,13 +67,16 @@ cat > "$FAKEBIN/gh" <<'SH'
 exit 1
 SH
 cp "$FAKEBIN/gh" "$FAKEBIN/gh-axi"
-# Hermetic no-mistakes: the pre-teardown run conclusion (conclude_nm_run) queries
-# `axi status` and, for a parked-and-attributed run, aborts it. This fake serves
-# the env-driven TOON for `axi status` and models the daemon concluding the run:
-# `axi abort` touches CS_FAKE_ABORT_MARK, after which `axi status` serves
-# CS_FAKE_AXI_STATUS_AFTER instead. Default (both unset) is "no run" -> no-op, so
-# every existing case above is unaffected and never touches the real binary.
-cat > "$FAKEBIN/no-mistakes" <<'SH'
+# Hermetic made: the pre-teardown run conclusion (conclude_nm_run) queries
+# `axi status` and, for a parked-and-attributed run, aborts it through
+# cs_made_abort (bin/cs-made-lib.sh), while cs_made_axi_status_read /
+# cs_made_runs_status_for_branch_read (bin/cs-made-run-lib.sh) shell `made`
+# directly for the reads. This fake serves the env-driven TOON for `axi
+# status`/`runs --limit` and models the daemon concluding the run: `axi abort`
+# touches CS_FAKE_ABORT_MARK, after which `axi status` serves
+# CS_FAKE_AXI_STATUS_AFTER instead. Default (both unset) is "no run" -> no-op,
+# so every existing case above is unaffected and never touches a real daemon.
+cat > "$FAKEBIN/made" <<'SH'
 #!/usr/bin/env bash
 set -u
 case "${1:-} ${2:-}" in
@@ -83,7 +100,7 @@ case "${1:-} ${2:-}" in
 esac
 exit 0
 SH
-chmod +x "$FAKEBIN/herdr" "$FAKEBIN/gh" "$FAKEBIN/gh-axi" "$FAKEBIN/no-mistakes"
+chmod +x "$FAKEBIN/herdr" "$FAKEBIN/gh" "$FAKEBIN/gh-axi" "$FAKEBIN/made"
 export PATH="$FAKEBIN:$PATH"
 
 cs_git_identity
@@ -96,7 +113,7 @@ BIN="$ROOT/bin/cs-teardown.sh"
 # and no approval posture to apply. The fixture mirrors that so the scout paths
 # below are exercised against the metadata shape a real scout actually has.
 make_task() {
-  local id=$1 kind=$2 mode=${3:-no-mistakes} proj wt
+  local id=$1 kind=$2 mode=${3:-made} proj wt
   proj="$TMP/proj-$id"
   wt="$TMP/wt-$id"
   cs_git_init_commit "$proj"
@@ -319,18 +336,100 @@ assert_present "$TMP/state/.decision-cursor-a.bx.read.abc123" \
   "a prefix-sibling id's cursor staging temp must survive a capo retirement"
 pass "retiring a dotted capo id leaves the near-miss route intact"
 
+# 11. Capo retirement unlinks that home's herdr event plugin, while the home is
+# still on disk. herdr's plugin registry is GLOBAL to the user and the plugin id
+# carries a digest of the home path, so an entry left behind after the directory
+# is gone can never be named again: herdr would keep dispatching every pane's
+# status edge on the machine to a deleted hook. The unlink is also fail-open -
+# the retirement's own safety proofs have already passed by then, so neither a
+# herdr that rejects the unlink nor a plugin script that cannot run at all may
+# turn a proven retirement into a failure.
+PLUGIN_LOG="$TMP/plugin-unlinks.log"
+: > "$PLUGIN_LOG"
+export CS_TEST_PLUGIN_LOG="$PLUGIN_LOG"
+
+# make_capo <id> <home>: a retirable capo fixture - marked home, route, meta.
+make_capo() {
+  local id=$1 home=$2
+  mkdir -p "$home"
+  printf '%s\n' "$id" > "$home/.cs-capo-home"
+  printf -- '- %s - Event domain. (home: %s; scope: event work; projects: ; added 2026-01-01)\n' \
+    "$id" "$home" >> "$TMP/host/capos.md"
+  cs_write_meta "$TMP/state/$id.meta" \
+    "workspace=w8" "pane=w8:p8" "kind=capo" "mode=capo" "home=$home"
+}
+
+# The id the transport itself derives for a home, asked of the script that owns
+# it rather than recomputed here, so the assertion pins the real registration.
+capo_plugin_id() {  # <home>
+  CS_HOME="$1" CS_STATE_OVERRIDE="$1/state" CS_HOST_OVERRIDE="$1/host" \
+    CS_DATA_OVERRIDE="$1/data" CS_CONFIG_OVERRIDE="$1/config" \
+    "$ROOT/bin/cs-herdr-event-plugin.sh" id
+}
+
+EVT_HOME="$TMP/capo-evt"
+make_capo evt "$EVT_HOME"
+EVT_PLUGIN_ID=$(capo_plugin_id "$EVT_HOME")
+[ -n "$EVT_PLUGIN_ID" ] || fail "the event plugin reported no id for the capo home"
+out=$(env -u CS_EVENT_PLUGIN_DISABLE CS_ROOT_OVERRIDE="$CAPO_ROOT" \
+  CS_TEST_PLUGIN_HOME="$EVT_HOME" "$BIN" evt 2>&1) \
+  || fail "capo retirement with the event transport installed failed: $out"
+assert_contains "$out" "teardown evt complete" "capo retirement still reports completion"
+assert_absent "$EVT_HOME" "the retired capo home is removed"
+assert_grep "$EVT_PLUGIN_ID"$'\t'"home-present" "$PLUGIN_LOG" \
+  "capo retirement must unlink THIS home's plugin while the home still exists"
+pass "capo retirement unlinks its herdr event plugin before removing the home"
+
+# A herdr that refuses the unlink, and a plugin script that cannot run at all (an
+# unmigrated home trips the layout gate and exits non-zero): both must leave the
+# retirement itself untouched.
+FAIL_HOME="$TMP/capo-evtfail"
+make_capo evtfail "$FAIL_HOME"
+FAIL_PLUGIN_ID=$(capo_plugin_id "$FAIL_HOME")
+out=$(env -u CS_EVENT_PLUGIN_DISABLE CS_ROOT_OVERRIDE="$CAPO_ROOT" \
+  CS_TEST_PLUGIN_HOME="$FAIL_HOME" CS_TEST_PLUGIN_UNLINK_FAIL=1 "$BIN" evtfail 2>&1) \
+  || fail "a herdr that rejects the unlink must not fail a proven retirement: $out"
+assert_contains "$out" "teardown evtfail complete" "retirement completes despite the unlink error"
+assert_absent "$FAIL_HOME" "the retired capo home is removed despite the unlink error"
+assert_grep "$FAIL_PLUGIN_ID"$'\t'"home-present" "$PLUGIN_LOG" \
+  "the rejected unlink was still attempted while the home existed"
+
+LEGACY_HOME="$TMP/capo-legacy"
+make_capo legacy "$LEGACY_HOME"
+mkdir -p "$LEGACY_HOME/config"
+: > "$LEGACY_HOME/config/permission-mode"
+out=$(env -u CS_EVENT_PLUGIN_DISABLE CS_ROOT_OVERRIDE="$CAPO_ROOT" \
+  CS_TEST_PLUGIN_HOME="$LEGACY_HOME" "$BIN" legacy 2>&1) \
+  || fail "a plugin script that cannot run must not fail a proven retirement: $out"
+assert_contains "$out" "teardown legacy complete" "retirement completes when the plugin script dies"
+assert_absent "$LEGACY_HOME" "the retired capo home is removed when the plugin script dies"
+pass "a failing plugin unlink never blocks a capo retirement"
+
+# CS_EVENT_PLUGIN_DISABLE (set for every suite by tests/lib.sh) must reach the
+# uninstall too: herdr's registry is the developer's own, and a suite that
+# retired a throwaway capo must never send it a plugin command.
+DIS_HOME="$TMP/capo-dis"
+make_capo dis "$DIS_HOME"
+DIS_PLUGIN_ID=$(capo_plugin_id "$DIS_HOME")
+out=$(CS_ROOT_OVERRIDE="$CAPO_ROOT" CS_TEST_PLUGIN_HOME="$DIS_HOME" "$BIN" dis 2>&1) \
+  || fail "capo retirement with the plugin seam disabled failed: $out"
+assert_contains "$out" "teardown dis complete" "retirement completes with the plugin seam disabled"
+assert_no_grep "$DIS_PLUGIN_ID" "$PLUGIN_LOG" \
+  "CS_EVENT_PLUGIN_DISABLE must keep the retirement away from the user-global registry"
+pass "CS_EVENT_PLUGIN_DISABLE keeps capo retirement out of the herdr registry"
+
 make_task m1 ship local-only
-out=$(CS_FAKE_AXI_STATUS_FAIL=1 "$BIN" m1 2>&1) || fail "non-no-mistakes teardown must skip run conclusion: $out"
-assert_contains "$out" "teardown m1 complete" "non-no-mistakes mode skips the run conclusion"
-pass "non-no-mistakes mode skips run conclusion"
+out=$(CS_FAKE_AXI_STATUS_FAIL=1 "$BIN" m1 2>&1) || fail "non-made teardown must skip run conclusion: $out"
+assert_contains "$out" "teardown m1 complete" "non-made mode skips the run conclusion"
+pass "non-made mode skips run conclusion"
 
 make_task f1 ship
 out=$(CS_FAKE_AXI_STATUS_FAIL=1 "$BIN" f1 2>&1) \
-  && fail "an unreadable no-mistakes status must refuse teardown"
+  && fail "an unreadable made status must refuse teardown"
 assert_contains "$out" "could not verify that no orphaned" "unreadable status refusal names the orphan check"
 assert_present "$TMP/wt-f1" "worktree retained after unreadable status refusal"
 assert_present "$TMP/state/f1.meta" "records retained after unreadable status refusal"
-pass "unreadable no-mistakes status fails closed"
+pass "unreadable made status fails closed"
 
 # --- pre-teardown run conclusion + leaked-process reap ----------------------
 # A run is attributed to a task only by its exact branch AND current head

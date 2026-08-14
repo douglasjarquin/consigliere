@@ -22,6 +22,8 @@
 #                              the same builds this dispatch gate does.
 #   HERDR_DOWN / HERDR_PROTOCOL:  the herdr server is unreachable or below the
 #                              minimum protocol (docs/herdr.md).
+#   MADE_DOWN                  the made daemon is unreachable; start it with
+#                              made daemon start before dispatching.
 #   NEEDS_GH_AUTH              gh is present but not authenticated.
 #   TANGLE: ...                the primary checkout is on a named non-default
 #                              branch (cs-tangle-lib.sh owns classification);
@@ -39,6 +41,10 @@
 # session; each also skipped silently while its owning script is not yet
 # installed):
 #   FLEET_SYNC: ...            refresh project clones (bin/cs-fleet-sync.sh).
+#   herdr event plugin         install this home's push-event transport
+#                              (bin/cs-herdr-event-plugin.sh); idempotent, and a
+#                              failure reports BOOTSTRAP_INFO rather than
+#                              blocking - the watcher keeps its poll loop.
 #   CAPO_SYNC: / CAPO_LIVENESS: fast-forward and respawn registered capos
 #                              (bin/cs-home-seed.sh sweep modes).
 #
@@ -216,6 +222,24 @@ EOF
       fi
     fi
   fi
+
+  # --- made daemon health -------------------------------------------------
+  # Local: made's daemon is reached over a local unix socket (internal/api),
+  # so this probe never leaves the machine either.
+  if command -v made >/dev/null 2>&1; then
+    # shellcheck source=bin/cs-made-lib.sh
+    . "$SCRIPT_DIR/cs-made-lib.sh"
+    # `made status --json` fails BOTH when the daemon is unreachable and when
+    # the daemon is healthy but has run nothing yet ("no runs found") - unlike
+    # herdr's status probe above, a nonzero exit here is not on its own proof
+    # of an unreachable daemon. Grepping stderr for made's own
+    # "daemon not reachable" wording (cmd/made/status.go) tells the two apart.
+    # shellcheck disable=SC2119  # cs_made_status with no run-id means "latest"
+    made_err=$(cs_made_status 2>&1 >/dev/null) || true
+    if printf '%s' "$made_err" | grep -q 'daemon not reachable'; then
+      printf 'MADE_DOWN: cannot reach the made daemon; start it (made daemon start) before dispatching.\n'
+    fi
+  fi
 }
 
 # --- gh auth -------------------------------------------------------------------
@@ -256,6 +280,16 @@ if [ "$DETECT_ONLY" != 1 ]; then
     && network_sweep_authorized 'project clone refresh'; then
     sync_out=$(cs_timed clone-refresh '' "$SCRIPT_DIR/cs-fleet-sync.sh" --all 2>&1) || true
     [ -z "$sync_out" ] || printf '%s\n' "$sync_out" | sed 's/^/FLEET_SYNC: /'
+  fi
+  # Local: the herdr event plugin is a machine-local registration this home owns
+  # (bin/cs-herdr-event-plugin.sh). Re-running install is idempotent and never
+  # required: a failure here costs blocked-escalation latency, not supervision,
+  # so it reports and moves on rather than gating dispatch.
+  if local_phase && [ -x "$SCRIPT_DIR/cs-herdr-event-plugin.sh" ] && command -v herdr >/dev/null 2>&1; then
+    if ! plugin_out=$("$SCRIPT_DIR/cs-herdr-event-plugin.sh" install 2>&1); then
+      printf 'BOOTSTRAP_INFO: herdr event plugin not installed (%s); supervision continues on the poll loop.\n' \
+        "$(printf '%s' "$plugin_out" | tail -n 1)"
+    fi
   fi
   # Local: capo homes are detached worktrees of this repo on this machine, and
   # their liveness probe asks the local herdr server (see the header).

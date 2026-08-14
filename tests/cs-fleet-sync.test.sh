@@ -368,6 +368,22 @@ test_local_only_skipped() {
   pass "local-only clone is skipped (benign), not flagged STUCK"
 }
 
+# The mode probe's fallback default (used when cs-project-mode.sh itself cannot
+# run) must never resolve to "local-only", or a probe failure would silently
+# skip a clone that should sync.
+test_project_mode_probe_failure_defaults_to_gated_not_local_only() {
+  local home clone out fake_root
+  home=$(new_home)
+  clone=$(build_pair "$home" omicron)
+  fake_root="$home/no-such-root"
+
+  out=$(CS_HOME="$home" CS_ROOT_OVERRIDE="$fake_root" "$ROOT/bin/cs-fleet-sync.sh" "$clone" 2>/dev/null)
+
+  assert_contains "$out" "omicron: already current" "a probe failure still syncs the clone normally"
+  assert_not_contains "$out" "skipped: local-only project" "a probe failure must never be mistaken for local-only"
+  pass "a cs-project-mode.sh probe failure falls back to a gated (non-local-only) default"
+}
+
 test_single_project_by_bare_name_resolves() {
   local home out
   home=$(new_home)

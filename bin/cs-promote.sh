@@ -12,7 +12,7 @@
 # (cs-spawn.sh records none for it, because a report has nothing to land), which
 # is precisely why promotion is where the ship contract is first stated. There is
 # nothing to inherit and nothing to default to.
-# Usage: cs-promote.sh <task-id> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off>
+# Usage: cs-promote.sh <task-id> --mode <made|direct-PR|local-only> --yolo <on|off>
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

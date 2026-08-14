@@ -317,7 +317,7 @@ EOF
 
 # --- contributor --------------------------------------------------------------
 
-heading 'CONTRIBUTOR - only needed to change this repo (lint, tests, push events)'
+heading 'CONTRIBUTOR - only needed to change this repo (lint, tests, detached monitor handoff)'
 pinned_shellcheck=$("$SCRIPT_DIR/cs-lint.sh" --required-version 2>/dev/null || true)
 while IFS= read -r tool; do
   [ -n "$tool" ] || continue

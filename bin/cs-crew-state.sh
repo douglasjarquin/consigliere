@@ -9,31 +9,42 @@
 # or blocked and the soldier resumes (responds to the gate, the pipeline fixes,
 # it re-validates), the log's last line stays stale. This helper never infers
 # the current state from a tail of the log: it reads the authoritative source
-# (a no-mistakes run-step attributed to this soldier's branch and current code
+# (a made pipeline run attributed to this soldier's branch and current code
 # identity, else the pane busy-signature) and reconciles the possibly-stale log
 # against it.
 #
 # The local reconciliation is deterministic - only run-step / pane / log reads
-# plus fixed mapping logic, no heuristics and no LLM. The shared no-mistakes run
-# attribution and gate-parked predicates live in bin/cs-nm-run-lib.sh, their one
-# owner for this reader and teardown. Output is one stable, parseable,
+# plus fixed mapping logic, no heuristics and no LLM. The shared made run
+# attribution and gate-parked predicates live in bin/cs-made-run-lib.sh, their
+# one owner for this reader and teardown. Output is one stable, parseable,
 # token-tight line consigliere can read every heartbeat:
 #
 #   state: <working|parked|done|blocked|paused|failed|unknown> · source: <run-step|pane|status-log|pane-process|none> · <detail>
 #
 # Logic, in order:
 #   1. Resolve worktree + pane + kind from state/<id>.meta.
-#   2. Resolve a no-mistakes run for this soldier's branch and current code
-#      identity through bin/cs-nm-run-lib.sh, using `axi status` or the coarse
-#      `no-mistakes runs` fallback. The library owns the exact attribution and
-#      gate-parked predicates used here and by teardown.
-#      The run-step is AUTHORITATIVE: running/fixing -> working, ci -> working,
-#      awaiting_approval/fix_review -> parked (with gate findings), terminal
-#      passed/checks-passed -> done, failed/cancelled -> failed. EXCEPT: while
-#      the active step is ci, `axi status` alone cannot tell "still waiting on
-#      checks" from "checks green, waiting on merge" (see nm_ci_checks_state) -
-#      a ci-step log-tail check overrides working -> done once checks read
-#      green, so a green PR is never silently read as still-validating.
+#   2. Resolve a made pipeline run for this soldier's branch through
+#      `made status --json` (bin/cs-made-run-lib.sh's bounded, JSON-only
+#      call), falling back to the coarse `runs` listing when the direct
+#      answer belongs to another branch. Both are documented FORWARD
+#      REFERENCES against subcommands made's CLI does not implement yet - see
+#      bin/cs-made-run-lib.sh's own header.
+#      The run's `state` field is AUTHORITATIVE: queued/running -> working,
+#      completed -> done, failed -> failed. EXCEPT: a non-empty
+#      `pending_findings[]` (ask-user findings raised by a gate, e.g. Review or
+#      Document) overrides a `running` state to parked with the findings count
+#      and the raising stage in the detail; and the `ci` pipeline stage's own
+#      per-stage `result` overrides a `running` state to done once it reads
+#      "pass" - the pipeline itself stays open waiting on a human merge (the
+#      plan's no-merge-authority rule), so a green PR is never silently read as
+#      still-validating - the same ci-monitor-after-green behavior the prior
+#      validation backend had, but read straight off a live per-stage field on
+#      every call instead of scraping the ci stage's full log for text markers.
+#      That full log still lands in made's evidence store for a human to
+#      inspect after the fact, but this reader never parses it: made's
+#      daemon-backed snapshot has no "insufficient data" state the way a log
+#      tail could, so a `pending` ci stage is trusted outright and a stale
+#      status-log claim of "checks green" is never allowed to override it.
 #   3. Reconcile the status log: if its last line says needs-decision/blocked but
 #      the run-step shows the run moved on, the log is deterministically stale and
 #      is flagged superseded. A genuinely parked run plus a needs-decision log
@@ -45,6 +56,16 @@
 #   5. Missing meta or torn-down worktree: report unknown · none. If no run is
 #      attributed to this soldier, a dead pane also reports unknown · none rather
 #      than trusting a stale status log.
+#
+# Schema note: `made status --json` (cmd/made/status.go) has no per-run head/
+# commit field yet, so the DIRECT match below (RUN_SOURCE=full) attributes a
+# run to this soldier by branch name alone. The coarse `runs`-listing fallback
+# is the one place head-identity (a reused branch name whose tip was rewritten
+# or has diverged) is still verified, via cs_made_head_matches_worktree in
+# bin/cs-made-run-lib.sh against the listing's short-sha column. This is a
+# narrower safety net on the direct path than the prior text-based status
+# reader had, tracked as a follow-up for whenever made's status schema grows a
+# head field.
 #
 # Read-only and side-effect free. Always exits 0 on a successful read regardless
 # of state; exit 2 only on a usage error (no id).
@@ -61,8 +82,8 @@ cs_resolve_root
 . "$SCRIPT_DIR/cs-meta-lib.sh"
 # shellcheck source=bin/cs-classify-lib.sh
 . "$SCRIPT_DIR/cs-classify-lib.sh"
-# shellcheck source=bin/cs-nm-run-lib.sh
-. "$SCRIPT_DIR/cs-nm-run-lib.sh"
+# shellcheck source=bin/cs-made-run-lib.sh
+. "$SCRIPT_DIR/cs-made-run-lib.sh"
 
 ID=${1:-}
 [ -n "$ID" ] || { echo "usage: cs-crew-state.sh <id>" >&2; exit 2; }
@@ -71,8 +92,8 @@ META="$STATE/$ID.meta"
 LOG="$STATE/$ID.status"
 NM_TIMEOUT=${CS_CREW_STATE_NM_TIMEOUT:-10}
 case "$NM_TIMEOUT" in ''|*[!0-9]*) NM_TIMEOUT=10 ;; esac
-# How many of the most recent `no-mistakes runs` rows the cross-branch fallback
-# (nm_runs_status_for_branch, below) scans. Generous enough to still find a
+# How many of the most recent `made runs` rows the cross-branch fallback
+# (made_runs_status_for_branch, below) scans. Generous enough to still find a
 # branch's own run on a busy multi-soldier fleet without listing the entire
 # history every call.
 CS_CREW_STATE_RUNS_LIMIT=${CS_CREW_STATE_RUNS_LIMIT:-200}
@@ -146,37 +167,69 @@ pane_readable() {  # <pane>
 # "esc to interrupt") before the soldier may be read as not working. That
 # corroboration matters here: herdr's agent.get reports generation state, which
 # is a narrower signal than "this soldier's turn/tool call is still in
-# progress". A soldier blocked on its own long-running foreground tool call
-# (e.g. `no-mistakes axi run` without --yes, which blocks synchronously until a
-# gate or outcome) is not generating for that whole span, so agent.get can read
-# idle while the pane's own rendered text still shows the harness's busy banner
-# for the entire tool call. Trusting a bare `idle` outright is what once let a
-# still-working soldier read as not-busy - and, combined with a no-mistakes
-# run-step lookup that also missed attribution (see nm_runs_status_for_branch) -
-# as not provably working in cs-classify-lib.sh, triggering an immediate
-# (non-wedge) stale wake instead of the absorb-then-escalate path. A genuinely
-# human-blocked agent (a permission dialog, not mid-tool-call) does not render
-# the busy banner, so the corroboration does not mask that case: it stays
-# correctly not-busy.
+# progress". A soldier blocked on its own long-running foreground validation
+# call (made's pipeline blocks synchronously until a gate or outcome) is not
+# generating for that whole span, so agent.get can read idle while the pane's
+# own rendered text still shows the harness's busy banner for the entire tool
+# call. Trusting a bare `idle` outright is what once let a still-working
+# soldier read as not-busy - and, combined with a made run-step lookup that
+# also missed attribution (see made_runs_status_for_branch) - as not provably
+# working in cs-classify-lib.sh, triggering an immediate (non-wedge) stale
+# wake instead of the absorb-then-escalate path. A genuinely human-blocked
+# agent (a permission dialog, not mid-tool-call) does not render the busy
+# banner, so the corroboration does not mask that case: it stays correctly
+# not-busy.
 crew_pane_is_busy() {  # <pane>
   [ "$(cs_herdr_agent_busy_state "$1" 2>/dev/null)" = busy ]
 }
 
-# --- no-mistakes run lookup (authoritative when a run matches this branch) --
+# --- made run lookup (authoritative when a run matches this branch) --------
 
-# TOON parsing, the bounded no-mistakes call, and the run-attribution rules all
-# live in bin/cs-nm-run-lib.sh so teardown and this reader share one owner (see
-# that file's header). These thin wrappers keep the local call sites below
-# reading against $RUN_OUT / $WT / $NM_TIMEOUT while the lib holds the logic.
+# The bounded call plumbing and the run-attribution rules (branch/head
+# matching, gate-parked predicate for the coarse listing) live in
+# bin/cs-made-run-lib.sh so teardown and this reader share one owner (see that
+# file's header). This thin wrapper keeps the local call sites below reading
+# against $RUN_OUT / $WT / $NM_TIMEOUT while the lib holds the bounded-exec
+# contract.
 RUN_OUT=""
-trim() { cs_nm_trim "${1:-}"; }
-strip_quotes() { cs_nm_strip_quotes "${1:-}"; }
-nm_run() { cs_nm_run "$WT" "$NM_TIMEOUT" "$@"; }
-nm_field() { cs_nm_field "$RUN_OUT" "$1"; }
-nm_has_gate() { cs_nm_has_gate "$RUN_OUT"; }
-nm_gate_line_name() { cs_nm_gate_line_name "$RUN_OUT"; }
-nm_gate_name() { cs_nm_gate_name "$RUN_OUT"; }
-nm_gate_findings_count() { cs_nm_gate_findings_count "$RUN_OUT"; }
+made_run() { cs_made_run "$WT" "$NM_TIMEOUT" "$@"; }
+
+# $RUN_OUT is `made status --json`'s report: schema_version, run_id, repo,
+# branch, state, queued_at, started_at, ended_at, error, stages[]{name,
+# result}, pending_findings[]{stage,message}. These read it with jq and fail
+# soft (empty result) on anything that is not a well-formed report, so a
+# timed-out or malformed call degrades to "no run" rather than a jq error.
+made_field() {  # <jq filter>
+  printf '%s' "$RUN_OUT" | jq -r "$1 // empty" 2>/dev/null
+}
+made_state() { made_field '.state'; }
+made_error() { made_field '.error'; }
+# The result ("pass"/"fail"/"pending") of the named pipeline stage, or empty
+# when the stage is absent from the report.
+made_stage_result() {  # <stage-name>
+  printf '%s' "$RUN_OUT" | jq -r --arg s "$1" \
+    '((.stages // [])[] | select(.name == $s) | .result) // empty' 2>/dev/null
+}
+# The first stage (in pipeline order) that has not passed - the pipeline's
+# current position, for the "validating (<stage>)" detail. Empty once every
+# stage has passed.
+made_active_stage() {
+  printf '%s' "$RUN_OUT" | jq -r \
+    '((.stages // [])[] | select(.result != "pass") | .name)' 2>/dev/null | head -1
+}
+made_first_failed_stage() {
+  printf '%s' "$RUN_OUT" | jq -r \
+    '((.stages // [])[] | select(.result == "fail") | .name)' 2>/dev/null | head -1
+}
+made_pending_findings_count() {
+  printf '%s' "$RUN_OUT" | jq -r '(.pending_findings // []) | length' 2>/dev/null
+}
+# The stage that raised the first pending ask-user finding - reported as the
+# "gate" name in the parked detail.
+made_pending_findings_stage() {
+  printf '%s' "$RUN_OUT" | jq -r '(.pending_findings // [])[0].stage // empty' 2>/dev/null
+}
+
 log_reports_ci_ready() {
   [ "$LOG_VERB" = "done" ] || return 1
   case "$(status_line_note "$LOG_LINE")" in
@@ -185,128 +238,50 @@ log_reports_ci_ready() {
   esac
 }
 
-nm_ci_step_status() {
-  local row rest
-  row=$(printf '%s\n' "$RUN_OUT" | grep -E '^[[:space:]]*ci,[[:space:]]*"?(running|fixing)"?[[:space:]]*,' | head -1)
-  [ -n "$row" ] || return 0
-  row=$(trim "$row")
-  rest=${row#*,}
-  strip_quotes "$(trim "${rest%%,*}")"
-}
-
-nm_effective_ci_step_status() {
-  local step_status
-  if [ "${RUN_STATUS:-}" = fixing ]; then
-    printf 'fixing'
-    return 0
-  fi
-  step_status=$(nm_ci_step_status)
-  if [ -n "$step_status" ]; then
-    printf '%s' "$step_status"
-    return 0
-  fi
-  if [ "${RUN_STATUS:-}" = ci ]; then
-    printf 'running'
-  fi
-}
-
-# Root cause of the PR #252 incident (2026-07): for a repo where merge is left
-# to the boss, no-mistakes' ci step (and therefore top-level status/outcome)
-# stays "running" for the ENTIRE CI-monitor phase, including long after GitHub
-# reports every check green - it only reaches outcome=passed once the PR is
-# actually merged (or failed/cancelled if closed). `axi status`'s steps[] table
-# never distinguishes "still waiting on checks" from "checks green, waiting on
-# merge": both read as plain `ci,running,...`. The only place that transition is
-# recorded is the ci step's own log text, e.g. "all CI checks passed - still
-# monitoring until merged or closed" or "no CI checks reported - still
-# monitoring until merged or closed" (verified against 360+ real run logs under
-# ~/.no-mistakes/logs/*/ci.log on the installed v1.32.2 binary, including the
-# actual PR #252 run). Reads the ci step's log tail via `axi logs` and scans it
-# for the MOST RECENT recognized marker (the log is append-only/chronological,
-# so the last match is current): green with nothing red after it means CI is
-# green right now, still only waiting on merge/close.
-nm_ci_checks_state() {
-  local run_id log_tail marker
-  run_id=$(strip_quotes "$(nm_field id)")
-  [ -n "$run_id" ] || { printf 'unknown'; return; }
-  log_tail=$(nm_run axi logs --step ci --run "$run_id") || true
-  [ -n "$log_tail" ] || { printf 'unknown'; return; }
-  marker=$(printf '%s\n' "$log_tail" \
-    | grep -E 'CI checks passed|no CI checks reported - still monitoring|no CI checks reported yet|checks failed|issues detected|CI checks running|base branch advanced.*re-arming CI monitor timeout' \
-    | tail -1)
-  case "$marker" in
-    *"checks passed"*|*"no CI checks reported - still monitoring"*) printf 'green' ;;
-    *"no CI checks reported yet"*|*"checks failed"*|*"issues detected"*|*"CI checks running"*|*"base branch advanced"*"re-arming CI monitor timeout"*) printf 'not-ready' ;;
-    *) printf 'unknown' ;;
-  esac
-}
-# Coarse fallback for cross-branch attribution. `no-mistakes axi status` (bare)
-# reports the active-or-most-recent run for the CURRENT branch when one
-# exists, else falls back to some other branch's run purely as informational
-# display (verified empirically: querying a worktree with its own active run
-# reliably returns that run, even under concurrent load from several other
-# validating soldiers on the same underlying repo). A soldier whose branch
-# genuinely has no run yet therefore sees another branch's answer here.
+# Coarse fallback for cross-branch attribution. `made status --json` with no
+# run-id resolves the daemon-wide most-recently-queued run (cmd/made/status.go
+# resolveRun), the same "may answer another soldier's run" shape the prior
+# validation backend's bare `axi status` had - a soldier whose branch genuinely
+# has no run yet, or whose run is not the most recently queued one, sees
+# another branch's answer here.
 #
-# This fallback used to shell out to `no-mistakes axi` (bare, no subcommand)
-# expecting a `runs[N]{id,branch,status,...}:` TOON table and re-query the
-# matched id via `axi status --run <id>`. Verified against the real installed
-# CLI (v1.32.2): the `axi` surface exposes only abort/logs/respond/run/status -
-# there is no runs-listing subcommand under `axi` at all, so that table never
-# appears and the lookup was silently dead code; whenever the bare `axi
-# status` answer was not this soldier's own branch, attribution always failed
-# and the caller fell straight through to the pane/log fallback below. (The
-# PRIMARY cause of the 2026-07 herdr false-surface incidents turned out to be
-# a separate bug in the watcher's stale_is_terminal precedence - see the
-# originating firstmate history - but this cross-branch path was independently
-# confirmed dead code and is worth having actually work.)
-#
-# The real run-listing command is the top-level `no-mistakes runs`. The coarse
-# cross-branch attribution (parse that plain text, match this branch's most
-# recent row under the same head-identity rule as axi status) is owned by
-# bin/cs-nm-run-lib.sh; this wrapper binds it to this reader's worktree and
-# limit. See that file's header for the exact runs-list shape and rules.
-nm_runs_status_for_branch() {  # <branch>
-  cs_nm_runs_status_for_branch "$WT" "$1" "$CS_CREW_STATE_RUNS_LIMIT" "$NM_TIMEOUT"
+# The real run-listing surface (a plain, human-oriented "made runs" table -
+# forward reference, see bin/cs-made-run-lib.sh's header) is owned by that
+# library: parse that table, match this branch's most recent row under the
+# same head-identity rule as the direct lookup. This wrapper binds it to this
+# reader's worktree and limit.
+made_runs_status_for_branch() {  # <branch>
+  cs_made_runs_status_for_branch "$WT" "$1" "$CS_CREW_STATE_RUNS_LIMIT" "$NM_TIMEOUT"
 }
 
 # CREW_BRANCH is empty at detached HEAD (a just-spawned soldier, or a scout's
 # scratch worktree); with no branch there is no run to attribute to this soldier.
 CREW_BRANCH=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
 
-# The head-identity rules (equal, or worktree HEAD is an ancestor of the run
-# head; a strict-earlier, diverged, or unresolvable head is no match) are owned
-# by cs_nm_head_matches_worktree. Branch match is the caller's precondition.
-# This reader binds it to the axi-status TOON `head` field; the coarse runs-list
-# form is applied inside cs_nm_runs_status_for_branch against the row's short-sha.
-nm_run_head_matches_worktree() {
-  cs_nm_head_matches_worktree "$WT" "$(strip_quotes "$(nm_field head)")"
-}
-
 HAVE_RUN=0
 # RUN_SOURCE distinguishes the two ways HAVE_RUN=1 can happen: "full" means
-# $RUN_OUT is real `axi status` TOON with step/gate detail; "coarse" means only
-# a bare status word came back from the runs-list fallback above, so the
-# run-step block below skips the TOON field parsing entirely for this soldier.
+# $RUN_OUT is a real `made status --json` report with stage/finding detail;
+# "coarse" means only a bare status word came back from the runs-list fallback
+# above, so the run-step block below skips the JSON field parsing entirely for
+# this soldier.
 RUN_SOURCE=full
 COARSE_STATUS=""
-# Scouts and capos never drive a no-mistakes validation of their own
-# worktree, so skip the lookup for them and read state from pane/log directly.
-if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/null 2>&1; then
-  RUN_OUT=$(nm_run axi status)
-  if [ -n "$RUN_OUT" ]; then
-    run_branch=$(strip_quotes "$(nm_field branch)")
-    if [ -n "$run_branch" ] && [ "$run_branch" = "$CREW_BRANCH" ] && nm_run_head_matches_worktree; then
+# Scouts and capos never drive a made validation of their own worktree, so
+# skip the lookup for them and read state from pane/log directly.
+if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v made >/dev/null 2>&1; then
+  RUN_OUT=$(made_run status --json)
+  if [ -n "$RUN_OUT" ] && printf '%s' "$RUN_OUT" | jq -e . >/dev/null 2>&1; then
+    run_branch=$(made_field '.branch')
+    if [ -n "$run_branch" ] && [ "$run_branch" = "$CREW_BRANCH" ]; then
       HAVE_RUN=1
     else
-      # The active-or-most-recent run is for another branch, or same branch with
-      # a rewritten/diverged head (the CLI is alive and answered; only the
-      # attribution missed) - try the coarse fallback.
-      # Deliberately nested inside `[ -n "$RUN_OUT" ]`: an empty/timed-out
-      # primary call means the CLI itself did not respond, so retrying it
-      # immediately with a second bounded call would just double the wait
-      # for no better answer.
-      COARSE_STATUS=$(nm_runs_status_for_branch "$CREW_BRANCH")
+      # The most-recently-queued run belongs to another branch (the CLI is
+      # alive and answered; only the attribution missed) - try the coarse
+      # fallback. Deliberately nested inside a well-formed $RUN_OUT: an
+      # empty/timed-out/malformed primary call means the CLI itself did not
+      # respond usably, so retrying it immediately with a second bounded call
+      # would just double the wait for no better answer.
+      COARSE_STATUS=$(made_runs_status_for_branch "$CREW_BRANCH")
       if [ -n "$COARSE_STATUS" ]; then
         HAVE_RUN=1
         RUN_SOURCE=coarse
@@ -320,97 +295,80 @@ fi
 if [ "$HAVE_RUN" = 1 ]; then
   RUN_STATE=working
   RUN_DETAIL=""
-  CI_STEP_STATUS=""
-  CI_LOG_STATE=""
-  RUN_STATUS=""
   if [ "$RUN_SOURCE" = coarse ]; then
-    # No step/gate detail is available from the plain runs list - only ever
-    # true/working, done, or failed. A soldier genuinely parked at a gate still
-    # gets full detail once `axi status` reports its own branch again (e.g.
-    # once its own step is the most-recently-touched one), and its own
-    # needs-decision/blocked status-log append (a boss-relevant VERB) is
-    # surfaced through signal_reason_is_actionable regardless of this
-    # coarse-vs-full distinction, so a real gate is never silently missed.
+    # No stage/finding detail is available from the plain runs list - only ever
+    # queued/running, completed, or failed/cancelled. A soldier genuinely
+    # parked at a gate still gets full detail once `made status --json`
+    # reports its own branch again (e.g. once its own run is the
+    # most-recently-queued one), and its own needs-decision/blocked
+    # status-log append (a boss-relevant VERB) is surfaced through
+    # signal_reason_is_actionable regardless of this coarse-vs-full
+    # distinction, so a real gate is never silently missed.
     case "$COARSE_STATUS" in
-      running)   RUN_STATE=working; RUN_DETAIL="validating (background run)" ;;
-      completed) RUN_STATE="done";  RUN_DETAIL="run completed" ;;
-      failed)    RUN_STATE=failed;  RUN_DETAIL="run failed" ;;
-      cancelled) RUN_STATE=failed;  RUN_DETAIL="run cancelled" ;;
-      *)         RUN_STATE=unknown; RUN_DETAIL="runs list status: $COARSE_STATUS" ;;
+      running|queued) RUN_STATE=working; RUN_DETAIL="validating (background run)" ;;
+      completed)      RUN_STATE="done";  RUN_DETAIL="run completed" ;;
+      failed)         RUN_STATE=failed;  RUN_DETAIL="run failed" ;;
+      cancelled)      RUN_STATE=failed;  RUN_DETAIL="run cancelled" ;;
+      *)              RUN_STATE=unknown; RUN_DETAIL="runs list status: $COARSE_STATUS" ;;
     esac
+
+    # The coarse listing carries no per-stage detail at all, so a status-log
+    # claim of "checks green" cannot be corroborated against a live signal the
+    # way the direct path corroborates it against the ci stage's own result -
+    # it is the only signal available here, so it is trusted outright.
+    if [ "$RUN_STATE" = working ] && log_reports_ci_ready; then
+      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
+    fi
   else
-    status=$(strip_quotes "$(nm_field status)")
-    RUN_STATUS=$status
-    outcome=$(strip_quotes "$(nm_field outcome)")
-    has_gate=0
-    nm_has_gate && has_gate=1
+    state=$(made_state)
+    findings_count=$(made_pending_findings_count)
+    case "$findings_count" in ''|*[!0-9]*) findings_count=0 ;; esac
 
-    if [ -n "$outcome" ]; then
-      case "$outcome" in
-        passed)        RUN_STATE="done"; RUN_DETAIL="run passed: PR merged/closed" ;;
-        checks-passed) RUN_STATE="done"; RUN_DETAIL="checks green: PR ready for review" ;;
-        failed)        RUN_STATE=failed; RUN_DETAIL="run failed" ;;
-        cancelled)     RUN_STATE=failed; RUN_DETAIL="run cancelled" ;;
-        *)             RUN_STATE=unknown; RUN_DETAIL="outcome: $outcome" ;;
-      esac
-    elif cs_nm_run_is_gate_parked "$RUN_OUT"; then
-      if [ "$has_gate" = 1 ]; then
-        gate=$(nm_gate_line_name)
-      else
-        gate=$(nm_gate_name)
-      fi
-      [ -n "$gate" ] || gate=$status
-      [ -n "$gate" ] || gate=gate
-      RUN_STATE=parked
-      RUN_DETAIL="parked at $gate"
-      fcount=$(nm_gate_findings_count)
-      [ -n "$fcount" ] && RUN_DETAIL="$RUN_DETAIL: $fcount finding(s)"
-      if printf '%s\n' "$RUN_OUT" | grep -q 'ask-user'; then
-        RUN_DETAIL="$RUN_DETAIL (ask-user: boss decision)"
-      fi
-    else
-      case "$status" in
-        ci)             RUN_STATE=working; RUN_DETAIL="ci running" ;;
-        running|fixing) RUN_STATE=working; RUN_DETAIL="validating ($status)" ;;
-        completed)      RUN_STATE="done"; RUN_DETAIL="run completed" ;;
-        failed)         RUN_STATE=failed;  RUN_DETAIL="run failed" ;;
-        cancelled)      RUN_STATE=failed;  RUN_DETAIL="run cancelled" ;;
-        "")             RUN_STATE=working; RUN_DETAIL="run active" ;;
-        *)              RUN_STATE=working; RUN_DETAIL="run active ($status)" ;;
-      esac
-      if [ "$RUN_STATE" = working ]; then
-        CI_STEP_STATUS=$(nm_effective_ci_step_status)
-        case "$CI_STEP_STATUS" in
-          running)
-            CI_LOG_STATE=$(nm_ci_checks_state)
-            if [ "$CI_LOG_STATE" = green ]; then
-              RUN_STATE="done"
-              RUN_DETAIL="checks green: PR ready for review (still monitoring for merge/close)"
-            fi
-            ;;
-          fixing)
-            CI_LOG_STATE=not-ready
-            ;;
-        esac
-      fi
-    fi
-  fi
-
-  if [ "$RUN_STATE" = working ] && log_reports_ci_ready; then
-    if [ "$RUN_SOURCE" = coarse ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
-    fi
-    [ -n "$CI_STEP_STATUS" ] || CI_STEP_STATUS=$(nm_effective_ci_step_status)
-    if [ "$RUN_STATUS" = fixing ]; then
-      CI_LOG_STATE=not-ready
-    elif [ "$CI_STEP_STATUS" = running ] && [ -z "$CI_LOG_STATE" ]; then
-      CI_LOG_STATE=$(nm_ci_checks_state)
-    elif [ "$CI_STEP_STATUS" = fixing ]; then
-      CI_LOG_STATE=not-ready
-    fi
-    if [ "$CI_LOG_STATE" != not-ready ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
-    fi
+    case "$state" in
+      completed)
+        RUN_STATE="done"; RUN_DETAIL="run completed"
+        ;;
+      failed)
+        RUN_STATE=failed
+        err=$(made_error)
+        failed_stage=$(made_first_failed_stage)
+        if [ -n "$err" ]; then
+          RUN_DETAIL="run failed: $err"
+        elif [ -n "$failed_stage" ]; then
+          RUN_DETAIL="run failed at $failed_stage"
+        else
+          RUN_DETAIL="run failed"
+        fi
+        ;;
+      running|queued)
+        if [ "$findings_count" -gt 0 ]; then
+          gate=$(made_pending_findings_stage)
+          [ -n "$gate" ] || gate=gate
+          RUN_STATE=parked
+          RUN_DETAIL="parked at $gate: $findings_count finding(s) (ask-user: boss decision)"
+        elif [ "$(made_stage_result ci)" = pass ]; then
+          # The ci stage itself is authoritative for "checks green", read
+          # straight off the live snapshot: a `running` top-level state with a
+          # passed ci stage means the pipeline is only waiting on a human
+          # merge (see the header note), which reads as done here regardless
+          # of whether the soldier's own status log already said so.
+          RUN_STATE="done"
+          RUN_DETAIL="checks green: PR ready for review (still monitoring for merge/close)"
+        elif [ "$state" = queued ]; then
+          RUN_STATE=working; RUN_DETAIL="run queued"
+        else
+          active=$(made_active_stage)
+          if [ -n "$active" ]; then
+            RUN_STATE=working; RUN_DETAIL="validating ($active)"
+          else
+            RUN_STATE=working; RUN_DETAIL="run active"
+          fi
+        fi
+        ;;
+      *)
+        RUN_STATE=unknown; RUN_DETAIL="state: $state"
+        ;;
+    esac
   fi
 
   # Reconcile the status log. A needs-decision/needs-review/blocked log line

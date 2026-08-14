@@ -651,7 +651,7 @@ cs_harness_instruction_file() {
 # omo plan-mode skill when it appears in a brief. Live-verified 2026-08-11
 # against codex-cli 0.147.0 and claude 2.1.228 via a herdr-lab probe pane: the
 # bare skill name, with no leading slash or $ prefix, is sufficient on both
-# harnesses (.no-mistakes/evidence/task-1-ulw-plan-codex.txt, .no-mistakes/evidence/task-1-plan-start-work-claude.txt).
+# harnesses (.made/evidence/task-1-ulw-plan-codex.txt, .made/evidence/task-1-plan-start-work-claude.txt).
 cs_harness_plan_skill() {
   case "$1" in
     codex) printf 'ulw-plan\n' ;;

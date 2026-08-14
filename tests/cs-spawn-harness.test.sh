@@ -149,7 +149,7 @@ spawn_one() {
 }
 
 # --- codex root: unchanged launch shape, harness=codex ----------------------
-launch=$(spawn_one codex t-codex --mode no-mistakes --yolo off)
+launch=$(spawn_one codex t-codex --mode made --yolo off)
 [ "$(cs_meta_get "$HOME_DIR/state/t-codex.meta" harness)" = codex ] || fail "codex meta harness"
 assert_contains "$launch" "kind=codex" "codex root launches codex"
 assert_contains "$launch" 'notify=' "codex root wires notify turn-end"
@@ -195,9 +195,9 @@ pass "capo spawn: env pre-step confirmed with its content, no turn-end wiring, c
 # --- the harness owns model and reasoning level ------------------------------
 # Consigliere selects neither, on either harness and for every task kind, so no
 # launch may name a model or a reasoning level and no task may record one.
-for spec in "codex t-noprofile-codex-ship --mode no-mistakes --yolo off" \
+for spec in "codex t-noprofile-codex-ship --mode made --yolo off" \
   "codex t-noprofile-codex-scout --scout" \
-  "claude t-noprofile-claude-ship --mode no-mistakes --yolo off" \
+  "claude t-noprofile-claude-ship --mode made --yolo off" \
   "claude t-noprofile-claude-scout --scout"; do
   # shellcheck disable=SC2086
   set -- $spec
@@ -218,12 +218,12 @@ pass "a spawn launches on the harness's own model and reasoning level, and recor
 for flag in --model --effort; do
   id="t-refuse${flag}"
   mkdir -p "$HOME_DIR/data/$id"
-  printf 'implement the fixture\nDelivery contract: mode=no-mistakes\n' > "$HOME_DIR/data/$id/brief.md"
+  printf 'implement the fixture\nDelivery contract: mode=made\n' > "$HOME_DIR/data/$id/brief.md"
   if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
     CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
     CS_CLAUDE_JSON="$TMP/claude.json" \
     CS_FAKE_SPAWN_WORKTREE="$TMP/wt-refuse$flag" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-refuse$flag" \
-    "$SPAWN" "$id" "$REPO" --mode no-mistakes --yolo off "$flag" high 2>&1); then
+    "$SPAWN" "$id" "$REPO" --mode made --yolo off "$flag" high 2>&1); then
     fail "$flag must be refused, not silently ignored"
   fi
   assert_contains "$output" "unknown flag $flag" "$flag is refused by name"
@@ -232,7 +232,7 @@ done
 pass "--model and --effort are refused as unknown flags"
 
 # --- claude root: --settings launch, harness=claude, settings file written --
-launch=$(spawn_one claude t-claude --mode no-mistakes --yolo off)
+launch=$(spawn_one claude t-claude --mode made --yolo off)
 [ "$(cs_meta_get "$HOME_DIR/state/t-claude.meta" harness)" = claude ] || fail "claude meta harness"
 assert_contains "$launch" "kind=claude" "claude root launches claude"
 assert_contains "$launch" "--dangerously-skip-permissions" "claude root autonomy flag"
@@ -268,7 +268,7 @@ pass "a claude credential-store split is exported into the pane shell before the
 # End-to-end, not just the launch-string unit: proves the home's config dir
 # resolves the same way for the harness lib as it does for cs-spawn itself.
 printf 'claude auto\n' > "$HOME_DIR/config/permission-mode.conf"
-launch=$(spawn_one claude t-claude-permmode --mode no-mistakes --yolo off)
+launch=$(spawn_one claude t-claude-permmode --mode made --yolo off)
 assert_contains "$launch" "--permission-mode auto" "configured permission mode reaches the spawn launch as a clean argv token"
 assert_not_contains "$launch" '--dangerously-skip-permissions' "configured mode replaces the bypass flag"
 
@@ -279,7 +279,7 @@ if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude \
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
   CS_CLAUDE_JSON="$TMP/claude.json" \
   CS_FAKE_SPAWN_WORKTREE="$TMP/wt-permmode-invalid" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-permmode-invalid" \
-  "$SPAWN" t-permmode-invalid "$REPO" --mode no-mistakes --yolo off 2>&1); then
+  "$SPAWN" t-permmode-invalid "$REPO" --mode made --yolo off 2>&1); then
   fail "an unusable permission mode must reject spawn"
 fi
 assert_contains "$output" "not a usable claude launch permission mode" "unusable mode error is specific"
@@ -296,12 +296,12 @@ pass "config/permission-mode.conf selects the claude launch mode and blocks an u
 # the task as under way, and the pane sat at a bare prompt until the stale timer
 # eventually noticed: a soldier that reported success and never existed.
 mkdir -p "$HOME_DIR/data/t-swallowed"
-printf 'implement the fixture\nDelivery contract: mode=no-mistakes\n' > "$HOME_DIR/data/t-swallowed/brief.md"
+printf 'implement the fixture\nDelivery contract: mode=made\n' > "$HOME_DIR/data/t-swallowed/brief.md"
 if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
   CS_FAKE_SPAWN_WORKTREE="$TMP/wt-swallowed" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-swallowed" \
   CS_FAKE_SPAWN_NO_AGENT=1 CS_SPAWN_LAUNCH_WAIT_SECS=2 \
-  "$SPAWN" t-swallowed "$REPO" --mode no-mistakes --yolo off 2>&1); then
+  "$SPAWN" t-swallowed "$REPO" --mode made --yolo off 2>&1); then
   fail "spawn must fail when no agent appears after the launch"
 fi
 assert_contains "$output" "no agent appeared" "the swallowed launch must be named, not silently reported as spawned"
@@ -325,7 +325,7 @@ mkdir -p "$HOME_DIR/host"
 printf 'enabled true\n' > "$HOME_DIR/host/telemetry.conf"
 export CS_TELEMETRY_DISABLE=''
 
-launch=$(spawn_one codex t-telemetry-codex --mode no-mistakes --yolo off)
+launch=$(spawn_one codex t-telemetry-codex --mode made --yolo off)
 assert_contains "$launch" 'touch' "the codex notify command must still touch the turn-end signal"
 assert_contains "$launch" 'cs-telemetry-emit.sh' "an enabled home instruments the codex worker turn end"
 assert_contains "$launch" '--worker --task' "the worker emitter is called with its task identity"
@@ -335,7 +335,7 @@ case "$launch" in
   *) fail "the turn-end touch must run first, joined by ';' so telemetry cannot gate it: $launch" ;;
 esac
 
-launch=$(spawn_one claude t-telemetry-claude --mode no-mistakes --yolo off)
+launch=$(spawn_one claude t-telemetry-claude --mode made --yolo off)
 SETTINGS="$HOME_DIR/state/t-telemetry-claude.claude-settings.json"
 assert_not_contains "$launch" 'cs-telemetry-emit.sh' \
   "a claude soldier is instrumented through its settings file, not its launch line"
