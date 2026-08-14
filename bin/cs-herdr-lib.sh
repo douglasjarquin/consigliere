@@ -405,9 +405,25 @@ cs_herdr_agent_start_timeout_ms() {
 # On failure, reports herdr's own distinct error code (agent_pane_not_found,
 # agent_kind_mismatch, agent_not_ready, agent_start_failed) instead of a
 # generic timeout, so a caller's message can name what actually went wrong.
+cs_herdr_agent_name() {
+  local logical=$1 name suffix keep
+  name=$(printf '%s' "$logical" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -c 'a-z0-9_-' '-')
+  case "$name" in
+    [a-z]*) ;;
+    *) name="a-$name" ;;
+  esac
+  if [ "${#name}" -gt 32 ]; then
+    suffix=$(printf '%s' "$logical" | cksum | cut -d ' ' -f1)
+    keep=$((32 - ${#suffix} - 1))
+    name="${name:0:keep}-${suffix}"
+  fi
+  printf '%s' "$name"
+}
+
 cs_herdr_agent_start() {
   local pane=$1 name=$2 kind=$3 timeout_ms=$4 out rc code
   shift 4
+  name=$(cs_herdr_agent_name "$name")
   out=$(cs_herdr agent start "$name" --kind "$kind" --pane "$pane" --timeout "$timeout_ms" -- "$@" 2>&1) && rc=0 || rc=$?
   [ "$rc" -eq 0 ] && return 0
   code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)

@@ -60,6 +60,16 @@ case "${1:-} ${2:-}" in
       fi
       shift
     done
+    case "$name" in
+      ''|[!a-z]*|*[!a-z0-9_-]*)
+        printf '%s\n' '{"error":{"code":"invalid_agent_name","message":"agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)"}}'
+        exit 1
+        ;;
+    esac
+    [ "${#name}" -le 32 ] || {
+      printf '%s\n' '{"error":{"code":"invalid_agent_name","message":"agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)"}}'
+      exit 1
+    }
     {
       printf 'name=%s\n' "$name"
       printf 'kind=%s\n' "$kind"
@@ -157,6 +167,10 @@ assert_not_contains "$launch" '--settings' "codex root does not use --settings"
 assert_absent "$HOME_DIR/state/t-codex.claude-settings.json" "codex root writes no claude settings file"
 pass "codex root: harness=codex, codex notify launch, no settings file"
 
+launch=$(spawn_one codex Foo.Bar --mode made --yolo off)
+assert_contains "$launch" "name=foo-bar" "native agent names normalize task ids to Herdr's lowercase charset"
+pass "a task id outside Herdr's agent-name charset reaches native agent start safely"
+
 # --- capo spawn: unconditional env pre-step, no turn-end wiring --------------
 # The old cs_harness_capo_launch unit test is gone with the function; this is
 # its end-to-end replacement, exercising cs-spawn.sh's own capo argv
@@ -253,13 +267,13 @@ pass "claude root: harness=claude, --settings launch, settings file written"
 # consigliere's environment, so a soldier under a work/personal claude split
 # comes up against the wrong store unless the export pre-step actually lands.
 mkdir -p "$HOME_DIR/data/t-claude-env"
-printf 'implement the fixture\nDelivery contract: mode=no-mistakes\n' > "$HOME_DIR/data/t-claude-env/brief.md"
+printf 'implement the fixture\nDelivery contract: mode=made\n' > "$HOME_DIR/data/t-claude-env/brief.md"
 env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude CLAUDE_CONFIG_DIR="$TMP/work-claude" \
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
   CS_CLAUDE_JSON="$TMP/claude.json" \
   CS_FAKE_SPAWN_WORKTREE="$TMP/wt-t-claude-env" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-t-claude-env" \
   CS_FAKE_SPAWN_PANE_RUN="$TMP/panerun-t-claude-env" \
-  "$SPAWN" t-claude-env "$REPO" --mode no-mistakes --yolo off >/dev/null || fail "claude credential-split spawn failed"
+  "$SPAWN" t-claude-env "$REPO" --mode made --yolo off >/dev/null || fail "claude credential-split spawn failed"
 assert_contains "$(cat "$TMP/panerun-t-claude-env")" "export CLAUDE_CONFIG_DIR='$TMP/work-claude'" \
   "a soldier under a credential-store split must export the store into the pane before agent start"
 pass "a claude credential-store split is exported into the pane shell before the agent starts"
