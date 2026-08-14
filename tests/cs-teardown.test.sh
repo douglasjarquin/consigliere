@@ -53,13 +53,16 @@ cat > "$FAKEBIN/gh" <<'SH'
 exit 1
 SH
 cp "$FAKEBIN/gh" "$FAKEBIN/gh-axi"
-# Hermetic no-mistakes: the pre-teardown run conclusion (conclude_nm_run) queries
-# `axi status` and, for a parked-and-attributed run, aborts it. This fake serves
-# the env-driven TOON for `axi status` and models the daemon concluding the run:
-# `axi abort` touches CS_FAKE_ABORT_MARK, after which `axi status` serves
-# CS_FAKE_AXI_STATUS_AFTER instead. Default (both unset) is "no run" -> no-op, so
-# every existing case above is unaffected and never touches the real binary.
-cat > "$FAKEBIN/no-mistakes" <<'SH'
+# Hermetic made: the pre-teardown run conclusion (conclude_nm_run) queries
+# `axi status` and, for a parked-and-attributed run, aborts it through
+# cs_made_abort (bin/cs-made-lib.sh), while cs_made_axi_status_read /
+# cs_made_runs_status_for_branch_read (bin/cs-made-run-lib.sh) shell `made`
+# directly for the reads. This fake serves the env-driven TOON for `axi
+# status`/`runs --limit` and models the daemon concluding the run: `axi abort`
+# touches CS_FAKE_ABORT_MARK, after which `axi status` serves
+# CS_FAKE_AXI_STATUS_AFTER instead. Default (both unset) is "no run" -> no-op,
+# so every existing case above is unaffected and never touches a real daemon.
+cat > "$FAKEBIN/made" <<'SH'
 #!/usr/bin/env bash
 set -u
 case "${1:-} ${2:-}" in
@@ -83,7 +86,7 @@ case "${1:-} ${2:-}" in
 esac
 exit 0
 SH
-chmod +x "$FAKEBIN/herdr" "$FAKEBIN/gh" "$FAKEBIN/gh-axi" "$FAKEBIN/no-mistakes"
+chmod +x "$FAKEBIN/herdr" "$FAKEBIN/gh" "$FAKEBIN/gh-axi" "$FAKEBIN/made"
 export PATH="$FAKEBIN:$PATH"
 
 cs_git_identity
@@ -96,7 +99,7 @@ BIN="$ROOT/bin/cs-teardown.sh"
 # and no approval posture to apply. The fixture mirrors that so the scout paths
 # below are exercised against the metadata shape a real scout actually has.
 make_task() {
-  local id=$1 kind=$2 mode=${3:-no-mistakes} proj wt
+  local id=$1 kind=$2 mode=${3:-made} proj wt
   proj="$TMP/proj-$id"
   wt="$TMP/wt-$id"
   cs_git_init_commit "$proj"
@@ -320,17 +323,17 @@ assert_present "$TMP/state/.decision-cursor-a.bx.read.abc123" \
 pass "retiring a dotted capo id leaves the near-miss route intact"
 
 make_task m1 ship local-only
-out=$(CS_FAKE_AXI_STATUS_FAIL=1 "$BIN" m1 2>&1) || fail "non-no-mistakes teardown must skip run conclusion: $out"
-assert_contains "$out" "teardown m1 complete" "non-no-mistakes mode skips the run conclusion"
-pass "non-no-mistakes mode skips run conclusion"
+out=$(CS_FAKE_AXI_STATUS_FAIL=1 "$BIN" m1 2>&1) || fail "non-made teardown must skip run conclusion: $out"
+assert_contains "$out" "teardown m1 complete" "non-made mode skips the run conclusion"
+pass "non-made mode skips run conclusion"
 
 make_task f1 ship
 out=$(CS_FAKE_AXI_STATUS_FAIL=1 "$BIN" f1 2>&1) \
-  && fail "an unreadable no-mistakes status must refuse teardown"
+  && fail "an unreadable made status must refuse teardown"
 assert_contains "$out" "could not verify that no orphaned" "unreadable status refusal names the orphan check"
 assert_present "$TMP/wt-f1" "worktree retained after unreadable status refusal"
 assert_present "$TMP/state/f1.meta" "records retained after unreadable status refusal"
-pass "unreadable no-mistakes status fails closed"
+pass "unreadable made status fails closed"
 
 # --- pre-teardown run conclusion + leaked-process reap ----------------------
 # A run is attributed to a task only by its exact branch AND current head

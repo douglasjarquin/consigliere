@@ -12,7 +12,7 @@
 # durable sweep policy comes only from bin/cs-board-watch.sh. The default
 # hold-green-prs behavior is unchanged. With release-green-prs selected, one
 # authenticated release-reviewed-green PR sidecar releases one slot only while
-# that no-mistakes PR remains open, non-draft, review-clean, green, and at the
+# that made PR remains open, non-draft, review-clean, green, and at the
 # exact recorded head. Missing, malformed, stale, red, or unknown data holds.
 # The gh-axi boundary accepts only its current three-line api_response envelope
 # with one unquoted scalar body token and an explicit non-truncated result.
@@ -146,7 +146,7 @@ merged_pr_is_verified() {
 scheduling_release_is_verified() {
   local meta=$1 id=$2 mode
   mode=$(cs_meta_get "$meta" mode || true)
-  [ "$mode" = no-mistakes ] || return 1
+  [ "$mode" = made ] || return 1
   cs_pr_poll_artifacts_valid "$STATE" "$id" "$SCRIPT_DIR/cs-pr-poll.sh" || return 1
   [ "$CS_PR_DATA_PROVIDER" = github ] || return 1
   [ "$CS_PR_DATA_CAPACITY" = release-reviewed-green ] || return 1

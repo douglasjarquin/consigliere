@@ -4,7 +4,7 @@
 # and keeps blocking; it queues and exits only for actionable wakes.
 # The no-verb signal and stale path is absorb-only-when-provably-working: a wake
 # is absorbed only when the soldier shows POSITIVE evidence it is still working
-# (an actively-running no-mistakes step, or herdr's native busy signal), and
+# (an actively-running made validation step, or herdr's native busy signal), and
 # surfaced otherwise, so a soldier that finishes (or stops and waits) without a
 # current working signal is never silently swallowed. A declared external-wait
 # pause is the separate idle absorb case and re-surfaces only on its long
@@ -17,7 +17,7 @@
 #                          timer) regardless of what the status log says - an active
 #                          run-step or busy pane outranks even a boss-relevant log
 #                          line, since the soldier's own log gets no new entry once
-#                          consigliere hands it to a no-mistakes validation. A declared
+#                          consigliere hands it to a made validation. A declared
 #                          external-wait pause is absorbed instead with its own long
 #                          re-surface cadence, never as a wedge. Only when neither
 #                          absorb class applies does the log's last line decide:
@@ -71,6 +71,11 @@ mkdir -p "$STATE"
 # stays live every cycle as the permanent fail-closed backstop.
 # shellcheck source=bin/cs-herdr-lib.sh
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
+# The one made-CLI layer (made status --json, etc.) - made_run_state below
+# calls cs_made_status through here, mirroring cs-herdr-lib.sh's own
+# separation of concerns for herdr.
+# shellcheck source=bin/cs-made-lib.sh
+. "$SCRIPT_DIR/cs-made-lib.sh"
 # shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
 # PR merge-poll artifact validation (byte-static poll published by cs-pr-check).
@@ -142,8 +147,9 @@ BUSY_REGEX=${CS_BUSY_REGEX:-$CS_CODEX_BUSY_RE}
 # marker, logs to a debug log, and keeps blocking WITHOUT enqueuing or exiting.
 # The no-verb signal / stale path is absorb-only-when-provably-working: such a
 # wake is absorbed ONLY while the soldier shows positive evidence it is still
-# working (an actively-running no-mistakes step, or a busy pane, via
-# crew_is_provably_working over cs-crew-state.sh); a soldier that stopped its
+# working (an actively-running made validation step - a `made status --json`
+# socket query, never scraped log text, see made_run_state below - or a busy
+# pane, via crew_is_provably_working over cs-crew-state.sh); a soldier that stopped its
 # turn with no running pipeline and no busy pane is SURFACED, so a finish
 # reported only through interactive pane menus (no done: status) is never
 # swallowed. An ACTIONABLE wake (a boss-relevant signal, a no-verb signal whose
@@ -208,6 +214,32 @@ triage_log() {
 
 hash_pane() {
   if command -v md5 >/dev/null 2>&1; then md5 -q; else md5sum | cut -d' ' -f1; fi
+}
+
+# made_run_state: the OTHER form of positive evidence a soldier is still
+# working (see the "Always-on wake triage" note above) - an actively-running
+# or queued `made` validation run - read directly from made's structured
+# socket state (cs_made_status, bin/cs-made-lib.sh) rather than inferred from
+# any scraped log/status text. running/queued -> busy; completed/failed ->
+# idle. A query that fails for ANY reason (made not installed, daemon not
+# running, socket unreachable, unparseable JSON) reports the DISTINCT
+# `unreachable` state - never silently treated as idle or busy, and never a
+# fallback to stale scraped content (plans/made-rewrite.md Task 28).
+made_run_state() {  # [run-id] -> busy|idle|unreachable
+  local json state
+  json=$(cs_made_status "${1:-}" 2>/dev/null) || { printf 'unreachable'; return 0; }
+  [ -n "$json" ] || { printf 'unreachable'; return 0; }
+  state=$(printf '%s' "$json" | jq -r '.state // empty' 2>/dev/null) || { printf 'unreachable'; return 0; }
+  case "$state" in
+    running|queued)   printf 'busy' ;;
+    completed|failed) printf 'idle' ;;
+    *)                printf 'unreachable' ;;
+  esac
+}
+
+# made_run_is_busy: 0 iff made_run_state (above) reports busy (running/queued).
+made_run_is_busy() {  # [run-id]
+  [ "$(made_run_state "${1:-}")" = busy ]
 }
 
 # pane_busy_state: one native busy-state read per pane per poll, shared by the
@@ -1417,8 +1449,9 @@ while :; do
     # wake whose soldier IS provably working) -> advance the markers so it will
     # not re-fire, log, and keep blocking without enqueuing. The
     # provably-working check is the only costly one (it may run a bounded
-    # no-mistakes call), so the || ordering evaluates it only for a
-    # no-boss-verb signal.
+    # made status query - crew_is_provably_working over cs-crew-state.sh, a
+    # `made status --json` read, never a log scrape), so the || ordering
+    # evaluates it only for a no-boss-verb signal.
     # shellcheck disable=SC2086  # $files is a space-separated status-path list (ids carry no spaces)
     if signal_reason_is_actionable $files || ! signal_crew_provably_working $files; then
       while IFS=$(printf '\t') read -r sf sig f; do
@@ -1574,7 +1607,7 @@ EOF
         elif stale_is_terminal "$w" "$STATE"; then
           # The log's last line is boss-relevant - but that alone is not proof
           # the soldier is actually done: a soldier's own status log gets no new
-          # entry once consigliere hands it to a no-mistakes validation (the
+          # entry once consigliere hands it to a made validation (the
           # sparse status-reporting contract), so the log can keep showing a
           # "done:"/needs-decision/blocked leftover from BEFORE that validation
           # started for the run's entire (possibly many-minutes) duration,

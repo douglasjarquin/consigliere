@@ -135,7 +135,7 @@ MD
 
 cs_write_meta "$STATE/proj-301.meta" \
   "pane=proj-301" "worktree=$GREEN_WT" "project=$PROJECT_ABS" "kind=ship" \
-  "mode=no-mistakes" "issue=301"
+  "mode=made" "issue=301"
 printf 'done: PR https://github.com/o/r/pull/301 checks green\n' > "$STATE/proj-301.status"
 for id in live-b live-c live-d live-e; do
   cs_write_meta "$STATE/$id.meta" \

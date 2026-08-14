@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Behavior: cs-project-mode.sh resolves delivery mode + yolo from
-# config/projects.md, defaulting to "no-mistakes off" on missing registry,
+# config/projects.md, defaulting to "made off" on missing registry,
 # unknown project, or unknown mode - a typo never silently drops the gate.
 set -u
 # shellcheck source=tests/lib.sh
@@ -14,8 +14,8 @@ mkdir -p "$TMP/data" "$TMP/config"
 BIN="$ROOT/bin/cs-project-mode.sh"
 
 out=$("$BIN" ghost 2>/dev/null)
-[ "$out" = "no-mistakes off" ] || fail "missing registry defaults: got '$out'"
-pass "missing registry defaults to no-mistakes off"
+[ "$out" = "made off" ] || fail "missing registry defaults: got '$out'"
+pass "missing registry defaults to made off"
 
 cat > "$TMP/config/projects.md" <<'EOF'
 # Projects
@@ -23,7 +23,7 @@ cat > "$TMP/config/projects.md" <<'EOF'
 - beta [direct-PR] - direct PR project (added 2026-07-01)
 - gamma [local-only +yolo] - local yolo project (added 2026-07-01)
 - delta [bogus-mode] - typo mode project (added 2026-07-01)
-- epsilon [no-mistakes +yolo] - gated but autonomous (added 2026-07-01)
+- epsilon [made +yolo] - gated but autonomous (added 2026-07-01)
 EOF
 
 check() {
@@ -32,14 +32,14 @@ check() {
   [ "$got" = "$want" ] || fail "$name: want '$want', got '$got'"
 }
 
-check alpha "no-mistakes off"
+check alpha "made off"
 check beta "direct-PR off"
 check gamma "local-only on"
-check epsilon "no-mistakes on"
+check epsilon "made on"
 pass "registered modes and +yolo parse"
 
-check delta "no-mistakes off"
-check ghost "no-mistakes off"
-pass "unknown mode and unknown project fall back to no-mistakes off"
+check delta "made off"
+check ghost "made off"
+pass "unknown mode and unknown project fall back to made off"
 
 pass "cs-project-mode behaviors"

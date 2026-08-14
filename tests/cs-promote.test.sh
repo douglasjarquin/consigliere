@@ -48,7 +48,7 @@ pass "cs-promote flips a scout task's meta to kind=ship with an explicit posture
 
 # 2. missing meta -> exit 1, names the missing meta.
 set +e
-out=$("$BIN" ghost --mode no-mistakes --yolo off 2>&1); rc=$?
+out=$("$BIN" ghost --mode made --yolo off 2>&1); rc=$?
 set -e
 expect_code 1 "$rc" "missing meta should exit 1"
 assert_contains "$out" "no meta for task ghost" "missing-meta refusal names the task"
@@ -58,10 +58,10 @@ pass "cs-promote refuses a task with no meta"
 cs_write_meta "$TMP/state/sh1.meta" \
   "project=$TMP/proj-sh1" \
   "kind=ship" \
-  "mode=no-mistakes"
+  "mode=made"
 before=$(cat "$TMP/state/sh1.meta")
 set +e
-out=$("$BIN" sh1 --mode no-mistakes --yolo off 2>&1); rc=$?
+out=$("$BIN" sh1 --mode made --yolo off 2>&1); rc=$?
 set -e
 expect_code 1 "$rc" "a non-scout task should exit 1"
 assert_contains "$out" "not a scout task" "non-scout refusal names the reason"

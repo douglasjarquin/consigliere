@@ -76,7 +76,7 @@ write_task_meta() {
     "worktree=$dir/wt" \
     "project=$dir/project" \
     "kind=ship" \
-    "mode=no-mistakes"
+    "mode=made"
 }
 
 run_check_entry() {
@@ -343,7 +343,7 @@ test_release_policy_records_reviewed_green_attestation() {
     "worktree=$dir/wt" \
     "project=$project" \
     "kind=ship" \
-    "mode=no-mistakes" \
+    "mode=made" \
     "issue=42"
   printf '%s\n%s\n' \
     '# Active board sweeps. Owned by bin/cs-board-watch.sh; do not hand-edit.' \

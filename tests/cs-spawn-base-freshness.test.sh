@@ -83,11 +83,11 @@ spawn() {
   local id=$1 repo=$2
   shift 2
   mkdir -p "$HOME_DIR/data/$id"
-  printf 'implement the fixture\nDelivery contract: mode=no-mistakes\n' > "$HOME_DIR/data/$id/brief.md"
+  printf 'implement the fixture\nDelivery contract: mode=made\n' > "$HOME_DIR/data/$id/brief.md"
   env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
     CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
     CS_FAKE_SPAWN_WORKTREE="$TMP/wt-$id" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-$id" \
-    "$SPAWN" "$id" "$repo" --mode no-mistakes --yolo off "$@" 2>&1
+    "$SPAWN" "$id" "$repo" --mode made --yolo off "$@" 2>&1
 }
 
 # branch_base <repo> <branch> - the commit the task branch starts from.
