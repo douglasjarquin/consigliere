@@ -167,6 +167,11 @@ for bad in 'quo"te' 'back\slash' "apos'trophe"; do
     && fail "a turn-end path carrying $bad must be refused, not emitted malformed"
   [ "${#argv[@]}" -eq 0 ] || fail "a refused turn-end path must append nothing"
 done
+bad=$'tmp/state\nbad/t.turn-ended'
+argv=()
+cs_harness_codex_notify_argv argv "$bad" 2>/dev/null \
+  && fail "a newline-bearing turn-end path must be refused, not emitted malformed"
+[ "${#argv[@]}" -eq 0 ] || fail "a newline-bearing path must append nothing"
 pass "the codex notify argv quotes the turn-end path for bash -c and fails closed on unsafe characters"
 
 # The narrower mode must reach agent start as clean argv, not the string
@@ -229,6 +234,10 @@ for bad in 'quo"te' 'back\slash' "apos'trophe"; do
     && fail "a turn-end path carrying $bad must be refused, not emitted malformed"
   [ -z "$json" ] || fail "a refused turn-end path must emit nothing"
 done
+bad=$'tmp/state\nbad/t.turn-ended'
+json=$(cs_harness_claude_settings_json "$bad" 2>/dev/null) \
+  && fail "a newline-bearing turn-end path must be refused, not emitted malformed"
+[ -z "$json" ] || fail "a newline-bearing path must emit nothing"
 pass "the claude settings json quotes the turn-end path for the hook shell and fails closed on unsafe characters"
 
 # --- claude folder trust pre-seed -------------------------------------------

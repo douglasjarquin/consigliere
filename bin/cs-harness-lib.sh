@@ -212,7 +212,7 @@ cs_harness_codex_notify_argv() {
   notify="touch $(cs_harness_shell_quote "$2")"
   [ -n "${3:-}" ] && notify="$notify; $3"
   case "$notify" in
-    *'"'*|*\\*) return 1 ;;
+    *'"'*|*\\*|*[[:cntrl:]]*) return 1 ;;
   esac
   _cs_codex_notify_out+=(-c "notify=[\"bash\",\"-c\",\"$notify\"]")
 }
@@ -244,7 +244,7 @@ cs_harness_claude_settings_json() {
   local telemetry=${2:-} touch_cmd
   touch_cmd="touch $(cs_harness_shell_quote "$1")"
   case "$touch_cmd" in
-    *'"'*|*\\*) return 1 ;;
+    *'"'*|*\\*|*[[:cntrl:]]*) return 1 ;;
   esac
   if [ -n "$telemetry" ]; then
     printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"%s"},{"type":"command","command":"%s"}]}]}}\n' \
