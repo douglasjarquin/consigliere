@@ -94,6 +94,36 @@ test_append_caps_the_spool() {
   pass "the spool is size-capped, so an unattended home cannot fill its disk"
 }
 
+# herdr's plugin registry is global to the user and the retirement unlink is
+# fail-open, so a registration can outlive the home it points at and keep
+# dispatching edges to this hook forever. Creating the spool's parent from the
+# hook would rebuild a retired home's directory tree one edge at a time, and
+# bin/cs-home-seed.sh then refuses to re-seed a capo onto that path.
+test_append_never_recreates_a_retired_home() {
+  local home state
+  home=$(mktemp -d "$TMP_ROOT/spool-retired.XXXXXX")
+  state="$home/retired/state"
+
+  cs_event_append "$(cs_event_spool_path "$state")" \
+    "$(cs_event_record status w1:p1 w1 blocked claude)" \
+    && fail "an append into a missing state directory reported success"
+  [ ! -e "$home/retired" ] || fail "the append rebuilt the retired home's directory tree"
+
+  HERDR_PLUGIN_EVENT=pane.agent_status_changed \
+  HERDR_PLUGIN_EVENT_JSON="$(status_json w1:p1 w1 blocked claude)" \
+    "$HOOK" "$state" || fail "the hook exited non-zero when its state directory was gone"
+  [ ! -e "$home/retired" ] || fail "the hook rebuilt the retired home's directory tree"
+
+  # An existing state directory whose spool was deleted still self-heals on the
+  # next edge, which is what docs/configuration.md promises.
+  mkdir -p "$state"
+  HERDR_PLUGIN_EVENT=pane.agent_status_changed \
+  HERDR_PLUGIN_EVENT_JSON="$(status_json w1:p1 w1 blocked claude)" \
+    "$HOOK" "$state" || fail "the hook failed on a live home with no spool yet"
+  [ -s "$state/.herdr-events" ] || fail "the hook did not recreate the spool inside a live state directory"
+  pass "an event for a retired home is dropped instead of rebuilding its directories"
+}
+
 test_record_fields_never_break_the_line_shape() {
   local rec
   rec=$(cs_event_record status "$(printf 'w1:p1\tx')" w1 "$(printf 'blo\ncked')" claude)
@@ -270,6 +300,7 @@ test_plugin_id_is_stable_and_home_scoped() {
 test_append_and_drain_returns_each_line_once
 test_drain_survives_no_reader_and_truncation
 test_append_caps_the_spool
+test_append_never_recreates_a_retired_home
 test_record_fields_never_break_the_line_shape
 test_hook_projects_a_status_event_into_the_spool
 test_hook_is_silent_on_anything_it_cannot_use

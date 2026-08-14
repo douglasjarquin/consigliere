@@ -37,15 +37,16 @@ cs_event_cursor_path() {  # <state_dir>
 # Portable file size. macOS (BSD) stat uses `-f <fmt>`; Linux (GNU) stat uses
 # `-c <fmt>`. The platform is resolved ONCE at source time and the wrapper
 # defined accordingly - the same shape as bin/cs-classify-lib.sh's
-# _cs_decision_file_ident and bin/cs-watch.sh's stat_sig. This runs on every
-# spool append and on every tick of the watcher's bounded wait, so a per-call
-# `uname` fork would double the idle cost of the very loop the spool exists to
-# keep cheap.
-if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
-  _cs_event_stat_size() { LC_ALL=C stat -f %z "$1" 2>/dev/null; }
-else
-  _cs_event_stat_size() { LC_ALL=C stat -c %s "$1" 2>/dev/null; }
-fi
+# _cs_decision_file_ident and bin/cs-watch.sh's stat_sig, which resolve it with
+# `uname`. This one reads bash's own $OSTYPE instead, because it is sourced by
+# the hook herdr runs for every status edge of every pane on the machine: a
+# source-time `uname` would be an exec per event, in herdr's server process,
+# for a fact the shell already knows. The Darwin/not-Darwin split is the same
+# one those siblings make.
+case "${OSTYPE:-}" in
+  darwin*) _cs_event_stat_size() { LC_ALL=C stat -f %z "$1" 2>/dev/null; } ;;
+  *)       _cs_event_stat_size() { LC_ALL=C stat -c %s "$1" 2>/dev/null; } ;;
+esac
 
 cs_event_file_size() {  # <path>
   local size
@@ -83,12 +84,21 @@ cs_event_record() {  # <kind> <pane_id> <workspace_id> <field3> <field4>
 # concurrent hooks for different panes interleave whole lines and never a
 # half-written one. The drain relies on that (it consumes only up to the last
 # newline in the file).
+#
+# This CREATES NOTHING but the spool file itself. The spool's parent is the
+# home's state directory, which bin/cs-herdr-event-plugin.sh's install already
+# owns; if it is missing, the home was retired (or never had the transport) and
+# the append must be a silent no-op. Creating it here would let a registration
+# that outlived its home - herdr's registry is global to the user, and the
+# retirement unlink is deliberately fail-open - rebuild a retired home's
+# directory tree from herdr's server, one status edge at a time, which then
+# blocks re-seeding a capo on that path.
 cs_event_append() {  # <spool> <record>
   local spool=$1 record=$2 dir size
   [ -n "$record" ] || return 1
   dir=${spool%/*}
   [ "$dir" != "$spool" ] || dir=.
-  [ -d "$dir" ] || mkdir -p "$dir" 2>/dev/null || return 1
+  [ -d "$dir" ] || return 1
   if size=$(cs_event_file_size "$spool") && [ "$size" -gt "$CS_EVENT_SPOOL_MAX_BYTES" ]; then
     : > "$spool" 2>/dev/null || return 1
   fi
@@ -100,9 +110,11 @@ cs_event_append() {  # <spool> <record>
 # caller can treat "no news" and "no transport" the same way and keep polling.
 #
 # A cursor beyond the file's end means the spool was rotated under us, so it
-# restarts from the beginning rather than going permanently silent. A trailing
-# partial line (a hook killed mid-write) is left unconsumed for the next drain
-# instead of being handed on as a truncated record.
+# restarts from the beginning rather than going permanently silent. A spool
+# whose last byte is not a newline (a hook killed mid-write) defers the ENTIRE
+# batch, complete records included, until a later append terminates that line:
+# the drain advances its cursor to the file's end in one step, so it cannot
+# hand up the complete records and keep the partial one back.
 cs_event_drain() {  # <spool> <cursor_file>
   local spool=$1 cursor_file=$2 size cursor chunk
   size=$(cs_event_file_size "$spool") || return 1

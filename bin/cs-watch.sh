@@ -61,14 +61,14 @@ mkdir -p "$STATE"
 # predicates), so the triage policy has one definition.
 # shellcheck source=bin/cs-classify-lib.sh
 . "$SCRIPT_DIR/cs-classify-lib.sh"
-# The one herdr layer: captures, native agent busy-state (codex corroboration
-# built in), and the socket path. This watcher's poll loop over those pull
-# primitives synthesizes the signal/stale/check/heartbeat wake vocabulary; when
-# this home's herdr event plugin is installed the watcher additionally replaces
-# its blind terminal sleep with a bounded wait on the spooled
-# pane.agent_status_changed edges (event_wait_or_sleep below), so a soldier
-# entering `blocked` wakes its supervisor sub-second; the poll loop stays live
-# every cycle as the permanent fail-closed backstop.
+# The one herdr layer: captures and native agent busy-state (codex corroboration
+# built in). This watcher's poll loop over those pull primitives synthesizes the
+# signal/stale/check/heartbeat wake vocabulary; when this home's herdr event
+# plugin is installed the watcher additionally replaces its blind terminal sleep
+# with a bounded wait on the spooled pane.agent_status_changed edges
+# (event_wait_or_sleep below), so a soldier entering `blocked` wakes its
+# supervisor sub-second; the poll loop stays live every cycle as the permanent
+# fail-closed backstop.
 # shellcheck source=bin/cs-herdr-lib.sh
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
 # The spool the herdr plugin hook appends to, and its cursor drain
