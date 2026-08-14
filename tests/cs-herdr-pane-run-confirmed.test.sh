@@ -63,4 +63,12 @@ pass "pane_run_confirmed's marker is producible only by executing the typed line
 
 [ "$(cs_herdr_agent_start_timeout_ms 08)" = 8000 ] ||
   fail "agent start timeout seconds with a leading zero must be decimal 8000ms"
+[ "$(cs_herdr_agent_start_timeout_ms 0008)" = 8000 ] ||
+  fail "agent start timeout seconds with multiple leading zeros must be decimal 8000ms"
 pass "agent start timeout treats leading-zero seconds as decimal"
+
+for huge in 9223372036854776 9223372036854775808; do
+  [ "$(cs_herdr_agent_start_timeout_ms "$huge")" = 300000 ] ||
+    fail "agent start timeout must clamp huge decimal seconds before arithmetic: $huge"
+done
+pass "agent start timeout clamps huge decimal seconds before arithmetic"

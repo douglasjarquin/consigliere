@@ -389,15 +389,22 @@ cs_herdr_agent_alive() { # <pane_id>  - is a real agent (codex or claude) in the
 # silently truncating without saying so.
 CS_HERDR_AGENT_START_TIMEOUT_MAX_MS=300000
 cs_herdr_agent_start_timeout_ms() {
-  local secs=$1 ms
+  local secs=$1 normalized ms
   case "$secs" in
     ''|*[!0-9]*) return 1 ;;
   esac
-  # Force decimal interpretation: Bash treats a leading zero as octal.
-  ms=$((10#$secs * 1000))
-  if [ "$ms" -gt "$CS_HERDR_AGENT_START_TIMEOUT_MAX_MS" ]; then
+  normalized=$secs
+  while [ "${normalized#0}" != "$normalized" ]; do
+    normalized=${normalized#0}
+  done
+  [ -n "$normalized" ] || normalized=0
+  if [ "${#normalized}" -gt 3 ] ||
+    { [ "${#normalized}" -eq 3 ] && [ "$normalized" -gt 300 ]; }; then
     echo "cs-herdr: clamping agent start --timeout from ${secs}s to herdr's ${CS_HERDR_AGENT_START_TIMEOUT_MAX_MS}ms ceiling" >&2
     ms=$CS_HERDR_AGENT_START_TIMEOUT_MAX_MS
+  else
+    # Force decimal interpretation: Bash treats a leading zero as octal.
+    ms=$((10#$normalized * 1000))
   fi
   printf '%s' "$ms"
 }
