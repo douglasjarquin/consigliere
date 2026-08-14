@@ -423,7 +423,11 @@ shell_quote() {
 # kill switch, the binary, the primary's index, then the worktree's committed
 # ignore rules (codegraph's own .gitignore lives INSIDE .codegraph/ and never
 # touches the project root, but the root itself still needs a committed rule
-# for the directory - or symlink - itself). Only `codegraph init` runs,
+# for the directory - or symlink - itself; both `.codegraph` and `.codegraph/`
+# count as that rule, so the guard asks in both forms - git matches a
+# directory-only pattern against a path that does not exist yet, which is
+# every fresh worktree, only when the query carries the slash too). Only
+# `codegraph init` runs,
 # positionally against $wt_real, never against $proj_abs. A failed or killed
 # init leaves a locked, truncated index that no later run repairs
 # (docs/codegraph.md), so an index this call created and did not finish is
@@ -434,7 +438,8 @@ spawn_codegraph_prep() {  # <project-abs> <worktree-real>
   [ "${CS_SPAWN_CODEGRAPH_PREP:-}" = off ] && return 0
   command -v codegraph >/dev/null 2>&1 || return 0
   [ -n "$proj_abs" ] && [ -f "$proj_abs/.codegraph/codegraph.db" ] || return 0
-  if ! git -C "$wt_real" check-ignore -q .codegraph; then
+  if ! git -C "$wt_real" check-ignore -q .codegraph 2>/dev/null &&
+     ! git -C "$wt_real" check-ignore -q .codegraph/ 2>/dev/null; then
     echo "warn: $wt_real's committed rules do not ignore .codegraph; skipping codegraph index build there" >&2
     return 0
   fi

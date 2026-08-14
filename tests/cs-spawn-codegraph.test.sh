@@ -99,19 +99,25 @@ make_fake_codegraph "$FAKEBIN"
 HOME_DIR="$TMP/home"
 mkdir -p "$HOME_DIR/data" "$HOME_DIR/state"
 
-# codegraph_repo <name> <ignore:yes|no> <indexed:yes|no> - a fresh one-commit
-# repo, echoing its path. `ignore=yes` commits a `.codegraph` gitignore rule
-# (what a project that has ever run `codegraph init` at its root carries);
-# `indexed=yes` leaves .codegraph/codegraph.db UNTRACKED in the working tree,
-# exactly how a real primary's local index sits on disk.
+# codegraph_repo <name> <ignore:yes|dir|no> <indexed:yes|no> - a fresh
+# one-commit repo, echoing its path. `ignore=yes` commits the bare
+# `.codegraph` gitignore rule and `ignore=dir` the directory-only
+# `.codegraph/` form - both are rules a real project carries, and git treats
+# them differently against a path that does not exist yet. `indexed=yes`
+# leaves .codegraph/codegraph.db UNTRACKED in the working tree, exactly how a
+# real primary's local index sits on disk.
 codegraph_repo() {
-  local dir="$TMP/proj-$1" ignore=$2 indexed=$3
+  local dir="$TMP/proj-$1" ignore=$2 indexed=$3 rule=
   cs_git_init_commit "$dir"
-  if [ "$ignore" = yes ]; then
-    printf '.codegraph\n' > "$dir/.gitignore"
+  case "$ignore" in
+    yes) rule='.codegraph' ;;
+    dir) rule='.codegraph/' ;;
+  esac
+  if [ -n "$rule" ]; then
+    printf '%s\n' "$rule" > "$dir/.gitignore"
     git -C "$dir" add .gitignore
     git -C "$dir" -c user.name='Consigliere Tests' -c user.email='tests@example.invalid' \
-      commit -qm 'ignore .codegraph'
+      commit -qm "ignore $rule"
   fi
   if [ "$indexed" = yes ]; then
     mkdir -p "$dir/.codegraph"
@@ -223,6 +229,18 @@ out=$(spawn_case t-case4 "$REPO4" "$LOG4" "$FAKEBIN:$PATH") ||
 assert_absent "$LOG4" "codegraph must never be invoked while the cleanliness guard fails"
 assert_contains "$out" "do not ignore .codegraph" "the guard failure must be reported, not silent"
 pass "cs-spawn codegraph prep: an unclean committed-ignore guard warns and skips, never invokes codegraph"
+
+# --- 10. the directory-only ignore rule satisfies the guard too --------------
+
+REPO10=$(codegraph_repo case10 dir yes)
+LOG10="$TMP/codegraph-case10.log"
+out=$(spawn_case t-case10 "$REPO10" "$LOG10" "$FAKEBIN:$PATH") ||
+  fail "a spawn against a project whose committed rule is the directory-only .codegraph/ must succeed: $out"
+WT10_REAL=$(cd "$TMP/wt-t-case10" && pwd -P)
+assert_present "$LOG10" "a committed .codegraph/ rule must satisfy the guard, not skip the prep"
+assert_line "$(cat "$LOG10")" "^argv: init $WT10_REAL\$" "the prep must still run positionally against the worktree root"
+assert_not_contains "$out" "do not ignore .codegraph" "a project that does ignore .codegraph must never be told it does not"
+pass "cs-spawn codegraph prep: a directory-only .codegraph/ committed rule satisfies the guard"
 
 # --- 5. a timeout is fail-open, loudly ---------------------------------------
 

@@ -49,10 +49,19 @@ A later `codegraph init` at that path prints "Already initialized" and repairs n
 Fail-open then really means no index rather than a broken one, and the next prep run - a relaunch - rebuilds from scratch.
 An index the worktree already carried is never removed on failure: that one came from a completed earlier run, and the warning says so instead of claiming the worktree has no index.
 
-## Committed-ignore guard: simpler than graft's
+## Committed-ignore guard: both rule forms have to be asked for
 
-Graft's committed-ignore guard needed a trailing-slash query (`graft/`, not `graft`) because git's directory-only ignore patterns only match a bare non-existent path when the pattern itself ends in `/`.
-`.codegraph` carries no trailing slash in either the ignore rule or the guard's query, and a plain (non-directory-only) pattern matches a not-yet-existing path correctly either way - verified empirically against a scratch fixture repo before shipping, so this guard needed no equivalent workaround.
+Git's ignore matching against a path that does not exist yet - which is every fresh task worktree - depends on the trailing slash on BOTH sides.
+Verified empirically against scratch fixture repos:
+
+| committed rule | `check-ignore .codegraph` | `check-ignore .codegraph/` |
+| --- | --- | --- |
+| `.codegraph` | ignored | ignored |
+| `.codegraph/` | NOT ignored | ignored |
+
+So a bare query alone silently reports "not ignored" for any project carrying the conventional directory-only rule, which is the form codegraph's own README names.
+`spawn_codegraph_prep` therefore asks both ways and treats either answer as a pass, bare form first: when a `.codegraph` symlink already exists at the queried path, the trailing-slash query hard-errors with `fatal: pathspec '.codegraph/' is beyond a symbolic link`, and the bare query already covers that case.
+Graft's retired guard queried the slash form only, which covers both rule forms but breaks on that already-existing-symlink case; asking both ways covers both axes.
 
 ## Coverage gap: no bash extractor either
 
