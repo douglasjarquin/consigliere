@@ -46,8 +46,12 @@ Killing `codegraph init`'s process group mid-run - exactly what `cs_run_timed` d
 A later `codegraph init` at that path prints "Already initialized" and repairs nothing, so nothing in codegraph's own CLI clears the state on its own.
 
 `spawn_codegraph_prep` therefore removes `<worktree>/.codegraph` when its own `codegraph init` fails or times out **and** the worktree had no `.codegraph` before that call.
-Fail-open then really means no index rather than a broken one, and the next prep run - a relaunch - rebuilds from scratch.
+Fail-open then means no index rather than a broken one, and the next prep run - a relaunch - rebuilds from scratch.
 An index the worktree already carried is never removed on failure: that one came from a completed earlier run, and the warning says so instead of claiming the worktree has no index.
+
+The removal itself is best-effort, and deliberately so: `bin/cs-spawn.sh` runs under `set -eu`, the prep step sits after the worktree exists and before the launch line is delivered, so a removal that exited non-zero would abort the whole spawn.
+That is not hypothetical - codegraph runs work outside the launching process group (a `codegraph ... serve --mcp` process observed on this machine with PPID 1 and its own PGID), so the timeout's group kill does not necessarily stop everything writing under `<worktree>/.codegraph`, and a removal walking a tree that is still being written can fail.
+When the leftover survives, the warning names it (`a half-written codegraph index remains at ...`) instead of claiming a clean worktree.
 
 ## Committed-ignore guard: both rule forms have to be asked for
 

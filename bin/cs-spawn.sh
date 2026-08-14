@@ -433,6 +433,8 @@ shell_quote() {
 # (docs/codegraph.md), so an index this call created and did not finish is
 # removed again - leaving a worktree with no index, which the next prep run
 # can rebuild - while an index the worktree already had survives untouched.
+# That removal is best-effort and reported, never fatal: a spawn is already
+# holding a created worktree by this point, so nothing here may abort it.
 spawn_codegraph_prep() {  # <project-abs> <worktree-real>
   local proj_abs=$1 wt_real=$2 timeout out rc had_index aftermath
   [ "${CS_SPAWN_CODEGRAPH_PREP:-}" = off ] && return 0
@@ -453,9 +455,11 @@ spawn_codegraph_prep() {  # <project-abs> <worktree-real>
   [ -e "$wt_real/.codegraph" ] && had_index=yes
   out=$(cs_run_timed "$timeout" codegraph init "$wt_real" 2>&1) && rc=0 || rc=$?
   aftermath='the worktree has no codegraph index'
-  if [ "$rc" != 0 ] && [ "$had_index" = no ] && [ -e "$wt_real/.codegraph" ]; then
-    rm -rf "${wt_real:?}/.codegraph"
-  elif [ "$rc" != 0 ] && [ "$had_index" = yes ]; then
+  if [ "$rc" != 0 ] && [ "$had_index" = no ]; then
+    [ -e "$wt_real/.codegraph" ] && { rm -rf "${wt_real:?}/.codegraph" 2>/dev/null || true; }
+    [ -e "$wt_real/.codegraph" ] &&
+      aftermath="a half-written codegraph index remains at $wt_real/.codegraph and could not be removed"
+  elif [ "$rc" != 0 ]; then
     aftermath="the worktree keeps the codegraph index it already had"
   fi
   case "$rc" in

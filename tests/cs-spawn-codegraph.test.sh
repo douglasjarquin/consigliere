@@ -66,6 +66,10 @@ SH
 # .codegraph the whole time it works, replaced by codegraph.db only when it
 # gets to exit 0 - so an interrupted or failed run leaves the same unusable
 # half-written index behind that codegraph itself does.
+# CS_FAKE_CODEGRAPH_WEDGE makes that leftover unremovable (a child under a
+# write-denied directory, the portable stand-in for a detached codegraph
+# worker still writing while the cleanup walks the tree), so the cleanup's own
+# failure is exercised rather than assumed.
 make_fake_codegraph() {
   cat > "$1/codegraph" <<'SH'
 #!/usr/bin/env bash
@@ -81,6 +85,11 @@ target=
 if [ -n "$target" ]; then
   mkdir -p "$target/.codegraph"
   printf 'indexing\n' > "$target/.codegraph/codegraph.lock"
+  if [ -n "${CS_FAKE_CODEGRAPH_WEDGE:-}" ]; then
+    mkdir -p "$target/.codegraph/wedged"
+    printf 'held\n' > "$target/.codegraph/wedged/held"
+    chmod 500 "$target/.codegraph/wedged"
+  fi
 fi
 [ -n "${CS_FAKE_CODEGRAPH_SLEEP:-}" ] && sleep "$CS_FAKE_CODEGRAPH_SLEEP"
 rc=${CS_FAKE_CODEGRAPH_EXIT:-0}
@@ -255,6 +264,27 @@ WT5_REAL=$(cd "$TMP/wt-t-case5" && pwd -P)
 [ -e "$WT5_REAL/.codegraph" ] &&
   fail "a killed codegraph init must leave no half-written index behind, found $(ls -A "$WT5_REAL/.codegraph" | tr '\n' ' ')"
 pass "cs-spawn codegraph prep: a codegraph init that outlives its bound is fail-open and loud"
+
+# --- 11. a cleanup that cannot finish never takes the spawn down ------------
+
+if [ "$(id -u)" = 0 ]; then
+  pass "cs-spawn codegraph prep: unremovable-leftover check skipped: running as root, where the mode bits do not apply"
+else
+  REPO11=$(codegraph_repo case11 yes yes)
+  LOG11="$TMP/codegraph-case11.log"
+  out=$(spawn_case t-case11 "$REPO11" "$LOG11" "$FAKEBIN:$PATH" \
+    CS_FAKE_CODEGRAPH_EXIT=3 CS_FAKE_CODEGRAPH_WEDGE=1) ||
+    fail "a spawn whose half-written index cannot be removed must still succeed: $out"
+  WT11_REAL=$(cd "$TMP/wt-t-case11" && pwd -P)
+  assert_present "$HOME_DIR/state/t-case11.meta" "the spawn must complete even when the cleanup cannot"
+  assert_present "$TMP/launch-t-case11" "the launch line must still be delivered to the task pane"
+  [ -e "$WT11_REAL/.codegraph" ] ||
+    fail "fixture bug: this case only means anything while the leftover survives the cleanup"
+  assert_contains "$out" "could not be removed" \
+    "a leftover the cleanup could not take must be named, not reported as a clean worktree"
+  chmod 700 "$WT11_REAL/.codegraph/wedged"
+  pass "cs-spawn codegraph prep: a cleanup that cannot finish is reported, never fatal"
+fi
 
 # --- 9. a failed prep never destroys an index the worktree already had ------
 
