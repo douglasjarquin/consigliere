@@ -406,18 +406,23 @@ cs_herdr_agent_start_timeout_ms() {
 # agent_kind_mismatch, agent_not_ready, agent_start_failed) instead of a
 # generic timeout, so a caller's message can name what actually went wrong.
 cs_herdr_agent_name() {
-  local logical=$1 name suffix keep
+  local logical=$1 name suffix keep digest
   name=$(printf '%s' "$logical" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -c 'a-z0-9_-' '-')
   case "$name" in
     [a-z]*) ;;
     *) name="a-$name" ;;
   esac
   if [ "$name" != "$logical" ] || [ "${#name}" -gt 32 ]; then
+    suffix=
     if command -v shasum >/dev/null 2>&1; then
-      suffix=$(printf '%s' "$logical" | shasum -a 256 2>/dev/null | awk '{print substr($1,1,16)}')
-    elif command -v sha256sum >/dev/null 2>&1; then
-      suffix=$(printf '%s' "$logical" | sha256sum 2>/dev/null | awk '{print substr($1,1,16)}')
-    else
+      digest=$(printf '%s' "$logical" | shasum -a 256 2>/dev/null) || digest=
+      suffix=$(printf '%s\n' "$digest" | awk '{print substr($1,1,16)}')
+    fi
+    if [[ ! "$suffix" =~ ^[0-9a-f]{16}$ ]] && command -v sha256sum >/dev/null 2>&1; then
+      digest=$(printf '%s' "$logical" | sha256sum 2>/dev/null) || digest=
+      suffix=$(printf '%s\n' "$digest" | awk '{print substr($1,1,16)}')
+    fi
+    if [[ ! "$suffix" =~ ^[0-9a-f]{16}$ ]]; then
       echo "cs-herdr: shasum or sha256sum is required to derive a native agent name" >&2
       return 1
     fi

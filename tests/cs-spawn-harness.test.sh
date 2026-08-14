@@ -192,6 +192,17 @@ collision_b_name=$(printf '%s\n' "$collision_b_launch" | sed -n 's/^name=//p')
   || fail "distinct accepted task ids must not collide under the native-name suffix"
 pass "native names remain distinct beyond the 32-bit checksum collision domain"
 
+cat > "$FAKEBIN/shasum" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+chmod +x "$FAKEBIN/shasum"
+fallback_launch=$(spawn_one codex Foo.Baz --mode made --yolo off)
+fallback_name=$(printf '%s\n' "$fallback_launch" | sed -n 's/^name=//p')
+[ "$fallback_name" != "foo-baz-" ] || fail "a failed shasum must not produce an empty native-name suffix"
+rm -f "$FAKEBIN/shasum"
+pass "a failed shasum falls through without emitting an empty native-name suffix"
+
 # --- capo spawn: unconditional env pre-step, no turn-end wiring --------------
 # The old cs_harness_capo_launch unit test is gone with the function; this is
 # its end-to-end replacement, exercising cs-spawn.sh's own capo argv
