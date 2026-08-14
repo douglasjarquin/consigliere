@@ -405,31 +405,39 @@ cs_herdr_agent_start_timeout_ms() {
 # On failure, reports herdr's own distinct error code (agent_pane_not_found,
 # agent_kind_mismatch, agent_not_ready, agent_start_failed) instead of a
 # generic timeout, so a caller's message can name what actually went wrong.
+# Native names use disjoint namespaces: v- for short task ids already valid in
+# Herdr's grammar, l- for longer valid task ids that need a digest, and n- for
+# ids whose logical spelling must be normalized. These prefixes belong only to
+# the native launch name; metadata, paths, and all other task identity remain
+# keyed by the original logical task id.
 cs_herdr_agent_name() {
-  local logical=$1 name suffix keep digest
+  local logical=$1 name suffix keep digest namespace
   name=$(printf '%s' "$logical" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -c 'a-z0-9_-' '-')
   case "$name" in
     [a-z]*) ;;
     *) name="a-$name" ;;
   esac
-  if [ "$name" != "$logical" ] || [ "${#name}" -gt 32 ]; then
-    suffix=
-    if command -v shasum >/dev/null 2>&1; then
-      digest=$(printf '%s' "$logical" | shasum -a 256 2>/dev/null) || digest=
-      suffix=$(printf '%s\n' "$digest" | awk '{print substr($1,1,16)}')
-    fi
-    if [[ ! "$suffix" =~ ^[0-9a-f]{16}$ ]] && command -v sha256sum >/dev/null 2>&1; then
-      digest=$(printf '%s' "$logical" | sha256sum 2>/dev/null) || digest=
-      suffix=$(printf '%s\n' "$digest" | awk '{print substr($1,1,16)}')
-    fi
-    if [[ ! "$suffix" =~ ^[0-9a-f]{16}$ ]]; then
-      echo "cs-herdr: shasum or sha256sum is required to derive a native agent name" >&2
-      return 1
-    fi
-    keep=$((32 - ${#suffix} - 1))
-    name="${name:0:keep}-${suffix}"
+  if [ "$name" = "$logical" ] && [ "${#name}" -le 30 ]; then
+    printf 'v-%s' "$name"
+    return 0
   fi
-  printf '%s' "$name"
+  namespace=n
+  [ "$name" = "$logical" ] && namespace=l
+  suffix=
+  if command -v shasum >/dev/null 2>&1; then
+    digest=$(printf '%s' "$logical" | shasum -a 256 2>/dev/null) || digest=
+    suffix=$(printf '%s\n' "$digest" | awk '{print substr($1,1,16)}')
+  fi
+  if [[ ! "$suffix" =~ ^[0-9a-f]{16}$ ]] && command -v sha256sum >/dev/null 2>&1; then
+    digest=$(printf '%s' "$logical" | sha256sum 2>/dev/null) || digest=
+    suffix=$(printf '%s\n' "$digest" | awk '{print substr($1,1,16)}')
+  fi
+  if [[ ! "$suffix" =~ ^[0-9a-f]{16}$ ]]; then
+    echo "cs-herdr: shasum or sha256sum is required to derive a native agent name" >&2
+    return 1
+  fi
+  keep=$((32 - ${#namespace} - 2 - ${#suffix}))
+  printf '%s-%s-%s' "$namespace" "${name:0:keep}" "$suffix"
 }
 
 cs_herdr_agent_start() {

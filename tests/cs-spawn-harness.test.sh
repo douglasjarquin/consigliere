@@ -169,7 +169,7 @@ assert_absent "$HOME_DIR/state/t-codex.claude-settings.json" "codex root writes 
 pass "codex root: harness=codex, codex notify launch, no settings file"
 
 launch=$(spawn_one codex Foo.Bar --mode made --yolo off)
-assert_contains "$launch" "name=foo-bar-" "native agent names normalize task ids to Herdr's lowercase charset"
+assert_contains "$launch" "name=n-foo-bar-" "native agent names normalize task ids into the transformed namespace"
 pass "a task id outside Herdr's agent-name charset reaches native agent start safely"
 
 dot_launch=$launch
@@ -182,6 +182,25 @@ hyphen_name=$(printf '%s\n' "$hyphen_launch" | sed -n 's/^name=//p')
 [ "$(cs_meta_get "$HOME_DIR/state/Foo.Bar.meta" kind)" = ship ] || fail "dot task metadata was not written"
 [ "$(cs_meta_get "$HOME_DIR/state/Foo-Bar.meta" kind)" = ship ] || fail "hyphen task metadata was not written"
 pass "distinct task ids receive distinct native names while task ids remain unchanged"
+
+literal_hash_id=foo-bar-845addd91b6d7a59
+literal_hash_launch=$(spawn_one codex "$literal_hash_id" --mode made --yolo off)
+literal_hash_name=$(printf '%s\n' "$literal_hash_launch" | sed -n 's/^name=//p')
+assert_contains "$literal_hash_launch" "name=v-foo-bar-" "literal task ids use the valid namespace"
+[ "$dot_name" != "$literal_hash_name" ] \
+  || fail "normalized/hash native names must not collide with accepted literal task ids"
+pass "normalized and literal task ids occupy disjoint native-name namespaces"
+
+long_literal_id=long-literal-task-id-that-is-definitely-over-thirty
+hash_shaped_literal_id=long-literal--b172313724c3099a
+long_literal_launch=$(spawn_one codex "$long_literal_id" --mode made --yolo off)
+hash_shaped_literal_launch=$(spawn_one codex "$hash_shaped_literal_id" --mode made --yolo off)
+long_literal_name=$(printf '%s\n' "$long_literal_launch" | sed -n 's/^name=//p')
+hash_shaped_literal_name=$(printf '%s\n' "$hash_shaped_literal_launch" | sed -n 's/^name=//p')
+assert_contains "$long_literal_launch" "name=l-" "long literal task ids use the long-valid namespace"
+[ "$long_literal_name" != "$hash_shaped_literal_name" ] \
+  || fail "long literal and hash-shaped short literal task ids must not collide"
+pass "long and short literal task ids occupy disjoint native-name namespaces"
 
 collision_a='a.a-A.a.a-a.a-a-A.A-a-a-a.a-A.A.A.a.a.A-'
 collision_b='a-a-A.a-A-A-a-A.A-A-a-a.A.a.A-a.a.A.a-A-'
