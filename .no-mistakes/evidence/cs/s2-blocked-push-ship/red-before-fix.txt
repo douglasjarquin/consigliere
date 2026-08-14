@@ -1,0 +1,4 @@
+$ # bin/cs-herdr-events.py reverted to the pre-change UNFILTERED subscribe, new test re-run
+$ bash tests/cs-herdr-events.test.sh
+not ok - status subscriptions must be exactly blocked + working: {"id": "cs-eventwait", "method": "events.subscribe", "params": {"subscriptions": [{"type": "pane.agent_status_changed", "pane_id": "w1:p1"}, {"type": "pane.exited", "pane_id": "w1:p1"}, {"type": "pane.agent_detected", "pane_id": "w1:p1"}]}}
+exit=1

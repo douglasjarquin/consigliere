@@ -1,0 +1,15 @@
+$ herdr --version
+herdr 0.8.0
+
+$ herdr api schema   # installed binary, no session touched
+Herdr API schema
+protocol: 19
+schema_version: 1
+
+# EventData variants the reader projects, straight from the live schema:
+  pane_exited -> ['pane_id', 'type', 'workspace_id']
+  pane_agent_detected -> ['agent', 'final_status', 'pane_id', 'released', 'type', 'workspace_id']
+  pane_agent_status_changed -> ['agent', 'agent_status', 'display_agent', 'pane_id', 'state_labels', 'title', 'type', 'workspace_id']
+
+# pane.agent_status_changed SUBSCRIPTION accepts the optional agent_status filter:
+  {"properties": {"agent_status": {"anyOf": [{"$ref": "#/schemas/request/$defs/AgentStatus"}, {"type": "null"}]}, "pane_id": {"type": "string"}, "type": {"const": "pane.agent_status_changed", "type": "string"}}, "required": ["type", "pane_id"], "type": "object"}

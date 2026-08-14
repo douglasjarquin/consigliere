@@ -1,0 +1,4 @@
+$ git checkout -- bin/cs-herdr-events.py   # restore the shipped filtered subscribe
+$ bash tests/cs-herdr-events.test.sh
+ok - cs-herdr-events.py subscribes to agent_status blocked+working, leaving exited/agent-detected unfiltered
+exit=0

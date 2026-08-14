@@ -1,0 +1,44 @@
+== live substrate: herdr 0.8.0, protocol 19 ==
+== pane.agent_status_changed SUBSCRIPTION schema, as published by the installed herdr binary ==
+{"properties": {"agent_status": {"anyOf": [{"$ref": "#/schemas/request/$defs/AgentStatus"}, {"type": "null"}]}, "pane_id": {"type": "string"}, "type": {"const": "pane.agent_status_changed", "type": "string"}}, "required": ["type", "pane_id"], "type": "object"}
+
+--- case: blocked-wakes (the once-per-cycle poll sees agent_status=idle, so any
+    escalation below can only have come from the pushed, filtered edge) ---
+  subscribe request actually put on the wire by bin/cs-herdr-events.py:
+      {"type": "pane.agent_status_changed", "pane_id": "ws-1:pane-e2e", "agent_status": "blocked"}
+      {"type": "pane.agent_status_changed", "pane_id": "ws-1:pane-e2e", "agent_status": "working"}
+      {"type": "pane.exited", "pane_id": "ws-1:pane-e2e"}
+      {"type": "pane.agent_detected", "pane_id": "ws-1:pane-e2e"}
+  server-side agent_status filters requested for ws-1:pane-e2e: ['blocked', 'working']
+    SUPPRESSED agent_status=idle (no subscription asked for it)
+    DELIVERED  agent_status=blocked
+  cs_watch_wait_transition -> rc=0  record=ws-1:pane-e2e|ws-1||blocked|claude
+  escalation markers on disk: 
+
+--- case: noise-stays-off-wire (the once-per-cycle poll sees agent_status=idle, so any
+    escalation below can only have come from the pushed, filtered edge) ---
+  subscribe request actually put on the wire by bin/cs-herdr-events.py:
+      {"type": "pane.agent_status_changed", "pane_id": "ws-1:pane-e2e", "agent_status": "blocked"}
+      {"type": "pane.agent_status_changed", "pane_id": "ws-1:pane-e2e", "agent_status": "working"}
+      {"type": "pane.exited", "pane_id": "ws-1:pane-e2e"}
+      {"type": "pane.agent_detected", "pane_id": "ws-1:pane-e2e"}
+  server-side agent_status filters requested for ws-1:pane-e2e: ['blocked', 'working']
+    SUPPRESSED agent_status=idle (no subscription asked for it)
+    SUPPRESSED agent_status=done (no subscription asked for it)
+    SUPPRESSED agent_status=idle (no subscription asked for it)
+  cs_watch_wait_transition -> rc=1  record=
+  escalation markers on disk: 
+
+--- case: working-rearms-blocked (the once-per-cycle poll sees agent_status=idle, so any
+    escalation below can only have come from the pushed, filtered edge) ---
+  subscribe request actually put on the wire by bin/cs-herdr-events.py:
+      {"type": "pane.agent_status_changed", "pane_id": "ws-1:pane-e2e", "agent_status": "blocked"}
+      {"type": "pane.agent_status_changed", "pane_id": "ws-1:pane-e2e", "agent_status": "working"}
+      {"type": "pane.exited", "pane_id": "ws-1:pane-e2e"}
+      {"type": "pane.agent_detected", "pane_id": "ws-1:pane-e2e"}
+  server-side agent_status filters requested for ws-1:pane-e2e: ['blocked', 'working']
+    DELIVERED  agent_status=working
+    DELIVERED  agent_status=blocked
+  cs_watch_wait_transition -> rc=0  record=ws-1:pane-e2e|ws-1||blocked|claude
+  escalation markers on disk: 
+

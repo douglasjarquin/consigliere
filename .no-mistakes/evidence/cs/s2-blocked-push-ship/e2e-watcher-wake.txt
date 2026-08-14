@@ -1,0 +1,12 @@
+== the real watcher, event splice on, every LEVEL read answering idle ==
+-- what the server put on / kept off the wire --
+   server-side agent_status filters requested for pane-push-1: ['blocked', 'working']
+     SUPPRESSED agent_status=idle (no subscription asked for it)
+     DELIVERED  agent_status=blocked
+-- watcher exit code: 0
+-- wake reason printed to the supervisor (this is the boss-facing line) --
+   stale: pane-push-1 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)
+-- durable wake queue record (epoch, seq, kind, key, payload) --
+   1786667811	1	stale	pane-push-1	stale: pane-push-1 (herdr: agent blocked - waiting on human, escalated immediately, not via wedge timer)
+-- dedupe marker committed for the pane --
+   .herdr-escalated-pane-push-1
