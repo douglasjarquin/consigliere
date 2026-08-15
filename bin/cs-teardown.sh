@@ -675,7 +675,7 @@ remove_task_artifacts() {
   # LOCKSTEP: the control plane's relaunch journal and its superseded copy
   # (bin/cs-control-lib.sh) are keyed by task id, so a leftover journal would
   # make the next task reusing this id refuse its first relaunch.
-  for f in "$STATE/$ID.check.sh" "$STATE/$ID.check-trust" "$STATE/$ID.pr-poll" "$STATE/$ID.pr-poll-registration" \
+  for f in "$STATE/$ID.check.sh" "$STATE/$ID.check-trust" "$STATE/$ID.plan-progress" "$STATE/$ID.pr-poll" "$STATE/$ID.pr-poll-registration" \
     "$STATE/$ID.control-relaunch" "$STATE/$ID.control-relaunch.abandoned"; do
     if [ -L "$f" ]; then
       echo "REFUSED: $f is a symlink, not the ordinary file teardown created; investigate before cleanup." >&2

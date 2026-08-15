@@ -53,6 +53,20 @@ if [ -n "${CS_DEPS_LIB_SOURCED:-}" ]; then
 fi
 CS_DEPS_LIB_SOURCED=1
 
+# The bash interpreter floor is owned here for the same reason as the axi
+# floors above: bin/cs-bootstrap.sh gates dispatch on it and bin/cs-doctor.sh
+# reports it, and one owner keeps those two readings identical. 4.3 is the
+# oldest bash with namerefs (`local -n`), which the argv builders in
+# bin/cs-harness-lib.sh and cs_herdr's argv plumbing in bin/cs-herdr-lib.sh
+# rely on; below it they fail OPEN (empty array, rc 0). Every script in bin/
+# runs via `#!/usr/bin/env bash`, which resolves to a modern bash in practice
+# (5.3 on the maintainer's machine) - stock macOS /bin/bash 3.2 was never the
+# interpreter, and the retired 3.2 floor was aspirational, not observed.
+# shellcheck disable=SC2034  # consumed by the sourcing scripts' gates and reports
+BASH_FLOOR_MAJOR=4
+# shellcheck disable=SC2034  # consumed by the sourcing scripts' gates and reports
+BASH_FLOOR_MINOR=3
+
 CS_DEPS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The required harness is the ROOT session's own; cs-harness-lib.sh owns that
 # resolution, so the inventory never second-guesses which harness is required.

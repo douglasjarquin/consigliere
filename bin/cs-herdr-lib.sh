@@ -33,8 +33,35 @@ cs_herdr_session() {
   printf '%s' "${CS_HERDR_SESSION:-default}"
 }
 
+# cs_herdr_argv_with_session <out-array-name> <session> <herdr arguments...>
+# Populates <out-array-name> with argv plus --session <session> inserted
+# immediately before a trailing "--" separator when one is present (e.g.
+# `agent start ... -- AGENT_ARG...`), else appended at the end. Appending
+# --session after a subcommand's own "--" would make it a literal passthrough
+# arg instead of herdr's own session flag, resolving against the wrong
+# session - the one shared implementation so this is fixed once, for every
+# caller (cs_herdr below and bin/cs-herdr-lab.sh's cs_herdr_lab_raw), not
+# reintroduced independently per caller.
+cs_herdr_argv_with_session() {
+  local -n _cs_herdr_argv_out=$1
+  local session=$2
+  shift 2
+  local arg saw_sep=0
+  _cs_herdr_argv_out=()
+  for arg in "$@"; do
+    if [ "$saw_sep" -eq 0 ] && [ "$arg" = "--" ]; then
+      _cs_herdr_argv_out+=(--session "$session")
+      saw_sep=1
+    fi
+    _cs_herdr_argv_out+=("$arg")
+  done
+  [ "$saw_sep" -eq 1 ] || _cs_herdr_argv_out+=(--session "$session")
+}
+
 cs_herdr() { # <herdr arguments...>
-  herdr "$@" --session "$(cs_herdr_session)"
+  local -a _cs_herdr_call_argv
+  cs_herdr_argv_with_session _cs_herdr_call_argv "$(cs_herdr_session)" "$@"
+  herdr "${_cs_herdr_call_argv[@]}"
 }
 
 cs_herdr_require() {
@@ -159,8 +186,34 @@ cs_herdr_capture() { # <pane_id> [lines] [format]
   cs_herdr pane read "$pane" --lines "$lines" --format "$format"
 }
 
+cs_herdr_capture_detection() {
+  local pane=$1 lines=${2:-200} format=${3:-text}
+  cs_herdr pane read "$pane" --source detection --lines "$lines" --format "$format"
+}
+
 cs_herdr_run() { # <pane_id> <text>  - text plus Enter, atomic
   cs_herdr pane run "$1" "$2"
+}
+
+# cs_herdr_pane_run_confirmed <pane_id> <line> <timeout-ms> - like
+# cs_herdr_run, but verifies <line> actually ran instead of trusting
+# `pane run`'s return code, which reports success even when a not-yet-ready
+# shell swallows the line. Appends a fresh per-call marker and confirms it
+# with native `pane wait-output`, which searches existing scrollback first -
+# so a stale marker from an earlier call on the same long-lived pane (a
+# capo's home pane; a relaunch's second attempt) could otherwise false-match
+# before the fresh line has actually run.
+# The TYPED marker is quote-split ('CS''_...') so it never contains the
+# matched string: the pty renders the typed line the moment the bytes arrive,
+# before and independently of the shell executing it, so matching the typed
+# spelling would confirm exactly the swallowed-line case this helper exists
+# to catch. Only the shell EXECUTING the echo concatenates the halves into
+# the string wait-output is asked for.
+cs_herdr_pane_run_confirmed() {
+  local pane=$1 line=$2 timeout_ms=$3 marker
+  marker="CS_LINE_RAN_$$_${RANDOM}_${RANDOM}"
+  cs_herdr_run "$pane" "$line; echo 'CS''${marker#CS}'" >/dev/null || return 1
+  cs_herdr pane wait-output "$pane" --match "$marker" --timeout "$timeout_ms" >/dev/null 2>&1
 }
 
 # Agent-aware atomic submit-and-confirm. Preferred over cs_herdr_run for
@@ -171,9 +224,12 @@ cs_herdr_run() { # <pane_id> <text>  - text plus Enter, atomic
 # "agent_prompt_stalled" error (src/api/wait.rs, herdr source) when the agent
 # never leaves its pre-submit state within its own 5s settle window, instead
 # of consigliere polling `agent wait` a second time to find out.
-# Still does NOT check the composer and will concatenate onto existing text -
-# bin/cs-prompt-lib.sh owns that guard and is the only thing that should call
-# this.
+# Still does NOT check the composer and will concatenate onto existing text.
+# Two sanctioned callers: bin/cs-prompt-lib.sh's cs_prompt_guarded, which owns
+# that composer guard, and bin/cs-spawn.sh's _cs_spawn_deliver_brief, which
+# deliberately bypasses it because the guard's composer-empty check can never
+# succeed on the fresh session its own spawn just created (rationale there and
+# in docs/claude.md) - do not route that call site back through the guard.
 cs_herdr_agent_prompt_confirmed() { # <pane_id> <text> [timeout-ms] -> rc 0 iff confirmed working
   cs_herdr agent prompt "$1" "$2" --wait --until working --timeout "${3:-8000}"
 }
@@ -194,6 +250,17 @@ cs_herdr_pane_close() { # <pane_id>
 
 cs_herdr_pane_exists() { # <pane_id>
   cs_herdr pane get "$1" >/dev/null 2>&1
+}
+
+cs_herdr_report_task_metadata() {
+  local pane=$1 task_id=$2 display_mode=$3
+  cs_herdr pane report-metadata \
+    "$pane" \
+    --source cs-spawn \
+    --state-label "working=task=$task_id mode=$display_mode" \
+    --token "task_id=$task_id" \
+    --token "delivery_mode=$display_mode" \
+    --ttl-ms 86400000
 }
 
 # The pane's own SHELL cwd. Verified live 2026-08-11 (herdr 0.7.5, protocol 17):
@@ -329,21 +396,92 @@ cs_herdr_agent_alive() { # <pane_id>  - is a real agent (codex or claude) in the
   printf '%s' "$out" | jq -e '.result.agent.agent // empty | select(. != "")' >/dev/null 2>&1
 }
 
-# Wait for an agent to actually appear in a pane, bounded. rc=1 on timeout.
-#
-# A launch line is delivered to a pane's SHELL with `pane run`, and a freshly
-# created worktree pane's shell may not be ready to read yet - the line is then
-# silently swallowed and no re-read can recover it (the same hazard
-# tests/cs-herdr-lib-live.test.sh works around by re-submitting an idempotent
-# probe). `pane run` reports success either way, so without this the caller
-# cannot tell "launched" from "typed into a void".
-cs_herdr_agent_wait_present() { # <pane_id> [timeout-secs]
-  local pane=$1 limit=${2:-60} waited=0
-  while [ "$waited" -lt "$limit" ]; do
-    cs_herdr_agent_alive "$pane" && return 0
-    sleep 1
-    waited=$((waited + 1))
+# cs_herdr_agent_start_timeout_ms <seconds> - seconds converted to milliseconds
+# for `agent start --timeout`, clamped to herdr's own documented ceiling
+# (`herdr agent start --help`: max 300000). LAUNCH_WAIT and its
+# CS_CONTROL_RESUME_WAIT_SECS sibling are boss-configurable with no upper
+# bound, so a slow-machine or cautious override could exceed what herdr
+# accepts; clamp with a loud note instead of letting the call fail or
+# silently truncating without saying so.
+CS_HERDR_AGENT_START_TIMEOUT_MAX_MS=300000
+cs_herdr_agent_start_timeout_ms() {
+  local secs=$1 normalized ms
+  case "$secs" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  normalized=$secs
+  while [ "${normalized#0}" != "$normalized" ]; do
+    normalized=${normalized#0}
   done
+  [ -n "$normalized" ] || normalized=0
+  if [ "${#normalized}" -gt 3 ] ||
+    { [ "${#normalized}" -eq 3 ] && [ "$normalized" -gt 300 ]; }; then
+    echo "cs-herdr: clamping agent start --timeout from ${secs}s to herdr's ${CS_HERDR_AGENT_START_TIMEOUT_MAX_MS}ms ceiling" >&2
+    ms=$CS_HERDR_AGENT_START_TIMEOUT_MAX_MS
+  else
+    # Force decimal interpretation: Bash treats a leading zero as octal.
+    ms=$((10#$normalized * 1000))
+  fi
+  printf '%s' "$ms"
+}
+
+# cs_herdr_agent_start <pane_id> <name> <kind> <timeout-ms> <argv...> - native
+# launch-and-wait-for-interactive_ready, replacing the cs_herdr_run +
+# cs_herdr_agent_wait_present pair for an interactive agent (cold launch,
+# capo, main ship/scout). Trailing <argv...> reaches the launched binary
+# LITERALLY, with no shell evaluation - never pass a shell-quoted string here.
+# On failure, reports herdr's own distinct error code (agent_pane_not_found,
+# agent_kind_mismatch, agent_not_ready, agent_start_failed) instead of a
+# generic timeout, so a caller's message can name what actually went wrong.
+# Native names use disjoint namespaces: v- for short task ids already valid in
+# Herdr's grammar, l- for longer valid task ids that need a digest, and n- for
+# ids whose logical spelling must be normalized. These prefixes belong only to
+# the native launch name; metadata, paths, and all other task identity remain
+# keyed by the original logical task id.
+cs_herdr_agent_name() {
+  local logical=$1 name suffix keep digest namespace
+  name=$(printf '%s' "$logical" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -c 'a-z0-9_-' '-')
+  case "$name" in
+    [a-z]*) ;;
+    *) name="a-$name" ;;
+  esac
+  if [ "$name" = "$logical" ] && [ "${#name}" -le 30 ]; then
+    printf 'v-%s' "$name"
+    return 0
+  fi
+  namespace=n
+  [ "$name" = "$logical" ] && namespace=l
+  suffix=
+  if command -v shasum >/dev/null 2>&1; then
+    digest=$(printf '%s' "$logical" | shasum -a 256 2>/dev/null) || digest=
+    suffix=$(printf '%s\n' "$digest" | awk '{print substr($1,1,16)}')
+  fi
+  if [[ ! "$suffix" =~ ^[0-9a-f]{16}$ ]] && command -v sha256sum >/dev/null 2>&1; then
+    digest=$(printf '%s' "$logical" | sha256sum 2>/dev/null) || digest=
+    suffix=$(printf '%s\n' "$digest" | awk '{print substr($1,1,16)}')
+  fi
+  if [[ ! "$suffix" =~ ^[0-9a-f]{16}$ ]]; then
+    echo "cs-herdr: shasum or sha256sum is required to derive a native agent name" >&2
+    return 1
+  fi
+  keep=$((32 - ${#namespace} - 2 - ${#suffix}))
+  printf '%s-%s-%s' "$namespace" "${name:0:keep}" "$suffix"
+}
+
+cs_herdr_agent_start() {
+  local pane=$1 name=$2 kind=$3 timeout_ms=$4 out rc code
+  shift 4
+  name=$(cs_herdr_agent_name "$name") || return 1
+  out=$(cs_herdr agent start "$name" --kind "$kind" --pane "$pane" --timeout "$timeout_ms" -- "$@" 2>&1) && rc=0 || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
+  case "$code" in
+    agent_pane_not_found) echo "cs-herdr: agent start found no pane $pane" >&2 ;;
+    agent_kind_mismatch) echo "cs-herdr: agent start detected the wrong agent kind in pane $pane (wanted $kind)" >&2 ;;
+    agent_not_ready) echo "cs-herdr: agent in pane $pane never became interactive-ready within ${timeout_ms}ms" >&2 ;;
+    agent_start_failed) echo "cs-herdr: agent start failed to launch in pane $pane: $out" >&2 ;;
+    *) echo "cs-herdr: agent start failed for pane $pane: $out" >&2 ;;
+  esac
   return 1
 }
 
@@ -405,6 +543,12 @@ cs_herdr_snapshot_agent_session() { # <snapshot-json> <pane_id>
 # and this is how a disagreement gets explained instead of guessed at.
 cs_herdr_agent_explain() { # <pane_id> -> raw explain output
   cs_herdr agent explain "$1" 2>/dev/null
+}
+
+cs_herdr_agent_explain_file() {
+  local capture=$1 agent=$2
+  [ -f "$capture" ] && [ -r "$capture" ] || return 1
+  cs_herdr agent explain --file "$capture" --agent "$agent" --verbose
 }
 
 # --- pane process evidence -------------------------------------------------

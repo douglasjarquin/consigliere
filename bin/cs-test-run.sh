@@ -6,7 +6,8 @@
 # there are no shards, families, or backends. Every tests/*.test.sh belongs to
 # exactly one lane:
 #
-#   portable    - hermetic. Runs on every hosted OS (Ubuntu + stock macOS Bash).
+#   portable    - hermetic. Runs on every hosted OS (Ubuntu + macOS, bash >= 4.3
+#                 per bin/cs-deps-lib.sh's floor).
 #                 The default lane: a new test is portable unless explicitly
 #                 categorized otherwise here, so a new test can never be silently
 #                 omitted from CI.

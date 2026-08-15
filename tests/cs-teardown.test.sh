@@ -180,16 +180,20 @@ c1_markers=(
   "$TMP/state/.decision-cursor-c1.tmp.abc123"
 )
 for m in "${c1_markers[@]}"; do : > "$m"; done
+: > "$TMP/state/c1.plan-progress"
 # markers belonging to a different task id / pane must survive teardown of c1
 : > "$TMP/state/.seen-other_status"
 : > "$TMP/state/.hb-surfaced-other"
 : > "$TMP/state/.hash-w88_p88"
+: > "$TMP/state/other.plan-progress"
 # a task whose id merely STARTS WITH c1 keeps its own cursor and staging temps
 : > "$TMP/state/.decision-cursor-c1x"
 : > "$TMP/state/.decision-cursor-c1x.read.abc123"
 out=$("$BIN" c1 2>&1) || fail "clean teardown failed: $out"
 assert_contains "$out" "teardown c1 complete" "clean teardown completes"
 for m in "${c1_markers[@]}"; do assert_absent "$m" "watcher marker $(basename "$m") removed"; done
+assert_absent "$TMP/state/c1.plan-progress" "this task's plan progress sidecar removed"
+assert_present "$TMP/state/other.plan-progress" "another task's plan progress sidecar untouched"
 assert_present "$TMP/state/.seen-other_status" "other task's .seen marker untouched"
 assert_present "$TMP/state/.hb-surfaced-other" "other task's .hb-surfaced marker untouched"
 assert_present "$TMP/state/.hash-w88_p88" "other pane's .hash marker untouched"

@@ -102,131 +102,148 @@ if pm_flag claude 2>/dev/null; then
 fi
 pass "config/permission-mode.conf fails closed on unusable, unknown, and duplicate records"
 
-# --- launch strings ---------------------------------------------------------
-# Pin the credential-store selector so launch assertions never depend on the
-# environment the developer happens to be running under.
-unset CLAUDE_CONFIG_DIR
+# --- launch strings (headless scout only; agent start reaches the rest natively)
+# Interactive soldier/capo launches moved off shell-string builders entirely
+# (bin/cs-spawn.sh calls native `agent start` with a literal argv, see
+# tests/cs-spawn-harness.test.sh for that end-to-end coverage). Only the
+# headless scout still builds a shell string, since a plain `codex exec`/
+# `claude -p` process has no composer or agent_status lifecycle for
+# `agent start` to target.
 op=$(cs_harness_shell_quote /root/bin/cs-operational-input.sh)
 br=$(cs_harness_shell_quote /home/data/t/brief.md)
-te=$(cs_harness_shell_quote /home/state/t.turn-ended)
 st=$(cs_harness_shell_quote /home/state/t.status)
-hm=$(cs_harness_shell_quote /home/capo)
-se=$(cs_harness_shell_quote /home/state/t.claude-settings.json)
-
-soldier_codex=$(cs_harness_soldier_launch codex "$op" "$br" "$te" "")
-assert_contains "$soldier_codex" "codex --dangerously" "codex soldier names the binary, then its own flags"
-assert_contains "$soldier_codex" "--dangerously-bypass-approvals-and-sandbox" "codex soldier autonomy"
-assert_contains "$soldier_codex" 'notify=' "codex soldier wires turn-end via notify"
-assert_contains "$soldier_codex" 'encode launch-brief' "codex soldier stamps launch-brief"
-assert_not_contains "$soldier_codex" '--settings' "codex soldier does not use --settings"
-
-soldier_claude=$(cs_harness_soldier_launch claude "$op" "$br" "$te" "$se")
-assert_contains "$soldier_claude" "claude --dangerously" "claude soldier names the binary, then its own flags"
-assert_contains "$soldier_claude" "--dangerously-skip-permissions" "claude soldier autonomy"
-assert_contains "$soldier_claude" "--settings '/home/state/t.claude-settings.json'" "claude soldier wires turn-end via --settings"
-assert_not_contains "$soldier_claude" 'notify=' "claude soldier does not use codex notify"
-assert_contains "$soldier_claude" 'encode launch-brief' "claude soldier stamps launch-brief"
 
 scout_codex=$(cs_harness_scout_launch codex "$op" "$br" "$st")
 assert_contains "$scout_codex" 'codex exec ' "codex scout uses codex exec"
 scout_claude=$(cs_harness_scout_launch claude "$op" "$br" "$st")
 assert_contains "$scout_claude" 'claude -p ' "claude scout uses claude -p"
 assert_contains "$scout_claude" 'done: headless scout finished' "scout appends terminal status"
+pass "headless scout launch string"
 
-# The relaunch shape: identical flags and turn-end wiring, the harness's own
-# cwd-keyed resume command in place of the brief prompt.
-resume_codex=$(cs_harness_soldier_resume codex "$te" "" "")
-assert_contains "$resume_codex" "codex resume --last --dangerously" "codex resume names the subcommand, then the flags"
-assert_contains "$resume_codex" "--dangerously-bypass-approvals-and-sandbox" "codex resume keeps autonomy"
-assert_contains "$resume_codex" 'notify=' "codex resume keeps the turn-end wiring"
-assert_not_contains "$resume_codex" 'encode launch-brief' "a resume carries no brief prompt"
-resume_claude=$(cs_harness_soldier_resume claude "$te" "$se" "")
-assert_contains "$resume_claude" "claude --continue --dangerously" "claude resume names the flag, then the flags"
-assert_contains "$resume_claude" "--settings '/home/state/t.claude-settings.json'" "claude resume keeps the turn-end wiring"
-assert_not_contains "$resume_claude" 'encode launch-brief' "a claude resume carries no brief prompt"
+# --- launch argv (the native agent start construction) ----------------------
+# Pin the credential-store selector so assertions never depend on the
+# environment the developer happens to be running under.
+unset CLAUDE_CONFIG_DIR
 
-capo_claude=$(cs_harness_capo_launch claude "$op" "$br" "$hm")
-assert_contains "$capo_claude" "CS_HOME='/home/capo' claude " "capo prefixes CS_HOME and names the harness"
-assert_not_contains "$capo_claude" '--settings' "capo has no turn-end wiring"
-assert_not_contains "$capo_claude" 'notify=' "capo has no turn-end wiring"
-pass "launch strings per harness and role"
+declare -a argv=()
+cs_harness_autonomy_argv argv codex
+{ [ "${#argv[@]}" -eq 1 ] && [ "${argv[0]}" = "--dangerously-bypass-approvals-and-sandbox" ]; } \
+  || fail "codex autonomy argv must be one clean token (got: ${argv[*]-<empty>})"
+argv=()
+cs_harness_autonomy_argv argv claude
+{ [ "${#argv[@]}" -eq 1 ] && [ "${argv[0]}" = "--dangerously-skip-permissions" ]; } \
+  || fail "claude autonomy argv must be one clean token (got: ${argv[*]-<empty>})"
+pass "the autonomy argv builder returns discrete unquoted tokens per harness"
 
-# Every claude launch role honors config/permission-mode.conf, and the configured mode
-# REPLACES the bypass flag in each one.
+argv=()
+cs_harness_resume_argv argv codex
+{ [ "${argv[0]-}" = resume ] && [ "${argv[1]-}" = "--last" ] && [ "${#argv[@]}" -eq 2 ]; } \
+  || fail "codex resume argv (got: ${argv[*]-<empty>})"
+argv=()
+cs_harness_resume_argv argv claude
+{ [ "${#argv[@]}" -eq 1 ] && [ "${argv[0]}" = "--continue" ]; } \
+  || fail "claude resume argv (got: ${argv[*]-<empty>})"
+pass "the resume argv builder per harness"
+
+# The notify value embeds `touch <path>` inside a JSON string that codex execs
+# via `bash -c`, so the path must survive BOTH contexts: run the exact command
+# codex would run against a state path carrying a space, and refuse a path
+# carrying a character the JSON string cannot hold - supervision silently never
+# seeing a turn end is the failure this guards against.
+mkdir -p "$TMP/state dir"
+argv=()
+cs_harness_codex_notify_argv argv "$TMP/state dir/t.turn-ended" \
+  || fail "a plain state path must build the notify wiring"
+{ [ "${#argv[@]}" -eq 2 ] && [ "${argv[0]}" = -c ]; } \
+  || fail "notify wiring must be -c plus one config value (got: ${argv[*]-<empty>})"
+notify_cmd=$(printf '%s' "${argv[1]#notify=}" | jq -r '.[2]') \
+  || fail "the notify config value must stay valid JSON: ${argv[1]}"
+bash -c "$notify_cmd" || fail "the command codex would exec on turn end failed"
+[ -f "$TMP/state dir/t.turn-ended" ] \
+  || fail "a state path with a space must still receive the turn-end touch"
+for bad in 'quo"te' 'back\slash' "apos'trophe"; do
+  argv=()
+  cs_harness_codex_notify_argv argv "$TMP/$bad/t.turn-ended" 2>/dev/null \
+    && fail "a turn-end path carrying $bad must be refused, not emitted malformed"
+  [ "${#argv[@]}" -eq 0 ] || fail "a refused turn-end path must append nothing"
+done
+bad=$'tmp/state\nbad/t.turn-ended'
+argv=()
+cs_harness_codex_notify_argv argv "$bad" 2>/dev/null \
+  && fail "a newline-bearing turn-end path must be refused, not emitted malformed"
+[ "${#argv[@]}" -eq 0 ] || fail "a newline-bearing path must append nothing"
+pass "the codex notify argv quotes the turn-end path for bash -c and fails closed on unsafe characters"
+
+# The narrower mode must reach agent start as clean argv, not the string
+# builder's shell-quote-wrapped value: `agent start`'s trailing argv reaches
+# the launched binary literally, with no shell to strip a quote character.
 printf 'claude auto\n' > "$PM/permission-mode.conf"
-for role in soldier scout capo; do
-  case $role in
-    soldier) line=$(CS_CONFIG_OVERRIDE="$PM" cs_harness_soldier_launch claude "$op" "$br" "$te" "$se") ;;
-    scout) line=$(CS_CONFIG_OVERRIDE="$PM" cs_harness_scout_launch claude "$op" "$br" "$st") ;;
-    capo) line=$(CS_CONFIG_OVERRIDE="$PM" cs_harness_capo_launch claude "$op" "$br" "$hm") ;;
-  esac
-  assert_contains "$line" "--permission-mode 'auto'" "claude $role honors config/permission-mode.conf"
-  assert_not_contains "$line" '--dangerously-skip-permissions' "claude $role drops the bypass flag"
-done
+argv=()
+CS_CONFIG_OVERRIDE="$PM" cs_harness_autonomy_argv argv claude
+{ [ "${#argv[@]}" -eq 2 ] && [ "${argv[0]}" = "--permission-mode" ] && [ "${argv[1]}" = auto ]; } \
+  || fail "configured permission mode must reach argv as two clean tokens (got: ${argv[*]-<empty>})"
 
-# A malformed file stops every launch role rather than falling back to bypass.
+# A malformed file fails closed here exactly as it does for the string builder.
 printf 'claude plan\n' > "$PM/permission-mode.conf"
-for role in soldier scout capo; do
-  case $role in
-    soldier) CS_CONFIG_OVERRIDE="$PM" cs_harness_soldier_launch claude "$op" "$br" "$te" "$se" 2>/dev/null ;;
-    scout) CS_CONFIG_OVERRIDE="$PM" cs_harness_scout_launch claude "$op" "$br" "$st" 2>/dev/null ;;
-    capo) CS_CONFIG_OVERRIDE="$PM" cs_harness_capo_launch claude "$op" "$br" "$hm" 2>/dev/null ;;
-  esac && fail "claude $role must refuse an unusable permission mode"
-done
+argv=()
+CS_CONFIG_OVERRIDE="$PM" cs_harness_autonomy_argv argv claude 2>/dev/null \
+  && fail "the argv builder must refuse an unusable permission mode"
 rm -f "$PM/permission-mode.conf"
-pass "configured permission mode reaches every claude launch role and fails closed"
+pass "config/permission-mode.conf reaches the argv builder as clean tokens and fails closed"
 
-# --- credential-store forwarding ---------------------------------------------
+# --- credential-store forwarding (cs_harness_launch_env itself) --------------
 # A pane is created by the long-lived herdr daemon, which does NOT inherit the
 # environment of the consigliere process that asked for it. Under a
 # work-vs-personal claude subscription split, a bare `claude` in that pane reads
 # the default ~/.claude store and comes up unauthenticated, blocking the agent
-# before it can do any work. Every claude launch role must restate
-# CLAUDE_CONFIG_DIR on the launch line itself.
-build_launch() {  # <role> -> launch string for that role
-  case $1 in
-    soldier) cs_harness_soldier_launch claude "$op" "$br" "$te" "$se" ;;
-    scout) cs_harness_scout_launch claude "$op" "$br" "$st" ;;
-    capo) cs_harness_capo_launch claude "$op" "$br" "$hm" ;;
-  esac
-}
-
+# before it can do any work. cs_harness_launch_env is the one source both the
+# scout string builder and cs-spawn.sh's own env-export pre-step read from
+# (tests/cs-spawn-harness.test.sh covers the soldier/capo pre-step end to end).
 export CLAUDE_CONFIG_DIR=/work/config/.claude
-for role in soldier scout capo; do
-  line=$(build_launch "$role")
-  assert_contains "$line" "CLAUDE_CONFIG_DIR='/work/config/.claude' " \
-    "claude $role forwards the credential store onto the launch line"
-  # The prefix must leave the line runnable, not just present in it.
-  bash -n -c "$line" 2>/dev/null ||
-    fail "claude $role launch line must stay parseable with the env prefix"
-done
-# The prefix precedes the binary in every role, including the capo line that
-# already carries its own CS_HOME assignment.
-assert_contains "$(build_launch capo)" \
-  "CLAUDE_CONFIG_DIR='/work/config/.claude' CS_ROOT_OVERRIDE=" \
-  "capo keeps the credential store ahead of its own home assignments"
-
-# codex selects no credential store by environment here, so it gets no prefix
-# even when the claude variable is set.
-codex_line=$(cs_harness_soldier_launch codex "$op" "$br" "$te" "")
-assert_not_contains "$codex_line" 'CLAUDE_CONFIG_DIR' "codex launch is unaffected"
-
-# Unset is the single-store default and must add nothing.
+assert_contains "$(cs_harness_launch_env claude)" "CLAUDE_CONFIG_DIR='/work/config/.claude' " \
+  "claude forwards the credential store"
+assert_not_contains "$(cs_harness_launch_env codex)" 'CLAUDE_CONFIG_DIR' \
+  "codex selects no credential store by environment"
 unset CLAUDE_CONFIG_DIR
-for role in soldier scout capo; do
-  assert_not_contains "$(build_launch "$role")" 'CLAUDE_CONFIG_DIR' \
-    "claude $role adds no prefix when the store is not overridden"
-done
-pass "claude launch roles forward the selected credential store"
+[ -z "$(cs_harness_launch_env claude)" ] || fail "unset CLAUDE_CONFIG_DIR must add no prefix"
+pass "cs_harness_launch_env forwards the selected credential store"
 
 # --- settings json ----------------------------------------------------------
 # A soldier's Stop hook touches the turn-end signal ONLY - the analog of codex's
 # notify. The exit-2 guard is a root/capo concern, never on a soldier.
 json=$(cs_harness_claude_settings_json /home/state/t.turn-ended)
 assert_contains "$json" '"Stop"' "settings json has a Stop hook"
-assert_contains "$json" 'touch /home/state/t.turn-ended' "settings json touches turn-end"
+assert_contains "$json" "touch '/home/state/t.turn-ended'" "settings json touches turn-end"
 assert_not_contains "$json" 'cs-turnend-guard' "soldier settings must not run the root guard"
 pass "claude settings json shape (touch-only)"
+
+# Same double context as the codex notify value: the Stop hook command runs
+# through a shell and lives inside a JSON string, so run the exact command
+# claude would run against a state path carrying a space, and refuse a path
+# carrying a character the JSON string cannot hold.
+mkdir -p "$TMP/settings dir"
+json=$(cs_harness_claude_settings_json "$TMP/settings dir/t.turn-ended") \
+  || fail "a plain state path must build the settings json"
+stop_cmd=$(printf '%s' "$json" | jq -r '.hooks.Stop[0].hooks[0].command') \
+  || fail "the settings json must stay valid JSON: $json"
+bash -c "$stop_cmd" || fail "the Stop hook command claude would run failed"
+[ -f "$TMP/settings dir/t.turn-ended" ] \
+  || fail "a state path with a space must still receive the turn-end touch"
+for bad in 'quo"te' 'back\slash' "apos'trophe"; do
+  json=$(cs_harness_claude_settings_json "$TMP/$bad/t.turn-ended" 2>/dev/null) \
+    && fail "a turn-end path carrying $bad must be refused, not emitted malformed"
+  [ -z "$json" ] || fail "a refused turn-end path must emit nothing"
+done
+bad=$'tmp/state\nbad/t.turn-ended'
+json=$(cs_harness_claude_settings_json "$bad" 2>/dev/null) \
+  && fail "a newline-bearing turn-end path must be refused, not emitted malformed"
+[ -z "$json" ] || fail "a newline-bearing path must emit nothing"
+for bad_telemetry in 'quo"te' 'back\\slash' $'printf ok\nbad'; do
+  json=$(cs_harness_claude_settings_json /tmp/t.turn-ended "$bad_telemetry" 2>/dev/null) \
+    && fail "telemetry carrying $bad_telemetry must be refused, not emitted malformed"
+  [ -z "$json" ] || fail "refused telemetry must emit nothing"
+done
+pass "the claude settings json quotes the turn-end path for the hook shell and fails closed on unsafe characters"
 
 # --- claude folder trust pre-seed -------------------------------------------
 CJSON="$TMP/claude.json"
@@ -356,8 +373,6 @@ pass "codex trust store path resolution"
 [ "$(cs_harness_skill_prefix claude)" = '/' ] || fail "claude skill prefix"
 [ "$(cs_harness_composer_command_settle codex)" = 1 ] || fail "codex needs settle"
 [ "$(cs_harness_composer_command_settle claude)" = 0 ] || fail "claude no settle"
-[ "$(cs_harness_resume_cmd codex)" = 'resume --last' ] || fail "codex resume"
-[ "$(cs_harness_resume_cmd claude)" = '--continue' ] || fail "claude resume"
 # Lifecycle mechanics: one key for both harnesses, one exit command each, and
 # herdr's canonical key spelling (docs/herdr.md refuses anything else).
 [ "$(cs_harness_interrupt_key codex)" = esc ] || fail "codex interrupt key"
@@ -379,7 +394,7 @@ done
 for fn in cs_harness_plan_skill cs_harness_start_work_skill; do
   "$fn" bogus >/dev/null 2>&1 && fail "$fn must refuse an unknown harness"
 done
-pass "skill/resume/instruction/busy accessors"
+pass "skill/instruction/busy accessors"
 
 # --- omo install detection ---------------------------------------------------
 # Isolated from the developer's own real ~/.codex and ~/.claude: both env

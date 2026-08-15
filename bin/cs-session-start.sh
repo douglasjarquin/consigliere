@@ -261,6 +261,14 @@ if [ -z "${CS_SESSION_START_STAGE_FILE:-}" ]; then
     printf '%s\n' "$BAR"
   fi
   [ "$SESSION_START_STAGE_FILE" = /dev/null ] || rm -f "$SESSION_START_STAGE_FILE" 2>/dev/null || true
+  # The digest normalizes to exit 0 so an ordinary problem report never reads
+  # as a hook failure. Exit 78 is the one deliberate exception, reserved for
+  # the fatal BASH_FLOOR refusal (see the bootstrap stage below): a pre-floor
+  # interpreter makes the nameref argv builders silently return empty arrays,
+  # so that refusal must stay visible to whatever ran this script.
+  if [ "$SESSION_START_RC" -eq 78 ]; then
+    exit 78
+  fi
   exit 0
 fi
 
@@ -624,21 +632,31 @@ fi
 # both re-block this digest and race the worker's sweeps against themselves.
 stage bootstrap
 subsection "BOOTSTRAP"
+BOOT_RC=0
 if [ "$READ_ONLY" -eq 1 ]; then
-  BOOT_OUT=$(CS_BOOTSTRAP_DETECT_ONLY=1 CS_BOOTSTRAP_NETWORK=skip "$SCRIPT_DIR/cs-bootstrap.sh" 2>&1)
+  BOOT_OUT=$(CS_BOOTSTRAP_DETECT_ONLY=1 CS_BOOTSTRAP_NETWORK=skip "$SCRIPT_DIR/cs-bootstrap.sh" 2>&1) || BOOT_RC=$?
 elif [ "$REEMIT" -eq 1 ]; then
   # Detect-only because startup already ran the sweeps, LOCKED because this
   # session still owns repair - it must not defer to a lock holder that is
   # itself.
   BOOT_OUT=$(CS_BOOTSTRAP_DETECT_ONLY=1 CS_BOOTSTRAP_LOCKED=1 CS_BOOTSTRAP_NETWORK=skip \
-    "$SCRIPT_DIR/cs-bootstrap.sh" 2>&1)
+    "$SCRIPT_DIR/cs-bootstrap.sh" 2>&1) || BOOT_RC=$?
 else
-  BOOT_OUT=$(CS_BOOTSTRAP_NETWORK=skip "$SCRIPT_DIR/cs-bootstrap.sh" 2>&1)
+  BOOT_OUT=$(CS_BOOTSTRAP_NETWORK=skip "$SCRIPT_DIR/cs-bootstrap.sh" 2>&1) || BOOT_RC=$?
 fi
 if [ -n "$BOOT_OUT" ]; then
   printf '%s\n' "$BOOT_OUT"
 else
   printf '(silent - all good)\n'
+fi
+# Only bootstrap's BASH_FLOOR blocker is session-fatal: below the floor the
+# nameref argv builders silently return empty arrays, so proceeding would
+# launch soldiers with no autonomy flag rather than fail honestly. Every other
+# bootstrap report deliberately stays a soft digest line - making them fatal
+# could wedge every home in the fleet on a single soft dependency warning.
+if [ "$BOOT_RC" -ne 0 ] && printf '%s\n' "$BOOT_OUT" | grep -q '^BASH_FLOOR:'; then
+  printf 'SESSION START REFUSED: bootstrap reported the fatal BASH_FLOOR blocker above; fix the interpreter before dispatching anything.\n'
+  exit 78
 fi
 
 # --- 3. wake-drain -------------------------------------------------------

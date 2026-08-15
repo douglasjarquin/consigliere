@@ -15,7 +15,7 @@ Worse, the workaround lived only in agent prose - remember to send an unmarked l
 
 [`bin/cs-control-lib.sh`](../bin/cs-control-lib.sh) is the shared, side-effect-free half: the verb allowlist, the endpoint predicates, the two verb implementations with their postconditions, and the relaunch journal's paths and phase rule.
 `bin/cs-control.sh` is the CLI and the relaunch transaction; `bin/cs-spawn.sh --relaunch` is the launch owner.
-Per-harness mechanics are NOT duplicated here: the interrupt key, the exit command, the pre-Enter settle, the resume command, and the relaunch launch string all come from [`bin/cs-harness-lib.sh`](../bin/cs-harness-lib.sh), the single owner of every per-harness fact, and the endpoint mechanics from [`bin/cs-herdr-lib.sh`](../bin/cs-herdr-lib.sh).
+Per-harness mechanics are NOT duplicated here: the interrupt key, the exit command, the pre-Enter settle, the resume argv, and the launch argv construction all come from [`bin/cs-harness-lib.sh`](../bin/cs-harness-lib.sh), the single owner of every per-harness fact, and the endpoint mechanics from [`bin/cs-herdr-lib.sh`](../bin/cs-herdr-lib.sh) (native `agent start`, since 2026-08-13 - docs/herdr.md and docs/claude.md own that mechanism's detail).
 There is no backend matrix to consult: consigliere has one runtime (herdr) and two harnesses (codex, claude), and the empirical basis for each value is the verification record in [`docs/codex.md`](codex.md), [`docs/claude.md`](claude.md), and [`docs/herdr.md`](herdr.md).
 
 ## Verbs
