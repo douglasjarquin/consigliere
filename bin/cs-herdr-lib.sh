@@ -186,6 +186,11 @@ cs_herdr_capture() { # <pane_id> [lines] [format]
   cs_herdr pane read "$pane" --lines "$lines" --format "$format"
 }
 
+cs_herdr_capture_detection() {
+  local pane=$1 lines=${2:-200} format=${3:-text}
+  cs_herdr pane read "$pane" --source detection --lines "$lines" --format "$format"
+}
+
 cs_herdr_run() { # <pane_id> <text>  - text plus Enter, atomic
   cs_herdr pane run "$1" "$2"
 }
@@ -527,6 +532,12 @@ cs_herdr_snapshot_agent_session() { # <snapshot-json> <pane_id>
 # and this is how a disagreement gets explained instead of guessed at.
 cs_herdr_agent_explain() { # <pane_id> -> raw explain output
   cs_herdr agent explain "$1" 2>/dev/null
+}
+
+cs_herdr_agent_explain_file() {
+  local capture=$1 agent=$2
+  [ -f "$capture" ] && [ -r "$capture" ] || return 1
+  cs_herdr agent explain --file "$capture" --agent "$agent" --verbose
 }
 
 # --- pane process evidence -------------------------------------------------

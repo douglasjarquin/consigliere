@@ -84,6 +84,23 @@ done
 assert_contains "$out" "cs-capture-probe" "pane run output visible in capture"
 pass "pane run + capture round-trip"
 
+detection_out=""
+for _ in $(seq 1 30); do
+  cs_herdr_run "$task_pane" "printf '%s\\n' '• Working (thinking, esc to interrupt)'" >/dev/null || fail "detection probe pane run"
+  sleep 0.3
+  detection_out=$(cs_herdr_capture_detection "$task_pane" 20 text) || fail "detection capture"
+  case "$detection_out" in *'• Working (thinking, esc to interrupt)'*) break ;; esac
+  sleep 0.5
+done
+assert_contains "$detection_out" "• Working (thinking, esc to interrupt)" "detection source capture contains the probe"
+detection_capture="$TMP/detection.capture"
+printf '%s' "$detection_out" > "$detection_capture"
+explain=$(cs_herdr_agent_explain_file "$detection_capture" codex) || fail "explain detection capture"
+assert_contains "$explain" "state: working" "offline explain reads the live detection capture state"
+rule=$(printf '%s\n' "$explain" | sed -n 's/^rule: //p')
+[ -n "$rule" ] && [ "$rule" != none ] || fail "offline explain must name a rule for the live detection capture"
+pass "real detection-source capture feeds offline explain with a named rule"
+
 # The two endpoint facts the agent-control plane depends on, pinned against the
 # REAL binary (docs/herdr.md records the measurements).
 pane_cwd=$(cs_herdr_pane_cwd "$task_pane") || fail "herdr reported no cwd for pane $task_pane"
