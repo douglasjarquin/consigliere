@@ -15,6 +15,27 @@ WF="$ROOT/.github/workflows/ci.yml"
 RUN="$ROOT/bin/cs-test-run.sh"
 LINT="$ROOT/bin/cs-lint.sh"
 
+TMP=$(cs_test_tmproot cs-ci-python)
+PY39BIN="$TMP/python39-bin"
+mkdir -p "$PY39BIN"
+cat > "$PY39BIN/python3" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --version ]; then
+  printf 'Python 3.9.6\n'
+  exit 0
+fi
+printf 'ModuleNotFoundError: No module named tomllib\n' >&2
+exit 1
+SH
+chmod +x "$PY39BIN/python3"
+runner_out=$(PATH="$PY39BIN:$PATH" "$RUN" tests/cs-harness-lib.test.sh 2>&1) &&
+  fail 'test runner must reject Python 3.9'
+assert_contains "$runner_out" 'Python 3.11+' 'runner preflight states the supported Python floor'
+assert_contains "$runner_out" tomllib 'runner preflight names the stdlib capability'
+assert_not_contains "$runner_out" 'cs-test-run: running tests/cs-harness-lib.test.sh' \
+  'runner preflight must run before invoking tests'
+pass 'test runner fails closed before a late tomllib import'
+
 # --- lane partition + coverage guard ---------------------------------------
 
 # The ok summary goes to stdout; the "excluded" report goes to stderr, so

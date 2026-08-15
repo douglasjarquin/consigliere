@@ -8,8 +8,9 @@
 #                              BOOTSTRAP_INFO instead. Both lists come from
 #                              cs-deps-lib.sh, their single owner, which
 #                              bin/cs-doctor.sh reports from as well.
-#                              Four of those tools are also version-gated:
-#                              gh-axi, tasks-axi, lavish-axi, and quota-axi. An
+#                              Five of those tools are also version-gated:
+#                              Python 3.11+ with stdlib tomllib, gh-axi,
+#                              tasks-axi, lavish-axi, and quota-axi. An
 #                              installed build below its floor reports through
 #                              the same MISSING / BOOTSTRAP_INFO line as an
 #                              absent tool, so the operator is asked to upgrade
@@ -163,16 +164,20 @@ network_sweep_authorized() {  # <label>
 # shellcheck source=bin/cs-timing-lib.sh
 . "$SCRIPT_DIR/cs-timing-lib.sh"
 
-# cs_bootstrap_axi_gap <tool> - the session-start wording for the below-floor
-# classification cs-deps-lib.sh owns: print "<version> below floor <floor> -
-# upgrade: <hint>" and exit 0, or exit 1 silently when the tool is ungated,
-# absent, or at/above its floor.
-cs_bootstrap_axi_gap() {
-  local tool=$1 gap installed floor
-  gap=$(cs_deps_axi_gap "$tool") || return 1
-  IFS=$'\t' read -r installed floor <<< "$gap"
-  printf '%s below floor %s - upgrade: %s\n' \
-    "$installed" "$floor" "$(cs_deps_hint "$tool")"
+# cs_bootstrap_tool_gap <tool> - the session-start wording for the below-floor
+# or capability classification cs-deps-lib.sh owns, then exit 0; exit 1
+# silently when the tool is ungated, absent, or at/above its floor.
+cs_bootstrap_tool_gap() {
+  local tool=$1 gap installed floor reason
+  gap=$(cs_deps_tool_gap "$tool") || return 1
+  IFS=$'\t' read -r installed floor reason <<< "$gap"
+  if [ "$reason" = tomllib ]; then
+    printf '%s lacks stdlib tomllib - install Python %s+; %s\n' \
+      "$installed" "$floor" "$(cs_deps_hint "$tool")"
+  else
+    printf '%s below floor %s - upgrade: %s\n' \
+      "$installed" "$floor" "$(cs_deps_hint "$tool")"
+  fi
 }
 
 # Local detection: tool presence, version floors, and the herdr server probe.
@@ -184,7 +189,7 @@ detect_local_tools() {
     [ -n "$tool" ] || continue
     if ! command -v "$tool" >/dev/null 2>&1; then
       missing="$missing $tool"
-    elif gap=$(cs_bootstrap_axi_gap "$tool"); then
+    elif gap=$(cs_bootstrap_tool_gap "$tool"); then
       outdated="$outdated$tool $gap"$'\n'
     fi
   done <<EOF
@@ -197,7 +202,7 @@ EOF
     [ -n "$tool" ] || continue
     if ! command -v "$tool" >/dev/null 2>&1; then
       printf 'BOOTSTRAP_INFO: optional tool %s not installed.\n' "$tool"
-    elif gap=$(cs_bootstrap_axi_gap "$tool"); then
+    elif gap=$(cs_bootstrap_tool_gap "$tool"); then
       printf 'BOOTSTRAP_INFO: optional tool %s %s\n' "$tool" "$gap"
     fi
   done <<EOF

@@ -10,10 +10,9 @@
 # Classes:
 #   required      absent = consigliere cannot operate and must not dispatch.
 #   optional      absent = one named capability is unavailable; the rest works.
-#   contributor   absent = only the contributor workflow (lint, herdr push
-#                 events) is affected. This class is deliberately NOT part of
-#                 session-start detection, so bootstrap's output does not change
-#                 when it grows.
+#   contributor   absent = only the contributor workflow (lint) is affected.
+#                 This class is deliberately NOT part of session-start detection,
+#                 so bootstrap's output does not change when it grows.
 #
 # The axi-family version floors (gh-axi, tasks-axi, lavish-axi, quota-axi) and
 # their bump policy are owned HERE, beside the comparator, because both
@@ -41,8 +40,11 @@
 #   cs_deps_version <tool>                        # installed version, or nothing
 #   cs_deps_version_release <tool>                # the comparable release, or nothing
 #   cs_deps_version_at_least <tool> <floor>       # exit 0 iff installed >= floor
+#   cs_deps_tool_floor <tool>                     # the tool's dependency floor
+#   cs_deps_python_tomllib                        # exit 0 iff Python can import tomllib
+#   cs_deps_tool_gap <tool>                       # "<version><TAB><floor><TAB><reason>" iff below
 #   cs_deps_axi_floor <tool>                      # the tool's axi floor, or nothing
-#   cs_deps_axi_gap <tool>                        # "<version><TAB><floor>" iff below
+#   cs_deps_axi_gap <tool>                        # "<version><TAB><floor><TAB><reason>" iff below
 #
 # cs_deps_version runs the tool's own `--version`; it does not bound that call,
 # so it is only safe against the inventory's tools, never arbitrary input.
@@ -92,14 +94,14 @@ cs_deps_other_harness_binary() {
 cs_deps_tools() {
   case "${1:-}" in
     required)
-      printf '%s\n' herdr "$(cs_deps_root_harness_binary)" jq gh gh-axi git
+      printf '%s\n' herdr "$(cs_deps_root_harness_binary)" jq gh gh-axi git python3
       ;;
     optional)
       printf '%s\n' "$(cs_deps_other_harness_binary)" tasks-axi made \
         lavish-axi chrome-devtools-axi quota-axi
       ;;
     contributor)
-      printf '%s\n' shellcheck python3
+      printf '%s\n' shellcheck
       ;;
     *)
       printf 'cs-deps-lib: unknown class "%s"\n' "${1:-}" >&2
@@ -124,7 +126,7 @@ cs_deps_purpose() {
     chrome-devtools-axi) printf 'browser work for soldiers that must drive a real page\n' ;;
     quota-axi) printf 'local provider quota headroom before spending a quota window\n' ;;
     shellcheck) printf 'the required shell-lint check (bin/cs-lint.sh)\n' ;;
-    python3) printf 'detached monitor handoff (bin/cs-detach.py) and harness worktree pre-trust\n' ;;
+    python3) printf 'detached monitor handoff, harness trust/config, and tests; requires stdlib tomllib\n' ;;
     *) printf 'no recorded purpose\n'; return 1 ;;
   esac
 }
@@ -146,7 +148,7 @@ cs_deps_hint() {
     chrome-devtools-axi) printf 'npm i -g chrome-devtools-axi\n' ;;
     quota-axi) printf 'npm i -g quota-axi\n' ;;
     shellcheck) printf 'brew install shellcheck; on Linux x86_64, bin/cs-install-shellcheck.sh <dir> installs the pinned build\n' ;;
-    python3) printf 'brew install python, or any python3 already on the system\n' ;;
+    python3) printf 'install Python 3.11+ (stdlib tomllib is required), for example: brew install python\n' ;;
     *) printf 'no recorded install suggestion\n'; return 1 ;;
   esac
 }
@@ -227,6 +229,7 @@ CS_GH_AXI_MIN=0.1.29
 CS_TASKS_AXI_MIN=0.2.4
 CS_LAVISH_AXI_MIN=0.1.46
 CS_QUOTA_AXI_MIN=0.1.17
+CS_PYTHON_MIN=3.11
 
 # cs_deps_axi_floor <tool> - the tool's floor, or nonzero for a tool the policy
 # above does not gate.
@@ -246,24 +249,57 @@ cs_deps_axi_floor() {
   esac
 }
 
+# cs_deps_tool_floor <tool> - the dependency floor for every version-gated
+# tool, including Python's standard-library capability floor.
+cs_deps_tool_floor() {
+  case "${1:-}" in
+    python3) printf '%s\n' "$CS_PYTHON_MIN" ;;
+    *) cs_deps_axi_floor "${1:-}" ;;
+  esac
+}
+
 # What every consumer displays where a version would go when the installed
 # build has no comparable one. Owned here so the session-start gate and the
 # preflight report cannot describe the same build two different ways.
 CS_DEPS_UNCOMPARABLE_VERSION='unparseable version'
 
-# cs_deps_axi_gap <tool> - the below-floor classification, owned once.
-# Prints "<version-or-CS_DEPS_UNCOMPARABLE_VERSION><TAB><floor>" and returns 0
-# when <tool> is gated and its installed build is below its floor; returns 1
-# silently when the tool is ungated, absent, or at or above its floor.
+# cs_deps_python_tomllib - true only when the selected Python exposes the
+# standard-library tomllib used by harness trust/config mutation and tests.
+cs_deps_python_tomllib() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 -I -c 'import tomllib' >/dev/null 2>&1
+}
+
+# cs_deps_tool_gap <tool> - the below-floor/capability classification, owned
+# once for doctor, bootstrap, and the test runner.
+# Prints "<version-or-CS_DEPS_UNCOMPARABLE_VERSION><TAB><floor><TAB><reason>"
+# and returns 0 when <tool> is gated and unsupported; returns 1 silently when it
+# is ungated, absent, or usable. The reason is "version" or "tomllib".
+cs_deps_tool_gap() {
+  local tool=${1:-} floor installed reason=version
+  floor=$(cs_deps_tool_floor "$tool") || return 1
+  command -v "$tool" >/dev/null 2>&1 || return 1
+  if cs_deps_version_at_least "$tool" "$floor"; then
+    if [ "$tool" != python3 ] || cs_deps_python_tomllib; then
+      return 1
+    fi
+    reason=tomllib
+  fi
+  installed=$(cs_deps_version_release "$tool" || true)
+  printf '%s\t%s\t%s\n' "${installed:-$CS_DEPS_UNCOMPARABLE_VERSION}" "$floor" "$reason"
+}
+
+# cs_deps_axi_gap <tool> - the axi-family compatibility wrapper.
+# Prints "<version-or-CS_DEPS_UNCOMPARABLE_VERSION><TAB><floor><TAB><reason>"
+# and returns 0 when <tool> is gated and its installed build is below its floor;
+# returns 1 silently when the tool is ungated, absent, or at or above its floor.
 #
 # The displayed version comes from the same acceptance test as the comparison,
 # so a build reported as below-floor is never displayed as a number above it.
 # Callers keep their own wording and line format and share this predicate.
 cs_deps_axi_gap() {
-  local tool=${1:-} floor installed
-  floor=$(cs_deps_axi_floor "$tool") || return 1
-  command -v "$tool" >/dev/null 2>&1 || return 1
-  cs_deps_version_at_least "$tool" "$floor" && return 1
-  installed=$(cs_deps_version_release "$tool" || true)
-  printf '%s\t%s\n' "${installed:-$CS_DEPS_UNCOMPARABLE_VERSION}" "$floor"
+  case "${1:-}" in
+    gh-axi|tasks-axi|lavish-axi|quota-axi) cs_deps_tool_gap "$1" ;;
+    *) return 1 ;;
+  esac
 }

@@ -272,6 +272,15 @@ cs_harness_claude_json_path() {
   fi
 }
 
+cs_harness_python_tomllib() {
+  if command -v python3 >/dev/null 2>&1 && \
+    python3 -I -c 'import sys, tomllib; raise SystemExit(sys.version_info < (3, 11))' >/dev/null 2>&1; then
+    return 0
+  fi
+  printf 'cs-harness: Python 3.11+ with stdlib tomllib is required before changing harness trust config; run bin/cs-doctor.sh\n' >&2
+  return 1
+}
+
 # cs_harness_claude_trust_dir <abs-dir> - mark a directory trusted in claude's
 # config so an interactive claude launched there does not block at the
 # folder-trust dialog. --dangerously-skip-permissions does NOT bypass that dialog
@@ -282,10 +291,7 @@ cs_harness_claude_json_path() {
 cs_harness_claude_trust_dir() {
   local dir=$1 file lock attempt=0
   [ -n "$dir" ] || return 1
-  command -v python3 >/dev/null 2>&1 || {
-    printf 'cs-harness: python3 required to pre-trust a claude worktree\n' >&2
-    return 1
-  }
+  cs_harness_python_tomllib || return 1
   file=$(cs_harness_claude_json_path)
   lock="$file.cslock"
   while ! mkdir "$lock" 2>/dev/null; do
@@ -295,7 +301,7 @@ cs_harness_claude_trust_dir() {
   done
   # shellcheck disable=SC2064
   trap "rmdir '$lock' 2>/dev/null || true" RETURN
-  python3 - "$file" "$dir" <<'PY'
+  python3 -I - "$file" "$dir" <<'PY'
 import json, os, sys
 path, wt = sys.argv[1], sys.argv[2]
 try:
@@ -336,7 +342,7 @@ cs_harness_claude_untrust_dir() {
   done
   # shellcheck disable=SC2064
   trap "rmdir '$lock' 2>/dev/null || true" RETURN
-  python3 - "$file" "$dir" <<'PY'
+  python3 -I - "$file" "$dir" <<'PY'
 import json, os, sys
 path, wt = sys.argv[1], sys.argv[2]
 try:
@@ -397,10 +403,7 @@ _cs_harness_codex_trust_lock() {
 cs_harness_codex_trust_dir() {
   local dir=$1 file
   [ -n "$dir" ] || return 1
-  command -v python3 >/dev/null 2>&1 || {
-    printf 'cs-harness: python3 required to pre-trust a codex worktree\n' >&2
-    return 1
-  }
+  cs_harness_python_tomllib || return 1
   file=$(cs_harness_codex_config_path)
   # The lock is a sibling of the config, so its directory has to exist before the
   # lock can be taken - otherwise a home whose codex config dir has not been
@@ -415,7 +418,7 @@ cs_harness_codex_trust_dir() {
   }
   # shellcheck disable=SC2064
   trap "rmdir '$file.cslock' 2>/dev/null || true" RETURN
-  python3 - "$file" "$dir" <<'PY'
+  python3 -I - "$file" "$dir" <<'PY'
 import os, sys, tomllib
 path, wt = sys.argv[1], sys.argv[2]
 try:
@@ -461,13 +464,13 @@ PY
 cs_harness_codex_untrust_dir() {
   local dir=$1 file
   [ -n "$dir" ] || return 0
-  command -v python3 >/dev/null 2>&1 || return 0
+  cs_harness_python_tomllib || return 0
   file=$(cs_harness_codex_config_path)
   [ -f "$file" ] || return 0
   _cs_harness_codex_trust_lock "$file" || return 0
   # shellcheck disable=SC2064
   trap "rmdir '$file.cslock' 2>/dev/null || true" RETURN
-  python3 - "$file" "$dir" <<'PY'
+  python3 -I - "$file" "$dir" <<'PY'
 import os, re, sys, tomllib
 path, wt = sys.argv[1], sys.argv[2]
 try:

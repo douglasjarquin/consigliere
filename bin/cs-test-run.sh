@@ -46,6 +46,8 @@ set -eu
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
+# shellcheck source=bin/cs-deps-lib.sh
+. "$ROOT/bin/cs-deps-lib.sh"
 
 MODE=
 LANE=
@@ -255,6 +257,22 @@ run_scripts() {
   [ "$failed" -eq 0 ] && [ "$gate_hits" -eq 0 ]
 }
 
+check_python_requirement() {
+  local gap installed floor reason
+  floor=$(cs_deps_tool_floor python3)
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf 'cs-test-run: python3 is required; install Python %s+ with stdlib tomllib, then run bin/cs-doctor.sh\n' \
+      "$floor" >&2
+    return 1
+  fi
+  if gap=$(cs_deps_tool_gap python3); then
+    IFS=$'\t' read -r installed floor reason <<< "$gap"
+    printf 'cs-test-run: python3 %s is unsupported; install Python %s+ with stdlib tomllib, then run bin/cs-doctor.sh\n' \
+      "$installed" "$floor" >&2
+    return 1
+  fi
+}
+
 # --- argument parsing -------------------------------------------------------
 
 while [ "$#" -gt 0 ]; do
@@ -345,4 +363,5 @@ if [ "$LIST_ONLY" -eq 1 ]; then
   exit 0
 fi
 
+check_python_requirement || exit 1
 run_scripts

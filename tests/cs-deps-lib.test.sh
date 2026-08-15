@@ -10,6 +10,19 @@ set -u
 # shellcheck source=bin/cs-deps-lib.sh
 . "$ROOT/bin/cs-deps-lib.sh"
 
+required=$(cs_deps_tools required)
+contributor=$(cs_deps_tools contributor)
+assert_line "$required" '^python3$' 'python3 is required for runtime paths that import tomllib'
+assert_no_line "$contributor" '^python3$' 'python3 is not left in the contributor-only inventory'
+python_floor=$(cs_deps_tool_floor python3) || fail 'python3 must have a dependency floor'
+[ "$python_floor" = 3.11 ] || fail "python3 floor must be 3.11, got $python_floor"
+purpose=$(cs_deps_purpose python3) || fail 'python3 must have a purpose'
+assert_contains "$purpose" tomllib 'python3 purpose must name the stdlib capability'
+hint=$(cs_deps_hint python3) || fail 'python3 must have an install hint'
+assert_contains "$hint" 'Python 3.11+' 'python3 hint must state the supported version floor'
+assert_contains "$hint" tomllib 'python3 hint must explain the stdlib requirement'
+pass 'python3 is a required, versioned tomllib capability'
+
 # --- optional tool list: made, not no-mistakes ------------------------------
 
 optional=$(cs_deps_tools optional)

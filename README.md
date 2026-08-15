@@ -13,7 +13,7 @@ Consigliere is a from-scratch personal rewrite of [Firstmate](https://github.com
 
 ## Quick start
 
-Requirements: `codex` or `claude`, `herdr` (protocol >= 16), `jq`, `git`, `gh` + `gh-axi` (authenticated).
+Requirements: `codex` or `claude`, Python 3.11+, `herdr` (protocol >= 16), `jq`, `git`, `gh` + `gh-axi` (authenticated).
 Optional: the other harness, `tasks-axi` (backlog), `no-mistakes` (delivery pipeline), `lavish-axi`, `chrome-devtools-axi`, `quota-axi`.
 
 1. **Clone the repo.**
@@ -113,10 +113,13 @@ The gate is a job-level `if:` rather than a `paths:` filter, so a skipped lane
 still reports its check instead of hanging pending, and an undeterminable change
 set (force-push, first push, shallow clone) fails open and runs everything.
 
-Pinned-tool owners: ShellCheck version in `bin/cs-lint.sh`; herdr version in
+Pinned-tool owners: Python 3.11+ with standard-library `tomllib` in
+`bin/cs-deps-lib.sh`; ShellCheck version in `bin/cs-lint.sh`; herdr version in
 `bin/cs-install-herdr.sh` (documented in `docs/herdr.md`); herdr protocol floor
 in `bin/cs-herdr-lib.sh` (`CS_HERDR_MIN_PROTOCOL`), which the installer reads.
 The axi-family version floors (`gh-axi`, `tasks-axi`, `lavish-axi`, `quota-axi`) and their bump policy live in `bin/cs-deps-lib.sh`, which both `bin/cs-doctor.sh` and session start gate on.
+The doctor, bootstrap, and test runner all refuse an unsupported Python before
+the harness trust/config path or tests can reach a late `tomllib` import failure.
 Every `tests/*.test.sh` belongs to one lane - `portable`, `real-herdr`, or the
 opt-in `live-codex` (`CS_TEST_CODEX_LIVE=1`) / `live-claude` (`CS_TEST_CLAUDE_LIVE=1`),
 never run in hosted CI and reported as visibly excluded by the coverage guard.

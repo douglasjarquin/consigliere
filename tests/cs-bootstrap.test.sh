@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavior (portable): bin/cs-bootstrap.sh's axi-family version floors and its
+# Behavior (portable): bin/cs-bootstrap.sh's Python and axi-family version floors and its
 # CS_BOOTSTRAP_NETWORK phase split.
 #
 # The phase split exists so bin/cs-session-start.sh can compose its digest from
@@ -9,12 +9,12 @@
 # section drives all three phases against one fixture and compares the line
 # multisets directly rather than trusting a reading of the source.
 #
-# bin/cs-deps-lib.sh owns the axi-family floors and their bump policy; bootstrap
+# bin/cs-deps-lib.sh owns the Python and axi-family floors and their bump policy; bootstrap
 # is the session-start gate that enforces them. These tests pin the enforcement
-# behavior, not the floor values: each floor is asked of its owner through
-# cs_deps_axi_floor, and the below-floor fixture is derived from it, so the
-# boundary stays genuine across deliberate floor bumps without this file naming
-# a version that drifts.
+# behavior, not the floor values: each floor is asked of its owner through the
+# dependency-floor helper, and the below-floor fixture is derived from it, so
+# the boundary stays genuine across deliberate floor bumps without this file
+# naming a version that drifts.
 #
 # Pinned behavior, per gated tool:
 #   - an installed build one patch below the floor fires the same diagnostic
@@ -45,8 +45,9 @@ cs_fake_version_tool "$FAKEBIN" gh-axi CS_TEST_GH_AXI_VERSION 9.9.9
 cs_fake_version_tool "$FAKEBIN" tasks-axi CS_TEST_TASKS_AXI_VERSION 9.9.9
 cs_fake_version_tool "$FAKEBIN" lavish-axi CS_TEST_LAVISH_AXI_VERSION 9.9.9
 cs_fake_version_tool "$FAKEBIN" quota-axi CS_TEST_QUOTA_AXI_VERSION 9.9.9
+cs_fake_version_tool "$FAKEBIN" python3 CS_TEST_PYTHON3_VERSION 9.9.9
 
-# A hermetic PATH. Only the four gated axi stubs and the ordinary utilities
+# A hermetic PATH. Only the five gated stubs and the ordinary utilities
 # bootstrap itself needs are reachable, so the fixture never executes the
 # developer's real gh, herdr, jq, or git - no network call, no live herdr
 # server, and no dependence on what happens to be installed.
@@ -78,6 +79,39 @@ out=$(run_bootstrap)
 assert_no_line "$out" '^MISSING: gh-axi' 'an at-floor gh-axi is silent'
 unset CS_TEST_GH_AXI_VERSION
 pass 'gh-axi floor: below fires, at-floor is silent'
+
+python_floor=$(cs_deps_tool_floor python3)
+export CS_TEST_PYTHON3_VERSION
+CS_TEST_PYTHON3_VERSION=$(cs_test_version_below "$python_floor") ||
+  fail "no below-floor fixture is derivable from the python3 floor $python_floor"
+out=$(run_bootstrap)
+assert_line "$out" "^MISSING: python3 .*below floor $python_floor" \
+  'a below-floor python3 reports MISSING before dispatch'
+assert_line "$out" '^MISSING: python3 .*Python 3\.11+' \
+  'the python3 bootstrap diagnostic states the supported version'
+assert_line "$out" '^MISSING: python3 .*tomllib' \
+  'the python3 bootstrap diagnostic names the stdlib capability'
+
+CS_TEST_PYTHON3_VERSION=$python_floor
+out=$(run_bootstrap)
+assert_no_line "$out" '^MISSING: python3' 'an at-floor python3 is silent'
+unset CS_TEST_PYTHON3_VERSION
+pass 'python3 floor: below fires, at-floor is silent'
+
+cat > "$FAKEBIN/python3" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --version ]; then
+  printf 'Python 3.12.0\n'
+  exit 0
+fi
+exit 1
+SH
+chmod +x "$FAKEBIN/python3"
+out=$(run_bootstrap)
+assert_line "$out" '^MISSING: python3 3\.12\.0 lacks stdlib tomllib' \
+  'bootstrap distinguishes a missing tomllib capability from a version gap'
+cs_fake_version_tool "$FAKEBIN" python3 CS_TEST_PYTHON3_VERSION 9.9.9
+pass 'bootstrap rejects a supported-version Python without tomllib'
 
 # --- optional axi tools: below fires BOOTSTRAP_INFO, at-floor is silent --------
 
