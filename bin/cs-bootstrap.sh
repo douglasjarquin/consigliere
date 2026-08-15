@@ -28,6 +28,14 @@
 #   TANGLE: ...                the primary checkout is on a named non-default
 #                              branch (cs-tangle-lib.sh owns classification);
 #                              resolve without touching unlanded work.
+#   BASH_FLOOR: ...            the running bash is below bin/cs-deps-lib.sh's
+#                              declared floor. This one REFUSES (exit 1)
+#                              instead of reporting and continuing - the only
+#                              blocker that does - and bin/cs-session-start.sh
+#                              honours that exit by refusing the session: the
+#                              nameref argv builders fail OPEN below the
+#                              floor, so continuing would dispatch soldiers
+#                              with an empty autonomy argv.
 #
 # MUTATING sweeps (skipped under CS_BOOTSTRAP_DETECT_ONLY=1, i.e. a read-only
 # session; each also skipped silently while its owning script is not yet
@@ -82,6 +90,28 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# A pre-floor bash fails OPEN in the nameref argv builders (`local -n` errors,
+# the caller's array stays empty, rc stays 0), so a soldier would launch with
+# no autonomy flag and cs_herdr would drop --session from every call. Refuse
+# here, at the gate every home runs. bin/cs-deps-lib.sh owns the floor, beside
+# the axi-family floors this gate and bin/cs-doctor.sh both read.
+# shellcheck source=bin/cs-deps-lib.sh
+. "$SCRIPT_DIR/cs-deps-lib.sh"
+case "${BASH_FLOOR_MAJOR:-}" in ''|*[!0-9]*) BASH_FLOOR_MAJOR= ;; esac
+case "${BASH_FLOOR_MINOR:-}" in ''|*[!0-9]*) BASH_FLOOR_MINOR= ;; esac
+if [ -z "$BASH_FLOOR_MAJOR" ] || [ -z "$BASH_FLOOR_MINOR" ]; then
+  printf 'BASH_FLOOR: bin/cs-deps-lib.sh did not provide BASH_FLOOR_MAJOR/BASH_FLOOR_MINOR; refusing to run on an unverified interpreter.\n' >&2
+  exit 1
+fi
+if [ "${BASH_VERSINFO[0]}" -lt "$BASH_FLOOR_MAJOR" ] ||
+  { [ "${BASH_VERSINFO[0]}" -eq "$BASH_FLOOR_MAJOR" ] &&
+    [ "${BASH_VERSINFO[1]}" -lt "$BASH_FLOOR_MINOR" ]; }; then
+  printf 'BASH_FLOOR: bash %s is below the required %s.%s (the nameref argv builders in bin/cs-herdr-lib.sh and bin/cs-harness-lib.sh fail open below it); do not dispatch from this interpreter.\n' \
+    "${BASH_VERSION%%(*}" "$BASH_FLOOR_MAJOR" "$BASH_FLOOR_MINOR" >&2
+  exit 1
+fi
+
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root

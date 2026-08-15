@@ -12,20 +12,59 @@ version. The launch template and per-harness facts live in `bin/cs-harness-lib.s
 
 ## Launch template (the only one)
 
-```
-[CLAUDE_CONFIG_DIR=<dir>] claude <--dangerously-skip-permissions | --permission-mode <mode>> \
-  --settings <state/<id>.claude-settings.json> \
-  "$(bin/cs-operational-input.sh encode launch-brief < data/<id>/brief.md)"
-```
+An interactive soldier or capo launches via herdr's native `agent start`, not a typed
+shell command: `herdr agent start <id> --kind claude --pane <p> --timeout <ms> --
+<--dangerously-skip-permissions | --permission-mode <mode>> [--settings <file>]`.
+Everything after `--` reaches the `claude` binary as literal argv, with no shell
+evaluation - `bin/cs-harness-lib.sh`'s `cs_harness_autonomy_argv` builds the autonomy
+flag as discrete unquoted tokens for exactly this reason (its string-building sibling
+`cs_harness_autonomy_flag`, still used only by the headless scout below, shell-quotes
+the `--permission-mode` value, which would reach a native `agent start` call as the
+literal 5-character string `'auto'`).
 
-- The typed `launch-brief` positional prompt starts the supervised interactive session.
-- `CLAUDE_CONFIG_DIR` is restated on the launch line whenever consigliere itself runs
-  under one. A pane is created by the long-lived herdr daemon, which does NOT inherit
-  the environment of the consigliere process that requested it, so under a
-  work-vs-personal subscription split a bare `claude` would read the default
-  `~/.claude` store and come up unauthenticated. Unset is the single-store default and
-  emits no prefix. This is the same store folder-trust is written to, so credentials
-  and trust cannot land in two different config directories.
+**The brief is NOT part of this call - it cannot be.** `agent start`'s trailing argv
+is refused outright (`invalid_agent_argument`) the moment any single token contains
+an embedded newline, live-verified 2026-08-13 with a minimal two-byte repro
+(`"a\nb"`); every real brief is multi-line. Instead, `bin/cs-spawn.sh` starts the
+agent bare (autonomy + `--settings` only), then delivers the brief as a follow-up
+prompt via `cs_herdr_agent_prompt_confirmed` (`bin/cs-herdr-lib.sh`) - native
+`agent prompt --wait --until working`. Existing panes use that primitive through
+`cs_prompt_guarded`; the fresh-pane `_cs_spawn_deliver_brief` path calls it directly
+because the first frame has no composer state the guard can validate. `cs-send.sh`
+remains on plain `pane run` plus `cs_herdr_submit_confirm`, so it does not use
+`agent prompt`.
+
+`bin/cs-spawn.sh`'s `_cs_spawn_deliver_brief` deliberately does NOT go through
+`bin/cs-prompt-lib.sh`'s general-purpose `cs_prompt_guarded` guard, checking only
+busy/blocked state itself before prompting. Live-verified 2026-08-13: a genuinely
+fresh claude session's very first frame (nothing typed, no history) shows a
+project-title banner where the composer classifier (`cs_composer_state`,
+`bin/cs-composer-lib.sh`) requires a rule immediately above the composer glyph to
+confirm "empty" - a frame shape distinct from every case that classifier's own test
+suite covers, and one that never resolves on its own, since nothing changes the
+render until a first prompt actually lands. Going through the guard here would
+retry for its full window and then warn, every time, on every claude launch,
+without ever actually delivering the brief. The guard's composer check exists to
+stop a prompt from concatenating onto text something else already typed - a risk
+that cannot apply to a pane this same spawn created moments ago, which nothing else
+has ever had the chance to type into. `_cs_spawn_deliver_brief` retries for up to
+`CS_SPAWN_BRIEF_DELIVER_WAIT_SECS` (default 50s): a prompt sent within ~40s of
+`agent start` can be silently lost while herdr still reports `interactive_ready`
+(see below), and `cs_herdr_agent_prompt_confirmed`'s own idle->working confirmation
+is what catches that miss and makes a retry safe.
+
+- `CLAUDE_CONFIG_DIR` is exported into the pane's shell BEFORE `agent start` runs,
+  whenever consigliere itself runs under one. A pane is created by the long-lived
+  herdr daemon, which does NOT inherit the environment of the consigliere process
+  that requested it, so under a work-vs-personal subscription split a bare `claude`
+  would read the default `~/.claude` store and come up unauthenticated. `agent
+  start`'s trailing argv has no shell prefix-assignment support and neither it nor
+  `worktree create` has an `--env` flag, so `bin/cs-spawn.sh`'s
+  `_cs_spawn_env_export_confirmed` types `export CLAUDE_CONFIG_DIR=...` into the pane
+  and verifies it landed (`cs_herdr_pane_run_confirmed`, native `pane wait-output`)
+  before ever calling `agent start` - skipped entirely when the store is not
+  overridden. This is the same store folder-trust is written to, so credentials and
+  trust cannot land in two different config directories.
 - `--dangerously-skip-permissions` gives the unattended soldier full autonomy (no permission prompts).
 - `--permission-mode <auto|acceptEdits|bypassPermissions>` is the alternative for a home
   whose Claude account policy forbids the bypass flag; `config/permission-mode.conf` selects it
@@ -34,19 +73,32 @@ version. The launch template and per-harness facts live in `bin/cs-harness-lib.s
   Exactly one of the two flags is emitted, never both.
 - Turn-end is wired via the `--settings` Stop hook, NOT an inline flag: claude has
   no codex-style `-c notify=`. cs-spawn writes a per-soldier settings file whose
-  `Stop` hook touches `state/<id>.turn-ended` every turn and then runs
-  `bin/cs-turnend-guard.sh` (the continuation backstop).
+  `Stop` hook touches `state/<id>.turn-ended` every turn (plus an optional,
+  separate telemetry hook command) and NOTHING more - the `bin/cs-turnend-guard.sh`
+  continuation backstop belongs to the root/capo `.claude/settings.json` described
+  below, never to a soldier, and tests/cs-spawn-harness.test.sh pins its absence.
+  The file's path rides `agent start`'s trailing argv as two literal tokens
+  (`--settings`, then the path).
 - **Why a launch-scoped file, not `.claude/settings.json` in the worktree:** claude
   resolves a repo `.claude/settings.json` through worktrees to the MAIN checkout,
   so a file dropped in a soldier's worktree would land in the boss's real project
   tree and would not be soldier-isolated. `--settings <file>` scopes the hooks to
-  the one launch. (`--settings` also accepts a raw JSON string; a file avoids
-  shell-escaping the JSON inside the pane launch line.)
+  the one launch.
 - A capo launch omits the turn-end wiring (a capo is a supervisor, not a supervised
-  turn-taker) and prefixes `CS_HOME=<home>`; the `CLAUDE_CONFIG_DIR` prefix, when
-  emitted, precedes those assignments.
-- Headless scout: `claude -p "<brief>"` (process exit = turn end), the analog of `codex exec`.
-  The env prefix goes between the enclosing `if` and the binary.
+  turn-taker) and its env-export pre-step is unconditional rather than
+  CLAUDE_CONFIG_DIR-gated: it clears every inherited `CS_*_OVERRIDE` and sets
+  `CS_HOME=<home>`, every time, so a capo never inherits the ROOT session's overrides.
+- Headless scout: `claude -p "<brief>"` (process exit = turn end), the analog of
+  `codex exec`, unchanged - a plain process has no composer or `agent_status`
+  lifecycle for `agent start` to target, so it stays on the shell-string mechanism
+  (`cs_harness_scout_launch`) permanently. The env prefix goes between the
+  enclosing `if` and the binary, exactly as before.
+- A relaunch's resume attempt (`--continue`) triggers through `agent start` too, but
+  its own success/failure is discarded: live-verified 2026-08-13 that native
+  `interactive_ready` is fooled by the same brief window a "nothing to resume"
+  `--continue` leaves before it exits (see docs/herdr.md). `bin/cs-spawn.sh`'s own
+  process-table stabilization loop, unchanged, is what actually decides resumed vs.
+  falls through to a cold launch.
 
 ## Hooks (.claude/settings.json)
 
@@ -228,6 +280,36 @@ In a brand-new cwd on 2.1.227 the interactive TUI
 showed "Quick safety check: Is this a project you created or one you trust?"
 despite that flag, and the capture run had to accept it before claude drew a
 composer.
+
+**Gap found, verified live 2026-08-13: the classifier misreads a genuinely fresh
+session's very first composer, forever.** A bare `agent start` with no positional
+prompt, once past the folder-trust dialog, settles into a steady-state render this
+classifier never sees as `empty`:
+
+```text
+ Survey consigliere substrate simplification
+opportunities ──
+❯
+─────────────────────────────────────────────────────
+────────
+  ⚠ Transcript saving is off — inherited CLAUDE_CODE…
+```
+
+The project-title banner ("Survey consigliere...opportunities ──") sits directly
+above the `❯` row instead of the rule the classifier requires there for `proven=1`
+on the unbordered-glyph branch (`bin/cs-composer-lib.sh`'s `cs_composer_state`,
+`'❯'*') proven=$prev_rule`), so `cs_composer_state` returns `unknown` - not a
+transient startup delay: re-read 5+ seconds later, byte-identical, still
+`unknown`. This is a genuinely new frame shape, distinct from every case
+`tests/cs-composer-lib.test.sh` already covers (ghost-composer, typed-input,
+dead-shell, stale-composer-above-dead-shell), and it never resolves on its own -
+nothing changes this render until a prompt actually lands, which is exactly what
+`cs_composer_state`'s "empty" verdict is supposed to authorize. Retrying
+`bin/cs-prompt-lib.sh`'s `cs_prompt_guarded` against this pane for any length of
+time never succeeds. `bin/cs-spawn.sh`'s initial-brief delivery works around this
+by not using that guard for this one call (see the launch template above); nothing
+else in the fleet currently prompts a bare-just-launched pane with no other
+caller between `agent start` and the first prompt, so nothing else hits this yet.
 
 ## Permission modes (verified 2026-07-28, claude 2.1.220)
 

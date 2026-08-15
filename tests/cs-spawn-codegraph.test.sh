@@ -58,6 +58,11 @@ case "${1:-} ${2:-}" in
     esac
     printf '{"result":{"workspace":{"workspace_id":"w1"},"root_pane":{"pane_id":"w1:p1"},"worktree":{"path":"%s","branch":"%s"}}}\n' "$CS_FAKE_SPAWN_WORKTREE" "$branch"
     ;;
+  "agent start") printf '%s\n' '{"result":{"agent":{"agent":"codex","agent_status":"idle","interactive_ready":true}}}' ;;
+  "agent prompt")
+    printf '%s' "${4:-}" > "$CS_FAKE_SPAWN_LAUNCH"
+    printf '%s\n' '{"result":{"type":"agent_prompted"}}'
+    ;;
   "pane run") printf '%s' "${4:-}" > "$CS_FAKE_SPAWN_LAUNCH" ;;
   "agent get") printf '{"result":{"agent":{"agent":"codex","agent_status":"idle"}}}\n' ;;
   *) printf '{}\n' ;;
