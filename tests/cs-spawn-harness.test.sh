@@ -32,6 +32,13 @@ case "${1:-} ${2:-}" in
     git -C "$repo" worktree add -q -b "$branch" "$CS_FAKE_SPAWN_WORKTREE"
     printf '{"result":{"workspace":{"workspace_id":"w1"},"root_pane":{"pane_id":"w1:p1"},"worktree":{"path":"%s","branch":"%s"}}}\n' "$CS_FAKE_SPAWN_WORKTREE" "$branch"
     ;;
+  "pane report-metadata")
+    printf '%s\n' "$*" > "$CS_FAKE_SPAWN_METADATA"
+    if [ "${CS_FAKE_SPAWN_REPORT_METADATA_FAIL:-0}" = 1 ]; then
+      cp "$CS_FAKE_SPAWN_META" "$CS_FAKE_SPAWN_META_BEFORE"
+      exit 1
+    fi
+    ;;
   "pane run")
     # A headless scout still types its whole launch line into the pane's shell
     # (no composer/agent_status lifecycle for agent start to target), and an
@@ -145,6 +152,10 @@ spawn_one() {
     CS_CLAUDE_JSON="$TMP/claude.json" \
     CS_FAKE_SPAWN_WORKTREE="$wt" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-$id" \
     CS_FAKE_SPAWN_PANE_RUN="$TMP/panerun-$id" \
+    CS_FAKE_SPAWN_METADATA="$TMP/metadata-$id" \
+    CS_FAKE_SPAWN_META="$HOME_DIR/state/$id.meta" \
+    CS_FAKE_SPAWN_META_BEFORE="$TMP/meta-before-$id" \
+    CS_FAKE_SPAWN_REPORT_METADATA_FAIL="${CS_FAKE_SPAWN_REPORT_METADATA_FAIL:-0}" \
     "$SPAWN" "$id" "$REPO" "$@" >/dev/null || fail "spawn ($harness) failed"
   # An interactive spawn is captured by `agent start`; a headless scout never
   # calls it and is captured by its `pane run` launch line instead. Returning
@@ -162,6 +173,13 @@ spawn_one() {
 # --- codex root: unchanged launch shape, harness=codex ----------------------
 launch=$(spawn_one codex t-codex --mode made --yolo off)
 [ "$(cs_meta_get "$HOME_DIR/state/t-codex.meta" harness)" = codex ] || fail "codex meta harness"
+assert_present "$TMP/metadata-t-codex" "spawn reports display metadata for the task pane"
+assert_grep '--source cs-spawn' "$TMP/metadata-t-codex" "display metadata uses the non-reserved spawn source"
+assert_grep '--state-label working=task=t-codex mode=made' "$TMP/metadata-t-codex" \
+  "display metadata labels the task id and delivery mode"
+assert_grep '--token task_id=t-codex' "$TMP/metadata-t-codex" "display metadata carries the task token"
+assert_grep '--token delivery_mode=made' "$TMP/metadata-t-codex" "display metadata carries the delivery mode"
+assert_grep '--ttl-ms ' "$TMP/metadata-t-codex" "display metadata carries a bounded TTL"
 assert_contains "$launch" "kind=codex" "codex root launches codex"
 assert_contains "$launch" 'notify=' "codex root wires notify turn-end"
 assert_not_contains "$launch" '--settings' "codex root does not use --settings"
@@ -262,6 +280,7 @@ printf 'charter\n' > "$HOME_DIR/data/foo/brief.md"
 env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude CLAUDE_CONFIG_DIR="$TMP/work-claude" \
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
   CS_CLAUDE_JSON="$TMP/claude.json" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-foo" \
+  CS_FAKE_SPAWN_METADATA="$TMP/metadata-foo" CS_FAKE_SPAWN_META="$HOME_DIR/state/foo.meta" \
   CS_FAKE_SPAWN_PROMPT="$TMP/prompt-foo" CS_FAKE_SPAWN_PANE_RUN="$TMP/panerun-foo" \
   "$SPAWN" foo "$CAPO_HOME" --capo >/dev/null || fail "capo spawn failed"
 launch=$(cat "$TMP/launch-foo")
@@ -355,6 +374,7 @@ env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude CLAUDE_CONFIG_DIR="$TMP/wor
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
   CS_CLAUDE_JSON="$TMP/claude.json" \
   CS_FAKE_SPAWN_WORKTREE="$TMP/wt-t-claude-env" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-t-claude-env" \
+  CS_FAKE_SPAWN_METADATA="$TMP/metadata-t-claude-env" CS_FAKE_SPAWN_META="$HOME_DIR/state/t-claude-env.meta" \
   CS_FAKE_SPAWN_PANE_RUN="$TMP/panerun-t-claude-env" \
   "$SPAWN" t-claude-env "$REPO" --mode made --yolo off >/dev/null || fail "claude credential-split spawn failed"
 assert_contains "$(cat "$TMP/panerun-t-claude-env")" "export CLAUDE_CONFIG_DIR='$TMP/work-claude'" \
@@ -384,6 +404,25 @@ assert_absent "$HOME_DIR/state/t-permmode-invalid.meta" "unusable mode writes no
 rm -f "$HOME_DIR/config/permission-mode.conf"
 pass "config/permission-mode.conf selects the claude launch mode and blocks an unusable one"
 
+mkdir -p "$HOME_DIR/data/t-report-metadata-failure"
+printf 'implement the fixture\nDelivery contract: mode=made\n' \
+  > "$HOME_DIR/data/t-report-metadata-failure/brief.md"
+CS_FAKE_SPAWN_REPORT_METADATA_FAIL=1 \
+  spawn_one codex t-report-metadata-failure --mode made --yolo off >/dev/null \
+  || fail "a display metadata failure must not fail the spawn"
+assert_present "$TMP/metadata-t-report-metadata-failure" \
+  "a display metadata failure still attempted the report"
+assert_grep '--state-label working=task=t-report-metadata-failure mode=made' \
+  "$TMP/metadata-t-report-metadata-failure" \
+  "the failed display report used the task label contract"
+assert_grep '--token delivery_mode=made' \
+  "$TMP/metadata-t-report-metadata-failure" \
+  "the failed display report used the delivery token contract"
+cmp -s "$TMP/meta-before-t-report-metadata-failure" \
+  "$HOME_DIR/state/t-report-metadata-failure.meta" \
+  || fail "a display metadata failure changed the durable task record"
+pass "display metadata failure stays best-effort and does not block spawn"
+
 # --- the swallowed launch ----------------------------------------------------
 # `pane run` hands the launch line to the pane's SHELL and reports success
 # whether or not the shell was ready to read it. A freshly created worktree pane
@@ -397,6 +436,7 @@ printf 'implement the fixture\nDelivery contract: mode=made\n' > "$HOME_DIR/data
 if output=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
   CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
   CS_FAKE_SPAWN_WORKTREE="$TMP/wt-swallowed" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-swallowed" \
+  CS_FAKE_SPAWN_METADATA="$TMP/metadata-swallowed" CS_FAKE_SPAWN_META="$HOME_DIR/state/t-swallowed.meta" \
   CS_FAKE_SPAWN_NO_AGENT=1 CS_SPAWN_LAUNCH_WAIT_SECS=2 \
   "$SPAWN" t-swallowed "$REPO" --mode made --yolo off 2>&1); then
   fail "spawn must fail when no agent appears after the launch"

@@ -252,6 +252,17 @@ cs_herdr_pane_exists() { # <pane_id>
   cs_herdr pane get "$1" >/dev/null 2>&1
 }
 
+cs_herdr_report_task_metadata() {
+  local pane=$1 task_id=$2 display_mode=$3
+  cs_herdr pane report-metadata \
+    "$pane" \
+    --source cs-spawn \
+    --state-label "working=task=$task_id mode=$display_mode" \
+    --token "task_id=$task_id" \
+    --token "delivery_mode=$display_mode" \
+    --ttl-ms 86400000
+}
+
 # The pane's own SHELL cwd. Verified live 2026-08-11 (herdr 0.7.5, protocol 17):
 # `pane get` returns result.pane.cwd (the shell's directory) beside
 # foreground_cwd (the foreground process's), both physically resolved, so a

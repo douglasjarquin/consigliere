@@ -111,6 +111,7 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
   A `kind=scout` records NEITHER, because a report deliverable has no mode to honour and no approval posture to apply, which is why `cs-promote.sh` is where a promoted scout first states both.
   `kind=capo` records `mode=capo`, `yolo=off`, and `home=`.
   `cs-spawn.sh` also records `issue=` for board-driven work and `headless=1` for a headless scout (`codex exec` / `claude -p`); `cs-pr-check.sh` appends `pr=` and any available `pr_head=`.
+  Herdr pane state labels and tokens are optional display metadata only; `state/<id>.meta` remains authoritative when the display report is unavailable or stale.
 - `state/<id>.check.sh` - an authenticated custom watcher check. A plan-first ship brief generates this check with `bin/cs-brief.sh --exec-mode plan-first`; it reads the recorded worktree's plain `.omo/boulder.json` and active `.omo/plans/<slug>.md` files, reports changed `remaining/total` checkbox progress, and stays silent when those inputs are unavailable or unchanged.
   `state/<id>.plan-progress` stores only the last emitted `remaining/total` pair so the check does not repeat an unchanged wake; it is disposable task state and is removed when a fresh plan-first check is armed or the task is torn down.
 - `state/<id>.status` - appended by soldiers; wake events, never current state. `bin/cs-classify-lib.sh` owns the verb vocabulary.

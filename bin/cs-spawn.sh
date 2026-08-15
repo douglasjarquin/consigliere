@@ -188,6 +188,14 @@ report_human_gate() {  # <pane> <harness> <subject>
     "$subject" "$detail" "$pane" >&2
 }
 
+report_task_metadata() {
+  local pane=$1 task_id=$2 display_mode=$3
+  if ! cs_herdr_report_task_metadata "$pane" "$task_id" "$display_mode"; then
+    printf 'warning: could not publish display labels for %s in pane %s; the durable record remains authoritative\n' \
+      "$task_id" "$pane" >&2
+  fi
+}
+
 # _cs_spawn_env_export_confirmed <pane> <env-prefix-string>: exports a
 # non-empty space-separated VAR=val prefix (the same shape cs_harness_launch_env
 # returns) into the pane and confirms it landed before the caller starts an
@@ -732,6 +740,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
   fi
 
   report_human_gate "$R_PANE" "$R_HARNESS" "$ID"
+  report_task_metadata "$R_PANE" "$ID" \
+    "$(cs_meta_get "$META" mode 2>/dev/null || printf '%s' "$R_KIND")"
 
   # TELEMETRY, measurement only: a relaunch is a dispatch of this task's work.
   cs_telemetry_crumb spawn "$R_KIND" || true
@@ -767,6 +777,7 @@ if [ "$KIND" = capo ]; then
     "yolo=off" \
     "harness=$HARNESS" \
     "home=$HOME_ABS"
+  report_task_metadata "$PANE" "$ID" capo
 
   encoded_brief=$("$SCRIPT_DIR/cs-operational-input.sh" encode launch-brief < "$BRIEF") || {
     echo "error: could not encode the charter brief for capo $ID" >&2
@@ -939,6 +950,9 @@ META_LINES+=("harness=$HARNESS")
 [ "$HEADLESS" -eq 1 ] && META_LINES+=("headless=1")
 [ -n "$ISSUE" ] && META_LINES+=("issue=$ISSUE")
 cs_meta_write "$STATE/$ID.meta" "${META_LINES[@]}"
+DISPLAY_MODE=$KIND
+[ "$KIND" = ship ] && DISPLAY_MODE=$MODE
+report_task_metadata "$PANE" "$ID" "$DISPLAY_MODE"
 
 sq_brief=$(shell_quote "$BRIEF")
 # TELEMETRY, measurement only. Resolved HERE, at spawn, so a soldier launched
