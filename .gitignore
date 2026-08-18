@@ -6,6 +6,10 @@ host/
 projects/
 .no-mistakes/
 
+# Elixir's config/ convention is source, not the boss-private tree above.
+!daemon/config
+!daemon/config/**
+
 # Local review artifacts and macOS noise — never tracked.
 .lavish/
 .DS_Store
