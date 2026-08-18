@@ -1,0 +1,202 @@
+# Phase 0 report: consigliere-next architecture grounding
+
+This is the master Phase 0 artifact for the consigliere-next rewrite. It answers the fourteen items required by the governing master prompt's final work assignment, and links out to the detailed documents that back each answer. No code has been written. No commits have been made. This report and its linked documents live in a disposable worktree (`consigliere-phase0`, branch `phase0-grounding`, based on `rewrite-in-elixer`) so they can be reviewed before anything lands.
+
+Two decisions were made by the boss during this grounding pass, and they override two of the master prompt's literal defaults:
+
+1. **Repository location**: consigliere-next is built in place, inside this consigliere repository, on a rewrite branch (`daemon/` and `runner/` directories arrive starting Phase 1/2). This overrides master-prompt section 4.1's literal instruction to use a separate `consigliere-next` repository. Recorded as a deviation in ADR-001.
+2. **Prior spike work**: earlier the same day, a branch `made-daemon-rewrite` (commit `7076209`) already scaffolded an Elixir app and proved a SQLite serialized-writer spike (25 concurrent writers, no `SQLITE_BUSY`, cross-process durability check). The boss explicitly chose to start over clean rather than resume that branch. It is left dangling as a historical artifact, not built on top of, and not referenced as prior art beyond this note.
+
+## 1. Current repository grounding
+
+Full detail: `failure-corpus.md`.
+
+Four repositories were grounded in parallel: the legacy Consigliere repository (read at commit `81612c3`, the last commit before the working tree was emptied for this rewrite, since the current branch tip has no source left to read), the Made repository (`internal/orchestrator`, `internal/daemon`, `internal/gitgate`, `cmd/made`, `plans/`), the Symphony reference project (`github.com/openai/symphony`, Elixir/OTP), and the Firstmate lineage project.
+
+Highest-signal confirmed facts:
+
+- **Made currently blocks a live goroutine on human review, today.** `internal/orchestrator/workfunc.go`'s `chain.parkForApproval` calls `c.reviewDecisions.Wait(...)`, a real blocking channel select in `internal/daemon/reviewdecisions.go`. This confirms master-prompt section 12's core premise directly: exit-and-rerun managed mode is not an optimization, it is fixing an actually-blocking mechanism that exists in Made's code right now.
+- **Made has zero durability.** `RunManager` is a `map[string]*run` behind a `sync.Mutex`, no SQLite, no bbolt, no spool, no replay anywhere in the codebase. A daemon restart loses every run and every parked decision unconditionally.
+- **Made has zero SHA-binding.** A full-repository grep for `input_sha`/`InputSHA`/`inputSha` returns nothing. The managed-mode contract's `--input-sha`/`--policy-hash` flags are wholly new surface area.
+- **Made's Consigliere integration was written ahead of Made's actual CLI.** `bin/cs-made-lib.sh`'s own comments confirm, against Made's real `cmd/made/main.go` dispatch, that `made axi status`, `made axi abort`, and `made axi logs` did not exist at the time consigliere started calling them; they were forward references, not a verified contract.
+- **Consigliere's own history shows the exact failure classes the master prompt names.** A 61-consecutive-checkpoint, 6.2-hour boss-starvation incident caused by a prose-only rule; an 8h11m unsupervised-fleet window from an orphaned ownership handoff; 213 monitor revivals in 7 hours and five consecutive away-daemon deaths within a second of arming, both traced to `nohup ... & disown` not surviving a bounded tool call's process-group teardown; and a still-open security finding (SEC-02) that a soldier's own status text could be laundered, via a forgeable Unicode marker convention, into the orchestrator's pane framed as a trusted supervision directive.
+- **Symphony (the OTP reference) is itself a cautionary tale, not a template.** Its `AgentRuntimeSupervisor` supervises the Orchestrator and its Task.Supervisor under `:one_for_all`, so an Orchestrator crash kills every in-flight agent Task (and its Codex Port) as a side effect. All of its Attempt-equivalent state (`running`, `blocked`, `retry_attempts`) lives only in GenServer memory. Its workspace model is a path keyed by external issue ID, with no SHA-based checkpoint concept.
+- **Firstmate is the clearest proof of the cost of the old model.** 52,558 lines of bash across 134 scripts, with the ten largest files (nearly 15,000 lines) entirely in supervision/spawn/wake/status machinery. Its own architecture documentation already names append-only status logs as the wrong primitive for current state. At least 45 of its last ~300 commits were fixes for the same liveness-class bug shape that continued directly into legacy Consigliere.
+
+## 2. Architecture contradiction list
+
+These are the concrete places where source evidence pushed back on, refined, or required an explicit decision against the master prompt's stated defaults, rather than a silent rewrite of the vision.
+
+1. **Section 4.1 (separate repository) vs. actual boss decision.** Resolved by explicit boss instruction: build in place, on a branch, inside this repo. See ADR-001.
+2. **Section 12's managed-mode command implies a modification of Made's existing pipeline.** Grounding evidence (M1/M2 in `failure-corpus.md`) shows the existing `parkForApproval`/`ReviewDecisions.Wait` mechanism is shared with the interactive `made review` path. Modifying it in place risks leaving a live blocking path reachable from managed mode by accident. Resolution: managed mode must be built as a brand-new, parallel command (`made validate --managed`), never a flag on the existing orchestrator path. See ADR-007 and `protocols/made-managed-mode.md`.
+3. **Section 7's runtime topology assumes coordinator/runner separation is "obviously" correct.** Symphony's `:one_for_all` coupling is direct, working evidence of what happens when this separation is skipped: a coordinator crash currently kills all of Symphony's in-flight work. This upgrades master-prompt section 4.7 and section 7's `:one_for_one` split from "good practice" to "the single most load-bearing supervision decision in the whole system," and Phase 0 Spike B exists specifically to prove consigliere-next does not repeat Symphony's mistake.
+4. **Section 9.5 ("marker files are diagnostic only") could read as a generic best practice.** Legacy Consigliere's SEC-01/SEC-02 finding shows this is not generic hardening; it is closing a real, previously-exploitable authority-laundering path. This is now treated as first-party evidence in `threat-model.md` and `architecture/authority-model.md`, not a hypothetical.
+5. **Section 4.3's "Elixir remains provisional" framing risks reading as a formality.** Given that a prior same-day attempt on `made-daemon-rewrite` already got as far as proving Spike A (SQLite serialized writer) before being discarded per the boss's own "start over clean" decision, the record shows this project has already, once, gotten ahead of itself by scaffolding before the full Phase 0 spike set and document set existed. This report's own existence is the correction: no runner, coordinator-kill, daemon-kill, or agent-isolation code should be written until this document set is reviewed.
+6. **No document in Made's own repository anticipates "managed mode" at all.** This is not a contradiction so much as a confirmation that ADR-007's design is genuinely new work, not an extension of existing Made design intent, and should be reviewed jointly with whoever maintains Made before Phase 5 begins.
+
+No contradiction found requires changing the governing product vision itself (master-prompt section 2). Every contradiction above is a refinement of how a stated invariant gets enforced, not a challenge to whether it should hold.
+
+## 3. Phase 0 document set (delivered)
+
+All documents below were written to `docs/` in this worktree. None have been committed; that is a separate decision for the boss.
+
+- `docs/failure-corpus.md` - the full incident-by-incident evidence base (this report's section 1 is a condensed excerpt).
+- `docs/state-machines/mission.md`, `attempt.md`, `question.md`, `gate.md`.
+- `docs/architecture/runtime.md`, `workspaces-and-git.md`, `authority-model.md`, `database.md`.
+- `docs/protocols/runner.md`, `harness-adapter.md`, `made-managed-mode.md`.
+- `docs/threat-model.md`.
+- `docs/cutover.md`.
+- `docs/adr/ADR-001` through `ADR-007`.
+
+## 4. Seven ADR outlines
+
+Full detail in `docs/adr/`. One-line summary each:
+
+- **ADR-001 (language and runtime)**: Elixir/OTP, provisional, conditioned on Spikes B and C passing; revisit trigger is either spike failing, or the required native-process/PTY/NIF surface turning out larger than expected. Symphony is cited as proof OTP supervision mechanics fit, and as proof its specific instance (`:one_for_all`, in-memory state) must not be copied.
+- **ADR-002 (SQLite operational model)**: WAL mode, single serialized writer, `busy_timeout`, no long-lived transactions, backup via `VACUUM INTO`/SQLite backup API. Made's zero-durability in-memory `RunManager` and Symphony's in-memory `%State{}` are the negative cases this must not resemble.
+- **ADR-003 (daemon-authoritative state)**: nothing except the daemon and its database is ever authoritative. Firstmate's documented append-only-log-as-state defect and legacy Consigliere's file/watcher/marker model are the direct precedent.
+- **ADR-004 (Mission vs. Attempt, daemon-bound execution)**: Missions are durable, Attempts are disposable. Symphony's coordinator-crash-kills-workers finding and legacy Consigliere's indefinitely-parked Made-run pattern both motivate independent supervision and daemon-bound Attempt lifetime.
+- **ADR-005 (human waiting and authority channels)**: no process may block on human input; three-principal authority split. Made's confirmed blocking `parkForApproval` and Consigliere's SEC-01/SEC-02 are the two strongest pieces of direct evidence.
+- **ADR-006 (workspace and trusted-Git boundary)**: SHA-anchored checkpoints, marker files diagnostic-only, trusted mirror separate from Agent-writable workspaces. Symphony's path-keyed workspace model and SEC-01/SEC-02 are the negative precedents.
+- **ADR-007 (Made exit-and-rerun managed mode)**: build `made validate --managed` as new, parallel surface; Made owns validation execution and evidence only, never delivery/merge/retries/notification. Grounded directly in Made's actual current code.
+
+## 5. Four state-machine drafts
+
+Full detail in `docs/state-machines/`. Each includes a full state list, a transition table with guards and side effects, terminal-state semantics, an explicit mapping to master-prompt section 14 invariants, and a failure-mode traceability section grounding transitions in the incidents above.
+
+Open policy questions flagged by the drafting pass, not yet resolved, to close out before Phase 1 schema work: exact numeric bounds for Attempt silence-tolerance and checkpoint-timeout windows; whether Mission needs an explicit `superseded_by` column; whether a Mission-scoped Question defaults to staying open across Attempt supersession or requires an explicit relevance judgment; retention policy for `invalidated` Gate rows.
+
+## 6. Runner protocol draft
+
+Full detail in `docs/protocols/runner.md`. Specifies a crash-safe runtime manifest write (temp file, fsync, rename, directory fsync), a length-prefixed/NDJSON control-channel wire format over a per-Attempt Unix domain socket, a bounded graceful-then-hard-kill termination sequence with justified timeouts, and explicitly rejects a Symphony-style Port-owned-harness pattern, citing the same `:one_for_all` coupling finding as the reason a daemon-bound external runner (not an in-BEAM Port) owns the harness process group.
+
+Open item flagged by the drafting pass: the "manifest with no matching Attempt row is adoptable-for-kill" reconciliation path needs verification against the real daemon transaction boundary in Phase 2, not just an assertion here.
+
+## 7. Made managed-mode exit-and-rerun draft
+
+Full detail in `docs/protocols/made-managed-mode.md`. Specifies the exact CLI signature, NDJSON event shapes, and terminal outcome vocabulary for `made validate --managed`, built as new command surface rather than a modification of the existing `parkForApproval` path. Includes the full `needs_decision` → persist Gate/Question → Made exits → answer → new invocation with same input-sha/policy-hash sequence as a numbered walkthrough, and an explicit list of what Made must never own in managed mode (push, PR, CI lifecycle, Soldier lifecycle, retries, notification), citing Made's own test-enforced inability to merge as positive precedent worth preserving.
+
+Open items flagged by the drafting pass: whether `--decisions` is a caller-maintained cumulative file or recomputed fresh per invocation (assumed the latter, needs Phase 5 confirmation); the finding-fingerprint algorithm needs a joint design pass with Made's maintainers, since findings currently have zero structured identity in Made's code.
+
+## 8. Authority matrix
+
+Full detail in `docs/architecture/authority-model.md`. The matrix covers every operation named in master-prompt section 5 across all three principals (Attempt, model advisory, boss), with "no" as the default for anything not explicitly granted. SEC-01/SEC-02 is used as the direct, first-party justification for why this must be a structural boundary (scoped capability credentials, fencing tokens, a boss channel unreachable from any model sandbox) rather than a naming or marker convention.
+
+## 9. Agent-isolation spike design (Spike D)
+
+**Goal**: prove a model-controlled process cannot read SQLite, read the trusted Git mirror, connect to the boss channel, access another Mission's workspace, read adapter credentials, or alter runner manifests.
+
+**Design**: run a harness process (initially a fake/stub harness, to isolate the OS-boundary question from harness-specific behavior) inside whichever candidate isolation mechanism Phase 0 selects for evaluation:
+
+- **Option 1: dedicated unprivileged worker account.** The daemon runs as one user; each Attempt's harness process runs as a separate, low-privilege OS user with no read access to the daemon's home directory, trusted mirror, or credential store, enforced by standard Unix file permissions plus the daemon never handing that user a socket path or credential file it shouldn't have.
+- **Option 2: harness-native sandboxing.** If the selected harness (Codex CLI or equivalent) ships its own sandbox mode, evaluate whether it can be configured to deny filesystem access outside the assigned Mission workspace and deny network access except to explicitly allowed destinations, then adversarially test that configuration rather than trusting its documentation.
+- **Option 3: OS-level sandbox.** On macOS, evaluate the Seatbelt/`sandbox-exec` mechanism or an equivalent enforced process boundary; on Linux (if ever required), evaluate namespaces/seccomp/AppArmor equivalents.
+
+Phase 0 must pick one candidate to prove first (dedicated worker account is the cheapest to stand up and the most portable across harnesses, so it is the recommended first candidate), and must not proceed to production cutover until at least one of the three is proven adversarially, not just configured.
+
+**Adversarial test matrix** (run against whichever candidate is under evaluation):
+
+1. From inside the sandboxed process, attempt to read the daemon's SQLite file by absolute path (known from source, since the codebase itself is not secret) → must fail with a permission error, not merely "not found."
+2. Attempt to read the trusted Git mirror's bare repository files by absolute path → must fail.
+3. Attempt to open a TCP/Unix-socket connection to the daemon's privileged (boss) socket path → must fail to connect.
+4. Attempt to open a TCP/Unix-socket connection to the daemon's Attempt-capability socket, but using a different Mission's workspace path or a guessed/incremented `attempt_id` → the daemon must reject the request based on the credential's actual scope, independent of whether the connection itself succeeded.
+5. Attempt to read another Mission's workspace directory by absolute path (guessable, since Mission IDs are not secret) → must fail.
+6. Attempt to read any adapter credential file (GitHub token, Linear token) by absolute path or by environment variable inspection (`env`, `/proc/self/environ` equivalent) → must fail or return nothing.
+7. Attempt to write to, or read, the runner's runtime manifest file for its own or another Attempt, outside the narrow channel the runner protocol defines for reporting a checkpoint → must fail.
+8. Attempt to spawn a child process that escapes the sandbox boundary (e.g., a setuid binary, a container-escape-style technique appropriate to the chosen isolation mechanism) → must fail; this test should be revisited and expanded as new escape techniques become known, not treated as complete after one pass.
+
+**Exit criteria**: all eight tests fail (from the attacker's perspective) consistently, across at least two separate runs on the actual target OS (macOS, since that is the current deployment target per the packaging spike), with the failure being a structural permission/connection denial, not an application-level check that a compromised harness process could bypass by not asking nicely.
+
+## 10. SQLite spike design (Spike A)
+
+**Goal**: prove the single-serialized-write-path model is safe and fast enough, before any daemon logic is built on top of it.
+
+**Design**: an Elixir/OTP application with `Csd.Repo` (Ecto/SQLite) and a single `Csd.DatabaseWriter` GenServer that owns all writes; every mutation is a short `Repo.transaction/1` call routed through that one process's mailbox, with WAL mode enabled and `busy_timeout` set.
+
+**Concrete commands and scenarios**:
+
+1. **Concurrent writers, no `SQLITE_BUSY`.** Spawn N concurrent Elixir processes (start with N=25, matching the scale already proven in the discarded `made-daemon-rewrite` spike, then push to N=200 to find the actual ceiling) each performing a write through `Csd.DatabaseWriter`. Assert: all N writes commit, zero `SQLITE_BUSY` errors, and a final row count matches N exactly.
+2. **Concurrent reads during writes.** While the writer load from (1) is running, spawn M concurrent read-only queries against the same database file (using Ecto's normal read path, not through the DatabaseWriter). Assert: reads complete without being blocked by, or blocking, the write path, consistent with WAL mode's reader/writer concurrency model.
+3. **`busy_timeout` under contention.** Deliberately hold a write transaction open slightly longer than usual (an artificial `Process.sleep/1` inside one transaction) while firing concurrent writes at it; assert the queued writers wait up to `busy_timeout` and then either succeed or return a clear, handled error, never crash the DatabaseWriter process itself.
+4. **WAL checkpoint.** Run a sustained write load, then trigger a manual `PRAGMA wal_checkpoint(TRUNCATE)` (or the Ecto/exqlite equivalent), and assert the WAL file shrinks and the main database file reflects all committed writes.
+5. **Crash recovery.** Kill the BEAM process (`kill -9`) mid-write-burst; restart it; assert the database is not corrupted (`PRAGMA integrity_check`) and contains exactly the writes that had actually committed before the kill, with no partial/torn rows.
+6. **Poison-row quarantine.** Deliberately insert a row that would violate an application-level invariant the read path assumes (e.g., an Attempt row referencing a nonexistent Mission id, inserted by bypassing normal application code via a raw SQL execute) and assert that a reconciler process encountering it quarantines that one row/entity and continues operating, rather than crashing or infinite-looping.
+7. **`VACUUM INTO` backup and restore.** With a live write load running, execute `VACUUM INTO` to a backup path; assert the backup file passes `PRAGMA integrity_check` and can be opened as an independent, complete database reflecting a consistent snapshot; separately, demonstrate that copying only the live `.db` file while ignoring its `-wal` sidecar produces a backup missing recently committed data, as a negative control proving why `VACUUM INTO` (or the SQLite backup API) is required instead of a plain file copy.
+
+**Exit criteria**: all seven scenarios pass, with scenario 6 in particular proving the daemon can survive a single corrupt/invalid row without a full restart-crash-loop, per master-prompt section 14 invariant 21.
+
+## 11. Exact commands and test scenarios for every Phase 0 spike
+
+This section consolidates the spike list from the master prompt's section 15 into concrete, runnable form. Spikes A and D are detailed above (sections 9 and 10); B, C, and E follow.
+
+### Spike B: coordinator-independent runner
+
+1. Start a fake/stub harness process through the external runner, under `Consigliere.RunnerDynamicSupervisor`.
+2. Confirm the fake harness is producing output (a simple heartbeat line every second is sufficient).
+3. Kill the `MissionCoordinator` process for that Mission directly (`Process.exit(pid, :kill)` or equivalent).
+4. Assert the fake harness process is still running and still producing output, unaffected by step 3.
+5. Allow `Consigliere.MissionDynamicSupervisor` to restart the `MissionCoordinator`.
+6. Assert the restarted `MissionCoordinator` rehydrates from the database, discovers the still-running Attempt/runner, and re-attaches to it (re-subscribes to its events) without sending it any termination signal.
+7. Exit criterion: at no point does the fake harness process receive a termination signal or stop producing output, and the restarted coordinator's view of the Attempt matches reality.
+
+### Spike C: daemon-bound runner
+
+1. Start a fake harness through the external runner, exactly as in Spike B.
+2. `kill -9` the entire daemon process (not just the coordinator).
+3. Assert the external runner observes the daemon control channel closing (EOF), independent of the daemon's own shutdown logic having run (since `kill -9` skips it).
+4. Assert the runner then executes the graceful-term/bounded-wait/hard-kill sequence against the full process group (harness plus any children it spawned), and verifies via process-table inspection (not just "the wait returned") that nothing survives.
+5. Restart the daemon.
+6. Assert the daemon's reconciler classifies that Attempt as lost (having found a manifest with no live process behind it) and that the corresponding Mission blocker/state reflects this without manual intervention.
+7. Assert the workspace the dead Attempt was using is left in a state the reconciler can evaluate (either safely reusable, because death is conclusively verified, or quarantined, per the workspace-reuse rule) rather than left ambiguous.
+8. Exit criterion: no process from the killed daemon's runner survives, and the daemon's post-restart state is internally consistent with that fact, verified by direct process-table inspection at the OS level, not by the daemon's own self-report.
+
+### Spike E: packaging
+
+1. Install the release under a LaunchAgent (or launchd equivalent) configuration, on a clean or reset test account/session, and confirm it starts successfully on login/load.
+2. Attempt to start a second instance of the daemon while the first is running; assert an OS-level lock (a lock file, an advisory flock, or the daemon's own home-lock mechanism) causes the second instance to fail to start, rather than both instances running concurrently against the same database.
+3. Simulate a stale socket left behind by an unclean prior shutdown (create a leftover socket file with no listener behind it) and confirm the daemon detects and recovers from this on next start, rather than failing to bind or silently misrouting.
+4. Force a crash-loop scenario (a startup that always fails, e.g. via a deliberately invalid config) and confirm the LaunchAgent's restart behavior is bounded (does not spin the CPU or fill logs unboundedly) and that `cs doctor` (or its Phase 0/1 equivalent) can identify the startup failure and report a specific, actionable cause rather than a generic error.
+5. Exit criterion: exactly one daemon instance can ever own a given home directory at a time, verified by attempting concurrent starts, and startup failures are diagnosable through the CLI, not just through raw logs.
+
+## 12. Elixir versus Go recommendation
+
+**Recommendation: proceed with Elixir/OTP, provisionally, exactly as the master prompt frames it, conditioned on Spikes B and C (sections 11 above) passing.**
+
+This is based on total-system complexity, not language preference:
+
+- The core correctness burden of this system is process supervision, independent-lifetime process boundaries, and reliable reconciliation after crashes, which is exactly OTP's designed strength (supervision trees, process monitors, `DynamicSupervisor`). Building the equivalent from scratch in Go (goroutines, channels, manual supervision policy, manual restart-strategy bookkeeping) reintroduces, by hand, mechanisms OTP provides as language/runtime primitives.
+- The Symphony reference project is proof this fit is real (its supervision tree, process monitoring, and dynamic dispatch patterns are directly usable), while also being proof that OTP does not automatically save you from the exact failure modes this rewrite must avoid (`:one_for_all` coupling, in-memory-only state). This means the recommendation is for OTP's mechanics, explicitly not for Symphony's specific instance of them.
+- SQLite plus Ecto is a mature, well-supported combination in the Elixir ecosystem (`exqlite`), and the discarded `made-daemon-rewrite` spike already demonstrated, on this exact machine, that the toolchain (Elixir 1.20.3 / OTP 29 via Homebrew) works and that a serialized SQLite writer under concurrent load is achievable without exotic effort. That prior spike's result is being redone from scratch per the boss's decision, but its toolchain findings (Erlang is keg-only and needs an explicit `PATH` export; Hex/rebar needed a forced reinstall against OTP 29) are worth carrying forward as operational notes even though the code itself is not being reused.
+- The primary risk Elixir introduces is the external process runner boundary: Elixir does not eliminate the need for a separate, daemon-bound Go (or similar) process to own the harness's OS process group, because master-prompt section 8 and section 4.3 both require the harness to survive independent of any BEAM process's lifetime, and an in-BEAM Port (Symphony's approach) does not satisfy that requirement, per the `:one_for_all` finding. This is not a reason to abandon Elixir; it is a reason the runner is its own small Go binary regardless of which language the daemon is written in, which the master prompt already anticipates (section 8: "prefer Go unless Phase 0 proves another choice materially better").
+
+**The formal revisit trigger** (recorded in ADR-001): reconsider a single Go daemon plus Made if either Spike B or Spike C fails to hold under adversarial conditions after a genuine attempt to fix the implementation (not just the first failure), or if Phase 2's actual agent-isolation and workspace work reveals a native-process/PTY/NIF surface materially larger than the runner protocol currently anticipates.
+
+## 13. Changes to the phase roadmap
+
+No phase was added or removed. Two adjustments are recorded:
+
+1. **Phase 0 exit gate gains an explicit checklist item**: confirm no code from the discarded `made-daemon-rewrite` branch is referenced, imported, or resumed anywhere in Phase 0-1 work, since the boss's decision to start clean should not be quietly undone by a future session finding that branch and assuming it is current.
+2. **ADR-007 (Made managed mode) gains an explicit dependency**: because Made's own repository has zero anticipation of managed mode today, Phase 5 work should budget time for a joint design pass with whoever maintains Made, particularly on the finding-fingerprint algorithm (Made's findings currently have no structured identity at all, only freeform description strings), rather than treating ADR-007's design as something consigliere-next can finalize unilaterally.
+
+## 14. Phase 0 go/no-go checklist
+
+| Item | Status |
+|---|---|
+| Repository grounding complete (4 source repos, dated incidents extracted) | Done |
+| Architecture contradiction list written | Done |
+| Required Phase 0 document set written | Done (this report plus 18 supporting documents) |
+| Seven ADRs drafted | Done |
+| Four state-machine drafts written | Done |
+| Runner protocol drafted | Done |
+| Made managed-mode protocol drafted | Done |
+| Authority matrix written | Done |
+| Agent-isolation spike (D) designed | Done (design only; not yet executed) |
+| SQLite spike (A) designed | Done (design only; not yet executed) |
+| Coordinator-independent runner spike (B) designed | Done (design only; not yet executed) |
+| Daemon-bound runner spike (C) designed | Done (design only; not yet executed) |
+| Packaging spike (E) designed | Done (design only; not yet executed) |
+| Elixir vs. Go recommendation made, with revisit trigger | Done |
+| **Spikes actually executed and passing** | **Not started - this is the next unit of work, not this one** |
+| No P0 contradiction remains unresolved | Confirmed (section 2 above; none required changing product vision) |
+
+**Go/no-go verdict for this report**: GO to begin executing Spikes A through E, one at a time, each as its own small, independently reviewable change, per master-prompt section 26's closing instruction. NO-GO on any Phase 1 daemon/kernel work, and NO-GO on resuming or referencing the discarded `made-daemon-rewrite` branch, until all five spikes pass under the conditions specified in sections 9-11 above.
