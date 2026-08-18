@@ -1,0 +1,61 @@
+defmodule Consigliere.DatabaseWriter do
+  @moduledoc """
+  The single serialized write path required by docs/adr/ADR-002 and
+  docs/architecture/database.md.
+
+  Every mutation in the system is expected to route through this one
+  GenServer's mailbox. Because a GenServer processes its mailbox one
+  message at a time, this turns "many concurrent writers" into "one
+  writer at a time, queued," which is what actually avoids
+  SQLITE_BUSY under WAL mode rather than relying on busy_timeout alone
+  to paper over real write contention.
+
+  This module holds no long-lived domain state in memory. Every call
+  is a short `Repo.transaction/1` that reads what it needs, mutates,
+  and returns. If the process crashes, nothing durable is lost,
+  because nothing durable ever lived here, only in SQLite.
+  """
+  use GenServer
+
+  alias Consigliere.Repo
+  alias Consigliere.Missions.Mission
+
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, :ok, Keyword.put_new(opts, :name, __MODULE__))
+  end
+
+  @doc "Insert a Mission through the serialized write path."
+  def insert_mission(attrs) do
+    GenServer.call(__MODULE__, {:transaction, fn -> do_insert_mission(attrs) end}, 10_000)
+  end
+
+  @doc """
+  Run an arbitrary transaction function through the serialized write
+  path. Exists for spike/test scenarios that need direct control
+  (e.g. deliberately holding a transaction open, or writing a
+  poison row via raw SQL). Production code should prefer named
+  functions like insert_mission/1 over this escape hatch.
+  """
+  def transaction(fun, timeout \\ 10_000) do
+    GenServer.call(__MODULE__, {:transaction, fun}, timeout)
+  end
+
+  @impl true
+  def init(:ok), do: {:ok, %{}}
+
+  @impl true
+  def handle_call({:transaction, fun}, _from, state) do
+    result = Repo.transaction(fun)
+    {:reply, result, state}
+  end
+
+  defp do_insert_mission(attrs) do
+    %Mission{}
+    |> Mission.changeset(attrs)
+    |> Repo.insert()
+    |> case do
+      {:ok, mission} -> mission
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+end
