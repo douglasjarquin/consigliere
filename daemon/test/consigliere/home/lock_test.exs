@@ -45,4 +45,14 @@ defmodule Consigliere.Home.LockTest do
 
     refute File.exists?(socket_path)
   end
+
+  test "repeated status probes never make a live lock look stale", %{home: home} do
+    assert {:ok, pid} = Lock.start_link(home: home)
+
+    for _ <- 1..20 do
+      assert Home.socket_status(home) == :live
+    end
+
+    GenServer.stop(pid)
+  end
 end

@@ -15,7 +15,8 @@ defmodule Consigliere.Home.Lock do
 
     case claim(socket_path) do
       {:ok, listen_socket} ->
-        {:ok, %{socket_path: socket_path, listen_socket: listen_socket}}
+        acceptor = spawn_link(fn -> accept_loop(listen_socket) end)
+        {:ok, %{socket_path: socket_path, listen_socket: listen_socket, acceptor: acceptor}}
 
       :already_running ->
         {:stop, :already_running}
@@ -33,7 +34,27 @@ defmodule Consigliere.Home.Lock do
 
       {:error, _not_live} ->
         File.rm(socket_path)
-        :gen_tcp.listen(0, [:binary, ifaddr: {:local, socket_path}, backlog: 1])
+        :gen_tcp.listen(0, [:binary, ifaddr: {:local, socket_path}, backlog: 128])
+    end
+  end
+
+  # A status probe (ours or anyone else's) just connects and disconnects --
+  # nothing ever calls accept/1 on the other end, so an unaccepted
+  # connection sits in the kernel's backlog until something drains it.
+  # With no acceptor, that queue fills after a handful of probes and every
+  # later connect gets refused, making a perfectly live lock look :stale --
+  # which would make the next boot delete a live daemon's socket file.
+  defp accept_loop(listen_socket) do
+    case :gen_tcp.accept(listen_socket) do
+      {:ok, conn} ->
+        :gen_tcp.close(conn)
+        accept_loop(listen_socket)
+
+      {:error, :closed} ->
+        :ok
+
+      {:error, _other} ->
+        accept_loop(listen_socket)
     end
   end
 
