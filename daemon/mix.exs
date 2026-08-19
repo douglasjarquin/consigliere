@@ -9,7 +9,8 @@ defmodule Consigliere.MixProject do
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
-      aliases: aliases()
+      aliases: aliases(),
+      releases: releases()
     ]
   end
 
@@ -35,6 +36,14 @@ defmodule Consigliere.MixProject do
   defp aliases do
     [
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
+    ]
+  end
+
+  defp releases do
+    [
+      consigliere_daemon: [
+        include_executables_for: [:unix]
+      ]
     ]
   end
 end
