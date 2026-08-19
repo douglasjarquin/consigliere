@@ -18,6 +18,18 @@ import (
 // waiting on a poll that never returns).
 const psSnapshotTimeout = 2 * time.Second
 
+// psWaitDelay bounds the extra time psSnapshot waits, after psSnapshotTimeout
+// has already killed `ps` itself, for its stdout pipe to actually close. A
+// context alone is not enough: exec.CommandContext only kills the direct
+// child, but a `ps` that forks a background child before dying (or is a
+// wrapper script that does) leaves that child holding the pipe's write end
+// open, so Output() keeps blocking on a read that will never see EOF until
+// the orphan exits on its own -- a later verification-gate round reproduced
+// this as a genuine 61-second hang despite the context timeout already
+// having fired. WaitDelay forces the pipe closed once it elapses, regardless
+// of what still holds it open.
+const psWaitDelay = 1 * time.Second
+
 // processInfo is one row of a `ps` snapshot: a pid, its parent, and its
 // start time. startedAt is an opaque fingerprint (ps's own `lstart`
 // rendering, never parsed as a real time.Time) used only to tell whether a
@@ -35,7 +47,9 @@ func psSnapshot() ([]processInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), psSnapshotTimeout)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,ppid=,lstart=").Output()
+	cmd := exec.CommandContext(ctx, "ps", "-axo", "pid=,ppid=,lstart=")
+	cmd.WaitDelay = psWaitDelay
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}

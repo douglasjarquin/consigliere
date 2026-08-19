@@ -129,3 +129,36 @@ func TestPSSnapshot_TimesOutRatherThanHangingForever(t *testing.T) {
 		t.Fatalf("psSnapshot took %v, did not respect its bound against a hung ps", elapsed)
 	}
 }
+
+// TestPSSnapshot_BoundedEvenWhenPSForksAChildThatOutlivesItAndHoldsStdoutOpen
+// proves psSnapshotTimeout's bound holds even when `ps` itself exits (or is
+// killed) but leaves an orphaned child holding the stdout pipe's write end
+// open: a verification-gate round found exec.CommandContext's kill only
+// reaches the direct child, so Output() kept blocking on a read that would
+// never see EOF until the orphan exited on its own (reproduced as a 61s
+// hang in the real runner) -- a bare context, with no WaitDelay, does not
+// actually bound this call the way it appears to.
+func TestPSSnapshot_BoundedEvenWhenPSForksAChildThatOutlivesItAndHoldsStdoutOpen(t *testing.T) {
+	dir := t.TempDir()
+	fakePS := filepath.Join(dir, "ps")
+	script := "#!/bin/sh\n/bin/sleep 30 &\nexec /bin/sleep 30\n"
+	if err := os.WriteFile(fakePS, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake ps: %v", err)
+	}
+
+	originalPath := os.Getenv("PATH")
+	t.Cleanup(func() { os.Setenv("PATH", originalPath) })
+	os.Setenv("PATH", dir)
+
+	start := time.Now()
+	_, err := psSnapshot()
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatalf("expected an error from a ps whose child never returns")
+	}
+	bound := psSnapshotTimeout + psWaitDelay + 2*time.Second
+	if elapsed >= bound {
+		t.Fatalf("psSnapshot took %v, exceeding its bound of %v -- an orphaned child holding stdout open must not be able to extend this indefinitely", elapsed, bound)
+	}
+}

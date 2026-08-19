@@ -502,6 +502,61 @@ func TestRun_MidGracefulWindowEscapeIsStillCaught(t *testing.T) {
 	}
 }
 
+// TestRun_RunningManifestAndReaperAreNotDelayedByDescendantTrackingsFirstPoll
+// proves a slow `ps` cannot delay reaping the harness or persisting its
+// pgid in the "running" manifest -- a verification-gate round found the
+// descendant tracker's synchronous first poll previously sat between
+// spawning the harness and both of those steps, so an already-running
+// harness went unreaped and unrecorded for as long as `ps` took. The fake
+// `ps` here is prepended to PATH rather than replacing it, so the harness
+// command (`sleep`) still resolves normally.
+func TestRun_RunningManifestAndReaperAreNotDelayedByDescendantTrackingsFirstPoll(t *testing.T) {
+	fakeDir := t.TempDir()
+	fakePS := filepath.Join(fakeDir, "ps")
+	if err := os.WriteFile(fakePS, []byte("#!/bin/sh\n/bin/sleep 1\n"), 0o755); err != nil {
+		t.Fatalf("write fake ps: %v", err)
+	}
+	originalPath := os.Getenv("PATH")
+	t.Cleanup(func() { os.Setenv("PATH", originalPath) })
+	os.Setenv("PATH", fakeDir+string(os.PathListSeparator)+originalPath)
+
+	dir := shortSocketDir(t)
+	manifestPath := filepath.Join(dir, "manifest.json")
+	controlSocketPath := filepath.Join(dir, "control.sock")
+
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- runWithAcceptTimeout("attempt-slow-ps", "mission-slow-ps", "fence-slow-ps",
+			manifestPath, controlSocketPath, []string{"sleep", "30"}, 200*time.Millisecond)
+	}()
+
+	start := time.Now()
+	m := waitForManifestState(t, manifestPath, StateRunning, 500*time.Millisecond)
+	elapsed := time.Since(start)
+	if elapsed >= 1*time.Second {
+		t.Fatalf("running manifest took %v to appear -- must never be delayed by descendant tracking's first poll against a slow ps (1s)", elapsed)
+	}
+	if m.HarnessPID == 0 || m.PGID == 0 {
+		t.Fatalf("running manifest missing harness_pid/pgid: %+v", m)
+	}
+
+	// Reap the harness directly here rather than waiting out the full
+	// termination sequence: the tracker's own background polling against
+	// this same slow ps is still in flight and can queue up several more
+	// slow polls back-to-back before Stop() drains it, which is an artifact
+	// of this test's synthetic slow ps (real ps calls take milliseconds),
+	// not a bound this test needs to assert on.
+	if err := syscall.Kill(-m.PGID, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
+		t.Fatalf("kill harness group %d: %v", m.PGID, err)
+	}
+
+	select {
+	case <-runErrCh:
+	case <-time.After(20 * time.Second):
+		t.Fatalf("run() never returned")
+	}
+}
+
 func skipLine(t *testing.T, r *bufio.Reader) {
 	t.Helper()
 	readLine(t, r)
