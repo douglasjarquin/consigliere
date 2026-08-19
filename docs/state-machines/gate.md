@@ -70,5 +70,10 @@ A new commit produces a new Gate; the Mission validation ledger (Section 10.8 of
 
 ## Open questions carried forward (not resolved here)
 
-- Whether `invalidated` Gates should be retained indefinitely for audit purposes or subject to a retention policy; this document assumes indefinite retention since they are cheap rows and valuable history, but does not specify a cleanup policy.
 - Exact policy defaults for the fingerprint occurrence limit and repair round limit (Section 11 suggests 2 and 3 respectively as starting points); left as configurable per project/gate-type rather than hardcoded in this state machine.
+
+## Decision (2026-08-19): `invalidated` Gates are retained indefinitely
+
+Confirmed: no retention/pruning policy for `invalidated` Gate rows.
+They are cheap rows and valuable audit/decision history for later debugging of why a Mission proceeded or blocked; no expiry mechanism is built for them.
+If table growth ever becomes a real, measured problem, add a retention window then, rather than paying the design and maintenance cost of a pruning mechanism now for a problem that has not yet been shown to exist.

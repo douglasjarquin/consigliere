@@ -64,7 +64,7 @@ Full detail in `docs/adr/`. One-line summary each:
 
 Full detail in `docs/state-machines/`. Each includes a full state list, a transition table with guards and side effects, terminal-state semantics, an explicit mapping to master-prompt section 14 invariants, and a failure-mode traceability section grounding transitions in the incidents above.
 
-Open policy questions flagged by the drafting pass, not yet resolved, to close out before Phase 1 schema work: exact numeric bounds for Attempt silence-tolerance and checkpoint-timeout windows; whether Mission needs an explicit `superseded_by` column; whether a Mission-scoped Question defaults to staying open across Attempt supersession or requires an explicit relevance judgment; retention policy for `invalidated` Gate rows.
+**Update (2026-08-19): all four open policy questions flagged by the drafting pass are now resolved**, clearing the way for Phase 1 schema work. Decisions recorded directly in each state machine doc: Attempt's silence-tolerance window is 15 minutes and its checkpoint-timeout bound is 5 minutes, both wall-clock and re-anchored on the runner's own timestamps (`docs/state-machines/attempt.md`, "Decision" section); Mission gets no `superseded_by` reverse-pointer column, only the replacement Mission's forward-pointing `replaces_mission_id` (`docs/state-machines/mission.md`, "Decision" section, overriding that document's own earlier recommendation); a Mission-scoped Question stays open by default across Attempt supersession, never silently dropped (`docs/state-machines/question.md`, "Decision" section); `invalidated` Gate rows are retained indefinitely, no pruning mechanism (`docs/state-machines/gate.md`, "Decision" section).
 
 ## 6. Runner protocol draft
 

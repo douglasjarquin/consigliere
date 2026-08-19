@@ -69,4 +69,9 @@ This is the direct justification for making `requested_authority` and the `-> an
 ## Open questions carried forward (not resolved here)
 
 - Exact default expiry policy per `blocking_scope` and `requested_authority` combination (a boss-authority Question probably needs a longer or absent default timeout than a project-advisory one); left as a project-level policy value.
-- Whether `superseded` for a Mission-scoped Question should require an explicit judgment call by whatever process is superseding the Attempt (i.e. "is this still relevant") versus a default of "stays open unless explicitly withdrawn"; this document assumes the latter default, since silently dropping a Mission-scoped Question would violate Invariant 29's intent.
+
+## Decision (2026-08-19): Mission-scoped Questions stay open by default across supersession
+
+Confirmed: a Mission-scoped Question defaults to staying open when the Attempt that raised it is superseded, rather than requiring an explicit relevance judgment before carrying forward.
+An open question almost always still matters to the Mission regardless of which Attempt raised it, and requiring a judgment call at every supersession would risk silently dropping a Mission-scoped Question, which would violate Invariant 29's intent.
+Explicit withdrawal remains the only way to close a Question early; supersession alone never does.

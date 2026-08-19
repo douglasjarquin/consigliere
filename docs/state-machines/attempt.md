@@ -68,5 +68,11 @@ The `running -> checkpoint_requested -> checkpointed` sequence is the direct str
 
 ## Open questions carried forward (not resolved here)
 
-- Exact numeric bound for the "bounded interval" in `checkpoint_requested -> lost` and the silence-tolerance window in `running`; this is a policy value, not a structural one, and should be set per-harness in Phase 3's harness conformance suite rather than hardcoded here.
 - Whether `failed` should carry a sub-classification distinguishing "harness bug" from "policy violation" (e.g. artifact hash mismatch) for repair-routing purposes, or whether `exit_classification` as a free-form field is sufficient for Phase 1-3 and can be refined later.
+
+## Decision (2026-08-19): default numeric bounds for the silence-tolerance and checkpoint-timeout windows
+
+- **`running` silence-tolerance window: 15 minutes.** Coding-agent harnesses routinely go quiet for several minutes mid-turn (a single large reasoning/tool-use burst can emit no framed event at all); 15 minutes is generous enough to absorb that pattern without misreading it as death, while still being short enough that a genuinely wedged runner is caught in a reasonable time.
+- **`checkpoint_requested -> lost` bounded interval: 5 minutes.** This window can be much tighter than the general silence tolerance, because a checkpoint request is the daemon proactively asking an Attempt it has *already confirmed is running* to wrap up and report a SHA -- it is not waiting on open-ended harness "thinking," just a bounded commit-and-report. 5 minutes is generous enough to cover a large working tree's commit/artifact-hash work without being so long that reconciliation stalls on a checkpoint that was never going to arrive.
+- Both windows are **wall-clock intervals re-anchored on the runner's own timestamps** (the runner's last-observed-alive evidence, not the daemon's own possibly-suspended interval timers), per Invariant 28 above -- a macOS sleep/wake cycle must not silently accumulate as apparent silence in either window.
+- These are Phase 1 schema defaults, not immutable constants: per the original open-question note, they remain revisable per-harness in Phase 3's harness conformance suite once real harness behavior under load is observed.

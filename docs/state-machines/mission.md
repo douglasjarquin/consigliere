@@ -42,7 +42,7 @@ This keeps the phase enum small and keeps "why is this Mission not running" a qu
 | `integrating` | `awaiting_integration_authorization` | merge attempt fails because remote head moved (force-push race) | server rejected the expected-SHA merge | Authorization revoked; `mission.integration_race_detected` event; blocker opened |
 | any non-terminal | `failed` | repair/retry budget exhausted, or terminal incident recorded | ledger counters exceed policy limits, or an Incident row references this Mission with severity terminal | `mission.failed` event; `terminal_reason` set; open Questions handled per supersession rule |
 | any non-terminal | `canceled` | boss cancels | boss principal | `mission.canceled` event; active Attempt(s) checkpoint-and-terminate; workspace released |
-| any non-terminal | `superseded` | a replacement Mission is authorized for the same scope, or the boss explicitly supersedes | replacement Mission row exists and references this Mission as `superseded_by` (tracked outside the phase enum, e.g. on the new Mission's row) | `mission.superseded` event; every open Question and active Attempt for this Mission resolved per the supersession rule |
+| any non-terminal | `superseded` | a replacement Mission is authorized for the same scope, or the boss explicitly supersedes | replacement Mission row exists with a `replaces_mission_id` referencing this Mission (forward pointer, mirroring Attempt's `retry_of_attempt_id`; no reverse-pointer column on this row -- see Decision below) | `mission.superseded` event; every open Question and active Attempt for this Mission resolved per the supersession rule |
 | `failed` | `active` | boss or project policy grants a decision that raises the budget or authorizes a fresh attempt | a Decision row of scope `mission_finding_waiver` or `project_policy_override` references this Mission's blocking incident | ledger not reset, only the specific blocking condition cleared; `mission.resumed_after_decision` event |
 
 ## Terminal states
@@ -71,4 +71,10 @@ This is exactly the shape the `ready_for_review -> active` and Mission validatio
 ## Open questions carried forward (not resolved here)
 
 - Whether `awaiting_integration_authorization -> active` (base moved) should be an automatic reconciler-driven transition or must always go through an explicit Decision; this document assumes automatic reconciliation is safe because it only ever narrows authority (revokes a stale Authorization), never grants one.
-- Whether `superseded` needs its own `superseded_by` foreign key on this table (cleaner for `cs why`) versus being derivable only from the replacement Mission's row; recommend adding it directly to avoid a reverse-lookup at query time.
+
+## Decision (2026-08-19): no `superseded_by` reverse-pointer column
+
+No dedicated `superseded_by` foreign key is added to the Mission table.
+This overrides this document's own earlier recommendation ("add it directly to avoid a reverse-lookup at query time") in favor of the simpler schema: `replaces_mission_id` on the *replacement* Mission's row (see the transition table above) is the only stored pointer.
+"What superseded this Mission" is answered by a reverse lookup (`WHERE replaces_mission_id = this_mission.id`), not a second stored column.
+If `cs why`'s query performance on that reverse lookup ever becomes a real problem, add the column then, backed by an actual measurement, rather than paying the schema/write-path cost now for a query pattern that has not yet been shown to need it.
