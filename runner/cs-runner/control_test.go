@@ -2,14 +2,52 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+// slowConn is a net.Conn stand-in whose Write splits its payload into two
+// chunks with a deliberate delay between them, widening the interleaving
+// window deterministically -- a real Unix domain socket's Write on this
+// platform turns out to already be atomic against concurrent writers at
+// the sizes practical for a test (verified empirically before writing
+// this), so a real-socket test alone cannot reliably distinguish
+// Send holding its lock across the whole write from releasing it early.
+type slowConn struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *slowConn) Write(p []byte) (int, error) {
+	mid := len(p) / 2
+	s.mu.Lock()
+	s.buf.Write(p[:mid])
+	s.mu.Unlock()
+
+	time.Sleep(20 * time.Millisecond)
+
+	s.mu.Lock()
+	s.buf.Write(p[mid:])
+	s.mu.Unlock()
+
+	return len(p), nil
+}
+
+func (s *slowConn) Read([]byte) (int, error)         { return 0, fmt.Errorf("slowConn: read unsupported") }
+func (s *slowConn) Close() error                     { return nil }
+func (s *slowConn) LocalAddr() net.Addr              { return nil }
+func (s *slowConn) RemoteAddr() net.Addr             { return nil }
+func (s *slowConn) SetDeadline(time.Time) error      { return nil }
+func (s *slowConn) SetReadDeadline(time.Time) error  { return nil }
+func (s *slowConn) SetWriteDeadline(time.Time) error { return nil }
 
 // shortSocketDir returns a short-path temp directory suitable for a Unix
 // domain socket. t.TempDir() nests under a path that includes the full test
@@ -26,6 +64,45 @@ func shortSocketDir(t *testing.T) string {
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	return dir
+}
+
+// TestControlChannel_SendSerializesAcrossTheWholeWrite proves Send holds
+// its lock across the entire write, not just the conn field read, using a
+// deliberately slow net.Conn stand-in to force a real interleaving window
+// deterministically -- two concurrent Send calls must never produce a
+// corrupted/interleaved byte stream, mirroring the real hazard of the main
+// goroutine (runner_started/harness_exited/termination_complete) and the
+// ReadLoop goroutine (pong) both calling Send at once.
+func TestControlChannel_SendSerializesAcrossTheWholeWrite(t *testing.T) {
+	fake := &slowConn{}
+	cc := &ControlChannel{conn: fake}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		cc.Send(map[string]any{"type": "pong", "marker": strings.Repeat("A", 2000)})
+	}()
+	go func() {
+		defer wg.Done()
+		cc.Send(map[string]any{"type": "pong", "marker": strings.Repeat("B", 2000)})
+	}()
+	wg.Wait()
+
+	fake.mu.Lock()
+	data := fake.buf.Bytes()
+	fake.mu.Unlock()
+
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected exactly 2 complete lines from 2 serialized sends, got %d (interleaved write): %q", len(lines), data)
+	}
+	for i, line := range lines {
+		var msg map[string]any
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			t.Fatalf("line %d is not valid complete JSON (interleaved write): %q: %v", i, line, err)
+		}
+	}
 }
 
 func TestControlChannel_AcceptsOneClientAndExchangesNDJSON(t *testing.T) {
@@ -311,5 +388,104 @@ func TestControlChannel_AcceptOnceTimesOutIfNoClientConnects(t *testing.T) {
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("AcceptOnce took %v to time out, expected close to the 200ms bound", elapsed)
+	}
+}
+
+// TestControlChannel_ConcurrentSendsNeverInterleaveOnTheWire proves Send
+// serializes concurrent callers across the entire write, not just the conn
+// field read -- two goroutines (mirroring the real main-goroutine vs.
+// ReadLoop-goroutine pong sender) writing large-ish payloads at the same
+// time must never interleave mid-syscall and corrupt NDJSON framing on the
+// wire.
+func TestControlChannel_ConcurrentSendsNeverInterleaveOnTheWire(t *testing.T) {
+	socketPath := filepath.Join(shortSocketDir(t), "control.sock")
+	cc, err := NewControlChannel(socketPath)
+	if err != nil {
+		t.Fatalf("NewControlChannel: %v", err)
+	}
+	defer cc.Close()
+
+	acceptErrCh := make(chan error, 1)
+	go func() { acceptErrCh <- cc.AcceptOnce(2 * time.Second) }()
+
+	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
+	if err != nil {
+		t.Fatalf("client dial: %v", err)
+	}
+	defer conn.Close()
+
+	if err := <-acceptErrCh; err != nil {
+		t.Fatalf("AcceptOnce: %v", err)
+	}
+
+	const perGoroutine = 20
+	const goroutines = 4
+	const total = goroutines * perGoroutine
+	// Each payload is large enough (~500KB) that a single Send call's
+	// underlying conn.Write is virtually certain to be split across
+	// multiple partial write(2) syscalls by the runtime/kernel, opening a
+	// real window for another goroutine's write to interleave if Send does
+	// not hold its lock across the whole call -- a small payload (a few KB)
+	// tends to complete in one atomic write(2) regardless of any userspace
+	// locking, which would make this test pass even against unsynchronized
+	// code for the wrong reason.
+	const payloadSize = 500_000
+
+	// The reader must drain concurrently with the writers, not after
+	// wg.Wait(): the total payload volume here comfortably exceeds a Unix
+	// domain socket's send buffer, so waiting for all sends to finish
+	// before reading anything would deadlock every writer on a full
+	// buffer -- an artifact of this test's own design, unrelated to
+	// whatever Send itself does or doesn't serialize.
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	reader := bufio.NewReader(conn)
+	readErrCh := make(chan error, 1)
+	go func() {
+		for i := 0; i < total; i++ {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				readErrCh <- fmt.Errorf("reading line %d: %w", i, err)
+				return
+			}
+			var msg map[string]any
+			if err := json.Unmarshal([]byte(line), &msg); err != nil {
+				readErrCh <- fmt.Errorf("line %d is not valid complete JSON (interleaved write): %q: %w", i, line, err)
+				return
+			}
+			if msg["type"] != "pong" {
+				readErrCh <- fmt.Errorf("line %d has unexpected content, framing likely corrupted: %+v", i, msg)
+				return
+			}
+			g, ok := msg["goroutine"].(float64)
+			if !ok {
+				readErrCh <- fmt.Errorf("line %d has no goroutine field: %+v", i, msg)
+				return
+			}
+			payload, _ := msg["payload"].(string)
+			marker := fmt.Sprintf("g%d", int(g))
+			if len(payload) != payloadSize || strings.Count(payload, marker)*len(marker) != len(payload) {
+				readErrCh <- fmt.Errorf("line %d payload is not homogeneous marker %q (len=%d, want=%d) -- bytes from a different concurrent Send leaked in", i, marker, len(payload), payloadSize)
+				return
+			}
+		}
+		readErrCh <- nil
+	}()
+
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			marker := fmt.Sprintf("g%d", g)
+			payload := strings.Repeat(marker, payloadSize/len(marker))
+			for i := 0; i < perGoroutine; i++ {
+				cc.Send(map[string]any{"type": "pong", "goroutine": g, "seq": i, "payload": payload})
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	if err := <-readErrCh; err != nil {
+		t.Fatal(err)
 	}
 }

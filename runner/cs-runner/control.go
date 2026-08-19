@@ -62,21 +62,27 @@ func (c *ControlChannel) AcceptOnce(timeout time.Duration) error {
 	}
 }
 
+// Send marshals and writes msg as one NDJSON line. The mutex is held across
+// the entire write, not just the conn field read: the main goroutine
+// (runner_started/harness_exited/termination_complete) and the ReadLoop
+// goroutine (pong) can both call Send concurrently, and releasing the lock
+// before the write would let their writes interleave mid-syscall and
+// corrupt NDJSON framing on the wire.
 func (c *ControlChannel) Send(msg map[string]any) error {
-	c.mu.Lock()
-	conn := c.conn
-	c.mu.Unlock()
-
-	if conn == nil {
-		return fmt.Errorf("no client connected")
-	}
-
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal control message: %w", err)
 	}
+	data = append(data, '\n')
 
-	_, err = conn.Write(append(data, '\n'))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.conn == nil {
+		return fmt.Errorf("no client connected")
+	}
+
+	_, err = c.conn.Write(data)
 	return err
 }
 
