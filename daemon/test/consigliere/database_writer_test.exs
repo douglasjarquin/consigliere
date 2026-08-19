@@ -7,8 +7,12 @@ defmodule Consigliere.DatabaseWriterTest do
   alias Consigliere.Missions.Mission
 
   setup do
-    Repo.delete_all(Mission)
+    Consigliere.Fixtures.reset_phase1_tables!()
     :ok
+  end
+
+  defp mission_attrs(objective) do
+    %{objective: objective, scope: "scope", acceptance_criteria: "criteria", phase: "draft"}
   end
 
   describe "scenario 1: concurrent writers, no SQLITE_BUSY" do
@@ -24,7 +28,7 @@ defmodule Consigliere.DatabaseWriterTest do
       results =
         1..n
         |> Task.async_stream(
-          fn i -> DatabaseWriter.insert_mission(%{title: "#{prefix}-#{i}", phase: "draft"}) end,
+          fn i -> DatabaseWriter.insert_mission(mission_attrs("#{prefix}-#{i}")) end,
           max_concurrency: n,
           timeout: 15_000
         )
@@ -36,7 +40,7 @@ defmodule Consigliere.DatabaseWriterTest do
 
       count =
         Mission
-        |> where([m], like(m.title, ^"#{prefix}-%"))
+        |> where([m], like(m.objective, ^"#{prefix}-%"))
         |> Repo.aggregate(:count)
 
       assert count == n
@@ -49,7 +53,7 @@ defmodule Consigliere.DatabaseWriterTest do
         Task.async(fn ->
           Task.async_stream(
             1..25,
-            fn i -> DatabaseWriter.insert_mission(%{title: "scenario2-#{i}", phase: "draft"}) end,
+            fn i -> DatabaseWriter.insert_mission(mission_attrs("scenario2-#{i}")) end,
             max_concurrency: 25,
             timeout: 15_000
           )
@@ -78,13 +82,11 @@ defmodule Consigliere.DatabaseWriterTest do
           DatabaseWriter.transaction(fn ->
             Process.sleep(300)
 
-            Repo.insert!(
-              Mission.changeset(%Mission{}, %{title: "scenario3-slow", phase: "draft"})
-            )
+            Repo.insert!(Mission.changeset(%Mission{}, mission_attrs("scenario3-slow")))
           end)
         end)
 
-      queued_result = DatabaseWriter.insert_mission(%{title: "scenario3-queued", phase: "draft"})
+      queued_result = DatabaseWriter.insert_mission(mission_attrs("scenario3-queued"))
 
       assert {:ok, _} = Task.await(slow_write, 5_000)
       assert {:ok, _} = queued_result
@@ -97,7 +99,7 @@ defmodule Consigliere.DatabaseWriterTest do
       Task.async_stream(
         1..25,
         fn i ->
-          DatabaseWriter.insert_mission(%{title: "scenario4-#{i}", phase: "draft"})
+          DatabaseWriter.insert_mission(mission_attrs("scenario4-#{i}"))
         end,
         max_concurrency: 25,
         timeout: 15_000
@@ -109,7 +111,7 @@ defmodule Consigliere.DatabaseWriterTest do
 
       count =
         Mission
-        |> where([m], like(m.title, "scenario4-%"))
+        |> where([m], like(m.objective, "scenario4-%"))
         |> Repo.aggregate(:count)
 
       assert count == 25
@@ -120,17 +122,16 @@ defmodule Consigliere.DatabaseWriterTest do
     test "a row with an unknown phase value (an app-level invariant SQLite cannot enforce) does not crash the writer" do
       {:ok, %{num_rows: 1}} =
         Repo.query(
-          "INSERT INTO missions (id, title, phase, inserted_at, updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now'))",
-          [Ecto.UUID.bingenerate(), "poison-row", "not_a_real_phase_value"]
+          "INSERT INTO missions (id, objective, scope, acceptance_criteria, phase, inserted_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+          [Ecto.UUID.bingenerate(), "poison-row", "scope", "criteria", "not_a_real_phase_value"]
         )
 
       assert Process.alive?(Process.whereis(DatabaseWriter))
 
-      poisoned = Repo.all(Mission) |> Enum.find(&(&1.title == "poison-row"))
+      poisoned = Repo.all(Mission) |> Enum.find(&(&1.objective == "poison-row"))
       assert poisoned.phase == "not_a_real_phase_value"
 
-      assert {:ok, _} =
-               DatabaseWriter.insert_mission(%{title: "scenario6-after-poison", phase: "draft"})
+      assert {:ok, _} = DatabaseWriter.insert_mission(mission_attrs("scenario6-after-poison"))
     end
   end
 end

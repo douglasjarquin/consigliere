@@ -2,7 +2,12 @@ alias Consigliere.Repo
 alias Consigliere.DatabaseWriter
 
 for i <- 1..500 do
-  DatabaseWriter.insert_mission(%{title: "backup-test-#{i}", phase: "draft"})
+  DatabaseWriter.insert_mission(%{
+    objective: "backup-test-#{i}",
+    scope: "scope",
+    acceptance_criteria: "criteria",
+    phase: "draft"
+  })
 end
 
 {:ok, %{rows: [[total_before]]}} = Repo.query("SELECT COUNT(*) FROM missions")

@@ -29,7 +29,8 @@ defmodule Consigliere.MixProject do
   defp deps do
     [
       {:ecto_sql, "~> 3.11"},
-      {:ecto_sqlite3, "~> 0.15"}
+      {:ecto_sqlite3, "~> 0.15"},
+      {:jason, "~> 1.4"}
     ]
   end
 
