@@ -224,6 +224,74 @@ func TestControlChannel_ReadLoopBoundsLineSizeAndNeverTreatsATooLongLineAsEOF(t 
 		t.Fatalf("expected the too-long line to be dropped, not treated as EOF/disconnection")
 	case <-time.After(500 * time.Millisecond):
 	}
+
+	// The channel must still be alive after the too-long line: a valid
+	// message sent afterward on the same connection must still be
+	// delivered, not silently lost because the read loop gave up.
+	if _, err := conn.Write([]byte(`{"type":"cancel"}` + "\n")); err != nil {
+		t.Fatalf("client write after too-long line: %v", err)
+	}
+	select {
+	case got := <-received:
+		if got["type"] != "cancel" {
+			t.Fatalf("unexpected message: %+v", got)
+		}
+	case <-eofDetected:
+		t.Fatalf("expected the valid cancel to be delivered, not treated as EOF")
+	case <-time.After(2 * time.Second):
+		t.Fatalf("cancel sent after a too-long line was never delivered -- the read loop stopped listening")
+	}
+}
+
+// TestControlChannel_ReadLoopStillDetectsRealDisconnectAfterATooLongLine
+// proves a too-long line does not leave ReadLoop permanently unable to
+// detect the connection actually closing afterward -- the daemon dying for
+// real, right after having sent one oversized frame, must still be
+// detected.
+func TestControlChannel_ReadLoopStillDetectsRealDisconnectAfterATooLongLine(t *testing.T) {
+	socketPath := filepath.Join(shortSocketDir(t), "control.sock")
+	cc, err := NewControlChannel(socketPath)
+	if err != nil {
+		t.Fatalf("NewControlChannel: %v", err)
+	}
+	defer cc.Close()
+
+	acceptErrCh := make(chan error, 1)
+	go func() { acceptErrCh <- cc.AcceptOnce(2 * time.Second) }()
+
+	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
+	if err != nil {
+		t.Fatalf("client dial: %v", err)
+	}
+
+	if err := <-acceptErrCh; err != nil {
+		t.Fatalf("AcceptOnce: %v", err)
+	}
+
+	eofDetected := make(chan struct{})
+	go cc.ReadLoop(
+		func(map[string]any) {},
+		func() { close(eofDetected) },
+	)
+
+	tooLong := strings.Repeat("z", maxControlLineBytes+1024)
+	if _, err := conn.Write([]byte(tooLong + "\n")); err != nil {
+		t.Fatalf("client write: %v", err)
+	}
+
+	select {
+	case <-eofDetected:
+		t.Fatalf("expected the too-long line alone not to trigger EOF")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	conn.Close()
+
+	select {
+	case <-eofDetected:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("real disconnect after a too-long line was never detected -- the read loop is permanently deaf")
+	}
 }
 
 func TestControlChannel_AcceptOnceTimesOutIfNoClientConnects(t *testing.T) {

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -95,26 +96,68 @@ func (c *ControlChannel) ReadLoop(onMessage func(map[string]any), onEOF func()) 
 		return
 	}
 
-	// scanner.Buffer raises the token limit well past bufio.Scanner's default
-	// 64KiB (generous enough for any real stdout/stderr chunk) while keeping
-	// it bounded, unlike an unbounded bufio.Reader.ReadString, which would
-	// let a malformed or hostile peer grow the runner's memory without
-	// limit. scanner.Err() after the loop distinguishes a genuine EOF (nil)
-	// from a scan error such as a too-long line (non-nil) -- only a real EOF
-	// may be conflated with the connection actually closing.
-	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxControlLineBytes)
-	for scanner.Scan() {
-		if trimmed := strings.TrimSpace(scanner.Text()); trimmed != "" {
+	// readBoundedLine bounds memory per line (unlike an unbounded
+	// bufio.Reader.ReadString) without ever making the read loop itself
+	// unusable the way bufio.Scanner does: once Scan() returns false due to
+	// an error (e.g. a too-long line), that Scanner can never be resumed, so
+	// treating a too-long line as anything other than "stop reading forever"
+	// would be a lie. A too-long line here is instead skipped (resynced to
+	// the next '\n') and reading continues -- the control channel must stay
+	// alive through one malformed frame, since giving up on it is exactly as
+	// bad as the daemon actually dying: onEOF only fires for a genuine read
+	// error (real disconnect), never for errLineTooLong.
+	reader := bufio.NewReaderSize(conn, 64*1024)
+	for {
+		line, err := readBoundedLine(reader, maxControlLineBytes)
+		if errors.Is(err, errLineTooLong) {
+			continue
+		}
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			var msg map[string]any
 			if jsonErr := json.Unmarshal([]byte(trimmed), &msg); jsonErr == nil {
 				onMessage(msg)
 			}
 		}
+		if err != nil {
+			break
+		}
 	}
 
-	if scanner.Err() == nil {
-		onEOF()
+	onEOF()
+}
+
+var errLineTooLong = errors.New("control channel line exceeds the maximum size")
+
+// readBoundedLine reads one '\n'-terminated line, bounded to max bytes. A
+// line exceeding max is fully drained up to and including its terminating
+// '\n' (so the stream stays correctly framed for the next line) and
+// reported as errLineTooLong instead of being returned -- the caller
+// decides to skip it and keep reading, never to stop reading altogether.
+func readBoundedLine(r *bufio.Reader, max int) (string, error) {
+	var buf []byte
+	tooLong := false
+
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if len(chunk) > 0 && !tooLong {
+			if len(buf)+len(chunk) > max {
+				tooLong = true
+				buf = nil
+			} else {
+				buf = append(buf, chunk...)
+			}
+		}
+
+		if err == nil {
+			if tooLong {
+				return "", errLineTooLong
+			}
+			return string(buf), nil
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return "", err
 	}
 }
 
