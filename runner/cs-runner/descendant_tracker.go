@@ -14,21 +14,21 @@ import (
 // cannot see either case: by the time termination begins, the harness may
 // already be dead and its escaped descendants already reparented to init,
 // with no trace connecting them back to the harness in a fresh snapshot.
-// Continuous polling closes that window for a descendant whose ENTIRE
-// chain of parent-child links back to the harness pid (or to any pid
-// already in the accumulated set) is intact at the instant of a single
-// poll, wherever in the harness's life that instant falls -- not just
-// near the end. Several brand-new links can be caught together within
-// one poll (the chain need not have been discovered incrementally across
-// earlier polls); what cannot happen is catching them piecemeal across
-// separate polls with no single poll ever seeing the whole chain intact
-// at once. A single intact edge is not enough on its own: a descendant
-// whose immediate parent itself was never linked back this way (e.g.
-// that parent's own link to its parent was already severed before any
-// poll ever saw the two of them together) is never discoverable, no
-// matter how long that descendant subsequently lives or how many further
-// descendants it goes on to have (see docs/spikes/spike-c-results.md's
-// double-fork Known Limitations bullet, which is exactly this case).
+// Continuous polling closes that window for a descendant reached by a
+// chain of parent-child links each of which is caught by SOME poll while
+// its parent side is already a valid root (the harness pid, or a pid an
+// earlier poll already added to the accumulated set) -- not necessarily
+// all caught by the SAME poll. Once a pid is added, it remains a root for
+// every later poll, so the links in a long chain are routinely discovered
+// incrementally, one poll and one generation at a time, long after an
+// upstream ancestor has itself died and been pruned. The one thing that
+// permanently breaks discovery is a single link that no poll ever catches
+// while its parent side was still a valid root: once that happens, the
+// child on the far side of that missed link was never added, so it can
+// never itself become a root, and everything beneath it is invisible no
+// matter how long it subsequently lives or how many further descendants
+// it goes on to have (see docs/spikes/spike-c-results.md's double-fork
+// Known Limitations bullet, which is exactly this case).
 // A pid is pruned from the accumulated set once its identity no longer
 // validates (it exited on its own, or the pid number has been recycled by
 // the OS to an unrelated process), so the accumulated set at any moment is
