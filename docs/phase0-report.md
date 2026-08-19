@@ -166,6 +166,21 @@ This section consolidates the spike list from the master prompt's section 15 int
 4. Force a crash-loop scenario (a startup that always fails, e.g. via a deliberately invalid config) and confirm the LaunchAgent's restart behavior is bounded (does not spin the CPU or fill logs unboundedly) and that `cs doctor` (or its Phase 0/1 equivalent) can identify the startup failure and report a specific, actionable cause rather than a generic error.
 5. Exit criterion: exactly one daemon instance can ever own a given home directory at a time, verified by attempting concurrent starts, and startup failures are diagnosable through the CLI, not just through raw logs.
 
+**Decision (2026-08-19): the LaunchAgent half of scenarios 1 and 4 is descoped, not executed.**
+This spike's scenarios were written assuming macOS `launchd` supervises the daemon's lifecycle -- starts it on login, restarts it on crash.
+That assumption does not match how consigliere is actually used: `herdr` (an existing session-holder tool, semantically like `tmux` session reuse) is what holds the daemon across terminal-open events -- attach to an existing session if one exists, start fresh otherwise.
+The boss's own workflow is `cd consigliere && herdr` (or attach to an existing `herdr` session), not a background service running independent of any session ever having been opened.
+Building and proving a `launchd`-supervised install for a lifecycle model that isn't the actual deployment target would be effort spent on the wrong mechanism, the same class of call as Spike D's descope (see section 9): match infrastructure investment to the actual deployment model, not a hypothetical one.
+
+This does not descope the rest of Spike E.
+Scenarios 2, 3, and the diagnosability half of scenario 4 and 5 are still exactly right regardless of who supervises the process: two `herdr` sessions (or two terminals) racing to start the daemon against the same home must not double-boot it, and `cs doctor` must still turn a startup failure into an actionable cause.
+Those are proven below.
+
+**What replaces the LaunchAgent scenarios**: a real release binary (`mix release`, giving `bin/consigliere_daemon start`/`daemon` for free) that respects the same lock semantics already proven for `iex -S mix`, plus a documented two-step protocol for whatever holds the daemon's lifecycle (`herdr`, or a human) to follow -- `cs doctor` first, `cs start` only if not already running, treat "refused because already running" as success rather than an error. That protocol is deliberately **not** application code: the decision of whether to start belongs to the harness/session layer, the same way `cs` (today's tool) and firstmate's original design keep that decision in agent instructions rather than compiled logic. See `docs/spikes/spike-e-results.md` for the exact protocol text and the live evidence for what's actually enforceable from application code (the lock) versus what has to stay a documented convention (the decision to invoke it).
+
+**Revisit trigger**: reopen this decision if the deployment model changes so the daemon must keep running -- and self-revive after a hard crash (OOM, `kill -9`) -- with no human, terminal, or `herdr` session ever having been present to restart it.
+`herdr` replaces `launchd` only for "survives a closed terminal"; it does not replace `launchd`'s `KeepAlive` restart-on-crash behavior, so a daemon that must self-revive with nobody around is the specific gap this descope accepts and would need to be closed then, not now.
+
 ## 12. Elixir versus Go recommendation
 
 **Recommendation: proceed with Elixir/OTP, provisionally, exactly as the master prompt frames it, conditioned on Spikes B and C (sections 11 above) passing.**
@@ -202,9 +217,9 @@ No phase was added or removed. Two adjustments are recorded:
 | SQLite spike (A) designed | Done, and executed (see `docs/spikes/spike-a-results.md`) |
 | Coordinator-independent runner spike (B) designed | Done, and executed (see `docs/spikes/spike-b-results.md`) |
 | Daemon-bound runner spike (C) designed | Done, executed, and passing -- verification gate closed with unconditional approval after four rounds (see `docs/spikes/spike-c-results.md`) |
-| Packaging spike (E) designed | Done (design only; not yet executed) |
+| Packaging spike (E) designed | Done. **In progress: lock/stale-socket/doctor-diagnosability scenarios executed and passing; LaunchAgent scenarios descoped (see section 11's "Decision" note); release binary and process-group-survival proof remain open -- see `docs/spikes/spike-e-results.md`** |
 | Elixir vs. Go recommendation made, with revisit trigger | Done |
-| **Spikes actually executed and passing** | **Spikes A, B, and C done and passing (see `docs/spikes/spike-a-results.md`, `docs/spikes/spike-b-results.md`, `docs/spikes/spike-c-results.md` -- Spike C's verification gate found and fixed thirteen real defects across three rounds before closing with unconditional approval on round 4); D descoped by deliberate decision (see section 9), not executed; E is the remaining unit of work** |
+| **Spikes actually executed and passing** | **Spikes A, B, and C done and passing (see `docs/spikes/spike-a-results.md`, `docs/spikes/spike-b-results.md`, `docs/spikes/spike-c-results.md` -- Spike C's verification gate found and fixed thirteen real defects across three rounds before closing with unconditional approval on round 4); D descoped by deliberate decision (see section 9), not executed; E in progress (see `docs/spikes/spike-e-results.md`) -- lock/stale-socket/doctor scenarios done, LaunchAgent scenarios descoped, release binary and process-group-survival proof remaining** |
 | No P0 contradiction remains unresolved | Confirmed (section 2 above; none required changing product vision) |
 
 **Go/no-go verdict for this report**: GO to begin executing Spikes A through E, one at a time, each as its own small, independently reviewable change, per master-prompt section 26's closing instruction. NO-GO on any Phase 1 daemon/kernel work, and NO-GO on resuming or referencing the discarded `made-daemon-rewrite` branch, until all five spikes pass under the conditions specified in sections 9-11 above -- except Spike D, which was deliberately descoped rather than executed (see section 9's "Decision" note) and is not a gating condition for Phase 1.
