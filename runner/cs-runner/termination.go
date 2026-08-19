@@ -56,10 +56,6 @@ func Terminate(pgid int, gracefulTimeout, verifyTimeout time.Duration) (verified
 	return waitUntilGone(pgid, verifyTimeout), nil
 }
 
-func pgidHasMember(pgid int) bool {
-	return checkProcessGroupFn(pgid) == groupAlive
-}
-
 func checkProcessGroup(pgid int) processGroupState {
 	switch err := syscall.Kill(-pgid, 0); err {
 	case nil:

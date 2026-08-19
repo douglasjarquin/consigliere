@@ -41,5 +41,14 @@ func SpawnHarness(command []string, confirmTimeout time.Duration) (*HarnessHandl
 		time.Sleep(time.Millisecond)
 	}
 
-	return nil, fmt.Errorf("harness pid %d never completed its own setsid() within %v", pid, confirmTimeout)
+	// setsid() never took effect within the window -- an exceptional case
+	// this project has never observed happen under normal conditions. The
+	// child is still running, but its process group cannot be trusted (it
+	// may still be this runner's OWN group), so clean up with a specific-pid
+	// signal rather than risk a negative-pgid broadcast against an
+	// unconfirmed group. The pid is still returned so a caller that wants to
+	// verify the cleanup can do so.
+	syscall.Kill(pid, syscall.SIGKILL)
+	cmd.Wait()
+	return &HarnessHandle{PID: pid}, fmt.Errorf("harness pid %d never completed its own setsid() within %v", pid, confirmTimeout)
 }
