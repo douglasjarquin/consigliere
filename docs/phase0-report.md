@@ -192,13 +192,15 @@ No phase was added or removed. Two adjustments are recorded:
 | Authority matrix written | Done |
 | Agent-isolation spike (D) designed | Done (design only; not yet executed) |
 | SQLite spike (A) designed | Done, and executed (see `docs/spikes/spike-a-results.md`) |
-| Coordinator-independent runner spike (B) designed | Done (design only; not yet executed) |
+| Coordinator-independent runner spike (B) designed | Done, and executed (see `docs/spikes/spike-b-results.md`) |
 | Daemon-bound runner spike (C) designed | Done (design only; not yet executed) |
 | Packaging spike (E) designed | Done (design only; not yet executed) |
 | Elixir vs. Go recommendation made, with revisit trigger | Done |
-| **Spikes actually executed and passing** | **Spike A done and passing (see `docs/spikes/spike-a-results.md`); B, C, D, E are the next unit of work** |
+| **Spikes actually executed and passing** | **Spikes A and B done and passing (see `docs/spikes/spike-a-results.md`, `docs/spikes/spike-b-results.md`); C, D, E are the next unit of work** |
 | No P0 contradiction remains unresolved | Confirmed (section 2 above; none required changing product vision) |
 
 **Go/no-go verdict for this report**: GO to begin executing Spikes A through E, one at a time, each as its own small, independently reviewable change, per master-prompt section 26's closing instruction. NO-GO on any Phase 1 daemon/kernel work, and NO-GO on resuming or referencing the discarded `made-daemon-rewrite` branch, until all five spikes pass under the conditions specified in sections 9-11 above.
+
+**Update**: Spike B (coordinator-independent runner) has since been executed and passes, after six adversarial verification-gate rounds that found and fixed three real bugs (two of them a genuine architectural miss: the round-2 mission-side blast-radius fix only deferred the cascade one level up, not eliminated it, which round 3 caught and fixed for real) plus one explicit hunt (round 4) that confirmed no further level of that bug class exists anywhere in the supervision tree; see `docs/spikes/spike-b-results.md`. Spikes C, D, and E remain not started.
 
 **Update**: Spike A (SQLite serialized writer) has since been executed and passes all seven scenarios; see `docs/spikes/spike-a-results.md`. Spikes B, C, D, and E remain not started.
