@@ -41,6 +41,23 @@ defmodule Consigliere.HomeDiagnosticsTest do
     assert Home.last_error(home) == "config invalid: missing thing"
   end
 
+  test "clear_error!/1 removes a previously recorded failure", %{home: home} do
+    Home.record_error!(home, "config invalid: missing thing")
+    assert Home.last_error(home) == "config invalid: missing thing"
+
+    Home.clear_error!(home)
+
+    assert Home.last_error(home) == nil
+  end
+
+  test "clear_error!/1 is a no-op when there was never a recorded failure", %{home: home} do
+    assert Home.last_error(home) == nil
+
+    Home.clear_error!(home)
+
+    assert Home.last_error(home) == nil
+  end
+
   test "forced_failure_reason/0 reads CS_FORCE_STARTUP_FAILURE" do
     refute Home.forced_failure_reason()
 

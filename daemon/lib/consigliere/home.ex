@@ -40,6 +40,11 @@ defmodule Consigliere.Home do
     File.write!(last_error_path(home), reason)
   end
 
+  def clear_error!(home \\ dir()) do
+    File.rm(last_error_path(home))
+    :ok
+  end
+
   def last_error(home \\ dir()) do
     case File.read(last_error_path(home)) do
       {:ok, contents} -> contents

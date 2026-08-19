@@ -28,6 +28,31 @@ defmodule Consigliere.Application do
 
     # :one_for_one is deliberate: a crashed sibling must never kill unrelated work (see ADR-004).
     opts = [strategy: :one_for_one, name: Consigliere.Supervisor]
-    Supervisor.start_link(children, opts)
+
+    children
+    |> Supervisor.start_link(opts)
+    |> record_boot_result(Consigliere.Home.dir())
+  end
+
+  # Losing the boot race to a live instance is expected contention, not a
+  # bug -- socket_status/1 already surfaces :live independently, so
+  # recording this here would just read as a false alarm next to a
+  # perfectly healthy daemon.
+  def record_boot_result(
+        {:error, {:shutdown, {:failed_to_start_child, Consigliere.Home.Lock, :already_running}}} =
+          result,
+        _home
+      ) do
+    result
+  end
+
+  def record_boot_result({:ok, _pid} = result, home) do
+    Consigliere.Home.clear_error!(home)
+    result
+  end
+
+  def record_boot_result({:error, reason} = result, home) do
+    Consigliere.Home.record_error!(home, inspect(reason))
+    result
   end
 end
