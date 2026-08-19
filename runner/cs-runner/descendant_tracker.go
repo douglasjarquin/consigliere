@@ -65,7 +65,21 @@ func (t *descendantTracker) poll(rootPID int) {
 	if rootPID <= 1 {
 		return
 	}
-	pids, err := descendantsOf(rootPID)
+
+	t.mu.Lock()
+	roots := make([]int, 0, len(t.seen)+1)
+	roots = append(roots, rootPID)
+	for pid := range t.seen {
+		roots = append(roots, pid)
+	}
+	t.mu.Unlock()
+
+	// Every previously-seen pid is polled as its own root, not just rootPID:
+	// once the harness itself has died and been reaped, a BFS rooted only at
+	// its pid can no longer reach anything, so a still-alive tracked
+	// descendant that later forks its own child would otherwise never be
+	// discovered at all.
+	pids, err := descendantsOfAny(roots)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()

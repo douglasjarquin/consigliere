@@ -91,6 +91,18 @@ type trackedPID struct {
 // escaped descendant to init and severed the very link this function
 // needs to find it.
 func descendantsOf(root int) ([]trackedPID, error) {
+	return descendantsOfAny([]int{root})
+}
+
+// descendantsOfAny returns every transitive descendant of any of the given
+// roots, from a single process-table snapshot, excluding the roots
+// themselves. descendantTracker polls with every pid it has already
+// tracked as an additional root, not just the harness: once the harness
+// itself has died and been reaped, a BFS rooted only at the harness pid can
+// no longer reach anything, so a still-alive tracked descendant that later
+// forks its own child would otherwise never be discovered at all. Letting
+// every previously-seen pid keep acting as its own root closes that gap.
+func descendantsOfAny(roots []int) ([]trackedPID, error) {
 	rows, err := psSnapshot()
 	if err != nil {
 		return nil, err
@@ -104,8 +116,14 @@ func descendantsOf(root int) ([]trackedPID, error) {
 	}
 
 	var descendants []trackedPID
-	seen := map[int]bool{root: true}
-	queue := []int{root}
+	seen := make(map[int]bool, len(roots))
+	queue := make([]int, 0, len(roots))
+	for _, root := range roots {
+		if !seen[root] {
+			seen[root] = true
+			queue = append(queue, root)
+		}
+	}
 	for len(queue) > 0 {
 		pid := queue[0]
 		queue = queue[1:]
