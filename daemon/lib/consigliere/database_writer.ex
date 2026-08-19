@@ -51,6 +51,11 @@ defmodule Consigliere.DatabaseWriter do
         exception -> {:error, exception}
       end
 
+    if match?({:ok, _}, result) do
+      Consigliere.EventBus.notify()
+      Consigliere.OutboxDispatcher.notify()
+    end
+
     {:reply, result, state}
   end
 

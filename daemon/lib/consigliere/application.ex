@@ -21,6 +21,9 @@ defmodule Consigliere.Application do
       Consigliere.Home.Lock,
       Consigliere.Repo,
       Consigliere.DatabaseWriter,
+      {Registry, keys: :duplicate, name: Consigliere.EventBus.Registry},
+      Consigliere.EventBus,
+      Consigliere.OutboxDispatcher,
       {Registry, keys: :unique, name: Consigliere.Registry},
       Consigliere.RunnerDynamicSupervisor,
       Consigliere.MissionDynamicSupervisor
