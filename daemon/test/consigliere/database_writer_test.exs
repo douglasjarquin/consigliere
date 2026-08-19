@@ -77,7 +77,10 @@ defmodule Consigliere.DatabaseWriterTest do
         Task.async(fn ->
           DatabaseWriter.transaction(fn ->
             Process.sleep(300)
-            Repo.insert!(Mission.changeset(%Mission{}, %{title: "scenario3-slow", phase: "draft"}))
+
+            Repo.insert!(
+              Mission.changeset(%Mission{}, %{title: "scenario3-slow", phase: "draft"})
+            )
           end)
         end)
 
@@ -91,9 +94,14 @@ defmodule Consigliere.DatabaseWriterTest do
 
   describe "scenario 4: WAL checkpoint" do
     test "PRAGMA wal_checkpoint runs clean after a write burst" do
-      Task.async_stream(1..25, fn i ->
-        DatabaseWriter.insert_mission(%{title: "scenario4-#{i}", phase: "draft"})
-      end, max_concurrency: 25, timeout: 15_000)
+      Task.async_stream(
+        1..25,
+        fn i ->
+          DatabaseWriter.insert_mission(%{title: "scenario4-#{i}", phase: "draft"})
+        end,
+        max_concurrency: 25,
+        timeout: 15_000
+      )
       |> Enum.to_list()
 
       assert {:ok, %{rows: [[_busy, _log_frames, _checkpointed]]}} =
@@ -121,7 +129,8 @@ defmodule Consigliere.DatabaseWriterTest do
       poisoned = Repo.all(Mission) |> Enum.find(&(&1.title == "poison-row"))
       assert poisoned.phase == "not_a_real_phase_value"
 
-      assert {:ok, _} = DatabaseWriter.insert_mission(%{title: "scenario6-after-poison", phase: "draft"})
+      assert {:ok, _} =
+               DatabaseWriter.insert_mission(%{title: "scenario6-after-poison", phase: "draft"})
     end
   end
 end

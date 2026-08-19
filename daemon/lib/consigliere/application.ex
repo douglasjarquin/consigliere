@@ -9,7 +9,10 @@ defmodule Consigliere.Application do
   def start(_type, _args) do
     children = [
       Consigliere.Repo,
-      Consigliere.DatabaseWriter
+      Consigliere.DatabaseWriter,
+      {Registry, keys: :unique, name: Consigliere.Registry},
+      Consigliere.RunnerDynamicSupervisor,
+      Consigliere.MissionDynamicSupervisor
     ]
 
     # :one_for_one is deliberate: a crashed sibling must never kill unrelated work (see ADR-004).

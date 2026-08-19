@@ -11,8 +11,8 @@ defmodule Consigliere.Missions.Mission do
 
   @primary_key {:id, :binary_id, autogenerate: true}
   schema "missions" do
-    field :title, :string
-    field :phase, :string, default: "draft"
+    field(:title, :string)
+    field(:phase, :string, default: "draft")
 
     timestamps(type: :utc_datetime_usec)
   end
