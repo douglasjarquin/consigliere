@@ -7,6 +7,16 @@ defmodule Consigliere.Application do
 
   @impl true
   def start(_type, _args) do
+    with nil <- Consigliere.Home.forced_failure_reason() do
+      start_supervisor()
+    else
+      reason ->
+        Consigliere.Home.record_error!(reason)
+        {:error, {:forced_startup_failure, reason}}
+    end
+  end
+
+  defp start_supervisor do
     children = [
       Consigliere.Home.Lock,
       Consigliere.Repo,
