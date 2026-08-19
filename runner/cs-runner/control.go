@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -89,13 +90,22 @@ func (c *ControlChannel) ReadLoop(onMessage func(map[string]any), onEOF func()) 
 		return
 	}
 
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		var msg map[string]any
-		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
-			continue
+	// bufio.Reader.ReadString has no fixed line-length cap, unlike
+	// bufio.Scanner's default 64KiB token limit -- a large-but-valid single
+	// line (e.g. a big stdout/stderr chunk) must never be misread as a scan
+	// error and conflated with the connection actually closing.
+	reader := bufio.NewReader(conn)
+	for {
+		line, err := reader.ReadString('\n')
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			var msg map[string]any
+			if jsonErr := json.Unmarshal([]byte(trimmed), &msg); jsonErr == nil {
+				onMessage(msg)
+			}
 		}
-		onMessage(msg)
+		if err != nil {
+			break
+		}
 	}
 
 	onEOF()

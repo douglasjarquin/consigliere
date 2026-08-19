@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -114,6 +115,66 @@ func TestControlChannel_ReadLoopDeliversMessagesAndDetectsEOF(t *testing.T) {
 	case <-eofDetected:
 	case <-time.After(2 * time.Second):
 		t.Fatalf("EOF callback was never invoked after client disconnected")
+	}
+}
+
+// TestControlChannel_ReadLoopHandlesOversizedSingleLineMessage proves a
+// large-but-valid single NDJSON line (larger than bufio.Scanner's default
+// 64KiB token limit) is delivered intact rather than being misread as a
+// scan error and reported as onEOF -- conflating "message too big" with
+// "the daemon is gone" would make ReadLoop kill a perfectly live Attempt's
+// harness the first time a large stdout/stderr chunk crossed the channel.
+func TestControlChannel_ReadLoopHandlesOversizedSingleLineMessage(t *testing.T) {
+	socketPath := filepath.Join(shortSocketDir(t), "control.sock")
+	cc, err := NewControlChannel(socketPath)
+	if err != nil {
+		t.Fatalf("NewControlChannel: %v", err)
+	}
+	defer cc.Close()
+
+	acceptErrCh := make(chan error, 1)
+	go func() { acceptErrCh <- cc.AcceptOnce(2 * time.Second) }()
+
+	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
+	if err != nil {
+		t.Fatalf("client dial: %v", err)
+	}
+	defer conn.Close()
+
+	if err := <-acceptErrCh; err != nil {
+		t.Fatalf("AcceptOnce: %v", err)
+	}
+
+	received := make(chan map[string]any, 1)
+	eofDetected := make(chan struct{})
+	go cc.ReadLoop(
+		func(msg map[string]any) { received <- msg },
+		func() { close(eofDetected) },
+	)
+
+	bigPayload := strings.Repeat("x", 70000)
+	msg := map[string]any{"type": "stdout_chunk", "attempt_id": "a1", "data": bigPayload}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if _, err := conn.Write(append(data, '\n')); err != nil {
+		t.Fatalf("client write: %v", err)
+	}
+
+	select {
+	case got := <-received:
+		if got["type"] != "stdout_chunk" || got["data"] != bigPayload {
+			t.Fatalf("oversized message was not delivered intact")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("oversized message was never delivered (likely misread as a scanner error / false EOF)")
+	}
+
+	select {
+	case <-eofDetected:
+		t.Fatalf("ReadLoop incorrectly reported EOF for an oversized-but-valid single line while the connection was still open")
+	case <-time.After(300 * time.Millisecond):
 	}
 }
 
