@@ -32,9 +32,9 @@ If a Phase 0 spike shows the Go-runner-plus-Elixir-daemon split adds more real c
 One runner process instance is spawned per Attempt.
 On launch it must, in order:
 
-1. Call `setsid()` (or platform equivalent) to become a new session leader and process group leader, so the harness process tree it starts shares one signalable process group with the runner.
+1. Spawn the harness with `setsid()` (or platform equivalent) applied to it, making the harness itself the new session leader and process group leader -- not the runner. This keeps the runner outside the harness's own process group, so the runner can `kill(-pgid, ...)` that group during termination without ever signaling itself, and can go on to write a final manifest after the group is gone. (Spike C: implemented in `runner/cs-runner/spawn.go`.)
 2. Write the runtime manifest (below) before or during harness spawn, using the crash-safe write protocol.
-3. Exec the harness as a child within that process group.
+3. Exec the harness within that new process group, as the group's leader.
 4. Report runner PID, harness PID, process-group ID, harness executable identity (path + a content hash, to detect a swapped binary across restarts), start timestamp, `attempt_id`, `mission_id`, and `fencing_token` to the daemon over the control channel.
 5. Frame the harness's stdout and stderr and forward them over the control channel, preserving native ordering (one writer per stream, no interleaved buffering across streams).
 6. Monitor the daemon control channel for liveness.
