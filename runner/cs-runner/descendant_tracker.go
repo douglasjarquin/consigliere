@@ -14,18 +14,28 @@ import (
 // cannot see either case: by the time termination begins, the harness may
 // already be dead and its escaped descendants already reparented to init,
 // with no trace connecting them back to the harness in a fresh snapshot.
-// Continuous polling closes that window for a descendant reached by a
-// chain of parent-child links each of which is caught by SOME poll while
-// its parent side is already a valid root (the harness pid, or a pid an
-// earlier poll already added to the accumulated set) -- not necessarily
-// all caught by the SAME poll. Once a pid is added, it remains a root for
-// every later poll, so the links in a long chain are routinely discovered
-// incrementally, one poll and one generation at a time, long after an
-// upstream ancestor has itself died and been pruned. The one thing that
-// permanently breaks discovery is a single link that no poll ever catches
-// while its parent side was still a valid root: once that happens, the
-// child on the far side of that missed link was never added, so it can
-// never itself become a root, and everything beneath it is invisible no
+// Continuous polling closes that window for a descendant reached, at some
+// poll, by an unbroken chain of parent-child links that are ALL present
+// together in that one poll's own snapshot and that connect back to a pid
+// already a valid root going into that poll -- the harness pid, or any
+// pid a strictly earlier poll already added. A single poll's own BFS
+// walks that snapshot to any depth, so it can catch several brand-new
+// generations at once with no earlier poll ever having seen the
+// intermediate links individually (this is why even the tracker's first,
+// synchronous poll can catch a multi-generation escape in one pass, not
+// just a direct child). And because every pid ever added remains a valid
+// root for every later poll too, a subtree already reached through some
+// ancestor keeps being explored on future polls even after that ancestor
+// has since died and been pruned -- a long chain is routinely completed
+// incrementally this way, across many different polls, long after an
+// upstream link has broken. The one thing that permanently breaks
+// discovery is a descendant for which no poll, at any point in the
+// harness's life, ever catches an intact chain back to whatever was a
+// valid root at that moment: in practice, one specific link on the path
+// back to the harness was already severed (its parent had already
+// exited) before any poll's snapshot could ever catch both ends of it
+// together, and the child beyond that missed link can therefore never
+// itself become a root -- so everything beneath it is invisible no
 // matter how long it subsequently lives or how many further descendants
 // it goes on to have (see docs/spikes/spike-c-results.md's double-fork
 // Known Limitations bullet, which is exactly this case).
