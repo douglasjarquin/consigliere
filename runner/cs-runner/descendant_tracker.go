@@ -14,14 +14,17 @@ import (
 // cannot see either case: by the time termination begins, the harness may
 // already be dead and its escaped descendants already reparented to init,
 // with no trace connecting them back to the harness in a fresh snapshot.
-// Continuous polling closes that window for any parent-child link that is
-// itself intact for at least one poll instant, wherever in the harness's
-// life that instant falls -- not just near the end. The residual gap this
-// leaves is narrower, not bounded to "right before the tracker stops": a
-// descendant whose immediate parent dies before any single poll captures
-// that exact edge is never discoverable at all, however long the
-// descendant itself subsequently runs (see docs/spikes/spike-c-results.md's
-// double-fork Known Limitations bullet, which is exactly this case).
+// Continuous polling closes that window for a descendant whose ENTIRE
+// chain of parent-child links back to a pid the tracker has already
+// observed is intact at the instant of a single poll, wherever in the
+// harness's life that instant falls -- not just near the end. A single
+// intact edge is not enough: a descendant whose immediate parent itself
+// was never linked back to a tracked pid (e.g. that parent's own link to
+// its parent was already severed before any poll saw it) is never
+// discoverable, no matter how long that descendant subsequently lives or
+// how many further descendants it goes on to have (see
+// docs/spikes/spike-c-results.md's double-fork Known Limitations bullet,
+// which is exactly this case).
 // A pid is pruned from the accumulated set once its identity no longer
 // validates (it exited on its own, or the pid number has been recycled by
 // the OS to an unrelated process), so the accumulated set at any moment is
