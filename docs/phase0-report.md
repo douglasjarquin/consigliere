@@ -193,13 +193,15 @@ No phase was added or removed. Two adjustments are recorded:
 | Agent-isolation spike (D) designed | Done (design only; not yet executed) |
 | SQLite spike (A) designed | Done, and executed (see `docs/spikes/spike-a-results.md`) |
 | Coordinator-independent runner spike (B) designed | Done, and executed (see `docs/spikes/spike-b-results.md`) |
-| Daemon-bound runner spike (C) designed | Done (design only; not yet executed) |
+| Daemon-bound runner spike (C) designed | Done, and executed (see `docs/spikes/spike-c-results.md`) |
 | Packaging spike (E) designed | Done (design only; not yet executed) |
 | Elixir vs. Go recommendation made, with revisit trigger | Done |
-| **Spikes actually executed and passing** | **Spikes A and B done and passing (see `docs/spikes/spike-a-results.md`, `docs/spikes/spike-b-results.md`); C, D, E are the next unit of work** |
+| **Spikes actually executed and passing** | **Spikes A, B, and C done and passing (see `docs/spikes/spike-a-results.md`, `docs/spikes/spike-b-results.md`, `docs/spikes/spike-c-results.md`); D, E are the next unit of work** |
 | No P0 contradiction remains unresolved | Confirmed (section 2 above; none required changing product vision) |
 
 **Go/no-go verdict for this report**: GO to begin executing Spikes A through E, one at a time, each as its own small, independently reviewable change, per master-prompt section 26's closing instruction. NO-GO on any Phase 1 daemon/kernel work, and NO-GO on resuming or referencing the discarded `made-daemon-rewrite` branch, until all five spikes pass under the conditions specified in sections 9-11 above.
+
+**Update**: Spike C (daemon-bound runner) has since been executed and passes: a real external `cs-runner` (Go) OS process survived a live `kill -9` of the entire Elixir daemon, detected the death itself via control-channel EOF with zero daemon-side cooperation, terminated the harness process group, verified that termination at the OS level, and left a truthful manifest, all captured live in a tmux session; a reconciler classification function reads that manifest and reaches the correct classification (`lost`, `quarantine_incident`, or `adopt_and_kill`) using a real OS-level process-group liveness check rather than the manifest's own self-report. Two genuine race conditions (a `setsid()` startup TOCTOU, and a shell `trap`-installation timing race) were found via actual failing test runs and fixed, not assumed away. See `docs/spikes/spike-c-results.md` for the full account, including this spike's explicit scope narrowing (no real daemon boot/restart sequence or Mission/Attempt/Workspace schema exists yet; only the classification logic itself is proven here). Spikes D and E remain not started.
 
 **Update**: Spike B (coordinator-independent runner) has since been executed and passes, after six adversarial verification-gate rounds that found and fixed three real bugs (two of them a genuine architectural miss: the round-2 mission-side blast-radius fix only deferred the cascade one level up, not eliminated it, which round 3 caught and fixed for real) plus one explicit hunt (round 4) that confirmed no further level of that bug class exists anywhere in the supervision tree; see `docs/spikes/spike-b-results.md`. Spikes C, D, and E remain not started.
 
