@@ -83,15 +83,35 @@ defmodule Consigliere.ReconcilerTest do
     end
 
     test "\"No such process\" (ESRCH-equivalent) means conclusively gone" do
-      assert Reconciler.kill_result_alive?({"kill: (-370): No such process\n", 1}) == false
+      assert Reconciler.kill_result_alive?({"kill: -370: No such process\n", 1}) == false
     end
 
     test "\"Operation not permitted\" (EPERM) means unverifiable, never treated as gone" do
-      assert Reconciler.kill_result_alive?({"kill: (-370): Operation not permitted\n", 1}) == true
+      assert Reconciler.kill_result_alive?({"kill: -370: Operation not permitted\n", 1}) == true
     end
 
     test "any other unrecognized failure output also means unverifiable, never treated as gone" do
       assert Reconciler.kill_result_alive?({"kill: something else entirely\n", 1}) == true
+    end
+  end
+
+  describe "classify/1 forward progress under a broken environment" do
+    test "a missing kill executable does not crash classify/1, and is treated as unverifiable rather than lost" do
+      original_path = System.get_env("PATH")
+      on_exit(fn -> System.put_env("PATH", original_path) end)
+
+      empty_path_dir = Path.join(System.tmp_dir!(), "empty-path-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(empty_path_dir)
+      on_exit(fn -> File.rm_rf(empty_path_dir) end)
+      System.put_env("PATH", empty_path_dir)
+
+      manifest_path =
+        Path.join(System.tmp_dir!(), "enoent-manifest-#{System.unique_integer([:positive])}.json")
+
+      on_exit(fn -> File.rm(manifest_path) end)
+      File.write!(manifest_path, JSON.encode!(%{"state" => "running", "pgid" => 999}))
+
+      assert {:adopt_and_kill, _manifest} = Reconciler.classify(manifest_path)
     end
   end
 

@@ -47,6 +47,13 @@ defmodule Consigliere.Reconciler do
 
   defp process_group_alive?(pgid) when is_integer(pgid) and pgid > 1 do
     kill_result_alive?(System.cmd("kill", ["-0", "-#{pgid}"], stderr_to_stdout: true))
+  rescue
+    # System.cmd raises (rather than returning an error tuple) if the "kill"
+    # executable itself cannot be found. The reconciler must make forward
+    # progress on every manifest per docs/protocols/runner.md:141, so this
+    # unverifiable case defaults to "alive" like every other one, not to a
+    # crash that would halt reconciliation of every other manifest too.
+    _ -> true
   end
 
   defp process_group_alive?(_), do: true
