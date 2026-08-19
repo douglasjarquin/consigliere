@@ -60,8 +60,8 @@ func Terminate(pgid int, gracefulTimeout, verifyTimeout time.Duration) (verified
 }
 
 // TerminateGroupAndDescendants runs Terminate against pgid and then
-// terminates every descendant pid the caller's tracker observed over the
-// harness's life still alive (via terminatePIDList) -- closing the
+// terminates every descendant pid the caller's tracker observes still alive
+// (via terminateTrackedDescendants) -- closing the
 // daemonize-escape gap: a harness grandchild that calls setsid() itself
 // leaves the process group entirely, so Terminate's group-scoped
 // kill(-pgid, ...) can never reach it, even though it is very much still
@@ -90,68 +90,119 @@ func Terminate(pgid int, gracefulTimeout, verifyTimeout time.Duration) (verified
 func TerminateGroupAndDescendants(pgid int, tracker *descendantTracker, gracefulTimeout, verifyTimeout time.Duration) (verified bool, err error) {
 	groupVerified, groupErr := Terminate(pgid, gracefulTimeout, verifyTimeout)
 
-	// The tracker keeps polling in its own goroutine for the entire
-	// duration of the group phase above, so a descendant that appears
-	// mid-graceful-window (after termination was triggered but before the
-	// group is confirmed gone) is still observed before Stop() takes its
-	// final poll and returns everything ever seen.
-	descendantPIDs, trackingReliable := tracker.Stop()
-	descVerified, descErr := terminatePIDList(descendantPIDs, gracefulTimeout, verifyTimeout)
+	descVerified, descErr := terminateTrackedDescendants(tracker, gracefulTimeout, verifyTimeout)
 
-	verified = groupVerified && trackingReliable && descVerified
+	verified = groupVerified && descVerified
 	return verified, errors.Join(groupErr, descErr)
 }
 
-// terminatePIDList runs the same bounded SIGTERM -> wait -> SIGKILL ->
-// verify sequence Terminate uses for a process group, but against a list of
-// specific tracked process identities rather than a group broadcast, since
-// an escaped descendant's own group cannot be assumed safe to
-// broadcast-signal (it may not be a group of one).
+// terminateTrackedDescendants runs the same bounded SIGTERM -> wait ->
+// SIGKILL -> verify sequence Terminate uses for a process group, but
+// against tracker's live, still-growing accumulated set rather than a
+// single snapshot taken up front. tracker is left running for this entire
+// call and is only stopped just before returning: a verification-gate
+// round found that stopping it first (to grab one static pid list) left a
+// blind spot for the whole of this function's own multi-second graceful-
+// wait and verify windows, during which an already-tracked, SIGTERM-
+// resistant escapee could fork a brand-new child that would never be
+// discovered or signaled, behind a manifest that still claimed
+// dead_verified. Keeping the tracker alive here means its own background
+// polling (which already treats every previously-seen pid as an extra
+// root) keeps discovering such newcomers throughout, not just before this
+// function was ever called.
 //
-// Every tracked pid is first revalidated against a fresh snapshot: the OS
-// is free to recycle a pid number to a completely unrelated process once
-// the original one has exited, and this function must never mistake that
-// unrelated process for the one it was asked to terminate. A pid whose
-// current start time no longer matches what was recorded (or that no
-// longer exists at all) is treated as already resolved -- removed from the
-// list this function signals and waits on, never killed or waited on. If
-// revalidation itself cannot run at all, nothing is signaled and the whole
-// call reports unverified, rather than guessing.
-func terminatePIDList(tracked []trackedPID, gracefulTimeout, verifyTimeout time.Duration) (verified bool, err error) {
-	if len(tracked) == 0 {
-		return true, nil
+// Every newly-discovered pid is revalidated against a fresh snapshot
+// before being signaled: the OS is free to recycle a pid number to a
+// completely unrelated process once the original one has exited, and this
+// function must never mistake that unrelated process for the one it was
+// asked to terminate. A pid whose current start time no longer matches
+// what was recorded (or that no longer exists at all) is treated as
+// already resolved -- never signaled, never waited on. If revalidation
+// itself cannot run at all, nothing is signaled and the whole call reports
+// unverified, rather than guessing.
+func terminateTrackedDescendants(tracker *descendantTracker, gracefulTimeout, verifyTimeout time.Duration) (verified bool, err error) {
+	known := make(map[int]bool)
+
+	signalFresh := func(sig syscall.Signal, doneThisPhase map[int]bool, candidates []trackedPID) error {
+		var fresh []trackedPID
+		for _, p := range candidates {
+			if !doneThisPhase[p.PID] {
+				fresh = append(fresh, p)
+			}
+		}
+		if len(fresh) == 0 {
+			return nil
+		}
+		current, snapErr := currentStartedAtFn()
+		if snapErr != nil {
+			return snapErr
+		}
+		for _, p := range fresh {
+			doneThisPhase[p.PID] = true
+			if current[p.PID] != p.StartedAt {
+				continue
+			}
+			known[p.PID] = true
+			if killErr := sendSignal(p.PID, sig); killErr != nil && killErr != syscall.ESRCH {
+				return killErr
+			}
+		}
+		return nil
 	}
 
-	current, snapErr := currentStartedAtFn()
-	if snapErr != nil {
-		return false, snapErr
+	allKnownGone := func() bool {
+		for pid := range known {
+			if checkPID(pid) != groupGone {
+				return false
+			}
+		}
+		return true
 	}
 
-	var pids []int
-	for _, p := range tracked {
-		if current[p.PID] == p.StartedAt {
-			pids = append(pids, p.PID)
+	runPhase := func(sig syscall.Signal, deadline time.Time) error {
+		doneThisPhase := make(map[int]bool)
+		for {
+			pids, _ := tracker.Peek()
+			if err := signalFresh(sig, doneThisPhase, pids); err != nil {
+				return err
+			}
+			if allKnownGone() {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return nil
+			}
+			time.Sleep(20 * time.Millisecond)
 		}
 	}
-	if len(pids) == 0 {
-		return true, nil
+
+	if err := runPhase(syscall.SIGTERM, time.Now().Add(gracefulTimeout)); err != nil {
+		return false, err
 	}
 
-	for _, pid := range pids {
-		if killErr := sendSignal(pid, syscall.SIGTERM); killErr != nil && killErr != syscall.ESRCH {
-			return false, killErr
+	if !allKnownGone() {
+		if err := runPhase(syscall.SIGKILL, time.Now().Add(verifyTimeout)); err != nil {
+			return false, err
 		}
-	}
-	if waitUntilPIDsGone(pids, gracefulTimeout) {
-		return true, nil
 	}
 
-	for _, pid := range pids {
-		if killErr := sendSignal(pid, syscall.SIGKILL); killErr != nil && killErr != syscall.ESRCH {
-			return false, killErr
-		}
+	finalPIDs, reliable := tracker.Stop()
+	knownBefore := len(known)
+	if err := signalFresh(syscall.SIGKILL, make(map[int]bool), finalPIDs); err != nil {
+		return false, err
 	}
-	return waitUntilPIDsGone(pids, verifyTimeout), nil
+	if len(known) > knownBefore {
+		// Stop()'s own final poll found something no earlier phase loop
+		// had a chance to see: give it a short grace period rather than
+		// judging it immediately after a single SIGKILL.
+		pids := make([]int, 0, len(known))
+		for pid := range known {
+			pids = append(pids, pid)
+		}
+		waitUntilPIDsGone(pids, 500*time.Millisecond)
+	}
+
+	return reliable && allKnownGone(), nil
 }
 
 // checkPID mirrors checkProcessGroup for a specific pid rather than a

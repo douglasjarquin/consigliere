@@ -117,6 +117,66 @@ exit 0
 	}
 }
 
+// TestDescendantTracker_PrunesAStalePollingRootAndNeverAdoptsItsUnrelatedChildren
+// proves a previously-seen pid whose recorded start time no longer matches
+// the live process at that pid number is pruned from the tracker rather
+// than kept as a permanent polling root -- a verification-gate round found
+// that without this, a recycled pid would sweep an unrelated process's
+// real children into the tracked set, and terminateTrackedDescendants'
+// own identity revalidation (a later, separate check) cannot catch this,
+// since those children are recorded with their own correct, matching
+// start times.
+func TestDescendantTracker_PrunesAStalePollingRootAndNeverAdoptsItsUnrelatedChildren(t *testing.T) {
+	dir := t.TempDir()
+	impostorChildPidFile := filepath.Join(dir, "impostor-child.pid")
+
+	impostorCmd := exec.Command("sh", "-c", `sleep 30 & echo $! > "$0"; wait`, impostorChildPidFile)
+	if err := impostorCmd.Start(); err != nil {
+		t.Fatalf("start impostor: %v", err)
+	}
+	impostorPID := impostorCmd.Process.Pid
+	go impostorCmd.Wait()
+	t.Cleanup(func() { syscall.Kill(impostorPID, syscall.SIGKILL) })
+
+	impostorChildPID := waitForPIDFile(t, impostorChildPidFile, 2*time.Second)
+	t.Cleanup(func() { syscall.Kill(impostorChildPID, syscall.SIGKILL) })
+
+	// A separate, real root the tracker actually tracks -- unrelated to the
+	// impostor, needed only so the tracker's background poll runs its full
+	// body (a degenerate root skips it entirely).
+	rootCmd := exec.Command("sleep", "30")
+	if err := rootCmd.Start(); err != nil {
+		t.Fatalf("start root: %v", err)
+	}
+	rootPID := rootCmd.Process.Pid
+	go rootCmd.Wait()
+	t.Cleanup(func() { syscall.Kill(rootPID, syscall.SIGKILL) })
+
+	tracker := startDescendantTracker(rootPID, 20*time.Millisecond)
+	// Seed a stale entry: the impostor's pid, but with a start time that
+	// does not match its real one -- simulating "this pid number was
+	// previously a different, now-exited process the tracker legitimately
+	// saw".
+	tracker.mu.Lock()
+	tracker.seen[impostorPID] = "Mon Jan  1 00:00:00 2001"
+	tracker.mu.Unlock()
+
+	time.Sleep(150 * time.Millisecond)
+
+	pids, reliable := tracker.Stop()
+	if !reliable {
+		t.Fatalf("expected reliable=true: ps was available throughout")
+	}
+	for _, p := range pids {
+		if p.PID == impostorPID {
+			t.Fatalf("stale entry for recycled pid %d was not pruned: %v", impostorPID, pids)
+		}
+		if p.PID == impostorChildPID {
+			t.Fatalf("impostor's real, unrelated child %d was adopted into the tracked set: %v", impostorChildPID, pids)
+		}
+	}
+}
+
 // TestDescendantTracker_ReportsUnreliableAfterAFailedPoll proves a tracker
 // that could never enumerate the process tree (ps unreachable, via a
 // broken PATH) reports reliable=false rather than silently claiming

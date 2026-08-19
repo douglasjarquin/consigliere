@@ -557,6 +557,68 @@ func TestRun_RunningManifestAndReaperAreNotDelayedByDescendantTrackingsFirstPoll
 	}
 }
 
+// TestRun_DescendantForkedDuringTheDescendantPhaseGracefulWindowIsStillCaught
+// proves the daemonize-escape fix holds throughout the descendant phase's
+// own graceful-wait/hard-kill/verify sequence, not just before it starts.
+// A verification-gate round found the tracker was stopped before that
+// sequence ever ran, so a child an already-tracked, SIGTERM-resistant
+// escapee forked during its own multi-second kill window was invisible,
+// unsignaled, and left running behind a manifest that still claimed
+// dead_verified. The escapee here escapes its own process group (so the
+// group phase's broadcast signal can never reach it) and ignores SIGTERM
+// (so it survives long enough into the descendant phase's own sequence to
+// fork something new partway through).
+func TestRun_DescendantForkedDuringTheDescendantPhaseGracefulWindowIsStillCaught(t *testing.T) {
+	dir := shortSocketDir(t)
+	manifestPath := filepath.Join(dir, "manifest.json")
+	controlSocketPath := filepath.Join(dir, "control.sock")
+	lateChildPidFile := filepath.Join(dir, "late-child.pid")
+
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	// The 0.3s pause before the harness exits is realistic, not adversarial:
+	// it gives the descendant tracker (150ms poll interval in production) a
+	// genuine chance to observe the escapee while the harness is still
+	// alive, before the harness's own exit severs that parent-child link.
+	script := `CS_RUNNER_TEST_HELPER=daemonize_ignoring_term_then_fork "$0" "$1" 1500 & sleep 0.3; exit 0`
+
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- run("attempt-late-fork", "mission-late-fork", "fence-late-fork",
+			manifestPath, controlSocketPath, []string{"sh", "-c", script, testBinary, lateChildPidFile})
+	}()
+
+	conn := dialControlSocketWithRetry(t, controlSocketPath, 3*time.Second)
+	defer conn.Close()
+	go io.Copy(io.Discard, conn)
+
+	lateChildPID := waitForPIDFile(t, lateChildPidFile, 5*time.Second)
+	t.Cleanup(func() { syscall.Kill(lateChildPID, syscall.SIGKILL) })
+
+	select {
+	case err := <-runErrCh:
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatalf("run() never returned")
+	}
+
+	m, err := ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if m.State != StateDeadVerified {
+		t.Fatalf("expected dead_verified, got %s", m.State)
+	}
+	if err := syscall.Kill(lateChildPID, 0); err != syscall.ESRCH {
+		t.Fatalf("child %d forked by an already-tracked escapee during the descendant phase's own graceful window is still alive (err=%v)", lateChildPID, err)
+	}
+}
+
 func skipLine(t *testing.T, r *bufio.Reader) {
 	t.Helper()
 	readLine(t, r)

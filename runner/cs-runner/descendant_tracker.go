@@ -67,19 +67,14 @@ func (t *descendantTracker) poll(rootPID int) {
 	}
 
 	t.mu.Lock()
-	roots := make([]int, 0, len(t.seen)+1)
-	roots = append(roots, rootPID)
-	for pid := range t.seen {
-		roots = append(roots, pid)
+	roots := make([]trackedPID, 0, len(t.seen)+1)
+	roots = append(roots, trackedPID{PID: rootPID})
+	for pid, startedAt := range t.seen {
+		roots = append(roots, trackedPID{PID: pid, StartedAt: startedAt})
 	}
 	t.mu.Unlock()
 
-	// Every previously-seen pid is polled as its own root, not just rootPID:
-	// once the harness itself has died and been reaped, a BFS rooted only at
-	// its pid can no longer reach anything, so a still-alive tracked
-	// descendant that later forks its own child would otherwise never be
-	// discovered at all.
-	pids, err := descendantsOfAny(roots)
+	pids, validRoots, err := descendantsOfAny(roots)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -94,11 +89,38 @@ func (t *descendantTracker) poll(rootPID int) {
 		t.pollFailed = true
 		return
 	}
+
+	// A previously-seen pid that no longer validates against this poll
+	// (exited on its own, or recycled by the OS to an unrelated process)
+	// is dropped: it must stop acting as a polling root before its
+	// unrelated replacement's real children could ever be mistaken for
+	// descendants of the harness.
+	stillValid := make(map[int]bool, len(validRoots))
+	for _, r := range validRoots {
+		stillValid[r.PID] = true
+	}
+	for pid := range t.seen {
+		if !stillValid[pid] {
+			delete(t.seen, pid)
+		}
+	}
+
 	for _, p := range pids {
 		if _, ok := t.seen[p.PID]; !ok {
 			t.seen[p.PID] = p.StartedAt
 		}
 	}
+}
+
+// Peek returns every pid observed as a descendant of the tracked root so
+// far, plus whether that result can be trusted as complete -- the same
+// result Stop() returns, but without halting polling: a caller can inspect
+// the tracker's live, still-growing accumulated set while it keeps running
+// in the background.
+func (t *descendantTracker) Peek() (pids []trackedPID, reliable bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.snapshotLocked()
 }
 
 // Stop halts polling (after one final poll) and returns every pid ever
@@ -116,6 +138,10 @@ func (t *descendantTracker) Stop() (pids []trackedPID, reliable bool) {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.snapshotLocked()
+}
+
+func (t *descendantTracker) snapshotLocked() (pids []trackedPID, reliable bool) {
 	pids = make([]trackedPID, 0, len(t.seen))
 	for pid, startedAt := range t.seen {
 		pids = append(pids, trackedPID{PID: pid, StartedAt: startedAt})

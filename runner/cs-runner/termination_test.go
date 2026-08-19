@@ -346,12 +346,26 @@ func TestTerminateGroupAndDescendants_DescendantPhaseStillRunsWhenGroupPhaseErro
 	}
 }
 
-// TestTerminatePIDList_UnverifiableDescendantReportsUnverifiedRatherThanAssumingGone
-// proves the pid-list path never confuses an unverifiable liveness check
+// seededTracker returns a tracker whose accumulated set is pre-populated
+// directly rather than through real polling: root 0 is degenerate, so the
+// tracker's own background goroutine never touches t.seen, letting a test
+// control exactly what terminateTrackedDescendants sees via Peek()/Stop().
+func seededTracker(seen map[int]string) *descendantTracker {
+	tracker := startDescendantTracker(0, time.Hour)
+	tracker.mu.Lock()
+	for pid, startedAt := range seen {
+		tracker.seen[pid] = startedAt
+	}
+	tracker.mu.Unlock()
+	return tracker
+}
+
+// TestTerminateTrackedDescendants_UnverifiableDescendantReportsUnverifiedRatherThanAssumingGone
+// proves the descendant path never confuses an unverifiable liveness check
 // (EPERM) with confirmed death, exactly like the group-scoped path (round
 // 1 finding B2) -- a real escaped descendant behind a permissions change
 // must quarantine, not silently be assumed gone.
-func TestTerminatePIDList_UnverifiableDescendantReportsUnverifiedRatherThanAssumingGone(t *testing.T) {
+func TestTerminateTrackedDescendants_UnverifiableDescendantReportsUnverifiedRatherThanAssumingGone(t *testing.T) {
 	origSignal := sendSignal
 	origCurrentStartedAtFn := currentStartedAtFn
 	t.Cleanup(func() {
@@ -369,12 +383,14 @@ func TestTerminatePIDList_UnverifiableDescendantReportsUnverifiedRatherThanAssum
 		return nil
 	}
 
+	tracker := seededTracker(map[int]string{424242: "same"})
+
 	start := time.Now()
-	verified, err := terminatePIDList([]trackedPID{{PID: 424242, StartedAt: "same"}}, 50*time.Millisecond, 50*time.Millisecond)
+	verified, err := terminateTrackedDescendants(tracker, 50*time.Millisecond, 50*time.Millisecond)
 	elapsed := time.Since(start)
 
 	if err != nil {
-		t.Fatalf("terminatePIDList: %v", err)
+		t.Fatalf("terminateTrackedDescendants: %v", err)
 	}
 	if verified {
 		t.Fatalf("expected verified=false when a descendant's liveness cannot be determined (e.g. EPERM), not assumed gone")
@@ -384,7 +400,7 @@ func TestTerminatePIDList_UnverifiableDescendantReportsUnverifiedRatherThanAssum
 	}
 }
 
-// TestTerminatePIDList_NeverSignalsAPidTheOSHasRecycledToAnUnrelatedProcess
+// TestTerminateTrackedDescendants_NeverSignalsAPidTheOSHasRecycledToAnUnrelatedProcess
 // proves a tracked pid whose current start time no longer matches what was
 // recorded is treated as already resolved -- not signaled, not waited on
 // -- closing a bug a verification-gate round found: a long-lived tracker's
@@ -392,7 +408,7 @@ func TestTerminatePIDList_UnverifiableDescendantReportsUnverifiedRatherThanAssum
 // completely unrelated process once the original one has exited, and this
 // function must never mistake that unrelated process for the one it was
 // asked to terminate.
-func TestTerminatePIDList_NeverSignalsAPidTheOSHasRecycledToAnUnrelatedProcess(t *testing.T) {
+func TestTerminateTrackedDescendants_NeverSignalsAPidTheOSHasRecycledToAnUnrelatedProcess(t *testing.T) {
 	origSignal := sendSignal
 	origCurrentStartedAtFn := currentStartedAtFn
 	t.Cleanup(func() {
@@ -409,23 +425,25 @@ func TestTerminatePIDList_NeverSignalsAPidTheOSHasRecycledToAnUnrelatedProcess(t
 		return map[int]string{555: "a-different-process-now"}, nil
 	}
 
-	verified, err := terminatePIDList([]trackedPID{{PID: 555, StartedAt: "original-process"}}, 50*time.Millisecond, 50*time.Millisecond)
+	tracker := seededTracker(map[int]string{555: "original-process"})
+
+	verified, err := terminateTrackedDescendants(tracker, 50*time.Millisecond, 50*time.Millisecond)
 	if err != nil {
-		t.Fatalf("terminatePIDList: %v", err)
+		t.Fatalf("terminateTrackedDescendants: %v", err)
 	}
 	if !verified {
 		t.Fatalf("expected verified=true: the originally-tracked process is gone (its pid now belongs to something else), which is exactly the desired outcome")
 	}
 	if signaled {
-		t.Fatalf("terminatePIDList signaled pid 555, but it is no longer the process that was tracked -- it must never be touched")
+		t.Fatalf("terminateTrackedDescendants signaled pid 555, but it is no longer the process that was tracked -- it must never be touched")
 	}
 }
 
-// TestTerminatePIDList_UnableToRevalidateReportsUnverifiedWithoutSignalingAnything
+// TestTerminateTrackedDescendants_UnableToRevalidateReportsUnverifiedWithoutSignalingAnything
 // proves that when identity revalidation itself cannot run (e.g. ps
-// unreachable), terminatePIDList signals nothing and reports unverified,
-// rather than guessing at identity and signaling blind.
-func TestTerminatePIDList_UnableToRevalidateReportsUnverifiedWithoutSignalingAnything(t *testing.T) {
+// unreachable), terminateTrackedDescendants signals nothing and reports
+// unverified, rather than guessing at identity and signaling blind.
+func TestTerminateTrackedDescendants_UnableToRevalidateReportsUnverifiedWithoutSignalingAnything(t *testing.T) {
 	origSignal := sendSignal
 	origCurrentStartedAtFn := currentStartedAtFn
 	t.Cleanup(func() {
@@ -442,7 +460,9 @@ func TestTerminatePIDList_UnableToRevalidateReportsUnverifiedWithoutSignalingAny
 		return nil, fmt.Errorf("ps unavailable")
 	}
 
-	verified, err := terminatePIDList([]trackedPID{{PID: 555, StartedAt: "original-process"}}, 50*time.Millisecond, 50*time.Millisecond)
+	tracker := seededTracker(map[int]string{555: "original-process"})
+
+	verified, err := terminateTrackedDescendants(tracker, 50*time.Millisecond, 50*time.Millisecond)
 	if err == nil {
 		t.Fatalf("expected the revalidation failure to surface as an error")
 	}
@@ -450,6 +470,6 @@ func TestTerminatePIDList_UnableToRevalidateReportsUnverifiedWithoutSignalingAny
 		t.Fatalf("expected verified=false when identity cannot be revalidated at all")
 	}
 	if signaled {
-		t.Fatalf("terminatePIDList signaled a pid it could not revalidate -- must never guess")
+		t.Fatalf("terminateTrackedDescendants signaled a pid it could not revalidate -- must never guess")
 	}
 }

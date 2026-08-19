@@ -91,38 +91,53 @@ type trackedPID struct {
 // escaped descendant to init and severed the very link this function
 // needs to find it.
 func descendantsOf(root int) ([]trackedPID, error) {
-	return descendantsOfAny([]int{root})
+	descendants, _, err := descendantsOfAny([]trackedPID{{PID: root}})
+	return descendants, err
 }
 
 // descendantsOfAny returns every transitive descendant of any of the given
 // roots, from a single process-table snapshot, excluding the roots
-// themselves. descendantTracker polls with every pid it has already
-// tracked as an additional root, not just the harness: once the harness
-// itself has died and been reaped, a BFS rooted only at the harness pid can
+// themselves, along with which of those roots are still valid. A root with
+// a non-empty StartedAt is revalidated against this same snapshot before
+// being traversed: if the pid's current start time no longer matches (the
+// process exited, or the pid number has since been recycled by the OS to
+// something else entirely), it is dropped rather than traversed -- an
+// unrelated process's real children must never be adopted just because
+// its pid happens to match a number this runner once cared about. A root
+// with an empty StartedAt (the harness's own pid, whose identity this
+// package does not track) is always trusted and traversed unconditionally.
+//
+// descendantTracker polls with every pid it has already tracked as an
+// extra root, not just the harness: once the harness itself has died and
+// been reaped, a BFS rooted only at the harness pid can
 // no longer reach anything, so a still-alive tracked descendant that later
 // forks its own child would otherwise never be discovered at all. Letting
 // every previously-seen pid keep acting as its own root closes that gap.
-func descendantsOfAny(roots []int) ([]trackedPID, error) {
+func descendantsOfAny(roots []trackedPID) (descendants []trackedPID, validRoots []trackedPID, err error) {
 	rows, err := psSnapshot()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	children := make(map[int][]int)
-	startedAt := make(map[int]string)
+	startedAt := make(map[int]string, len(rows))
 	for _, row := range rows {
 		children[row.ppid] = append(children[row.ppid], row.pid)
 		startedAt[row.pid] = row.startedAt
 	}
 
-	var descendants []trackedPID
 	seen := make(map[int]bool, len(roots))
 	queue := make([]int, 0, len(roots))
 	for _, root := range roots {
-		if !seen[root] {
-			seen[root] = true
-			queue = append(queue, root)
+		if root.StartedAt != "" && startedAt[root.PID] != root.StartedAt {
+			continue
 		}
+		if seen[root.PID] {
+			continue
+		}
+		seen[root.PID] = true
+		queue = append(queue, root.PID)
+		validRoots = append(validRoots, root)
 	}
 	for len(queue) > 0 {
 		pid := queue[0]
@@ -136,7 +151,7 @@ func descendantsOfAny(roots []int) ([]trackedPID, error) {
 			queue = append(queue, child)
 		}
 	}
-	return descendants, nil
+	return descendants, validRoots, nil
 }
 
 // currentStartedAt takes a fresh snapshot and returns every currently-live
