@@ -258,13 +258,15 @@ func TestRun_RunningManifestWriteFailureTerminatesAlreadySpawnedHarness(t *testi
 }
 
 // TestRun_ManifestWriteFailureOnTheCancelPathStillTerminatesTheHarness is a
-// table-driven proof, across every writeManifestFn call in the cancel-
-// triggered termination path (1=starting, 2=running, 3=terminating,
-// 4=final-inside-terminateAndFinalize), that a write failure at that call
-// still terminates the already-spawned harness -- closing the specific gap
-// at the "terminating" write (a fourth abandonment path distinct from the
-// three already covered) and guarding against a fifth one hiding later in
-// this same sequence.
+// table-driven proof, across the two writeManifestFn calls in the cancel-
+// triggered termination path that occur once a harness is already running
+// (3=terminating, 4=final-inside-terminateAndFinalize; calls 1=starting and
+// 2=running are covered by their own dedicated tests above, since a failure
+// there happens before or without ever reaching this path), that a write
+// failure at that call still terminates the already-spawned harness --
+// closing the specific gap at the "terminating" write (a fourth abandonment
+// path distinct from the three already covered) and guarding against a
+// fifth one hiding later in this same sequence.
 func TestRun_ManifestWriteFailureOnTheCancelPathStillTerminatesTheHarness(t *testing.T) {
 	for _, failAt := range []int{3, 4} {
 		t.Run(fmt.Sprintf("failAt=%d", failAt), func(t *testing.T) {
