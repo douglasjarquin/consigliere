@@ -429,7 +429,7 @@ func TestControlChannel_ConcurrentSendsNeverInterleaveOnTheWire(t *testing.T) {
 	// internally. That means this test alone cannot distinguish Send
 	// holding its lock across the whole write from releasing it early --
 	// TestControlChannel_SendSerializesAcrossTheWholeWrite (the slowConn
-	// test below) is the test that actually forces and proves the
+	// test above) is the test that actually forces and proves the
 	// distinction. This test still exercises the real, large-payload path
 	// end to end under load.
 	const payloadSize = 500_000

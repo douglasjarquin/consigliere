@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"syscall"
 	"time"
@@ -14,13 +15,15 @@ const (
 	groupUnknown
 )
 
-// sendSignal and checkProcessGroupFn are package-level seams so tests can
-// simulate signal-delivery and liveness-check outcomes (in particular,
-// EPERM/unknown states that require privileges this test suite cannot
-// assume) without touching real, unrelated processes.
+// sendSignal, checkProcessGroupFn, and currentStartedAtFn are package-level
+// seams so tests can simulate signal-delivery, liveness-check, and
+// process-identity outcomes (in particular, EPERM/unknown states that
+// require privileges this test suite cannot assume) without touching real,
+// unrelated processes.
 var (
 	sendSignal          = syscall.Kill
 	checkProcessGroupFn = checkProcessGroup
+	currentStartedAtFn  = currentStartedAt
 )
 
 // Terminate implements docs/protocols/runner.md's termination sequence:
@@ -68,14 +71,22 @@ func Terminate(pgid int, gracefulTimeout, verifyTimeout time.Duration) (verified
 // time termination begins, the harness may already be dead (a natural
 // exit reaps it before this function is ever called) and any escaped
 // descendant already reparented to init, with no trace connecting it back
-// to the harness in a fresh snapshot taken now. The two phases run
-// sequentially, not concurrently: descendant termination only starts once
-// the group phase (which can itself produce new descendants right up
-// until the group is confirmed gone) has finished, so a descendant that
-// appears mid-graceful-window is still caught by the caller's tracker
-// (which keeps polling until stopped, after this function's group phase
-// completes) rather than being missed by a snapshot taken too early.
-// verified is true only if both phases verify their targets are gone.
+// to the harness in a fresh snapshot taken now.
+//
+// The descendant phase always runs, even if the group phase errored: a
+// group-scoped signal can fail for reasons unrelated to a specific escaped
+// descendant (e.g. a permissions change affecting the negative-pgid
+// broadcast but not an individually-addressed pid), and a trackable,
+// killable escapee must not go untouched just because the unrelated group
+// phase failed. Likewise, a descendant-tracking failure never skips the
+// group phase, which runs and is verified unconditionally first.
+//
+// verified is true only if the group is confirmed gone, descendant
+// tracking ran reliably for the harness's whole life (never failed to
+// enumerate the process tree), and every descendant it saw is confirmed
+// gone: an enumeration failure means a real escapee could have existed and
+// gone unseen, which is exactly as unverifiable as a liveness check that
+// returns EPERM, and must never be reported as if it were confirmed dead.
 func TerminateGroupAndDescendants(pgid int, tracker *descendantTracker, gracefulTimeout, verifyTimeout time.Duration) (verified bool, err error) {
 	groupVerified, groupErr := Terminate(pgid, gracefulTimeout, verifyTimeout)
 
@@ -84,29 +95,44 @@ func TerminateGroupAndDescendants(pgid int, tracker *descendantTracker, graceful
 	// mid-graceful-window (after termination was triggered but before the
 	// group is confirmed gone) is still observed before Stop() takes its
 	// final poll and returns everything ever seen.
-	descendantPIDs := tracker.Stop()
-
-	if groupErr != nil {
-		return false, groupErr
-	}
-
+	descendantPIDs, trackingReliable := tracker.Stop()
 	descVerified, descErr := terminatePIDList(descendantPIDs, gracefulTimeout, verifyTimeout)
-	if descErr != nil {
-		return false, descErr
-	}
 
-	return groupVerified && descVerified, nil
+	verified = groupVerified && trackingReliable && descVerified
+	return verified, errors.Join(groupErr, descErr)
 }
 
 // terminatePIDList runs the same bounded SIGTERM -> wait -> SIGKILL ->
-// verify sequence Terminate uses for a process group, but against each
-// pid in a pre-determined list individually rather than a group
-// broadcast, since an escaped descendant's own group cannot be assumed
-// safe to broadcast-signal (it may not be a group of one). Every pid is
-// signaled unconditionally (no upfront "is it alive" filter): an ESRCH on
-// signal delivery is harmless and expected for a pid that has already
-// exited on its own, mirroring Terminate's own group-signal handling.
-func terminatePIDList(pids []int, gracefulTimeout, verifyTimeout time.Duration) (verified bool, err error) {
+// verify sequence Terminate uses for a process group, but against a list of
+// specific tracked process identities rather than a group broadcast, since
+// an escaped descendant's own group cannot be assumed safe to
+// broadcast-signal (it may not be a group of one).
+//
+// Every tracked pid is first revalidated against a fresh snapshot: the OS
+// is free to recycle a pid number to a completely unrelated process once
+// the original one has exited, and this function must never mistake that
+// unrelated process for the one it was asked to terminate. A pid whose
+// current start time no longer matches what was recorded (or that no
+// longer exists at all) is treated as already resolved -- removed from the
+// list this function signals and waits on, never killed or waited on. If
+// revalidation itself cannot run at all, nothing is signaled and the whole
+// call reports unverified, rather than guessing.
+func terminatePIDList(tracked []trackedPID, gracefulTimeout, verifyTimeout time.Duration) (verified bool, err error) {
+	if len(tracked) == 0 {
+		return true, nil
+	}
+
+	current, snapErr := currentStartedAtFn()
+	if snapErr != nil {
+		return false, snapErr
+	}
+
+	var pids []int
+	for _, p := range tracked {
+		if current[p.PID] == p.StartedAt {
+			pids = append(pids, p.PID)
+		}
+	}
 	if len(pids) == 0 {
 		return true, nil
 	}

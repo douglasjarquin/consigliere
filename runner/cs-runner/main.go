@@ -16,9 +16,10 @@ var writeManifestFn = WriteManifest
 
 // descendantPollInterval bounds how quickly startDescendantTracker can
 // observe a new descendant of the harness -- short enough to catch a
-// harness that spawns an escaping grandchild and exits almost immediately,
-// long enough that spawning a `ps` subprocess this often is not itself a
-// meaningful resource burden.
+// harness that spawns an escaping grandchild and exits almost immediately.
+// Polling this often has a real, measured `ps`-subprocess cost (see
+// docs/spikes/spike-c-results.md's Known Limitations); this value is not
+// tuned against that cost, only against the escape-detection window.
 const descendantPollInterval = 150 * time.Millisecond
 
 func main() {
@@ -110,22 +111,17 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 		return fmt.Errorf("spawn harness: %w", err)
 	}
 
-	// Start tracking the harness's OS-process-tree descendants the moment
-	// it is spawned, continuously for its entire life: a descendant that
-	// calls setsid() itself escapes the harness's own process group (which
-	// a group-scoped kill(-pgid, ...) can never reach), and by the time
-	// termination begins the harness may already be dead and any escaped
-	// descendant already reparented to init, severing the parent-child
-	// link a snapshot taken only at termination time would need.
-	descendants := startDescendantTracker(handle.PID, descendantPollInterval)
-
 	// Start reaping the harness the moment it is spawned, not after control-
 	// channel setup: a later Terminate call's own process-group verification
 	// depends on the harness being promptly reaped by its actual parent (this
 	// process), since an unreaped zombie leader makes kill(-pgid, 0) return
 	// EPERM rather than ESRCH on at least one real platform this was tested
 	// against, which would otherwise be misread as "cannot verify" for a
-	// harness that is, in fact, already dead.
+	// harness that is, in fact, already dead. This must never be delayed
+	// waiting on descendant tracking's own first `ps` call below: a
+	// verification-gate round found that starting the tracker here instead
+	// left an already-spawned harness with no reaper and no persisted pgid
+	// whenever that first `ps` call was slow or hung.
 	harnessExited := make(chan harnessExitResult, 1)
 	go func() {
 		waitErr := handle.Cmd.Wait()
@@ -156,9 +152,25 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 	base.State = StateRunning
 	base.LastStateChangeAt = nowRFC3339()
 	if err := writeManifestFn(manifestPath, base); err != nil {
-		terminateAndReport(manifestPath, base, descendants, "running_manifest_write_failed")
+		// The harness is already spawned and already being reaped, but
+		// descendant tracking has not started yet: start it now, right
+		// before best-effort cleanup, rather than leaving an escapee that
+		// exists by this point completely untracked.
+		terminateAndReport(manifestPath, base, startDescendantTracker(handle.PID, descendantPollInterval), "running_manifest_write_failed")
 		return fmt.Errorf("write running manifest: %w", err)
 	}
+
+	// Start tracking the harness's OS-process-tree descendants only once
+	// it is durably recorded as running and its own reaper is already in
+	// place, never before: a descendant that calls setsid() itself
+	// escapes the harness's own process group (which a group-scoped
+	// kill(-pgid, ...) can never reach), and by the time termination
+	// begins the harness may already be dead and any escaped descendant
+	// already reparented to init, severing the parent-child link a
+	// snapshot taken only at termination time would need -- but this
+	// tracking's own first `ps` call must never be allowed to delay the
+	// reaper or the manifest write above it depends on.
+	descendants := startDescendantTracker(handle.PID, descendantPollInterval)
 
 	cc, err := NewControlChannel(controlSocketPath)
 	if err != nil {

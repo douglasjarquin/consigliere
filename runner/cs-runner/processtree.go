@@ -2,24 +2,49 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// childrenByParent returns a snapshot of every process's parent pid, from a
-// single `ps` invocation, mapping each parent pid to its direct child pids.
-func childrenByParent() (map[int][]int, error) {
-	out, err := exec.Command("ps", "-axo", "pid=,ppid=").Output()
+// psSnapshotTimeout bounds every `ps` invocation this package makes.
+// Without a bound, a hung or unreachable `ps` would block descendant
+// tracking indefinitely -- which a post-closure verification-gate round
+// found could either abandon an already-spawned harness mid-startup (its
+// synchronous first poll blocking the manifest write and reaper that
+// depend on running first) or hang the termination path forever (Stop()
+// waiting on a poll that never returns).
+const psSnapshotTimeout = 2 * time.Second
+
+// processInfo is one row of a `ps` snapshot: a pid, its parent, and its
+// start time. startedAt is an opaque fingerprint (ps's own `lstart`
+// rendering, never parsed as a real time.Time) used only to tell whether a
+// pid observed earlier is still the same OS process or has since exited
+// and been recycled by something else entirely.
+type processInfo struct {
+	pid       int
+	ppid      int
+	startedAt string
+}
+
+// psSnapshot takes one bounded `ps` invocation and returns every process's
+// pid, parent pid, and start time.
+func psSnapshot() ([]processInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), psSnapshotTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,ppid=,lstart=").Output()
 	if err != nil {
 		return nil, err
 	}
 
-	children := make(map[int][]int)
+	var rows []processInfo
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
-		if len(fields) != 2 {
+		if len(fields) < 2 {
 			continue
 		}
 		pid, err1 := strconv.Atoi(fields[0])
@@ -27,9 +52,19 @@ func childrenByParent() (map[int][]int, error) {
 		if err1 != nil || err2 != nil {
 			continue
 		}
-		children[ppid] = append(children[ppid], pid)
+		rows = append(rows, processInfo{pid: pid, ppid: ppid, startedAt: strings.Join(fields[2:], " ")})
 	}
-	return children, scanner.Err()
+	return rows, scanner.Err()
+}
+
+// trackedPID identifies a specific process instance, not just a pid
+// number: startedAt lets a later revalidation tell "still the same
+// process" apart from "this pid number has since been recycled by the OS
+// to something else entirely", closing the window where blindly signaling
+// every pid ever observed could hit an unrelated process.
+type trackedPID struct {
+	PID       int
+	StartedAt string
 }
 
 // descendantsOf returns every transitive descendant of root from a single
@@ -41,26 +76,48 @@ func childrenByParent() (map[int][]int, error) {
 // may already be dead and reaped by then, having already reparented any
 // escaped descendant to init and severed the very link this function
 // needs to find it.
-func descendantsOf(root int) ([]int, error) {
-	byParent, err := childrenByParent()
+func descendantsOf(root int) ([]trackedPID, error) {
+	rows, err := psSnapshot()
 	if err != nil {
 		return nil, err
 	}
 
-	var descendants []int
+	children := make(map[int][]int)
+	startedAt := make(map[int]string)
+	for _, row := range rows {
+		children[row.ppid] = append(children[row.ppid], row.pid)
+		startedAt[row.pid] = row.startedAt
+	}
+
+	var descendants []trackedPID
 	seen := map[int]bool{root: true}
 	queue := []int{root}
 	for len(queue) > 0 {
 		pid := queue[0]
 		queue = queue[1:]
-		for _, child := range byParent[pid] {
+		for _, child := range children[pid] {
 			if seen[child] {
 				continue
 			}
 			seen[child] = true
-			descendants = append(descendants, child)
+			descendants = append(descendants, trackedPID{PID: child, StartedAt: startedAt[child]})
 			queue = append(queue, child)
 		}
 	}
 	return descendants, nil
+}
+
+// currentStartedAt takes a fresh snapshot and returns every currently-live
+// pid's start time, used to revalidate that a previously-tracked pid is
+// still the same process before signaling it.
+func currentStartedAt() (map[int]string, error) {
+	rows, err := psSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	byPID := make(map[int]string, len(rows))
+	for _, row := range rows {
+		byPID[row.pid] = row.startedAt
+	}
+	return byPID, nil
 }

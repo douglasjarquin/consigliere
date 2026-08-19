@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -254,13 +256,19 @@ func TestTerminateGroupAndDescendants_KillsAHarnessGrandchildThatDaemonizesAway(
 	}
 }
 
-// TestTerminateGroupAndDescendants_GroupStillTerminatesWhenDescendantTrackingCanNeverSeeAnything
+// TestTerminateGroupAndDescendants_GroupStillTerminatesButOverallVerificationFailsWhenDescendantTrackingCanNeverSeeAnything
 // proves a failed descendant snapshot never skips the group-scoped kill:
 // with `ps` entirely unreachable (a broken PATH) for the tracker's whole
-// life, the group must still be signaled, verified, and reported dead --
+// life, the group must still be signaled and verified dead --
 // TerminateGroupAndDescendants must not silently give up on the one part
 // of termination it can always do regardless of process-tree visibility.
-func TestTerminateGroupAndDescendants_GroupStillTerminatesWhenDescendantTrackingCanNeverSeeAnything(t *testing.T) {
+// But the overall verified result must be false: a post-closure
+// verification-gate round found the original version of this test
+// asserting verified=true here, which enshrined a real bug -- ps being
+// entirely unreachable means a real escaped descendant could have existed
+// and gone completely unseen, which is exactly as unverifiable as an
+// EPERM liveness check, and must never be reported as confirmed dead.
+func TestTerminateGroupAndDescendants_GroupStillTerminatesButOverallVerificationFailsWhenDescendantTrackingCanNeverSeeAnything(t *testing.T) {
 	pgid, cmd := startGroupedProcess(t, "sleep 30")
 	go cmd.Wait()
 
@@ -271,15 +279,70 @@ func TestTerminateGroupAndDescendants_GroupStillTerminatesWhenDescendantTracking
 	tracker := startDescendantTracker(pgid, 20*time.Millisecond)
 	time.Sleep(60 * time.Millisecond)
 
-	verified, err := TerminateGroupAndDescendants(pgid, tracker, 300*time.Millisecond, 300*time.Millisecond)
-	if err != nil {
-		t.Fatalf("TerminateGroupAndDescendants: %v", err)
-	}
-	if !verified {
-		t.Fatalf("expected verified=true: the group terminated cleanly and had no real descendants, even though ps-based tracking could never run at all (broken PATH)")
+	verified, _ := TerminateGroupAndDescendants(pgid, tracker, 300*time.Millisecond, 300*time.Millisecond)
+	if verified {
+		t.Fatalf("expected verified=false: descendant tracking could never run at all (broken PATH), so the descendant side is unverifiable even though the group itself terminated cleanly")
 	}
 	if groupHasSurvivors(pgid) {
 		t.Fatalf("process group %d still has a member after termination", pgid)
+	}
+}
+
+// TestTerminateGroupAndDescendants_DescendantPhaseStillRunsWhenGroupPhaseErrors
+// proves a group-scoped signal failure (e.g. EPERM on the negative-pgid
+// broadcast, per docs/protocols/runner.md's explicit "process the runner
+// cannot signal" case) never skips the descendant phase: a trackable,
+// individually-signalable escaped descendant must still be terminated even
+// though the unrelated group-scoped signal failed -- the mirror image of
+// round-1 finding B1 (a failed descendant snapshot must not skip the group
+// kill), in the other direction, found by a later verification-gate round.
+func TestTerminateGroupAndDescendants_DescendantPhaseStillRunsWhenGroupPhaseErrors(t *testing.T) {
+	origSignal := sendSignal
+	origCurrentStartedAtFn := currentStartedAtFn
+	t.Cleanup(func() {
+		sendSignal = origSignal
+		currentStartedAtFn = origCurrentStartedAtFn
+	})
+
+	var mu sync.Mutex
+	descendantSignaled := false
+
+	sendSignal = func(pid int, sig syscall.Signal) error {
+		if pid < 0 {
+			return syscall.EPERM
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if sig == 0 {
+			if descendantSignaled {
+				return syscall.ESRCH
+			}
+			return nil
+		}
+		if sig == syscall.SIGTERM {
+			descendantSignaled = true
+		}
+		return nil
+	}
+	currentStartedAtFn = func() (map[int]string, error) {
+		return map[int]string{555: "same"}, nil
+	}
+
+	tracker := startDescendantTracker(0, time.Hour)
+	tracker.seen[555] = "same"
+
+	verified, err := TerminateGroupAndDescendants(4242, tracker, 200*time.Millisecond, 200*time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected the group phase's EPERM to surface as an error")
+	}
+	if verified {
+		t.Fatalf("expected verified=false: the group phase failed")
+	}
+	mu.Lock()
+	signaled := descendantSignaled
+	mu.Unlock()
+	if !signaled {
+		t.Fatalf("expected the descendant phase to still signal pid 555 even though the group phase errored")
 	}
 }
 
@@ -290,8 +353,15 @@ func TestTerminateGroupAndDescendants_GroupStillTerminatesWhenDescendantTracking
 // must quarantine, not silently be assumed gone.
 func TestTerminatePIDList_UnverifiableDescendantReportsUnverifiedRatherThanAssumingGone(t *testing.T) {
 	origSignal := sendSignal
-	t.Cleanup(func() { sendSignal = origSignal })
+	origCurrentStartedAtFn := currentStartedAtFn
+	t.Cleanup(func() {
+		sendSignal = origSignal
+		currentStartedAtFn = origCurrentStartedAtFn
+	})
 
+	currentStartedAtFn = func() (map[int]string, error) {
+		return map[int]string{424242: "same"}, nil
+	}
 	sendSignal = func(pid int, sig syscall.Signal) error {
 		if sig == 0 {
 			return syscall.EPERM
@@ -300,7 +370,7 @@ func TestTerminatePIDList_UnverifiableDescendantReportsUnverifiedRatherThanAssum
 	}
 
 	start := time.Now()
-	verified, err := terminatePIDList([]int{424242}, 50*time.Millisecond, 50*time.Millisecond)
+	verified, err := terminatePIDList([]trackedPID{{PID: 424242, StartedAt: "same"}}, 50*time.Millisecond, 50*time.Millisecond)
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -311,5 +381,75 @@ func TestTerminatePIDList_UnverifiableDescendantReportsUnverifiedRatherThanAssum
 	}
 	if elapsed < 100*time.Millisecond {
 		t.Fatalf("returned in %v, faster than both bounded wait windows it should have exhausted before giving up", elapsed)
+	}
+}
+
+// TestTerminatePIDList_NeverSignalsAPidTheOSHasRecycledToAnUnrelatedProcess
+// proves a tracked pid whose current start time no longer matches what was
+// recorded is treated as already resolved -- not signaled, not waited on
+// -- closing a bug a verification-gate round found: a long-lived tracker's
+// pid list can go stale, since the OS is free to reuse a pid number for a
+// completely unrelated process once the original one has exited, and this
+// function must never mistake that unrelated process for the one it was
+// asked to terminate.
+func TestTerminatePIDList_NeverSignalsAPidTheOSHasRecycledToAnUnrelatedProcess(t *testing.T) {
+	origSignal := sendSignal
+	origCurrentStartedAtFn := currentStartedAtFn
+	t.Cleanup(func() {
+		sendSignal = origSignal
+		currentStartedAtFn = origCurrentStartedAtFn
+	})
+
+	signaled := false
+	sendSignal = func(pid int, sig syscall.Signal) error {
+		signaled = true
+		return nil
+	}
+	currentStartedAtFn = func() (map[int]string, error) {
+		return map[int]string{555: "a-different-process-now"}, nil
+	}
+
+	verified, err := terminatePIDList([]trackedPID{{PID: 555, StartedAt: "original-process"}}, 50*time.Millisecond, 50*time.Millisecond)
+	if err != nil {
+		t.Fatalf("terminatePIDList: %v", err)
+	}
+	if !verified {
+		t.Fatalf("expected verified=true: the originally-tracked process is gone (its pid now belongs to something else), which is exactly the desired outcome")
+	}
+	if signaled {
+		t.Fatalf("terminatePIDList signaled pid 555, but it is no longer the process that was tracked -- it must never be touched")
+	}
+}
+
+// TestTerminatePIDList_UnableToRevalidateReportsUnverifiedWithoutSignalingAnything
+// proves that when identity revalidation itself cannot run (e.g. ps
+// unreachable), terminatePIDList signals nothing and reports unverified,
+// rather than guessing at identity and signaling blind.
+func TestTerminatePIDList_UnableToRevalidateReportsUnverifiedWithoutSignalingAnything(t *testing.T) {
+	origSignal := sendSignal
+	origCurrentStartedAtFn := currentStartedAtFn
+	t.Cleanup(func() {
+		sendSignal = origSignal
+		currentStartedAtFn = origCurrentStartedAtFn
+	})
+
+	signaled := false
+	sendSignal = func(pid int, sig syscall.Signal) error {
+		signaled = true
+		return nil
+	}
+	currentStartedAtFn = func() (map[int]string, error) {
+		return nil, fmt.Errorf("ps unavailable")
+	}
+
+	verified, err := terminatePIDList([]trackedPID{{PID: 555, StartedAt: "original-process"}}, 50*time.Millisecond, 50*time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected the revalidation failure to surface as an error")
+	}
+	if verified {
+		t.Fatalf("expected verified=false when identity cannot be revalidated at all")
+	}
+	if signaled {
+		t.Fatalf("terminatePIDList signaled a pid it could not revalidate -- must never guess")
 	}
 }

@@ -18,15 +18,17 @@ import (
 // poll interval immediately before the tracker is stopped -- a residual,
 // disclosed limitation of finite-frequency polling, not an unbounded gap.
 type descendantTracker struct {
-	mu   sync.Mutex
-	seen map[int]bool
-	stop chan struct{}
-	done chan struct{}
+	mu         sync.Mutex
+	seen       map[int]string
+	pollFailed bool
+	stop       chan struct{}
+	done       chan struct{}
+	stopOnce   sync.Once
 }
 
 func startDescendantTracker(rootPID int, interval time.Duration) *descendantTracker {
 	t := &descendantTracker{
-		seen: make(map[int]bool),
+		seen: make(map[int]string),
 		stop: make(chan struct{}),
 		done: make(chan struct{}),
 	}
@@ -64,28 +66,45 @@ func (t *descendantTracker) poll(rootPID int) {
 		return
 	}
 	pids, err := descendantsOf(rootPID)
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if err != nil {
+		// A failed enumeration means this poll could not see who was alive
+		// at this instant: a descendant that appeared and disappeared
+		// entirely within this one failed window is permanently invisible,
+		// so the tracker's accumulated result can no longer be trusted as
+		// complete. Recorded here so the caller can report the descendant
+		// side as unverifiable, rather than silently treating whatever
+		// happened to be seen as everything there was.
+		t.pollFailed = true
 		return
 	}
-	t.mu.Lock()
-	for _, pid := range pids {
-		t.seen[pid] = true
+	for _, p := range pids {
+		if _, ok := t.seen[p.PID]; !ok {
+			t.seen[p.PID] = p.StartedAt
+		}
 	}
-	t.mu.Unlock()
 }
 
 // Stop halts polling (after one final poll) and returns every pid ever
-// observed as a descendant of the tracked root. Safe to call exactly once
-// per tracker.
-func (t *descendantTracker) Stop() []int {
-	close(t.stop)
+// observed as a descendant of the tracked root, plus whether that result
+// can be trusted as complete. reliable is false if even one poll over the
+// tracker's life failed to enumerate the process tree (e.g. `ps` timed out
+// or was unreachable): a gap during which a real descendant could have
+// come and gone unseen, so the caller must treat the descendant side as
+// unverifiable rather than assuming the pids it did see are the only ones
+// that ever existed. Idempotent: calling Stop() more than once returns the
+// same result rather than panicking on a doubly-closed channel.
+func (t *descendantTracker) Stop() (pids []trackedPID, reliable bool) {
+	t.stopOnce.Do(func() { close(t.stop) })
 	<-t.done
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	pids := make([]int, 0, len(t.seen))
-	for pid := range t.seen {
-		pids = append(pids, pid)
+	pids = make([]trackedPID, 0, len(t.seen))
+	for pid, startedAt := range t.seen {
+		pids = append(pids, trackedPID{PID: pid, StartedAt: startedAt})
 	}
-	return pids
+	return pids, !t.pollFailed
 }

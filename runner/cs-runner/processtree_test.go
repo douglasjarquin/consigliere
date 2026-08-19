@@ -67,8 +67,8 @@ wait $child
 	}
 
 	got := map[int]bool{}
-	for _, pid := range descendants {
-		got[pid] = true
+	for _, p := range descendants {
+		got[p.PID] = true
 	}
 	if !got[childPID] {
 		t.Fatalf("descendantsOf(%d) = %v, missing direct child %d", rootPID, descendants, childPID)
@@ -95,5 +95,37 @@ func TestDescendantsOf_ReturnsEmptyForAPidWithNoChildren(t *testing.T) {
 	}
 	if len(descendants) != 0 {
 		t.Fatalf("expected no descendants for a childless process, got %v", descendants)
+	}
+}
+
+// TestPSSnapshot_TimesOutRatherThanHangingForever proves a hung `ps` bounds
+// psSnapshot's return within psSnapshotTimeout instead of blocking forever
+// -- a `ps` that never returns previously hung every caller indefinitely:
+// startDescendantTracker's synchronous first poll (blocking the manifest
+// write and reaper that must start immediately after spawning a harness)
+// and descendantTracker.Stop() (blocking the entire termination path).
+func TestPSSnapshot_TimesOutRatherThanHangingForever(t *testing.T) {
+	dir := t.TempDir()
+	fakePS := filepath.Join(dir, "ps")
+	if err := os.WriteFile(fakePS, []byte("#!/bin/sh\nexec /bin/sleep 30\n"), 0o755); err != nil {
+		t.Fatalf("write fake ps: %v", err)
+	}
+
+	originalPath := os.Getenv("PATH")
+	t.Cleanup(func() { os.Setenv("PATH", originalPath) })
+	os.Setenv("PATH", dir)
+
+	start := time.Now()
+	_, err := psSnapshot()
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatalf("expected an error from a ps that never returns")
+	}
+	if elapsed < psSnapshotTimeout {
+		t.Fatalf("psSnapshot returned in %v, before its own %v timeout even elapsed", elapsed, psSnapshotTimeout)
+	}
+	if elapsed >= 30*time.Second {
+		t.Fatalf("psSnapshot took %v, did not respect its bound against a hung ps", elapsed)
 	}
 }
