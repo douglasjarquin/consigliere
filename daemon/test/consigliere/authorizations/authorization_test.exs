@@ -21,6 +21,25 @@ defmodule Consigliere.Authorizations.AuthorizationTest do
     assert Repo.get(Authorization, authorization.id).scope == "work"
   end
 
+  test "consumed_at and expires_at round-trip" do
+    mission = Fixtures.mission!()
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    attrs = %{
+      mission_id: mission.id,
+      scope: "work",
+      granted_by_principal: "boss",
+      granted_at: now,
+      consumed_at: now,
+      expires_at: now
+    }
+
+    assert {:ok, authorization} = Repo.insert(Authorization.changeset(%Authorization{}, attrs))
+    reloaded = Repo.get(Authorization, authorization.id)
+    assert reloaded.consumed_at == now
+    assert reloaded.expires_at == now
+  end
+
   test "an unknown scope is rejected" do
     mission = Fixtures.mission!()
 

@@ -13,6 +13,8 @@ defmodule Consigliere.MissionBlockers.MissionBlocker do
     field(:kind, :string)
     field(:reason, :string)
     field(:status, :string, default: "open")
+    field(:subject_type, :string)
+    field(:subject_id, :binary_id)
     field(:closed_reason, :string)
     field(:closed_at, :utc_datetime_usec)
 
@@ -20,7 +22,7 @@ defmodule Consigliere.MissionBlockers.MissionBlocker do
   end
 
   @required [:mission_id, :kind, :status]
-  @optional [:reason, :closed_reason, :closed_at]
+  @optional [:reason, :subject_type, :subject_id, :closed_reason, :closed_at]
 
   def changeset(blocker, attrs) do
     blocker

@@ -12,6 +12,9 @@ defmodule Consigliere.OutboxItems.OutboxItem do
     field(:kind, :string)
     field(:payload, :map, default: %{})
     field(:status, :string, default: "queued")
+    field(:natural_key, :string)
+    field(:idempotency_key, :string)
+    field(:next_attempt_at, :utc_datetime_usec)
     field(:leased_until, :utc_datetime_usec)
     field(:attempts, :integer, default: 0)
     field(:last_error, :string)
@@ -20,12 +23,21 @@ defmodule Consigliere.OutboxItems.OutboxItem do
   end
 
   @required [:kind, :status]
-  @optional [:payload, :leased_until, :attempts, :last_error]
+  @optional [
+    :payload,
+    :natural_key,
+    :idempotency_key,
+    :next_attempt_at,
+    :leased_until,
+    :attempts,
+    :last_error
+  ]
 
   def changeset(item, attrs) do
     item
     |> cast(attrs, @required ++ @optional)
     |> validate_required(@required)
     |> validate_inclusion(:status, @statuses)
+    |> unique_constraint(:idempotency_key)
   end
 end

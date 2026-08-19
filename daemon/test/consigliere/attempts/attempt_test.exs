@@ -38,6 +38,22 @@ defmodule Consigliere.Attempts.AttemptTest do
     refute Attempt.changeset(%Attempt{}, attrs).valid?
   end
 
+  test "reported_checkpoint_sha round-trips" do
+    mission = Fixtures.mission!()
+
+    attrs = %{
+      mission_id: mission.id,
+      role: "soldier",
+      harness: "claude",
+      status: "checkpoint_requested",
+      fencing_token: "fence-1",
+      reported_checkpoint_sha: "abc123"
+    }
+
+    assert {:ok, attempt} = Repo.insert(Attempt.changeset(%Attempt{}, attrs))
+    assert Repo.get(Attempt, attempt.id).reported_checkpoint_sha == "abc123"
+  end
+
   test "retry_of_attempt_id self-references another Attempt" do
     mission = Fixtures.mission!()
     original = Fixtures.attempt!(mission)

@@ -18,7 +18,6 @@ defmodule Consigliere.DatabaseWriter do
   use GenServer
 
   alias Consigliere.Repo
-  alias Consigliere.Missions.Mission
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, :ok, Keyword.put_new(opts, :name, __MODULE__))
@@ -26,7 +25,7 @@ defmodule Consigliere.DatabaseWriter do
 
   @doc "Insert a Mission through the serialized write path."
   def insert_mission(attrs) do
-    GenServer.call(__MODULE__, {:transaction, fn -> do_insert_mission(attrs) end}, 10_000)
+    Consigliere.Missions.create(attrs, Consigliere.Actor.system())
   end
 
   @doc """
@@ -45,17 +44,14 @@ defmodule Consigliere.DatabaseWriter do
 
   @impl true
   def handle_call({:transaction, fun}, _from, state) do
-    result = Repo.transaction(fun)
+    result =
+      try do
+        Repo.transaction(fun)
+      rescue
+        exception -> {:error, exception}
+      end
+
     {:reply, result, state}
   end
 
-  defp do_insert_mission(attrs) do
-    %Mission{}
-    |> Mission.changeset(attrs)
-    |> Repo.insert()
-    |> case do
-      {:ok, mission} -> mission
-      {:error, changeset} -> Repo.rollback(changeset)
-    end
-  end
 end

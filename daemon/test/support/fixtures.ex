@@ -1,4 +1,6 @@
 defmodule Consigliere.Fixtures do
+  import Ecto.Query
+
   alias Consigliere.Repo
   alias Consigliere.Missions.Mission
   alias Consigliere.Workspaces.Workspace
@@ -18,12 +20,13 @@ defmodule Consigliere.Fixtures do
   # existing non-sandboxed test style) -- leftover rows from one test file
   # otherwise accumulate and break any other file's blanket table cleanup.
   def reset_phase1_tables! do
+    Repo.update_all(Mission, set: [authorization_id: nil])
+    Repo.delete_all(Decision)
     Repo.delete_all(Question)
     Repo.delete_all(Gate)
     Repo.delete_all(MissionBlocker)
     Repo.delete_all(MissionValidationLedger)
     Repo.delete_all(Incident)
-    Repo.delete_all(Decision)
     Repo.delete_all(Attempt)
     Repo.delete_all(Workspace)
     Repo.delete_all(Authorization)
@@ -63,5 +66,16 @@ defmodule Consigliere.Fixtures do
 
     {:ok, attempt} = Repo.insert(Attempt.changeset(%Attempt{}, Map.merge(defaults, attrs)))
     attempt
+  end
+
+  def events(subject_id) do
+    DomainEvent
+    |> where([e], e.subject_id == ^subject_id)
+    |> order_by(:id)
+    |> Repo.all()
+  end
+
+  def event_types(subject_id) do
+    Enum.map(events(subject_id), & &1.type)
   end
 end
