@@ -62,6 +62,37 @@ defmodule Consigliere.ReconcilerTest do
       manifest = %{"state" => "terminating", "pgid" => 999}
       assert Reconciler.classify_manifest(manifest, fn -> true end) == {:adopt_and_kill, manifest}
     end
+
+    test "a non-terminal state with no pgid at all is quarantined rather than assumed lost" do
+      manifest = %{"state" => "running"}
+      assert Reconciler.classify_manifest(manifest, fn -> false end) == {:quarantine_incident, manifest}
+    end
+
+    for degenerate_pgid <- [0, 1, -5] do
+      test "a non-terminal state with pgid #{degenerate_pgid} is quarantined rather than signaled, since kill(-#{degenerate_pgid}, ...) is a POSIX broadcast, not a specific group" do
+        manifest = %{"state" => "running", "pgid" => unquote(degenerate_pgid)}
+        assert Reconciler.classify_manifest(manifest, fn -> true end) == {:quarantine_incident, manifest}
+        assert Reconciler.classify_manifest(manifest, fn -> false end) == {:quarantine_incident, manifest}
+      end
+    end
+  end
+
+  describe "kill_result_alive?/1 (distinguishes ESRCH from EPERM in kill's output)" do
+    test "a successful kill (exit 0) means alive" do
+      assert Reconciler.kill_result_alive?({"", 0}) == true
+    end
+
+    test "\"No such process\" (ESRCH-equivalent) means conclusively gone" do
+      assert Reconciler.kill_result_alive?({"kill: (-370): No such process\n", 1}) == false
+    end
+
+    test "\"Operation not permitted\" (EPERM) means unverifiable, never treated as gone" do
+      assert Reconciler.kill_result_alive?({"kill: (-370): Operation not permitted\n", 1}) == true
+    end
+
+    test "any other unrecognized failure output also means unverifiable, never treated as gone" do
+      assert Reconciler.kill_result_alive?({"kill: something else entirely\n", 1}) == true
+    end
   end
 
   describe "classify/1 (reads a manifest file from disk)" do

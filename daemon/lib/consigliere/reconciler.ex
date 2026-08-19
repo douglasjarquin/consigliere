@@ -28,10 +28,16 @@ defmodule Consigliere.Reconciler do
 
   def classify_manifest(%{"state" => state} = manifest, pgid_alive?)
       when state in @non_terminal_states do
-    if pgid_alive?.() do
-      {:adopt_and_kill, manifest}
-    else
-      {:lost, manifest}
+    case manifest["pgid"] do
+      pgid when is_integer(pgid) and pgid > 1 ->
+        if pgid_alive?.() do
+          {:adopt_and_kill, manifest}
+        else
+          {:lost, manifest}
+        end
+
+      _ ->
+        {:quarantine_incident, manifest}
     end
   end
 
@@ -39,9 +45,24 @@ defmodule Consigliere.Reconciler do
     {:quarantine_incident, manifest}
   end
 
-  defp process_group_alive?(pgid) when is_integer(pgid) do
-    match?({_, 0}, System.cmd("kill", ["-0", "-#{pgid}"], stderr_to_stdout: true))
+  defp process_group_alive?(pgid) when is_integer(pgid) and pgid > 1 do
+    kill_result_alive?(System.cmd("kill", ["-0", "-#{pgid}"], stderr_to_stdout: true))
   end
 
-  defp process_group_alive?(_), do: false
+  defp process_group_alive?(_), do: true
+
+  @doc """
+  Interprets the output of `kill -0 -<pgid>`. Only an explicit "No such
+  process" (ESRCH-equivalent) is conclusive evidence of death; any other
+  failure (in particular "Operation not permitted"/EPERM after a permissions
+  change, the exact case docs/protocols/runner.md names) means the liveness
+  check itself is unreliable and must never be read as "gone" -- reusing a
+  workspace under a live process is the unsafe direction, so an unverifiable
+  result defaults to "alive".
+  """
+  def kill_result_alive?({_output, 0}), do: true
+
+  def kill_result_alive?({output, _status}) do
+    not String.contains?(output, "No such process")
+  end
 end
