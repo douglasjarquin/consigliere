@@ -5,8 +5,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 )
+
+// writeManifestFn is a package-level seam so tests can simulate a manifest
+// write failure at a specific point in the runner's lifecycle without
+// depending on a real, precisely-timed disk/permissions fault.
+var writeManifestFn = WriteManifest
 
 func main() {
 	attemptID := flag.String("attempt-id", "", "attempt id")
@@ -56,7 +62,24 @@ func terminateAndFinalize(manifestPath string, base Manifest, exitCode *int, rea
 	} else {
 		final.State = StateDeadUnverified
 	}
-	return verified, WriteManifest(manifestPath, final)
+	return verified, writeManifestFn(manifestPath, final)
+}
+
+// terminateAndReport runs terminateAndFinalize and, if the final manifest
+// write itself fails, reports that to stderr instead of discarding it: a
+// silently-abandoned write failure here would leave an on-disk manifest that
+// falsely still claims "running" for a process group that has, in fact,
+// already been terminated.
+func terminateAndReport(manifestPath string, base Manifest, reason string) {
+	reasonCopy := reason
+	if _, err := terminateAndFinalize(manifestPath, base, nil, &reasonCopy); err != nil {
+		fmt.Fprintf(os.Stderr, "cs-runner: terminated harness (%s) but failed to write the final manifest: %v\n", reason, err)
+	}
+}
+
+type harnessExitResult struct {
+	code     int
+	signaled bool
 }
 
 func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, controlSocketPath string, harnessCommand []string, acceptTimeout time.Duration) error {
@@ -70,7 +93,7 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 		StartedAt:         nowRFC3339(),
 		LastStateChangeAt: nowRFC3339(),
 	}
-	if err := WriteManifest(manifestPath, base); err != nil {
+	if err := writeManifestFn(manifestPath, base); err != nil {
 		return fmt.Errorf("write starting manifest: %w", err)
 	}
 
@@ -86,14 +109,23 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 	// EPERM rather than ESRCH on at least one real platform this was tested
 	// against, which would otherwise be misread as "cannot verify" for a
 	// harness that is, in fact, already dead.
-	harnessExited := make(chan int, 1)
+	harnessExited := make(chan harnessExitResult, 1)
 	go func() {
 		waitErr := handle.Cmd.Wait()
-		code := 0
+		var result harnessExitResult
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
-			code = exitErr.ExitCode()
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+				result.signaled = status.Signaled()
+				if result.signaled {
+					result.code = -1
+				} else {
+					result.code = status.ExitStatus()
+				}
+			} else {
+				result.code = exitErr.ExitCode()
+			}
 		}
-		harnessExited <- code
+		harnessExited <- result
 	}()
 
 	execPath := harnessCommand[0]
@@ -106,21 +138,20 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 	base.HarnessExecutableSHA256 = execHash
 	base.State = StateRunning
 	base.LastStateChangeAt = nowRFC3339()
-	if err := WriteManifest(manifestPath, base); err != nil {
+	if err := writeManifestFn(manifestPath, base); err != nil {
+		terminateAndReport(manifestPath, base, "running_manifest_write_failed")
 		return fmt.Errorf("write running manifest: %w", err)
 	}
 
 	cc, err := NewControlChannel(controlSocketPath)
 	if err != nil {
-		reason := "control_channel_setup_failed"
-		terminateAndFinalize(manifestPath, base, nil, &reason)
+		terminateAndReport(manifestPath, base, "control_channel_setup_failed")
 		return fmt.Errorf("create control channel: %w", err)
 	}
 	defer cc.Close()
 
 	if err := cc.AcceptOnce(acceptTimeout); err != nil {
-		reason := "daemon_never_connected"
-		terminateAndFinalize(manifestPath, base, nil, &reason)
+		terminateAndReport(manifestPath, base, "daemon_never_connected")
 		return fmt.Errorf("wait for daemon to connect: %w", err)
 	}
 
@@ -159,13 +190,19 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 	)
 
 	select {
-	case code := <-harnessExited:
-		cc.Send(map[string]any{"type": "harness_exited", "attempt_id": attemptID, "exit_code": code, "signaled": false})
+	case result := <-harnessExited:
+		cc.Send(map[string]any{
+			"type":       "harness_exited",
+			"attempt_id": attemptID,
+			"exit_code":  result.code,
+			"signaled":   result.signaled,
+		})
 
 		// The harness itself exiting does not mean its process group is
 		// empty: it may have backgrounded a child before exiting, still
 		// alive under the same pgid. terminateAndFinalize reaps any such
 		// stragglers before trusting Wait() as proof the group is clear.
+		code := result.code
 		_, err := terminateAndFinalize(manifestPath, base, &code, nil)
 		return err
 
@@ -173,7 +210,7 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 		terminating := base
 		terminating.State = StateTerminating
 		terminating.LastStateChangeAt = nowRFC3339()
-		if err := WriteManifest(manifestPath, terminating); err != nil {
+		if err := writeManifestFn(manifestPath, terminating); err != nil {
 			return fmt.Errorf("write terminating manifest: %w", err)
 		}
 
