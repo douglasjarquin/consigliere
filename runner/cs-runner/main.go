@@ -49,7 +49,7 @@ func run(attemptID, missionID, fencingToken, manifestPath, controlSocketPath str
 // explicit termination trigger, and a post-spawn failure that must not
 // abandon an already-running harness.
 func terminateAndFinalize(manifestPath string, base Manifest, exitCode *int, reason *string) (verified bool, err error) {
-	verified, _ = Terminate(base.PGID, 5*time.Second, 2*time.Second)
+	verified, _ = TerminateGroupAndDescendants(base.PGID, base.HarnessPID, 5*time.Second, 2*time.Second)
 
 	deadAt := nowRFC3339()
 	final := base

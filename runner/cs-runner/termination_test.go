@@ -175,3 +175,69 @@ func TestTerminate_RefusesDegeneratePgidWithoutSignalingCallersOwnGroup(t *testi
 		t.Fatalf("innocent bystander process group %d was affected by a degenerate-pgid Terminate call", innocentPgid)
 	}
 }
+
+// TestTerminateGroupAndDescendants_KillsAHarnessGrandchildThatDaemonizesAway
+// proves the daemonize-escape gap is closed: a harness grandchild that
+// calls setsid() itself leaves the harness's own process group entirely,
+// so a group-scoped kill(-pgid, ...) alone can never reach it -- exactly
+// the limitation an independent fable-model audit surfaced after Spike C's
+// verification gate had already closed. TerminateGroupAndDescendants must
+// kill and verify both the harness's group AND this escaped descendant.
+func TestTerminateGroupAndDescendants_KillsAHarnessGrandchildThatDaemonizesAway(t *testing.T) {
+	dir := t.TempDir()
+	grandchildPidFile := filepath.Join(dir, "grandchild.pid")
+
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	script := `CS_RUNNER_TEST_HELPER=daemonize "$0" & echo $! > "$1"; sleep 30`
+	handle, err := SpawnHarness([]string{"sh", "-c", script, testBinary, grandchildPidFile}, 2*time.Second)
+	if err != nil {
+		t.Fatalf("SpawnHarness: %v", err)
+	}
+	// Reap the harness concurrently, exactly as main.go's real production
+	// code does: kill(-pgid, 0)'s verification depends on the harness
+	// being promptly reaped by its actual parent (this process), since an
+	// unreaped zombie leader makes kill(-pgid, 0) return EPERM rather than
+	// ESRCH on this platform until Wait() actually reaps it (the same
+	// finding that shaped every other Terminate test in this file).
+	go handle.Cmd.Wait()
+	t.Cleanup(func() {
+		syscall.Kill(-handle.PGID, syscall.SIGKILL)
+	})
+
+	grandchildPID := waitForPIDFile(t, grandchildPidFile, 2*time.Second)
+	t.Cleanup(func() { syscall.Kill(grandchildPID, syscall.SIGKILL) })
+
+	// Wait for the grandchild to actually complete its own setsid() call
+	// before terminating -- otherwise this test might race it, mirroring
+	// the same TOCTOU class spawn.go already guards against for the
+	// harness itself.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if pgid, gErr := syscall.Getpgid(grandchildPID); gErr == nil && pgid == grandchildPID {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("grandchild pid %d never completed its own setsid()", grandchildPID)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	verified, err := TerminateGroupAndDescendants(handle.PGID, handle.PID, 2*time.Second, 2*time.Second)
+	if err != nil {
+		t.Fatalf("TerminateGroupAndDescendants: %v", err)
+	}
+	if !verified {
+		t.Fatalf("expected verified=true")
+	}
+
+	if err := syscall.Kill(-handle.PGID, 0); err != syscall.ESRCH {
+		t.Fatalf("harness process group %d still has a member (err=%v)", handle.PGID, err)
+	}
+	if err := syscall.Kill(grandchildPID, 0); err != syscall.ESRCH {
+		t.Fatalf("escaped grandchild pid %d is still alive after termination (err=%v)", grandchildPID, err)
+	}
+}
