@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
@@ -379,6 +380,125 @@ func TestRun_SignaledHarnessExitReportsSignaledTrue(t *testing.T) {
 	}
 	if final.ExitCode == nil {
 		t.Fatalf("expected a non-nil exit code recording the signal-terminated exit")
+	}
+}
+
+// TestRun_NaturalHarnessExitAlsoReapsAnEscapedGrandchild proves the
+// daemonize-escape fix holds on the natural-exit path specifically: a
+// harness that spawns a self-daemonizing grandchild (escaping its own
+// process group via setsid()) and then exits on its own, still ends up
+// with that grandchild terminated -- the exact case a fable-model audit
+// found unfixed in an earlier version of this change, since the harness
+// gets reaped before a termination-time-only snapshot could ever see it.
+func TestRun_NaturalHarnessExitAlsoReapsAnEscapedGrandchild(t *testing.T) {
+	dir := shortSocketDir(t)
+	manifestPath := filepath.Join(dir, "manifest.json")
+	controlSocketPath := filepath.Join(dir, "control.sock")
+	grandchildPidFile := filepath.Join(dir, "grandchild.pid")
+
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	// The 0.5s pause before exit is realistic, not adversarial: it gives the
+	// descendant tracker (which polls every descendantPollInterval, 150ms
+	// in production) a genuine chance to observe the grandchild before the
+	// harness reaps and reparents it -- testing the tracker's actual
+	// "within one poll interval" guarantee, not an impossible zero-latency
+	// one no polling design can ever provide.
+	script := `CS_RUNNER_TEST_HELPER=daemonize "$0" & echo $! > "$1"; sleep 0.5; exit 0`
+
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- run("attempt-escape-natural", "mission-escape-natural", "fence-escape-natural",
+			manifestPath, controlSocketPath, []string{"sh", "-c", script, testBinary, grandchildPidFile})
+	}()
+
+	conn := dialControlSocketWithRetry(t, controlSocketPath, 3*time.Second)
+	defer conn.Close()
+	go io.Copy(io.Discard, conn)
+
+	grandchildPID := waitForPIDFile(t, grandchildPidFile, 2*time.Second)
+	t.Cleanup(func() { syscall.Kill(grandchildPID, syscall.SIGKILL) })
+
+	select {
+	case err := <-runErrCh:
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("run() never returned")
+	}
+
+	m, err := ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if m.State != StateDeadVerified {
+		t.Fatalf("expected dead_verified, got %s", m.State)
+	}
+	if err := syscall.Kill(grandchildPID, 0); err != syscall.ESRCH {
+		t.Fatalf("escaped grandchild pid %d is still alive after a natural harness exit (err=%v)", grandchildPID, err)
+	}
+}
+
+// TestRun_MidGracefulWindowEscapeIsStillCaught proves a descendant that
+// appears partway through the termination sequence's graceful-wait window
+// (after cancel was triggered, but before the harness's group is confirmed
+// gone) is still caught -- the tracker keeps polling throughout the entire
+// group-kill phase, not just up to the moment termination began.
+func TestRun_MidGracefulWindowEscapeIsStillCaught(t *testing.T) {
+	dir := shortSocketDir(t)
+	manifestPath := filepath.Join(dir, "manifest.json")
+	controlSocketPath := filepath.Join(dir, "control.sock")
+	readyFile := filepath.Join(dir, "ready")
+	grandchildPidFile := filepath.Join(dir, "grandchild.pid")
+
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+
+	script := `trap '' TERM; touch "$2"; sleep 1; CS_RUNNER_TEST_HELPER=daemonize "$0" & echo $! > "$1"; wait`
+
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- run("attempt-escape-window", "mission-escape-window", "fence-escape-window",
+			manifestPath, controlSocketPath, []string{"sh", "-c", script, testBinary, grandchildPidFile, readyFile})
+	}()
+
+	conn := dialControlSocketWithRetry(t, controlSocketPath, 3*time.Second)
+	defer conn.Close()
+	go io.Copy(io.Discard, conn)
+
+	waitForFile(t, readyFile, 3*time.Second)
+
+	if _, err := conn.Write([]byte(`{"type":"cancel"}` + "\n")); err != nil {
+		t.Fatalf("send cancel: %v", err)
+	}
+
+	grandchildPID := waitForPIDFile(t, grandchildPidFile, 3*time.Second)
+	t.Cleanup(func() { syscall.Kill(grandchildPID, syscall.SIGKILL) })
+
+	select {
+	case err := <-runErrCh:
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatalf("run() never returned")
+	}
+
+	m, err := ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if m.State != StateDeadVerified {
+		t.Fatalf("expected dead_verified, got %s", m.State)
+	}
+	if err := syscall.Kill(grandchildPID, 0); err != syscall.ESRCH {
+		t.Fatalf("grandchild %d that escaped mid-graceful-window is still alive (err=%v)", grandchildPID, err)
 	}
 }
 

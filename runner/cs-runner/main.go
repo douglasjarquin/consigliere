@@ -14,6 +14,13 @@ import (
 // depending on a real, precisely-timed disk/permissions fault.
 var writeManifestFn = WriteManifest
 
+// descendantPollInterval bounds how quickly startDescendantTracker can
+// observe a new descendant of the harness -- short enough to catch a
+// harness that spawns an escaping grandchild and exits almost immediately,
+// long enough that spawning a `ps` subprocess this often is not itself a
+// meaningful resource burden.
+const descendantPollInterval = 150 * time.Millisecond
+
 func main() {
 	attemptID := flag.String("attempt-id", "", "attempt id")
 	missionID := flag.String("mission-id", "", "mission id")
@@ -47,9 +54,10 @@ func run(attemptID, missionID, fencingToken, manifestPath, controlSocketPath str
 // dead_unverified), shared by every path that ends a runner's life: a
 // natural harness exit (which may still leave stragglers in the group), an
 // explicit termination trigger, and a post-spawn failure that must not
-// abandon an already-running harness.
-func terminateAndFinalize(manifestPath string, base Manifest, exitCode *int, reason *string) (verified bool, err error) {
-	verified, _ = TerminateGroupAndDescendants(base.PGID, base.HarnessPID, 5*time.Second, 2*time.Second)
+// abandon an already-running harness. tracker is stopped as part of this
+// call (see TerminateGroupAndDescendants) and must not be reused afterward.
+func terminateAndFinalize(manifestPath string, base Manifest, tracker *descendantTracker, exitCode *int, reason *string) (verified bool, err error) {
+	verified, _ = TerminateGroupAndDescendants(base.PGID, tracker, 5*time.Second, 2*time.Second)
 
 	deadAt := nowRFC3339()
 	final := base
@@ -70,9 +78,9 @@ func terminateAndFinalize(manifestPath string, base Manifest, exitCode *int, rea
 // silently-abandoned write failure here would leave an on-disk manifest that
 // falsely still claims "running" for a process group that has, in fact,
 // already been terminated.
-func terminateAndReport(manifestPath string, base Manifest, reason string) {
+func terminateAndReport(manifestPath string, base Manifest, tracker *descendantTracker, reason string) {
 	reasonCopy := reason
-	if _, err := terminateAndFinalize(manifestPath, base, nil, &reasonCopy); err != nil {
+	if _, err := terminateAndFinalize(manifestPath, base, tracker, nil, &reasonCopy); err != nil {
 		fmt.Fprintf(os.Stderr, "cs-runner: terminated harness (%s) but failed to write the final manifest: %v\n", reason, err)
 	}
 }
@@ -101,6 +109,15 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 	if err != nil {
 		return fmt.Errorf("spawn harness: %w", err)
 	}
+
+	// Start tracking the harness's OS-process-tree descendants the moment
+	// it is spawned, continuously for its entire life: a descendant that
+	// calls setsid() itself escapes the harness's own process group (which
+	// a group-scoped kill(-pgid, ...) can never reach), and by the time
+	// termination begins the harness may already be dead and any escaped
+	// descendant already reparented to init, severing the parent-child
+	// link a snapshot taken only at termination time would need.
+	descendants := startDescendantTracker(handle.PID, descendantPollInterval)
 
 	// Start reaping the harness the moment it is spawned, not after control-
 	// channel setup: a later Terminate call's own process-group verification
@@ -139,19 +156,19 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 	base.State = StateRunning
 	base.LastStateChangeAt = nowRFC3339()
 	if err := writeManifestFn(manifestPath, base); err != nil {
-		terminateAndReport(manifestPath, base, "running_manifest_write_failed")
+		terminateAndReport(manifestPath, base, descendants, "running_manifest_write_failed")
 		return fmt.Errorf("write running manifest: %w", err)
 	}
 
 	cc, err := NewControlChannel(controlSocketPath)
 	if err != nil {
-		terminateAndReport(manifestPath, base, "control_channel_setup_failed")
+		terminateAndReport(manifestPath, base, descendants, "control_channel_setup_failed")
 		return fmt.Errorf("create control channel: %w", err)
 	}
 	defer cc.Close()
 
 	if err := cc.AcceptOnce(acceptTimeout); err != nil {
-		terminateAndReport(manifestPath, base, "daemon_never_connected")
+		terminateAndReport(manifestPath, base, descendants, "daemon_never_connected")
 		return fmt.Errorf("wait for daemon to connect: %w", err)
 	}
 
@@ -203,7 +220,7 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 		// alive under the same pgid. terminateAndFinalize reaps any such
 		// stragglers before trusting Wait() as proof the group is clear.
 		code := result.code
-		_, err := terminateAndFinalize(manifestPath, base, &code, nil)
+		_, err := terminateAndFinalize(manifestPath, base, descendants, &code, nil)
 		return err
 
 	case reason := <-terminationTriggered:
@@ -211,12 +228,12 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 		terminating.State = StateTerminating
 		terminating.LastStateChangeAt = nowRFC3339()
 		if err := writeManifestFn(manifestPath, terminating); err != nil {
-			terminateAndReport(manifestPath, base, reason)
+			terminateAndReport(manifestPath, base, descendants, reason)
 			return fmt.Errorf("write terminating manifest: %w", err)
 		}
 
 		reasonCopy := reason
-		verified, err := terminateAndFinalize(manifestPath, base, nil, &reasonCopy)
+		verified, err := terminateAndFinalize(manifestPath, base, descendants, nil, &reasonCopy)
 		if err != nil {
 			return fmt.Errorf("write final manifest: %w", err)
 		}

@@ -35,10 +35,12 @@ func childrenByParent() (map[int][]int, error) {
 // descendantsOf returns every transitive descendant of root from a single
 // process-table snapshot -- including a descendant that has escaped root's
 // own process group (e.g. by calling setsid()), which a pgid-scoped signal
-// can never reach. A single snapshot means a process spawned after it was
-// taken cannot appear; that is an acceptable bound on a defense-in-depth
-// sweep run after the group-scoped termination has already had its full
-// timeout budget to reach the same processes.
+// can never reach. A single snapshot only reflects one instant, which is
+// why descendantTracker calls this repeatedly throughout a harness's whole
+// life rather than taking one snapshot at termination time: root itself
+// may already be dead and reaped by then, having already reparented any
+// escaped descendant to init and severed the very link this function
+// needs to find it.
 func descendantsOf(root int) ([]int, error) {
 	byParent, err := childrenByParent()
 	if err != nil {

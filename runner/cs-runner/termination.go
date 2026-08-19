@@ -56,95 +56,104 @@ func Terminate(pgid int, gracefulTimeout, verifyTimeout time.Duration) (verified
 	return waitUntilGone(pgid, verifyTimeout), nil
 }
 
-// TerminateGroupAndDescendants runs Terminate against pgid and, in
-// parallel, terminates every OS-process-tree descendant of harnessPID
-// still alive (via terminatePIDList) -- closing the daemonize-escape gap:
-// a harness grandchild that calls setsid() itself leaves the process
-// group entirely, so Terminate's group-scoped kill(-pgid, ...) can never
-// reach it, even though it is very much still a descendant of the
-// harness. The descendant snapshot is taken FIRST, before either kill
-// phase starts: if it were taken concurrently with (or after) the
-// group-kill, a fast group-kill could reap the harness before the
-// snapshot runs, reparenting any escaped descendant to init and severing
-// the very parent-child link this function needs to find it. Both kill
-// phases then run concurrently against the snapshot so the combined
-// wall-clock stays within the same gracefulTimeout+verifyTimeout budget
-// rather than doubling it. verified is true only if both phases verify
-// their targets are gone.
-func TerminateGroupAndDescendants(pgid, harnessPID int, gracefulTimeout, verifyTimeout time.Duration) (verified bool, err error) {
-	descendantPIDs, err := descendantsOf(harnessPID)
-	if err != nil {
-		return false, err
+// TerminateGroupAndDescendants runs Terminate against pgid and then
+// terminates every descendant pid the caller's tracker observed over the
+// harness's life still alive (via terminatePIDList) -- closing the
+// daemonize-escape gap: a harness grandchild that calls setsid() itself
+// leaves the process group entirely, so Terminate's group-scoped
+// kill(-pgid, ...) can never reach it, even though it is very much still
+// a descendant of the harness. The descendant pid list must come from a
+// tracker that has been polling continuously since the harness was
+// spawned (descendantTracker), not a single snapshot taken here: by the
+// time termination begins, the harness may already be dead (a natural
+// exit reaps it before this function is ever called) and any escaped
+// descendant already reparented to init, with no trace connecting it back
+// to the harness in a fresh snapshot taken now. The two phases run
+// sequentially, not concurrently: descendant termination only starts once
+// the group phase (which can itself produce new descendants right up
+// until the group is confirmed gone) has finished, so a descendant that
+// appears mid-graceful-window is still caught by the caller's tracker
+// (which keeps polling until stopped, after this function's group phase
+// completes) rather than being missed by a snapshot taken too early.
+// verified is true only if both phases verify their targets are gone.
+func TerminateGroupAndDescendants(pgid int, tracker *descendantTracker, gracefulTimeout, verifyTimeout time.Duration) (verified bool, err error) {
+	groupVerified, groupErr := Terminate(pgid, gracefulTimeout, verifyTimeout)
+
+	// The tracker keeps polling in its own goroutine for the entire
+	// duration of the group phase above, so a descendant that appears
+	// mid-graceful-window (after termination was triggered but before the
+	// group is confirmed gone) is still observed before Stop() takes its
+	// final poll and returns everything ever seen.
+	descendantPIDs := tracker.Stop()
+
+	if groupErr != nil {
+		return false, groupErr
 	}
 
-	type result struct {
-		verified bool
-		err      error
+	descVerified, descErr := terminatePIDList(descendantPIDs, gracefulTimeout, verifyTimeout)
+	if descErr != nil {
+		return false, descErr
 	}
-	groupCh := make(chan result, 1)
-	descCh := make(chan result, 1)
 
-	go func() {
-		v, e := Terminate(pgid, gracefulTimeout, verifyTimeout)
-		groupCh <- result{v, e}
-	}()
-	go func() {
-		v, e := terminatePIDList(descendantPIDs, gracefulTimeout, verifyTimeout)
-		descCh <- result{v, e}
-	}()
-
-	group := <-groupCh
-	desc := <-descCh
-
-	if group.err != nil {
-		return false, group.err
-	}
-	if desc.err != nil {
-		return false, desc.err
-	}
-	return group.verified && desc.verified, nil
+	return groupVerified && descVerified, nil
 }
 
 // terminatePIDList runs the same bounded SIGTERM -> wait -> SIGKILL ->
 // verify sequence Terminate uses for a process group, but against each
 // pid in a pre-determined list individually rather than a group
 // broadcast, since an escaped descendant's own group cannot be assumed
-// safe to broadcast-signal (it may not be a group of one).
+// safe to broadcast-signal (it may not be a group of one). Every pid is
+// signaled unconditionally (no upfront "is it alive" filter): an ESRCH on
+// signal delivery is harmless and expected for a pid that has already
+// exited on its own, mirroring Terminate's own group-signal handling.
 func terminatePIDList(pids []int, gracefulTimeout, verifyTimeout time.Duration) (verified bool, err error) {
-	var alive []int
-	for _, pid := range pids {
-		if sendSignal(pid, 0) == nil {
-			alive = append(alive, pid)
-		}
-	}
-	if len(alive) == 0 {
+	if len(pids) == 0 {
 		return true, nil
 	}
 
-	for _, pid := range alive {
+	for _, pid := range pids {
 		if killErr := sendSignal(pid, syscall.SIGTERM); killErr != nil && killErr != syscall.ESRCH {
 			return false, killErr
 		}
 	}
-	if waitUntilPidsGone(alive, gracefulTimeout) {
+	if waitUntilPIDsGone(pids, gracefulTimeout) {
 		return true, nil
 	}
 
-	for _, pid := range alive {
+	for _, pid := range pids {
 		if killErr := sendSignal(pid, syscall.SIGKILL); killErr != nil && killErr != syscall.ESRCH {
 			return false, killErr
 		}
 	}
-	return waitUntilPidsGone(alive, verifyTimeout), nil
+	return waitUntilPIDsGone(pids, verifyTimeout), nil
 }
 
-func waitUntilPidsGone(pids []int, timeout time.Duration) bool {
+// checkPID mirrors checkProcessGroup for a specific pid rather than a
+// negative-pgid broadcast target: only ESRCH is conclusive evidence of
+// death, so an EPERM (or any other error) can never be misread as "gone"
+// (round 1 finding B2's fix, applied identically here).
+func checkPID(pid int) processGroupState {
+	switch err := sendSignal(pid, 0); err {
+	case nil:
+		return groupAlive
+	case syscall.ESRCH:
+		return groupGone
+	default:
+		return groupUnknown
+	}
+}
+
+// waitUntilPIDsGone mirrors waitUntilGone for a list of specific pids:
+// resolves true only once every pid conclusively checks as gone (ESRCH),
+// treating an unverifiable check (EPERM) the same as "still alive" rather
+// than "gone", exactly like the group-scoped check.
+func waitUntilPIDsGone(pids []int, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 
 	for {
 		allGone := true
 		for _, pid := range pids {
-			if sendSignal(pid, 0) == nil {
+			if checkPID(pid) != groupGone {
 				allGone = false
 				break
 			}

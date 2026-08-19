@@ -197,6 +197,11 @@ func TestTerminateGroupAndDescendants_KillsAHarnessGrandchildThatDaemonizesAway(
 	if err != nil {
 		t.Fatalf("SpawnHarness: %v", err)
 	}
+	// Start tracking immediately after spawn, exactly as main.go's real
+	// production code does: a single snapshot taken only at termination
+	// time cannot see a descendant whose parent-child link to the harness
+	// has already been severed by then.
+	tracker := startDescendantTracker(handle.PID, 20*time.Millisecond)
 	// Reap the harness concurrently, exactly as main.go's real production
 	// code does: kill(-pgid, 0)'s verification depends on the harness
 	// being promptly reaped by its actual parent (this process), since an
@@ -226,7 +231,14 @@ func TestTerminateGroupAndDescendants_KillsAHarnessGrandchildThatDaemonizesAway(
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	verified, err := TerminateGroupAndDescendants(handle.PGID, handle.PID, 2*time.Second, 2*time.Second)
+	// Give the tracker a real chance to observe the grandchild before
+	// terminating anything: the tracker's guarantee is "caught within one
+	// poll interval," not "caught instantly," so a test that terminates
+	// within microseconds of the grandchild existing is testing a race the
+	// design explicitly does not claim to close (see descendant_tracker.go).
+	time.Sleep(5 * 20 * time.Millisecond)
+
+	verified, err := TerminateGroupAndDescendants(handle.PGID, tracker, 2*time.Second, 2*time.Second)
 	if err != nil {
 		t.Fatalf("TerminateGroupAndDescendants: %v", err)
 	}
@@ -239,5 +251,65 @@ func TestTerminateGroupAndDescendants_KillsAHarnessGrandchildThatDaemonizesAway(
 	}
 	if err := syscall.Kill(grandchildPID, 0); err != syscall.ESRCH {
 		t.Fatalf("escaped grandchild pid %d is still alive after termination (err=%v)", grandchildPID, err)
+	}
+}
+
+// TestTerminateGroupAndDescendants_GroupStillTerminatesWhenDescendantTrackingCanNeverSeeAnything
+// proves a failed descendant snapshot never skips the group-scoped kill:
+// with `ps` entirely unreachable (a broken PATH) for the tracker's whole
+// life, the group must still be signaled, verified, and reported dead --
+// TerminateGroupAndDescendants must not silently give up on the one part
+// of termination it can always do regardless of process-tree visibility.
+func TestTerminateGroupAndDescendants_GroupStillTerminatesWhenDescendantTrackingCanNeverSeeAnything(t *testing.T) {
+	pgid, cmd := startGroupedProcess(t, "sleep 30")
+	go cmd.Wait()
+
+	originalPath := os.Getenv("PATH")
+	t.Cleanup(func() { os.Setenv("PATH", originalPath) })
+	os.Setenv("PATH", t.TempDir())
+
+	tracker := startDescendantTracker(pgid, 20*time.Millisecond)
+	time.Sleep(60 * time.Millisecond)
+
+	verified, err := TerminateGroupAndDescendants(pgid, tracker, 300*time.Millisecond, 300*time.Millisecond)
+	if err != nil {
+		t.Fatalf("TerminateGroupAndDescendants: %v", err)
+	}
+	if !verified {
+		t.Fatalf("expected verified=true: the group terminated cleanly and had no real descendants, even though ps-based tracking could never run at all (broken PATH)")
+	}
+	if groupHasSurvivors(pgid) {
+		t.Fatalf("process group %d still has a member after termination", pgid)
+	}
+}
+
+// TestTerminatePIDList_UnverifiableDescendantReportsUnverifiedRatherThanAssumingGone
+// proves the pid-list path never confuses an unverifiable liveness check
+// (EPERM) with confirmed death, exactly like the group-scoped path (round
+// 1 finding B2) -- a real escaped descendant behind a permissions change
+// must quarantine, not silently be assumed gone.
+func TestTerminatePIDList_UnverifiableDescendantReportsUnverifiedRatherThanAssumingGone(t *testing.T) {
+	origSignal := sendSignal
+	t.Cleanup(func() { sendSignal = origSignal })
+
+	sendSignal = func(pid int, sig syscall.Signal) error {
+		if sig == 0 {
+			return syscall.EPERM
+		}
+		return nil
+	}
+
+	start := time.Now()
+	verified, err := terminatePIDList([]int{424242}, 50*time.Millisecond, 50*time.Millisecond)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("terminatePIDList: %v", err)
+	}
+	if verified {
+		t.Fatalf("expected verified=false when a descendant's liveness cannot be determined (e.g. EPERM), not assumed gone")
+	}
+	if elapsed < 100*time.Millisecond {
+		t.Fatalf("returned in %v, faster than both bounded wait windows it should have exhausted before giving up", elapsed)
 	}
 }
