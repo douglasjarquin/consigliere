@@ -25,9 +25,9 @@ import (
 // synchronous poll can catch a multi-generation escape in one pass, not
 // just a direct child). And because every pid ever added remains a valid
 // root for every later poll for as long as it is still that same live
-// process, a subtree already reached through some
-// ancestor keeps being explored on future polls even after that ancestor
-// has since died and been pruned -- a long chain is routinely completed
+// process, a subtree already reached through some ancestor keeps being
+// explored on future polls even after that ancestor has since died and
+// been pruned -- a long chain is routinely completed
 // incrementally this way, across many different polls, long after an
 // upstream link has broken. The one thing that permanently breaks
 // discovery is a descendant for which no poll, at any point in the

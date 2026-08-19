@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -174,6 +175,127 @@ func TestDescendantTracker_PrunesAStalePollingRootAndNeverAdoptsItsUnrelatedChil
 		if p.PID == impostorChildPID {
 			t.Fatalf("impostor's real, unrelated child %d was adopted into the tracked set: %v", impostorChildPID, pids)
 		}
+	}
+}
+
+// writeFakePS writes an executable at path that, when run in place of a
+// real `ps`, prints exactly the given pid/ppid/lstart rows -- used to give
+// a test full control over what a poll sees, independent of the real
+// process table and its timing.
+func writeFakePS(t *testing.T, path string, rows [][2]int) {
+	t.Helper()
+	// echo is a shell builtin, not an external command: the script must
+	// never depend on anything resolved via PATH, since the whole point
+	// of this stub is to run with PATH overridden to nothing but itself.
+	script := "#!/bin/sh\n"
+	for _, row := range rows {
+		script += fmt.Sprintf("echo '%d %d Mon Jan  1 00:00:00 2001'\n", row[0], row[1])
+	}
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake ps: %v", err)
+	}
+}
+
+// TestDescendantTracker_FirstPollIsSynchronousAndAlreadyContainsAChild
+// proves startDescendantTracker's very first poll has already run, and its
+// result is already visible, before the function returns -- a real
+// implementation bug this exact guarantee once closed (see
+// docs/spikes/spike-c-results.md's "Two real races found" section) had no
+// regression test of its own: nothing in the suite failed when this
+// synchronous poll was removed.
+func TestDescendantTracker_FirstPollIsSynchronousAndAlreadyContainsAChild(t *testing.T) {
+	rootCmd := exec.Command("sleep", "30")
+	if err := rootCmd.Start(); err != nil {
+		t.Fatalf("start root: %v", err)
+	}
+	rootPID := rootCmd.Process.Pid
+	go rootCmd.Wait()
+	t.Cleanup(func() { syscall.Kill(rootPID, syscall.SIGKILL) })
+
+	childCmd := exec.Command("sleep", "30")
+	if err := childCmd.Start(); err != nil {
+		t.Fatalf("start child: %v", err)
+	}
+	childPID := childCmd.Process.Pid
+	go childCmd.Wait()
+	t.Cleanup(func() { syscall.Kill(childPID, syscall.SIGKILL) })
+
+	dir := t.TempDir()
+	writeFakePS(t, filepath.Join(dir, "ps"), [][2]int{{rootPID, 1}, {childPID, rootPID}})
+	originalPath := os.Getenv("PATH")
+	t.Cleanup(func() { os.Setenv("PATH", originalPath) })
+	os.Setenv("PATH", dir)
+
+	// A 30-second interval guarantees the background ticker cannot have
+	// fired by the time Peek() is called immediately below -- only the
+	// synchronous first poll can have populated the tracked set.
+	tracker := startDescendantTracker(rootPID, 30*time.Second)
+	pids, reliable := tracker.Peek()
+	tracker.Stop()
+
+	if !reliable {
+		t.Fatalf("expected reliable=true: the fake ps always succeeds")
+	}
+	found := false
+	for _, p := range pids {
+		if p.PID == childPID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("startDescendantTracker's first poll did not already contain child %d: %v", childPID, pids)
+	}
+}
+
+// TestDescendantTracker_StopsFinalPollCanStillDiscoverANewChild proves
+// Stop()'s documented "one final poll" is real and load-bearing: a child
+// that appears only after the tracker's last background tick, with no
+// further tick ever scheduled to fire, is still discovered because Stop()
+// itself triggers one more poll before returning -- nothing in the suite
+// failed when this final poll was removed.
+func TestDescendantTracker_StopsFinalPollCanStillDiscoverANewChild(t *testing.T) {
+	rootCmd := exec.Command("sleep", "30")
+	if err := rootCmd.Start(); err != nil {
+		t.Fatalf("start root: %v", err)
+	}
+	rootPID := rootCmd.Process.Pid
+	go rootCmd.Wait()
+	t.Cleanup(func() { syscall.Kill(rootPID, syscall.SIGKILL) })
+
+	childCmd := exec.Command("sleep", "30")
+	if err := childCmd.Start(); err != nil {
+		t.Fatalf("start child: %v", err)
+	}
+	childPID := childCmd.Process.Pid
+	go childCmd.Wait()
+	t.Cleanup(func() { syscall.Kill(childPID, syscall.SIGKILL) })
+
+	dir := t.TempDir()
+	fakePS := filepath.Join(dir, "ps")
+	writeFakePS(t, fakePS, [][2]int{{rootPID, 1}})
+	originalPath := os.Getenv("PATH")
+	t.Cleanup(func() { os.Setenv("PATH", originalPath) })
+	os.Setenv("PATH", dir)
+
+	// A 30-second interval guarantees the background ticker never fires
+	// again for the rest of this test -- the child added to the snapshot
+	// below can only ever be seen by Stop()'s own final poll.
+	tracker := startDescendantTracker(rootPID, 30*time.Second)
+
+	writeFakePS(t, fakePS, [][2]int{{rootPID, 1}, {childPID, rootPID}})
+
+	pids, reliable := tracker.Stop()
+	if !reliable {
+		t.Fatalf("expected reliable=true: the fake ps always succeeds")
+	}
+	found := false
+	for _, p := range pids {
+		if p.PID == childPID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Stop()'s final poll did not discover child %d, added to the process table only after the last background tick: %v", childPID, pids)
 	}
 }
 

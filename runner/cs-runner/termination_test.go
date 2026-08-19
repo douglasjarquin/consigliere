@@ -474,6 +474,49 @@ func TestTerminateTrackedDescendants_UnableToRevalidateReportsUnverifiedWithoutS
 	}
 }
 
+// TestTerminateTrackedDescendants_LastDitchPassCatchesAChildDiscoveredOnlyAtStop
+// proves the last-ditch signaling pass after tracker.Stop() is real and
+// load-bearing: a child forked only after the tracker's last background
+// tick -- and with no further tick ever scheduled to fire before the
+// graceful/verify phases already finished -- is still discovered and
+// killed, because Stop() itself performs one more poll no earlier phase
+// loop had a chance to see.
+func TestTerminateTrackedDescendants_LastDitchPassCatchesAChildDiscoveredOnlyAtStop(t *testing.T) {
+	dir := t.TempDir()
+	childPidFile := filepath.Join(dir, "child.pid")
+
+	// The escapee delays before backgrounding its own real child, so the
+	// tracker's synchronous first poll (which runs before this script has
+	// had time to fork anything) sees no child at all.
+	escapeeCmd := exec.Command("sh", "-c", `sleep 0.3; sleep 30 & echo $! > "$0"; wait`, childPidFile)
+	if err := escapeeCmd.Start(); err != nil {
+		t.Fatalf("start escapee: %v", err)
+	}
+	escapeePID := escapeeCmd.Process.Pid
+	go escapeeCmd.Wait()
+	t.Cleanup(func() { syscall.Kill(-escapeePID, syscall.SIGKILL) })
+
+	// A 30-second interval guarantees the tracker's own background ticker
+	// cannot fire again before this test's very short graceful/verify
+	// phases already complete -- so the child forked below can only ever
+	// be found by Stop()'s own final poll.
+	tracker := startDescendantTracker(escapeePID, 30*time.Second)
+
+	childPID := waitForPIDFile(t, childPidFile, 2*time.Second)
+	t.Cleanup(func() { syscall.Kill(childPID, syscall.SIGKILL) })
+
+	verified, err := terminateTrackedDescendants(tracker, 20*time.Millisecond, 20*time.Millisecond)
+	if err != nil {
+		t.Fatalf("terminateTrackedDescendants: %v", err)
+	}
+	if !verified {
+		t.Fatalf("expected verified=true: the last-ditch pass should have caught and killed the child Stop()'s final poll discovered")
+	}
+	if err := syscall.Kill(childPID, 0); err != syscall.ESRCH {
+		t.Fatalf("child %d discovered only by Stop()'s final poll is still alive (err=%v)", childPID, err)
+	}
+}
+
 // TestTerminateTrackedDescendants_StopsTheTrackerEvenOnAnErrorReturn proves
 // every error return path still stops the tracker's background goroutine --
 // a verification-gate round found the early error returns introduced when
