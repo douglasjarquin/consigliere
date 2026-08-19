@@ -473,3 +473,30 @@ func TestTerminateTrackedDescendants_UnableToRevalidateReportsUnverifiedWithoutS
 		t.Fatalf("terminateTrackedDescendants signaled a pid it could not revalidate -- must never guess")
 	}
 }
+
+// TestTerminateTrackedDescendants_StopsTheTrackerEvenOnAnErrorReturn proves
+// every error return path still stops the tracker's background goroutine --
+// a verification-gate round found the early error returns introduced when
+// this function was rewritten to keep the tracker alive throughout (see the
+// comment above it) all skipped calling Stop() entirely, leaking a
+// goroutine that would poll `ps` forever.
+func TestTerminateTrackedDescendants_StopsTheTrackerEvenOnAnErrorReturn(t *testing.T) {
+	origCurrentStartedAtFn := currentStartedAtFn
+	t.Cleanup(func() { currentStartedAtFn = origCurrentStartedAtFn })
+
+	currentStartedAtFn = func() (map[int]string, error) {
+		return nil, fmt.Errorf("ps unavailable")
+	}
+
+	tracker := seededTracker(map[int]string{555: "original-process"})
+
+	if _, err := terminateTrackedDescendants(tracker, 50*time.Millisecond, 50*time.Millisecond); err == nil {
+		t.Fatalf("expected an error")
+	}
+
+	select {
+	case <-tracker.done:
+	default:
+		t.Fatalf("tracker's background goroutine was not stopped after an error return -- it leaks forever")
+	}
+}

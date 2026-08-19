@@ -121,6 +121,15 @@ func TerminateGroupAndDescendants(pgid int, tracker *descendantTracker, graceful
 // itself cannot run at all, nothing is signaled and the whole call reports
 // unverified, rather than guessing.
 func terminateTrackedDescendants(tracker *descendantTracker, gracefulTimeout, verifyTimeout time.Duration) (verified bool, err error) {
+	// Guarantees the tracker's background goroutine is always stopped,
+	// even on an early error return -- a verification-gate round found
+	// every error path here previously returned without ever calling
+	// Stop(), leaking a goroutine that polled `ps` forever. Idempotent
+	// (sync.Once-backed), so this is harmless alongside the explicit
+	// Stop() call the normal completion path below still makes to get at
+	// its actual return values.
+	defer func() { tracker.Stop() }()
+
 	known := make(map[int]bool)
 
 	signalFresh := func(sig syscall.Signal, doneThisPhase map[int]bool, candidates []trackedPID) error {

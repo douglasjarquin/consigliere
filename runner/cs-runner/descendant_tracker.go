@@ -7,7 +7,7 @@ import (
 
 // descendantTracker continuously polls the OS process tree rooted at a
 // harness pid throughout its entire life, accumulating every descendant
-// pid ever observed -- including one that later calls setsid() and
+// pid still confirmed alive -- including one that later calls setsid() and
 // escapes the harness's own process group, or one whose parent-child link
 // to the harness is later severed by the harness itself exiting and being
 // reaped. A single point-in-time snapshot taken only at termination time
@@ -17,6 +17,11 @@ import (
 // Continuous polling closes that window down to, at worst, the single
 // poll interval immediately before the tracker is stopped -- a residual,
 // disclosed limitation of finite-frequency polling, not an unbounded gap.
+// A pid is pruned from the accumulated set once its identity no longer
+// validates (it exited on its own, or the pid number has been recycled by
+// the OS to an unrelated process), so the accumulated set at any moment is
+// "every descendant seen and not yet ruled out", not a permanent record
+// of everything ever observed.
 type descendantTracker struct {
 	mu         sync.Mutex
 	seen       map[int]string
@@ -112,26 +117,27 @@ func (t *descendantTracker) poll(rootPID int) {
 	}
 }
 
-// Peek returns every pid observed as a descendant of the tracked root so
-// far, plus whether that result can be trusted as complete -- the same
-// result Stop() returns, but without halting polling: a caller can inspect
-// the tracker's live, still-growing accumulated set while it keeps running
-// in the background.
+// Peek returns every pid currently tracked as a descendant of the root --
+// one seen and not since pruned for failing revalidation -- plus whether
+// that result can be trusted as complete. Same result shape as Stop(), but
+// without halting polling: a caller can inspect the tracker's live,
+// still-changing accumulated set while it keeps running in the background.
 func (t *descendantTracker) Peek() (pids []trackedPID, reliable bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.snapshotLocked()
 }
 
-// Stop halts polling (after one final poll) and returns every pid ever
-// observed as a descendant of the tracked root, plus whether that result
-// can be trusted as complete. reliable is false if even one poll over the
-// tracker's life failed to enumerate the process tree (e.g. `ps` timed out
-// or was unreachable): a gap during which a real descendant could have
-// come and gone unseen, so the caller must treat the descendant side as
-// unverifiable rather than assuming the pids it did see are the only ones
-// that ever existed. Idempotent: calling Stop() more than once returns the
-// same result rather than panicking on a doubly-closed channel.
+// Stop halts polling (after one final poll) and returns every pid still
+// tracked as a descendant of the root at that point, plus whether that
+// result can be trusted as complete. reliable is false if even one poll
+// over the tracker's life failed to enumerate the process tree (e.g. `ps`
+// timed out or was unreachable): a gap during which a real descendant
+// could have come and gone unseen, so the caller must treat the
+// descendant side as unverifiable rather than assuming the pids it did
+// see are the only ones that ever existed. Idempotent: calling Stop() more
+// than once returns the same result rather than panicking on a
+// doubly-closed channel.
 func (t *descendantTracker) Stop() (pids []trackedPID, reliable bool) {
 	t.stopOnce.Do(func() { close(t.stop) })
 	<-t.done
