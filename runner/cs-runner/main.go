@@ -211,6 +211,7 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 		terminating.State = StateTerminating
 		terminating.LastStateChangeAt = nowRFC3339()
 		if err := writeManifestFn(manifestPath, terminating); err != nil {
+			terminateAndReport(manifestPath, base, reason)
 			return fmt.Errorf("write terminating manifest: %w", err)
 		}
 

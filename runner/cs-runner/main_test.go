@@ -257,6 +257,71 @@ func TestRun_RunningManifestWriteFailureTerminatesAlreadySpawnedHarness(t *testi
 	}
 }
 
+// TestRun_ManifestWriteFailureOnTheCancelPathStillTerminatesTheHarness is a
+// table-driven proof, across every writeManifestFn call in the cancel-
+// triggered termination path (1=starting, 2=running, 3=terminating,
+// 4=final-inside-terminateAndFinalize), that a write failure at that call
+// still terminates the already-spawned harness -- closing the specific gap
+// at the "terminating" write (a fourth abandonment path distinct from the
+// three already covered) and guarding against a fifth one hiding later in
+// this same sequence.
+func TestRun_ManifestWriteFailureOnTheCancelPathStillTerminatesTheHarness(t *testing.T) {
+	for _, failAt := range []int{3, 4} {
+		t.Run(fmt.Sprintf("failAt=%d", failAt), func(t *testing.T) {
+			orig := writeManifestFn
+			t.Cleanup(func() { writeManifestFn = orig })
+
+			callCount := 0
+			writeManifestFn = func(path string, m Manifest) error {
+				callCount++
+				if callCount == failAt {
+					return fmt.Errorf("simulated write failure at call %d", failAt)
+				}
+				return orig(path, m)
+			}
+
+			dir := shortSocketDir(t)
+			manifestPath := filepath.Join(dir, "manifest.json")
+			controlSocketPath := filepath.Join(dir, "control.sock")
+
+			runErrCh := make(chan error, 1)
+			go func() {
+				runErrCh <- run(fmt.Sprintf("attempt-tbl-%d", failAt), "mission-tbl", "fence-tbl",
+					manifestPath, controlSocketPath, []string{"sleep", "30"})
+			}()
+
+			conn := dialControlSocketWithRetry(t, controlSocketPath, 3*time.Second)
+			defer conn.Close()
+			go io.Copy(io.Discard, conn)
+
+			waitForManifestState(t, manifestPath, StateRunning, 3*time.Second)
+			if _, err := conn.Write([]byte(`{"type":"cancel"}` + "\n")); err != nil {
+				t.Fatalf("send cancel: %v", err)
+			}
+
+			select {
+			case err := <-runErrCh:
+				if err == nil {
+					t.Fatalf("failAt=%d: expected run() to return an error", failAt)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatalf("failAt=%d: run() never returned", failAt)
+			}
+
+			m, readErr := ReadManifest(manifestPath)
+			if readErr != nil {
+				t.Fatalf("failAt=%d: ReadManifest: %v", failAt, readErr)
+			}
+			if m.PGID == 0 {
+				t.Fatalf("failAt=%d: final manifest has no pgid recorded, cannot verify cleanup", failAt)
+			}
+			if err := syscall.Kill(-m.PGID, 0); err != syscall.ESRCH {
+				t.Fatalf("failAt=%d: harness process group %d was left running (kill err=%v)", failAt, m.PGID, err)
+			}
+		})
+	}
+}
+
 // TestRun_SignaledHarnessExitReportsSignaledTrue proves that a harness
 // killed by a signal (as opposed to exiting with its own status code) is
 // reported as such -- both in the harness_exited control message and the
