@@ -178,6 +178,54 @@ func TestControlChannel_ReadLoopHandlesOversizedSingleLineMessage(t *testing.T) 
 	}
 }
 
+// TestControlChannel_ReadLoopBoundsLineSizeAndNeverTreatsATooLongLineAsEOF
+// proves ReadLoop's line size is bounded (unlike a raw bufio.Reader.
+// ReadString, which has no cap and lets an unterminated write grow memory
+// without limit) and that exceeding the bound drops the line rather than
+// ever firing onEOF -- a too-long frame must not be conflated with the
+// daemon actually disconnecting.
+func TestControlChannel_ReadLoopBoundsLineSizeAndNeverTreatsATooLongLineAsEOF(t *testing.T) {
+	socketPath := filepath.Join(shortSocketDir(t), "control.sock")
+	cc, err := NewControlChannel(socketPath)
+	if err != nil {
+		t.Fatalf("NewControlChannel: %v", err)
+	}
+	defer cc.Close()
+
+	acceptErrCh := make(chan error, 1)
+	go func() { acceptErrCh <- cc.AcceptOnce(2 * time.Second) }()
+
+	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
+	if err != nil {
+		t.Fatalf("client dial: %v", err)
+	}
+	defer conn.Close()
+
+	if err := <-acceptErrCh; err != nil {
+		t.Fatalf("AcceptOnce: %v", err)
+	}
+
+	received := make(chan map[string]any, 1)
+	eofDetected := make(chan struct{})
+	go cc.ReadLoop(
+		func(msg map[string]any) { received <- msg },
+		func() { close(eofDetected) },
+	)
+
+	tooLong := strings.Repeat("y", maxControlLineBytes+1024)
+	if _, err := conn.Write([]byte(tooLong + "\n")); err != nil {
+		t.Fatalf("client write: %v", err)
+	}
+
+	select {
+	case got := <-received:
+		t.Fatalf("expected the too-long line to be dropped, not delivered: %+v", got)
+	case <-eofDetected:
+		t.Fatalf("expected the too-long line to be dropped, not treated as EOF/disconnection")
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
 func TestControlChannel_AcceptOnceTimesOutIfNoClientConnects(t *testing.T) {
 	socketPath := filepath.Join(shortSocketDir(t), "control.sock")
 	cc, err := NewControlChannel(socketPath)

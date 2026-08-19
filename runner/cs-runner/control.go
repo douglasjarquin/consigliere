@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+// maxControlLineBytes bounds a single NDJSON line: generous enough for any
+// real stdout/stderr chunk or control message, small enough that a
+// malformed or hostile peer cannot grow the runner's memory without limit.
+const maxControlLineBytes = 16 * 1024 * 1024
+
 // ControlChannel is the runner's side of the per-Attempt Unix domain socket
 // control channel: the runner is the server, the daemon connects as the one
 // client. Framing is NDJSON (one JSON object per line), per
@@ -90,25 +95,27 @@ func (c *ControlChannel) ReadLoop(onMessage func(map[string]any), onEOF func()) 
 		return
 	}
 
-	// bufio.Reader.ReadString has no fixed line-length cap, unlike
-	// bufio.Scanner's default 64KiB token limit -- a large-but-valid single
-	// line (e.g. a big stdout/stderr chunk) must never be misread as a scan
-	// error and conflated with the connection actually closing.
-	reader := bufio.NewReader(conn)
-	for {
-		line, err := reader.ReadString('\n')
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
+	// scanner.Buffer raises the token limit well past bufio.Scanner's default
+	// 64KiB (generous enough for any real stdout/stderr chunk) while keeping
+	// it bounded, unlike an unbounded bufio.Reader.ReadString, which would
+	// let a malformed or hostile peer grow the runner's memory without
+	// limit. scanner.Err() after the loop distinguishes a genuine EOF (nil)
+	// from a scan error such as a too-long line (non-nil) -- only a real EOF
+	// may be conflated with the connection actually closing.
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxControlLineBytes)
+	for scanner.Scan() {
+		if trimmed := strings.TrimSpace(scanner.Text()); trimmed != "" {
 			var msg map[string]any
 			if jsonErr := json.Unmarshal([]byte(trimmed), &msg); jsonErr == nil {
 				onMessage(msg)
 			}
 		}
-		if err != nil {
-			break
-		}
 	}
 
-	onEOF()
+	if scanner.Err() == nil {
+		onEOF()
+	}
 }
 
 func (c *ControlChannel) Close() error {
