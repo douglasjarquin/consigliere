@@ -33,6 +33,33 @@ func nowRFC3339() string {
 }
 
 func run(attemptID, missionID, fencingToken, manifestPath, controlSocketPath string, harnessCommand []string) error {
+	return runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, controlSocketPath, harnessCommand, 30*time.Second)
+}
+
+// terminateAndFinalize runs the termination sequence against base's process
+// group and writes the resulting terminal manifest state (dead_verified or
+// dead_unverified), shared by every path that ends a runner's life: a
+// natural harness exit (which may still leave stragglers in the group), an
+// explicit termination trigger, and a post-spawn failure that must not
+// abandon an already-running harness.
+func terminateAndFinalize(manifestPath string, base Manifest, exitCode *int, reason *string) (verified bool, err error) {
+	verified, _ = Terminate(base.PGID, 5*time.Second, 2*time.Second)
+
+	deadAt := nowRFC3339()
+	final := base
+	final.ExitCode = exitCode
+	final.TerminationReason = reason
+	final.LastStateChangeAt = deadAt
+	if verified {
+		final.State = StateDeadVerified
+		final.VerifiedDeadAt = &deadAt
+	} else {
+		final.State = StateDeadUnverified
+	}
+	return verified, WriteManifest(manifestPath, final)
+}
+
+func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, controlSocketPath string, harnessCommand []string, acceptTimeout time.Duration) error {
 	base := Manifest{
 		SchemaVersion:     1,
 		AttemptID:         attemptID,
@@ -52,6 +79,23 @@ func run(attemptID, missionID, fencingToken, manifestPath, controlSocketPath str
 		return fmt.Errorf("spawn harness: %w", err)
 	}
 
+	// Start reaping the harness the moment it is spawned, not after control-
+	// channel setup: a later Terminate call's own process-group verification
+	// depends on the harness being promptly reaped by its actual parent (this
+	// process), since an unreaped zombie leader makes kill(-pgid, 0) return
+	// EPERM rather than ESRCH on at least one real platform this was tested
+	// against, which would otherwise be misread as "cannot verify" for a
+	// harness that is, in fact, already dead.
+	harnessExited := make(chan int, 1)
+	go func() {
+		waitErr := handle.Cmd.Wait()
+		code := 0
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			code = exitErr.ExitCode()
+		}
+		harnessExited <- code
+	}()
+
 	execPath := harnessCommand[0]
 	execHash, _ := sha256File(execPath)
 
@@ -68,11 +112,15 @@ func run(attemptID, missionID, fencingToken, manifestPath, controlSocketPath str
 
 	cc, err := NewControlChannel(controlSocketPath)
 	if err != nil {
+		reason := "control_channel_setup_failed"
+		terminateAndFinalize(manifestPath, base, nil, &reason)
 		return fmt.Errorf("create control channel: %w", err)
 	}
 	defer cc.Close()
 
-	if err := cc.AcceptOnce(30 * time.Second); err != nil {
+	if err := cc.AcceptOnce(acceptTimeout); err != nil {
+		reason := "daemon_never_connected"
+		terminateAndFinalize(manifestPath, base, nil, &reason)
 		return fmt.Errorf("wait for daemon to connect: %w", err)
 	}
 
@@ -88,16 +136,6 @@ func run(attemptID, missionID, fencingToken, manifestPath, controlSocketPath str
 		"mission_id":                missionID,
 		"fencing_token":             fencingToken,
 	})
-
-	harnessExited := make(chan int, 1)
-	go func() {
-		waitErr := handle.Cmd.Wait()
-		code := 0
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
-			code = exitErr.ExitCode()
-		}
-		harnessExited <- code
-	}()
 
 	terminationTriggered := make(chan string, 1)
 	go cc.ReadLoop(
@@ -123,13 +161,13 @@ func run(attemptID, missionID, fencingToken, manifestPath, controlSocketPath str
 	select {
 	case code := <-harnessExited:
 		cc.Send(map[string]any{"type": "harness_exited", "attempt_id": attemptID, "exit_code": code, "signaled": false})
-		deadAt := nowRFC3339()
-		final := base
-		final.State = StateDeadVerified
-		final.ExitCode = &code
-		final.VerifiedDeadAt = &deadAt
-		final.LastStateChangeAt = deadAt
-		return WriteManifest(manifestPath, final)
+
+		// The harness itself exiting does not mean its process group is
+		// empty: it may have backgrounded a child before exiting, still
+		// alive under the same pgid. terminateAndFinalize reaps any such
+		// stragglers before trusting Wait() as proof the group is clear.
+		_, err := terminateAndFinalize(manifestPath, base, &code, nil)
+		return err
 
 	case reason := <-terminationTriggered:
 		terminating := base
@@ -139,20 +177,9 @@ func run(attemptID, missionID, fencingToken, manifestPath, controlSocketPath str
 			return fmt.Errorf("write terminating manifest: %w", err)
 		}
 
-		verified, _ := Terminate(handle.PGID, 5*time.Second, 2*time.Second)
-
-		deadAt := nowRFC3339()
-		final := base
-		final.LastStateChangeAt = deadAt
 		reasonCopy := reason
-		final.TerminationReason = &reasonCopy
-		if verified {
-			final.State = StateDeadVerified
-			final.VerifiedDeadAt = &deadAt
-		} else {
-			final.State = StateDeadUnverified
-		}
-		if err := WriteManifest(manifestPath, final); err != nil {
+		verified, err := terminateAndFinalize(manifestPath, base, nil, &reasonCopy)
+		if err != nil {
 			return fmt.Errorf("write final manifest: %w", err)
 		}
 
