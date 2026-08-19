@@ -8,6 +8,7 @@ defmodule Consigliere.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      Consigliere.Home.Lock,
       Consigliere.Repo,
       Consigliere.DatabaseWriter,
       {Registry, keys: :unique, name: Consigliere.Registry},
