@@ -421,14 +421,17 @@ func TestControlChannel_ConcurrentSendsNeverInterleaveOnTheWire(t *testing.T) {
 	const perGoroutine = 20
 	const goroutines = 4
 	const total = goroutines * perGoroutine
-	// Each payload is large enough (~500KB) that a single Send call's
-	// underlying conn.Write is virtually certain to be split across
-	// multiple partial write(2) syscalls by the runtime/kernel, opening a
-	// real window for another goroutine's write to interleave if Send does
-	// not hold its lock across the whole call -- a small payload (a few KB)
-	// tends to complete in one atomic write(2) regardless of any userspace
-	// locking, which would make this test pass even against unsynchronized
-	// code for the wrong reason.
+	// This is a real-world smoke/regression test, not the primary proof of
+	// serialization: measured directly, a real Unix domain socket's Write
+	// on this platform stays atomic against concurrent writers even at
+	// these sizes (and larger, up to at least several MB), because Go's
+	// runtime already serializes concurrent Write calls on the same fd
+	// internally. That means this test alone cannot distinguish Send
+	// holding its lock across the whole write from releasing it early --
+	// TestControlChannel_SendSerializesAcrossTheWholeWrite (the slowConn
+	// test below) is the test that actually forces and proves the
+	// distinction. This test still exercises the real, large-payload path
+	// end to end under load.
 	const payloadSize = 500_000
 
 	// The reader must drain concurrently with the writers, not after
