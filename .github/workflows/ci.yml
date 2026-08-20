@@ -83,8 +83,8 @@ jobs:
           REL=daemon/_build/prod/rel/consigliere_daemon/bin/consigliere_daemon
           "$REL" eval "Consigliere.Release.migrate()"
           "$REL" stop >/dev/null 2>&1 || true
-          sleep 1
-          "$REL" start
+          sleep 2
+          "$REL" start >"$CS_HOME/start.log" 2>&1 &
           i=0
           while [ "$i" -lt 30 ]; do
             if [ -S "$CS_HOME/priv.sock" ] && [ -S "$CS_HOME/api.sock" ]; then
@@ -93,18 +93,22 @@ jobs:
             i=$((i + 1))
             sleep 1
           done
-          test -S "$CS_HOME/priv.sock"
+          if [ ! -S "$CS_HOME/priv.sock" ]; then
+            echo "boot failed; start.log:"
+            cat "$CS_HOME/start.log" || true
+            exit 1
+          fi
           test -S "$CS_HOME/api.sock"
           daemon/cs ping
           daemon/cs doctor
           "$REL" stop
-          sleep 1
+          sleep 2
           if pgrep -f cs-runner >/dev/null; then
             echo "leftover cs-runner after stop"
             exit 1
           fi
           test -f "$CS_HOME/consigliere.db"
-          "$REL" start
+          "$REL" start >"$CS_HOME/restart.log" 2>&1 &
           i=0
           while [ "$i" -lt 30 ]; do
             if [ -S "$CS_HOME/priv.sock" ]; then
@@ -113,6 +117,11 @@ jobs:
             i=$((i + 1))
             sleep 1
           done
+          if [ ! -S "$CS_HOME/priv.sock" ]; then
+            echo "restart failed; restart.log:"
+            cat "$CS_HOME/restart.log" || true
+            exit 1
+          fi
           daemon/cs ping
           test -f "$CS_HOME/consigliere.db"
           "$REL" stop
