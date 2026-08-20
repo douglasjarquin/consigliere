@@ -48,7 +48,8 @@ defmodule Consigliere.Runtime.Inventory do
     runtime = Path.expand(Home.runtime_attempts_dir(home))
     expanded = Path.expand(path)
 
-    if String.starts_with?(expanded, runtime <> "/") and Path.basename(expanded) == "manifest.json" do
+    if String.starts_with?(expanded, runtime <> "/") and
+         Path.basename(expanded) == "manifest.json" do
       :ok
     else
       {:error, :identity}

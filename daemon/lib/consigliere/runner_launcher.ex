@@ -65,10 +65,12 @@ defmodule Consigliere.RunnerLauncher do
     fencing_token = Keyword.fetch!(opts, :fencing_token)
     manifest_path = Keyword.fetch!(opts, :manifest_path)
     control_socket_path = Keyword.fetch!(opts, :control_socket_path)
+
     control_token =
       Keyword.get_lazy(opts, :control_token, fn ->
         Base.encode16(:crypto.strong_rand_bytes(32), case: :lower)
       end)
+
     harness_command = Keyword.fetch!(opts, :harness_command)
 
     args =
@@ -104,7 +106,10 @@ defmodule Consigliere.RunnerLauncher do
              packet: :line
            ]),
          :ok <-
-           :gen_tcp.send(socket, JSON.encode!(%{"type" => "auth", "token" => control_token}) <> "\n"),
+           :gen_tcp.send(
+             socket,
+             JSON.encode!(%{"type" => "auth", "token" => control_token}) <> "\n"
+           ),
          {:ok, line} <- :gen_tcp.recv(socket, 0, 5_000),
          {:ok, %{"type" => "runner_started"} = started} <- JSON.decode(String.trim(line)) do
       {:ok,

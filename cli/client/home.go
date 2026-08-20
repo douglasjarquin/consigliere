@@ -37,7 +37,7 @@ func (h Home) CredentialPath() string   { return filepath.Join(h.Dir, "credentia
 func (h Home) AdvisoryCredentialPath() string {
 	return filepath.Join(h.Dir, "credentials", "advisory")
 }
-func (h Home) PIDPath() string          { return filepath.Join(h.Dir, "csd.pid") }
+func (h Home) PIDPath() string { return filepath.Join(h.Dir, "csd.pid") }
 
 func (h Home) BossSecret() (string, error) {
 	b, err := os.ReadFile(h.CredentialPath())

@@ -179,6 +179,7 @@ defmodule Consigliere.RunnerLauncherTest do
     refute match?({:ok, line} when is_binary(line) and line != "", thief_result)
 
     :ok = RunnerLauncher.cancel(session)
+
     assert {:ok, %{"type" => "termination_complete"}} =
              RunnerLauncher.recv_until(session, "termination_complete", 5_000)
   end

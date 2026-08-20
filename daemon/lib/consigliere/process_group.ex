@@ -145,5 +145,4 @@ defmodule Consigliere.ProcessGroup do
 
   defp zombie?(stat) when is_binary(stat), do: String.starts_with?(stat, "Z")
   defp zombie?(_), do: false
-
 end

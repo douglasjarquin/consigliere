@@ -84,6 +84,7 @@ defmodule Consigliere.Git do
     # the exact SHA rather than cloning HEAD, because the trusted mirror
     # stores checkpoints on refs/consigliere/* rather than a branch.
     git!(["init", "-b", "main", dest])
+
     git!(
       [
         "fetch",
@@ -93,6 +94,7 @@ defmodule Consigliere.Git do
       ],
       cd: dest
     )
+
     git!(["checkout", "--detach", sha], cd: dest)
     _ = git_cmd(["remote", "remove", "origin"], cd: dest)
 

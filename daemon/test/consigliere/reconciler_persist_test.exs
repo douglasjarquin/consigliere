@@ -154,6 +154,7 @@ defmodule Consigliere.ReconcilerPersistTest do
     results = Reconciler.run(home: home)
     Consigliere.ProcessHelpers.wait_group_gone(pgid)
     refute Consigliere.ProcessGroup.alive?(pgid)
+
     assert Enum.any?(results, fn
              {:lost, id} -> id == attempt.id
              {:quarantined, id} -> id == attempt.id
@@ -258,6 +259,7 @@ defmodule Consigliere.ReconcilerPersistTest do
     })
 
     results = Reconciler.run(home: home)
+
     assert Enum.any?(results, fn
              {:incident, _} -> true
              {:skipped, _} -> true

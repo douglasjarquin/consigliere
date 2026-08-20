@@ -34,7 +34,10 @@ defmodule Consigliere.Home.LockTest do
     File.mkdir_p!(home)
     lock_path = Home.lock_path(home)
     probe = Lock.probe_binary()
-    port = Port.open({:spawn_executable, probe}, [:binary, :exit_status, args: ["hold", lock_path]])
+
+    port =
+      Port.open({:spawn_executable, probe}, [:binary, :exit_status, args: ["hold", lock_path]])
+
     assert_receive {^port, {:data, "held\n"}}, 2_000
 
     assert {:error, :already_running} = Lock.start_link(home: home)

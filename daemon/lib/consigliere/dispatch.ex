@@ -37,7 +37,9 @@ defmodule Consigliere.Dispatch do
 
     case Missions.start(mission.id, Actor.system(), %{workspace_path: path}) do
       {:ok, %{attempt: attempt}} ->
-        {:ok, _} = DispatchOperations.ensure(attempt, %{status: "pending", slot_state: slot_name(grant)})
+        {:ok, _} =
+          DispatchOperations.ensure(attempt, %{status: "pending", slot_state: slot_name(grant)})
+
         continue(state, mission, grant, attempt)
 
       {:error, _} ->
@@ -157,7 +159,8 @@ defmodule Consigliere.Dispatch do
   defp slot_name(:granted), do: "granted"
   defp slot_name(_), do: "held"
 
-  defp inventory_path(attempt_id), do: Path.join(Home.runtime_attempts_dir(), "#{attempt_id}/manifest.json")
+  defp inventory_path(attempt_id),
+    do: Path.join(Home.runtime_attempts_dir(), "#{attempt_id}/manifest.json")
 
   defp mark_spawn_requested(attempt) do
     case DispatchOperations.get_by_attempt(attempt.id) do
@@ -168,7 +171,9 @@ defmodule Consigliere.Dispatch do
 
   defp mark_child_started(attempt) do
     case DispatchOperations.get_by_attempt(attempt.id) do
-      nil -> :ok
+      nil ->
+        :ok
+
       op ->
         DispatchOperations.update(op, %{
           status: "child_started",

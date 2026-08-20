@@ -71,6 +71,7 @@ defmodule Consigliere.GlobalScheduler do
 
   defp rebuild_occupants do
     occupying = AttemptStates.occupying()
+
     Repo.all(from(a in Attempt, where: a.status in ^occupying, select: a.mission_id))
     |> MapSet.new()
   end

@@ -48,7 +48,10 @@ defmodule Consigliere.Runtime.InventoryTest do
 
   test "fencing token mismatch is stale generation and is not signalable", %{home: home} do
     {attempt, _} = running_attempt!()
-    path = write_manifest!(home, attempt, %{"fencing_token" => "other-fence", "state" => "running"})
+
+    path =
+      write_manifest!(home, attempt, %{"fencing_token" => "other-fence", "state" => "running"})
+
     assert Inventory.verify(path, home) == :stale_generation
     refute Inventory.signalable?(:stale_generation)
   end

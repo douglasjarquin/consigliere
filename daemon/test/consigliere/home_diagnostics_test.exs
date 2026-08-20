@@ -22,7 +22,9 @@ defmodule Consigliere.HomeDiagnosticsTest do
     {:ok, pid} = Consigliere.Home.Lock.start_link(home: home)
 
     assert Home.socket_status(home) == :live
-    assert Home.lock_status(home) in [:stale, :unowned] or match?({:held, _}, Home.lock_status(home))
+
+    assert Home.lock_status(home) in [:stale, :unowned] or
+             match?({:held, _}, Home.lock_status(home))
 
     GenServer.stop(pid)
   end
