@@ -15,9 +15,12 @@ defmodule Consigliere.API.Protocol do
   alias Consigliere.Repo
 
   @version 1
+  # reconcile is a batch pass with its own per-item writes. Putting it in
+  # @mutating holds DatabaseWriter for the whole scan, including any
+  # ProcessGroup.terminate wait (up to 7s per leftover manifest).
   @mutating ~w(mission.create mission.submit mission.grant_work mission.cancel
                mission.grant_integration question.open question.answer away.mark
-               away.return project.add mission.pause mission.resume reconcile)
+               away.return project.add mission.pause mission.resume)
   @attempt_ops ~w(ping mission.get question.open)
   @review_phases ~w(awaiting_authorization ready_for_review
                     awaiting_integration_authorization failed)
