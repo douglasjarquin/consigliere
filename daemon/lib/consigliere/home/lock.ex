@@ -18,13 +18,7 @@ defmodule Consigliere.Home.Lock do
   @helper_path "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/opt/python@3/bin"
 
   def start_link(opts \\ []) do
-    home = opts[:home] || Home.dir()
-    name = Keyword.get(opts, :name, {:global, {__MODULE__, Path.expand(home)}})
-
-    case GenServer.start_link(__MODULE__, opts, name: name) do
-      {:error, {:already_started, _pid}} -> {:error, :already_running}
-      other -> other
-    end
+    GenServer.start_link(__MODULE__, opts)
   end
 
   @impl true

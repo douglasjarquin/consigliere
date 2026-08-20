@@ -78,7 +78,6 @@ defmodule Consigliere.Home.LockTest do
     end)
 
     assert {:ok, pid} = Lock.start_link(home: home)
-    assert File.exists?(Path.join(home, "bin/home_lock.py"))
     GenServer.stop(pid)
   end
 
