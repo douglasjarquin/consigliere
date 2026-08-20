@@ -24,7 +24,8 @@ defmodule Consigliere.RunnerLauncherTest do
       heartbeat_path: Path.join(dir, "heartbeat"),
       attempt_id: "attempt-#{unique}",
       mission_id: "mission-#{unique}",
-      fencing_token: "fence-#{unique}"
+      fencing_token: "fence-#{unique}",
+      control_token: "token-#{unique}"
     }
   end
 
@@ -34,7 +35,8 @@ defmodule Consigliere.RunnerLauncherTest do
     heartbeat_path: heartbeat_path,
     attempt_id: attempt_id,
     mission_id: mission_id,
-    fencing_token: fencing_token
+    fencing_token: fencing_token,
+    control_token: control_token
   } do
     {:ok, session} =
       RunnerLauncher.launch(
@@ -43,6 +45,7 @@ defmodule Consigliere.RunnerLauncherTest do
         fencing_token: fencing_token,
         manifest_path: manifest_path,
         control_socket_path: control_socket_path,
+        control_token: control_token,
         harness_command: [@fake_harness, heartbeat_path]
       )
 
@@ -73,7 +76,8 @@ defmodule Consigliere.RunnerLauncherTest do
          heartbeat_path: heartbeat_path,
          attempt_id: attempt_id,
          mission_id: mission_id,
-         fencing_token: fencing_token
+         fencing_token: fencing_token,
+         control_token: control_token
        } do
     {:ok, session} =
       RunnerLauncher.launch(
@@ -82,6 +86,7 @@ defmodule Consigliere.RunnerLauncherTest do
         fencing_token: fencing_token,
         manifest_path: manifest_path,
         control_socket_path: control_socket_path,
+        control_token: control_token,
         harness_command: [@fake_harness, heartbeat_path, "3"]
       )
 
@@ -103,7 +108,8 @@ defmodule Consigliere.RunnerLauncherTest do
          heartbeat_path: heartbeat_path,
          attempt_id: attempt_id,
          mission_id: mission_id,
-         fencing_token: fencing_token
+         fencing_token: fencing_token,
+         control_token: control_token
        } do
     {:ok, session} =
       RunnerLauncher.launch(
@@ -112,6 +118,7 @@ defmodule Consigliere.RunnerLauncherTest do
         fencing_token: fencing_token,
         manifest_path: manifest_path,
         control_socket_path: control_socket_path,
+        control_token: control_token,
         harness_command: [@fake_harness, heartbeat_path]
       )
 
@@ -126,6 +133,73 @@ defmodule Consigliere.RunnerLauncherTest do
              read_manifest(manifest_path)
 
     refute_harness_alive(harness_pid)
+  end
+
+  test "an unauthenticated first client cannot steal the control channel", %{
+    manifest_path: manifest_path,
+    control_socket_path: control_socket_path,
+    heartbeat_path: heartbeat_path,
+    attempt_id: attempt_id,
+    mission_id: mission_id,
+    fencing_token: fencing_token,
+    control_token: control_token
+  } do
+    parent = self()
+
+    _thief =
+      spawn(fn ->
+        wait_for_socket(control_socket_path, 5_000)
+
+        {:ok, sock} =
+          :gen_tcp.connect({:local, control_socket_path}, 0, [
+            :binary,
+            active: false,
+            packet: :line
+          ])
+
+        :gen_tcp.send(sock, JSON.encode!(%{"type" => "auth", "token" => "stolen"}) <> "\n")
+        result = :gen_tcp.recv(sock, 0, 2_000)
+        send(parent, {:thief, result})
+        :gen_tcp.close(sock)
+      end)
+
+    {:ok, session} =
+      RunnerLauncher.launch(
+        attempt_id: attempt_id,
+        mission_id: mission_id,
+        fencing_token: fencing_token,
+        manifest_path: manifest_path,
+        control_socket_path: control_socket_path,
+        control_token: control_token,
+        harness_command: [@fake_harness, heartbeat_path]
+      )
+
+    assert session.harness_pid > 0
+    assert_receive {:thief, thief_result}, 3_000
+    refute match?({:ok, line} when is_binary(line) and line != "", thief_result)
+
+    :ok = RunnerLauncher.cancel(session)
+    assert {:ok, %{"type" => "termination_complete"}} =
+             RunnerLauncher.recv_until(session, "termination_complete", 5_000)
+  end
+
+  defp wait_for_socket(path, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    wait_for_socket_loop(path, deadline)
+  end
+
+  defp wait_for_socket_loop(path, deadline) do
+    cond do
+      File.exists?(path) ->
+        :ok
+
+      System.monotonic_time(:millisecond) > deadline ->
+        flunk("control socket never appeared: #{path}")
+
+      true ->
+        Process.sleep(10)
+        wait_for_socket_loop(path, deadline)
+    end
   end
 
   defp read_manifest(path) do

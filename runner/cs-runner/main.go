@@ -28,15 +28,16 @@ func main() {
 	fencingToken := flag.String("fencing-token", "", "fencing token")
 	manifestPath := flag.String("manifest", "", "path to write the runtime manifest")
 	controlSocketPath := flag.String("control-socket", "", "path for the control channel unix socket")
+	controlToken := flag.String("control-token", "", "shared secret authenticating the daemon control client")
 	flag.Parse()
 	harnessCommand := flag.Args()
 
-	if *attemptID == "" || *manifestPath == "" || *controlSocketPath == "" || len(harnessCommand) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: cs-runner --attempt-id ID --manifest PATH --control-socket PATH -- HARNESS_CMD ARGS...")
+	if *attemptID == "" || *manifestPath == "" || *controlSocketPath == "" || *controlToken == "" || len(harnessCommand) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: cs-runner --attempt-id ID --manifest PATH --control-socket PATH --control-token TOKEN -- HARNESS_CMD ARGS...")
 		os.Exit(2)
 	}
 
-	if err := run(*attemptID, *missionID, *fencingToken, *manifestPath, *controlSocketPath, harnessCommand); err != nil {
+	if err := runAuthenticated(*attemptID, *missionID, *fencingToken, *manifestPath, *controlSocketPath, *controlToken, harnessCommand, 30*time.Second); err != nil {
 		fmt.Fprintln(os.Stderr, "cs-runner:", err)
 		os.Exit(1)
 	}
@@ -46,8 +47,14 @@ func nowRFC3339() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
+const testControlToken = "test-control-token"
+
 func run(attemptID, missionID, fencingToken, manifestPath, controlSocketPath string, harnessCommand []string) error {
-	return runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, controlSocketPath, harnessCommand, 30*time.Second)
+	return runAuthenticated(attemptID, missionID, fencingToken, manifestPath, controlSocketPath, testControlToken, harnessCommand, 30*time.Second)
+}
+
+func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, controlSocketPath string, harnessCommand []string, acceptTimeout time.Duration) error {
+	return runAuthenticated(attemptID, missionID, fencingToken, manifestPath, controlSocketPath, testControlToken, harnessCommand, acceptTimeout)
 }
 
 // terminateAndFinalize runs the termination sequence against base's process
@@ -91,7 +98,7 @@ type harnessExitResult struct {
 	signaled bool
 }
 
-func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, controlSocketPath string, harnessCommand []string, acceptTimeout time.Duration) error {
+func runAuthenticated(attemptID, missionID, fencingToken, manifestPath, controlSocketPath, controlToken string, harnessCommand []string, acceptTimeout time.Duration) error {
 	base := Manifest{
 		SchemaVersion:     1,
 		AttemptID:         attemptID,
@@ -184,7 +191,7 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 	}
 	defer cc.Close()
 
-	if err := cc.AcceptOnce(acceptTimeout); err != nil {
+	if err := cc.AcceptAuthenticated(controlToken, acceptTimeout); err != nil {
 		terminateAndReport(manifestPath, base, descendants, "daemon_never_connected")
 		return fmt.Errorf("wait for daemon to connect: %w", err)
 	}

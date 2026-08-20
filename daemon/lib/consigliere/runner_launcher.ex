@@ -13,6 +13,7 @@ defmodule Consigliere.RunnerLauncher do
     :socket,
     :manifest_path,
     :control_socket_path,
+    :control_token,
     :harness_pid,
     :runner_os_pid,
     :pgid
@@ -64,6 +65,10 @@ defmodule Consigliere.RunnerLauncher do
     fencing_token = Keyword.fetch!(opts, :fencing_token)
     manifest_path = Keyword.fetch!(opts, :manifest_path)
     control_socket_path = Keyword.fetch!(opts, :control_socket_path)
+    control_token =
+      Keyword.get_lazy(opts, :control_token, fn ->
+        Base.encode16(:crypto.strong_rand_bytes(32), case: :lower)
+      end)
     harness_command = Keyword.fetch!(opts, :harness_command)
 
     args =
@@ -78,6 +83,8 @@ defmodule Consigliere.RunnerLauncher do
         manifest_path,
         "--control-socket",
         control_socket_path,
+        "--control-token",
+        control_token,
         "--"
       ] ++ harness_command
 
@@ -96,6 +103,8 @@ defmodule Consigliere.RunnerLauncher do
              active: false,
              packet: :line
            ]),
+         :ok <-
+           :gen_tcp.send(socket, JSON.encode!(%{"type" => "auth", "token" => control_token}) <> "\n"),
          {:ok, line} <- :gen_tcp.recv(socket, 0, 5_000),
          {:ok, %{"type" => "runner_started"} = started} <- JSON.decode(String.trim(line)) do
       {:ok,
@@ -104,6 +113,7 @@ defmodule Consigliere.RunnerLauncher do
          socket: socket,
          manifest_path: manifest_path,
          control_socket_path: control_socket_path,
+         control_token: control_token,
          harness_pid: started["harness_pid"],
          runner_os_pid: started["runner_pid"],
          pgid: started["pgid"]

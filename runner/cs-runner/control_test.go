@@ -145,6 +145,55 @@ func TestControlChannel_AcceptsOneClientAndExchangesNDJSON(t *testing.T) {
 	}
 }
 
+func TestControlChannel_RejectsUnauthenticatedFirstClient(t *testing.T) {
+	socketPath := filepath.Join(shortSocketDir(t), "control.sock")
+	cc, err := NewControlChannel(socketPath)
+	if err != nil {
+		t.Fatalf("NewControlChannel: %v", err)
+	}
+	defer cc.Close()
+
+	acceptErrCh := make(chan error, 1)
+	go func() { acceptErrCh <- cc.AcceptAuthenticated("secret-token", 3*time.Second) }()
+
+	thief, err := net.DialTimeout("unix", socketPath, 2*time.Second)
+	if err != nil {
+		t.Fatalf("thief dial: %v", err)
+	}
+	if _, err := thief.Write([]byte(`{"type":"auth","token":"wrong"}` + "\n")); err != nil {
+		t.Fatalf("thief write: %v", err)
+	}
+
+	buf := make([]byte, 8)
+	thief.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _ = thief.Read(buf)
+	thief.Close()
+
+	daemon, err := net.DialTimeout("unix", socketPath, 2*time.Second)
+	if err != nil {
+		t.Fatalf("daemon dial: %v", err)
+	}
+	defer daemon.Close()
+	if _, err := daemon.Write([]byte(`{"type":"auth","token":"secret-token"}` + "\n")); err != nil {
+		t.Fatalf("daemon auth: %v", err)
+	}
+
+	if err := <-acceptErrCh; err != nil {
+		t.Fatalf("AcceptAuthenticated: %v", err)
+	}
+
+	if err := cc.Send(map[string]any{"type": "runner_started"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	line, err := bufio.NewReader(daemon).ReadString('\n')
+	if err != nil {
+		t.Fatalf("daemon read: %v", err)
+	}
+	if !strings.Contains(line, "runner_started") {
+		t.Fatalf("daemon did not receive runner_started: %q", line)
+	}
+}
+
 func TestControlChannel_ReadLoopDeliversMessagesAndDetectsEOF(t *testing.T) {
 	socketPath := filepath.Join(shortSocketDir(t), "control.sock")
 	cc, err := NewControlChannel(socketPath)

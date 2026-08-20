@@ -20,6 +20,10 @@ func dialControlSocketWithRetry(t *testing.T, path string, timeout time.Duration
 	for {
 		conn, err := net.DialTimeout("unix", path, 200*time.Millisecond)
 		if err == nil {
+			if _, err := conn.Write([]byte(`{"type":"auth","token":"` + testControlToken + `"}` + "\n")); err != nil {
+				conn.Close()
+				t.Fatalf("write auth: %v", err)
+			}
 			return conn
 		}
 		if time.Now().After(deadline) {

@@ -45,13 +45,16 @@ defmodule Consigliere.RunnerProcess do
 
     runtime = runtime_dir(attempt_id)
     File.mkdir_p!(runtime)
+    File.chmod!(runtime, 0o700)
+    control_token = control_token()
 
     case RunnerLauncher.launch(
            attempt_id: attempt_id,
            mission_id: mission_id,
            fencing_token: fencing_token,
            manifest_path: Path.join(runtime, "manifest.json"),
-           control_socket_path: control_socket_path(attempt_id),
+           control_socket_path: control_socket_path(runtime, attempt_id),
+           control_token: control_token,
            harness_command: harness_command,
            env: runner_env(opts)
          ) do
@@ -271,10 +274,23 @@ defmodule Consigliere.RunnerProcess do
     Path.join(Consigliere.Home.runtime_attempts_dir(), to_string(attempt_id))
   end
 
-  # macOS sun_path is ~104 bytes. Manifests live under CS_HOME; the
-  # control socket uses a short /tmp name derived from the Attempt.
-  defp control_socket_path(attempt_id) do
-    Path.join(System.tmp_dir!(), "cs-#{:erlang.phash2(attempt_id)}.sock")
+  defp control_token do
+    Base.encode16(:crypto.strong_rand_bytes(32), case: :lower)
+  end
+
+  # macOS sun_path is ~104 bytes. Prefer the Attempt runtime dir; if that
+  # path is too long, use an unpredictable short name instead of phash2.
+  defp control_socket_path(runtime, _attempt_id) do
+    preferred = Path.join(runtime, "c.sock")
+
+    if byte_size(preferred) < 104 do
+      preferred
+    else
+      Path.join(
+        System.tmp_dir!(),
+        "cs-#{Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)}.sock"
+      )
+    end
   end
 
   defp maybe_persist_started(attempt_id, session, fencing_token) do

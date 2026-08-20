@@ -33,6 +33,7 @@ func NewControlChannel(socketPath string) (*ControlChannel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen on control socket %s: %w", socketPath, err)
 	}
+	_ = os.Chmod(socketPath, 0o600)
 	return &ControlChannel{listener: listener}, nil
 }
 
@@ -60,6 +61,79 @@ func (c *ControlChannel) AcceptOnce(timeout time.Duration) error {
 	case <-time.After(timeout):
 		return fmt.Errorf("no client connected to control socket within %v", timeout)
 	}
+}
+
+// AcceptAuthenticated accepts clients until one presents the expected
+// control token as its first NDJSON frame. A thief that connects first
+// without the token is dropped; the channel stays open for the real daemon.
+func (c *ControlChannel) AcceptAuthenticated(token string, timeout time.Duration) error {
+	if token == "" {
+		return fmt.Errorf("control token must not be empty")
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("no authenticated client connected to control socket within %v", timeout)
+		}
+		if err := c.AcceptOnce(remaining); err != nil {
+			return err
+		}
+		if err := c.authenticate(token, 2*time.Second); err != nil {
+			c.closeConn()
+			continue
+		}
+		return nil
+	}
+}
+
+func (c *ControlChannel) authenticate(token string, timeout time.Duration) error {
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+	if conn == nil {
+		return fmt.Errorf("no client connected")
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+	defer conn.SetReadDeadline(time.Time{})
+
+	reader := bufio.NewReaderSize(conn, 64*1024)
+	line, err := readBoundedLine(reader, 4096)
+	if err != nil {
+		return fmt.Errorf("read auth frame: %w", err)
+	}
+	var msg map[string]any
+	if json.Unmarshal([]byte(strings.TrimSpace(line)), &msg) != nil {
+		return fmt.Errorf("auth frame is not json")
+	}
+	if msg["type"] != "auth" {
+		return fmt.Errorf("first frame must be auth, got %v", msg["type"])
+	}
+	got, _ := msg["token"].(string)
+	if !tokensEqual(token, got) {
+		return fmt.Errorf("control token mismatch")
+	}
+	return nil
+}
+
+func (c *ControlChannel) closeConn() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
+	}
+}
+
+func tokensEqual(expected, got string) bool {
+	if len(expected) != len(got) {
+		return false
+	}
+	var acc byte
+	for i := 0; i < len(expected); i++ {
+		acc |= expected[i] ^ got[i]
+	}
+	return acc == 0
 }
 
 // Send marshals and writes msg as one NDJSON line. The mutex is held across
