@@ -19,22 +19,56 @@ func TestDescendantTracker_AccumulatesAcrossPollsEvenAfterRootExits(t *testing.T
 	dir := t.TempDir()
 	childPidFile := filepath.Join(dir, "child.pid")
 
-	cmd := exec.Command("sh", "-c", `sleep 30 & echo $! > "$0"; sleep 0.1; exit 0`, childPidFile)
+	cmd := exec.Command("sh", "-c", `sleep 30 & echo $! > "$0"; read _`, childPidFile)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	rootPID := cmd.Process.Pid
-	go cmd.Wait()
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
 
 	tracker := startDescendantTracker(rootPID, 20*time.Millisecond)
 
 	childPID := waitForPIDFile(t, childPidFile, 2*time.Second)
 	t.Cleanup(func() { syscall.Kill(childPID, syscall.SIGKILL) })
 
-	// Give the tracker time to observe the child while root is still (or
-	// was very recently) alive, then let root fully exit and get reaped
-	// before we stop tracking.
-	time.Sleep(200 * time.Millisecond)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		pids, _ := tracker.Peek()
+		found := false
+		for _, p := range pids {
+			if p.PID == childPID {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("tracker never observed child %d while root %d was alive", childPID, rootPID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if _, err := stdin.Write([]byte("\n")); err != nil {
+		t.Fatalf("release root: %v", err)
+	}
+	if err := stdin.Close(); err != nil {
+		t.Fatalf("close root stdin: %v", err)
+	}
+	select {
+	case err := <-waitDone:
+		if err != nil {
+			t.Fatalf("wait root: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("root %d did not exit after release", rootPID)
+	}
 
 	pids, reliable := tracker.Stop()
 	if !reliable {
