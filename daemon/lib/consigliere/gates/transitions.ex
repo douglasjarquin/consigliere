@@ -1,19 +1,12 @@
 defmodule Consigliere.Gates.Transitions do
   @moduledoc false
 
-  import Ecto.Query
-
   alias Consigliere.DatabaseWriter
-  alias Consigliere.Repo
   alias Consigliere.Txn
   alias Consigliere.Gates.Gate
-  alias Consigliere.Missions.Mission
-  alias Consigliere.Questions.Transitions, as: Questions
-  alias Consigliere.MissionBlockers.MissionBlocker
+  alias Consigliere.Gates.Blockers
+  alias Consigliere.Gates.Support
   alias Consigliere.MissionValidationLedgers.MissionValidationLedger
-  alias Consigliere.Incidents.Incident
-  alias Consigliere.Decisions.Decision
-  alias Consigliere.DomainEvents.DomainEvent
 
   @default_identical_finding_limit 2
   @default_repair_round_limit 3
@@ -24,7 +17,7 @@ defmodule Consigliere.Gates.Transitions do
 
   def create_txn(mission_id, actor, attrs) do
     Txn.require_principal(actor, ["daemon", "boss"])
-    _mission = fetch_mission!(mission_id)
+    _mission = Support.fetch_mission!(mission_id)
 
     gate =
       Txn.insert!(
@@ -48,12 +41,15 @@ defmodule Consigliere.Gates.Transitions do
 
   def start_txn(gate_id, actor, attrs) do
     Txn.require_principal(actor, ["daemon"])
-    gate = fetch!(gate_id)
-    require_status!(gate, "pending", "running")
+    gate = Support.fetch_gate!(gate_id)
+    Support.require_status!(gate, "pending", "running")
 
     gate =
       Txn.update!(
-        Gate.changeset(gate, %{status: "running", managed_run_id: Map.fetch!(attrs, :managed_run_id)})
+        Gate.changeset(gate, %{
+          status: "running",
+          managed_run_id: Map.fetch!(attrs, :managed_run_id)
+        })
       )
 
     Txn.append_event!("gate.started", "gate", gate.id)
@@ -66,10 +62,11 @@ defmodule Consigliere.Gates.Transitions do
 
   def pass_txn(gate_id, actor, attrs) do
     Txn.require_principal(actor, ["daemon"])
-    gate = fetch!(gate_id)
-    require_status!(gate, "running", "passed")
-    match_identity!(gate, attrs)
-    match_run_id!(gate, attrs)
+    gate = Support.fetch_gate!(gate_id)
+    Support.require_status!(gate, "running", "passed")
+    Support.match_identity!(gate, attrs)
+    Support.match_run_id!(gate, attrs)
+    Blockers.close_validation!(gate, "passed")
 
     gate =
       Txn.update!(
@@ -86,34 +83,9 @@ defmodule Consigliere.Gates.Transitions do
 
   def needs_decision_txn(gate_id, actor, attrs) do
     Txn.require_principal(actor, ["daemon"])
-    gate = fetch!(gate_id)
-    require_status!(gate, "running", "needs_decision")
-    match_run_id!(gate, attrs)
-
-    question_attrs = Map.fetch!(attrs, :question_attrs)
-    question = Questions.open_txn(question_attrs, actor)
-
-    Txn.insert!(
-      MissionBlocker.changeset(%MissionBlocker{}, %{
-        mission_id: gate.mission_id,
-        kind: "validation",
-        reason: "gate needs decision",
-        status: "open",
-        subject_type: "gate",
-        subject_id: gate.id
-      })
-    )
-
-    gate =
-      Txn.update!(
-        Gate.changeset(gate, %{
-          status: "needs_decision",
-          finding_digest: Map.get(attrs, :finding_digest)
-        })
-      )
-
-    Txn.append_event!("gate.needs_decision", "gate", gate.id, %{question_id: question.id})
-    %{gate: gate, question: question}
+    gate = Support.fetch_gate!(gate_id)
+    Support.match_run_id!(gate, attrs)
+    Blockers.decide_needs_decision(gate, actor, attrs)
   end
 
   def fail_retryable(gate_id, actor, attrs) do
@@ -122,30 +94,34 @@ defmodule Consigliere.Gates.Transitions do
 
   def fail_retryable_txn(gate_id, actor, attrs) do
     Txn.require_principal(actor, ["daemon"])
-    gate = fetch!(gate_id)
-    require_status!(gate, "running", "failed_retryable")
-    mission = fetch_mission!(gate.mission_id)
-    ledger = load_or_create_ledger!(gate)
+    gate = Support.fetch_gate!(gate_id)
+    Support.require_status!(gate, "running", "failed_retryable")
+    mission = Support.fetch_mission!(gate.mission_id)
+    ledger = Support.load_or_create_ledger!(gate)
     fingerprint = Map.get(attrs, :finding_fingerprint)
     trigger_repair = Map.get(attrs, :trigger_repair, true)
 
-    counts = ledger.identical_finding_counts_json || %{}
-
     {counts, fingerprint_count} =
-      if is_binary(fingerprint) do
-        next = Map.update(counts, fingerprint, 1, &(&1 + 1))
-        {next, Map.fetch!(next, fingerprint)}
-      else
-        {counts, 0}
-      end
+      Support.bump_fingerprint(ledger.identical_finding_counts_json || %{}, fingerprint)
 
     repair_rounds =
       if trigger_repair, do: ledger.total_repair_rounds + 1, else: ledger.total_repair_rounds
 
-    identical_limit = policy_int(mission, gate.gate_type, "identical_finding_limit", @default_identical_finding_limit)
-    repair_limit = policy_int(mission, gate.gate_type, "repair_round_limit", @default_repair_round_limit)
+    identical_limit =
+      Support.policy_int(
+        mission,
+        gate.gate_type,
+        "identical_finding_limit",
+        @default_identical_finding_limit
+      )
 
-    over_limit = fingerprint_count > identical_limit or repair_rounds > repair_limit
+    repair_limit =
+      Support.policy_int(
+        mission,
+        gate.gate_type,
+        "repair_round_limit",
+        @default_repair_round_limit
+      )
 
     ledger =
       Txn.update!(
@@ -156,9 +132,10 @@ defmodule Consigliere.Gates.Transitions do
         })
       )
 
-    if over_limit do
-      fail_terminal_from_running!(gate, "repair budget exceeded")
+    if fingerprint_count > identical_limit or repair_rounds > repair_limit do
+      Blockers.fail_terminal!(gate, actor, "repair budget exceeded")
     else
+      Blockers.close_validation!(gate, "failed_retryable")
       gate = Txn.update!(Gate.changeset(gate, %{status: "failed_retryable"}))
       Txn.append_event!("gate.failed_retryable", "gate", gate.id)
       %{gate: gate, ledger: ledger}
@@ -171,9 +148,9 @@ defmodule Consigliere.Gates.Transitions do
 
   def fail_terminal_txn(gate_id, actor, attrs) do
     Txn.require_principal(actor, ["daemon", "boss"])
-    gate = fetch!(gate_id)
-    require_status!(gate, "running", "failed_terminal")
-    fail_terminal_from_running!(gate, Map.get(attrs, :reason, "terminal"))
+    gate = Support.fetch_gate!(gate_id)
+    Support.require_status!(gate, "running", "failed_terminal")
+    Blockers.fail_terminal!(gate, actor, Map.get(attrs, :reason, "terminal"))
   end
 
   def record_infrastructure_error(gate_id, actor) do
@@ -182,9 +159,9 @@ defmodule Consigliere.Gates.Transitions do
 
   def record_infrastructure_error_txn(gate_id, actor) do
     Txn.require_principal(actor, ["daemon"])
-    gate = fetch!(gate_id)
-    require_status!(gate, "running", "failed_retryable")
-    ledger = load_or_create_ledger!(gate)
+    gate = Support.fetch_gate!(gate_id)
+    Support.require_status!(gate, "running", "failed_retryable")
+    ledger = Support.load_or_create_ledger!(gate)
 
     Txn.update!(
       MissionValidationLedger.changeset(ledger, %{
@@ -192,6 +169,7 @@ defmodule Consigliere.Gates.Transitions do
       })
     )
 
+    Blockers.close_validation!(gate, "infrastructure_retry")
     gate = Txn.update!(Gate.changeset(gate, %{status: "failed_retryable"}))
     Txn.append_event!("gate.infrastructure_retry", "gate", gate.id, %{kind: "infrastructure"})
     gate
@@ -203,23 +181,16 @@ defmodule Consigliere.Gates.Transitions do
 
   def retry_infrastructure_txn(gate_id, actor) do
     Txn.require_principal(actor, ["daemon"])
-    gate = fetch!(gate_id)
-    require_status!(gate, "failed_retryable", "pending")
-
-    last =
-      Repo.one(
-        from e in DomainEvent,
-          where: e.subject_id == ^gate.id,
-          order_by: [desc: e.id],
-          limit: 1
-      )
+    gate = Support.fetch_gate!(gate_id)
+    Support.require_status!(gate, "failed_retryable", "pending")
+    last = Support.last_event(gate)
 
     unless last && last.type == "gate.infrastructure_retry" do
       Txn.illegal(gate.status, "pending", :not_infrastructure)
     end
 
-    gate = Txn.update!(Gate.changeset(gate, %{status: "pending", managed_run_id: nil}))
-    gate
+    Blockers.close_validation!(gate, "infrastructure_retry")
+    Txn.update!(Gate.changeset(gate, %{status: "pending", managed_run_id: nil}))
   end
 
   def rerun_after_decision(gate_id, actor, decision_id) do
@@ -228,24 +199,11 @@ defmodule Consigliere.Gates.Transitions do
 
   def rerun_after_decision_txn(gate_id, actor, decision_id) do
     Txn.require_principal(actor, ["daemon", "boss"])
-    gate = fetch!(gate_id)
-    require_status!(gate, "needs_decision", "pending")
-
-    decision =
-      case Repo.get(Decision, decision_id) do
-        nil -> Txn.illegal(gate.status, "pending", :decision_not_found)
-        d -> d
-      end
-
-    sha_ok =
-      (decision.input_sha == gate.input_sha and decision.base_sha == gate.base_sha) or
-        (decision.scope == "sha_bound" and decision.input_sha == gate.input_sha and
-           decision.base_sha == gate.base_sha)
-
-    unless sha_ok do
-      Txn.sha_mismatch({gate.input_sha, gate.base_sha}, {decision.input_sha, decision.base_sha})
-    end
-
+    gate = Support.fetch_gate!(gate_id)
+    Support.require_status!(gate, "needs_decision", "pending")
+    decision = Blockers.fetch_decision!(gate, decision_id)
+    Blockers.verify_decision!(gate, decision)
+    Blockers.close_validation!(gate, "rerun_after_decision")
     gate = Txn.update!(Gate.changeset(gate, %{status: "pending", managed_run_id: nil}))
     Txn.append_event!("gate.rerun_after_decision", "gate", gate.id, %{decision_id: decision.id})
     gate
@@ -257,12 +215,14 @@ defmodule Consigliere.Gates.Transitions do
 
   def cancel_txn(gate_id, actor) do
     Txn.require_principal(actor, ["daemon", "boss"])
-    gate = fetch!(gate_id)
+    gate = Support.fetch_gate!(gate_id)
 
-    unless gate.status in ["pending", "running"] do
+    unless gate.status in ["pending", "running", "needs_decision"] do
       Txn.illegal(gate.status, "canceled", :wrong_status)
     end
 
+    Blockers.withdraw_open_questions!(gate, actor)
+    Blockers.close_validation!(gate, "canceled")
     gate = Txn.update!(Gate.changeset(gate, %{status: "canceled"}))
     Txn.append_event!("gate.canceled", "gate", gate.id)
     gate
@@ -274,97 +234,11 @@ defmodule Consigliere.Gates.Transitions do
 
   def invalidate_txn(gate_id, actor) do
     Txn.require_principal(actor, ["daemon", "boss"])
-    gate = fetch!(gate_id)
-    require_status!(gate, "passed", "invalidated")
+    gate = Support.fetch_gate!(gate_id)
+    Support.require_status!(gate, "passed", "invalidated")
+    Blockers.close_validation!(gate, "invalidated")
     gate = Txn.update!(Gate.changeset(gate, %{status: "invalidated"}))
     Txn.append_event!("gate.invalidated", "gate", gate.id)
     gate
-  end
-
-  defp fetch!(id) do
-    case Repo.get(Gate, id) do
-      nil -> Txn.illegal(nil, nil, :not_found)
-      gate -> gate
-    end
-  end
-
-  defp fetch_mission!(id) do
-    case Repo.get(Mission, id) do
-      nil -> Txn.illegal(nil, nil, :not_found)
-      mission -> mission
-    end
-  end
-
-  defp require_status!(gate, from, to) do
-    if gate.status == from, do: :ok, else: Txn.illegal(gate.status, to, :wrong_status)
-  end
-
-  defp match_identity!(gate, attrs) do
-    input = Map.get(attrs, :input_sha, gate.input_sha)
-    base = Map.get(attrs, :base_sha, gate.base_sha)
-
-    if input != gate.input_sha or base != gate.base_sha do
-      Txn.sha_mismatch({gate.input_sha, gate.base_sha}, {input, base})
-    end
-  end
-
-  defp match_run_id!(gate, attrs) do
-    got = Map.get(attrs, :managed_run_id)
-
-    if got && gate.managed_run_id && got != gate.managed_run_id do
-      Txn.run_id_mismatch(gate.managed_run_id, got)
-    end
-  end
-
-  defp load_or_create_ledger!(gate) do
-    case Repo.get_by(MissionValidationLedger,
-           mission_id: gate.mission_id,
-           gate_type: gate.gate_type
-         ) do
-      nil ->
-        Txn.insert!(
-          MissionValidationLedger.changeset(%MissionValidationLedger{}, %{
-            mission_id: gate.mission_id,
-            gate_type: gate.gate_type
-          })
-        )
-
-      ledger ->
-        ledger
-    end
-  end
-
-  defp policy_int(mission, gate_type, key, default) do
-    case get_in(mission.validation_policy, [gate_type, key]) do
-      n when is_integer(n) -> n
-      _ -> default
-    end
-  end
-
-  defp fail_terminal_from_running!(gate, reason) do
-    Txn.insert!(
-      Incident.changeset(%Incident{}, %{
-        mission_id: gate.mission_id,
-        subject_type: "gate",
-        subject_id: gate.id,
-        severity: "terminal",
-        reason: reason
-      })
-    )
-
-    Txn.insert!(
-      MissionBlocker.changeset(%MissionBlocker{}, %{
-        mission_id: gate.mission_id,
-        kind: "validation",
-        reason: reason,
-        status: "open",
-        subject_type: "gate",
-        subject_id: gate.id
-      })
-    )
-
-    gate = Txn.update!(Gate.changeset(gate, %{status: "failed_terminal"}))
-    Txn.append_event!("gate.failed_terminal", "gate", gate.id, %{reason: reason})
-    %{gate: gate}
   end
 end

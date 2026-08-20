@@ -29,13 +29,44 @@ defmodule Consigliere.Fixtures do
     Repo.delete_all(MissionValidationLedger)
     Repo.delete_all(Incident)
     Repo.delete_all(HarnessEvent)
+    Repo.delete_all(Consigliere.Capabilities.AttemptCapability)
     Repo.delete_all(Attempt)
     Repo.delete_all(Workspace)
     Repo.delete_all(Authorization)
     Repo.delete_all(Mission)
+    Repo.delete_all(Consigliere.BossCursors.BossCursor)
+    Repo.delete_all(Consigliere.Projects.Project)
+    Repo.delete_all(Consigliere.CommandReceipts.CommandReceipt)
     Repo.delete_all(DomainEvent)
     Repo.delete_all(OutboxItem)
     :ok
+  end
+
+  def dummy_project! do
+    {:ok, project} =
+      Repo.insert(
+        Consigliere.Projects.Project.changeset(%Consigliere.Projects.Project{}, %{
+          name: "fixture",
+          repository_url: "file:///tmp/cs-fix-#{System.unique_integer([:positive])}",
+          default_branch: "main",
+          trusted_mirror_path:
+            Path.join(System.tmp_dir!(), "cs-nomirror-#{System.unique_integer([:positive])}")
+        })
+      )
+
+    project
+  end
+
+  def mission_attrs(extra \\ %{}) do
+    Map.merge(
+      %{
+        objective: "o",
+        scope: "s",
+        acceptance_criteria: "a",
+        project_id: dummy_project!().id
+      },
+      extra
+    )
   end
 
   def mission!(attrs \\ %{}) do

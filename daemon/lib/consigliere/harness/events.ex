@@ -13,6 +13,9 @@ defmodule Consigliere.Harness.Events do
   alias Consigliere.Txn
 
   @live ~w(starting running checkpoint_requested)
+  @types ~w(session.started turn.started progress.reported artifact.created
+            question.requested checkpoint.created usage.updated turn.completed
+            session.completed session.failed)
 
   def ingest(event, actor) do
     DatabaseWriter.transaction(fn -> ingest_txn(event, actor) end)
@@ -27,6 +30,14 @@ defmodule Consigliere.Harness.Events do
 
     unless is_binary(attempt_id) and is_binary(event_id) and is_binary(type) and is_integer(seq) do
       Repo.rollback(:malformed)
+    end
+
+    unless type in @types do
+      Repo.rollback(:unknown_event_type)
+    end
+
+    if payload_too_large?(payload) do
+      Repo.rollback(:payload_too_large)
     end
 
     attempt = fetch_attempt!(attempt_id)
@@ -79,6 +90,27 @@ defmodule Consigliere.Harness.Events do
 
   defp maybe_session(_type, _payload, attrs), do: attrs
 
+  defp apply_type("session.completed", attempt, _payload, _actor) do
+    Txn.update!(Attempt.changeset(attempt, %{exit_classification: "completed"}))
+  end
+
+  defp apply_type("session.failed", attempt, payload, _actor) do
+    klass = Map.get(payload, "class") || Map.get(payload, "reason") || "failed"
+    Txn.update!(Attempt.changeset(attempt, %{exit_classification: to_string(klass)}))
+  end
+
+  defp apply_type("checkpoint.created", attempt, payload, actor) do
+    sha = Map.get(payload, "sha") || Map.get(payload, "commit_sha")
+
+    if is_binary(sha) and sha != "" do
+      Consigliere.Attempts.Transitions.request_checkpoint_txn(attempt.id, actor, %{
+        reported_checkpoint_sha: sha
+      })
+    else
+      :ok
+    end
+  end
+
   defp apply_type("question.requested", attempt, payload, actor) do
     Consigliere.Questions.Transitions.open_txn(
       %{
@@ -110,6 +142,10 @@ defmodule Consigliere.Harness.Events do
       attempt.status not in @live -> Txn.fenced(attempt.id)
       true -> :ok
     end
+  end
+
+  defp payload_too_large?(payload) do
+    byte_size(inspect(payload, limit: :infinity)) > 16_384
   end
 
   defp reject_stale_sequence!(attempt, seq) do

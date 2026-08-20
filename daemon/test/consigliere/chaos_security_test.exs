@@ -25,7 +25,7 @@ defmodule Consigliere.ChaosSecurityTest do
 
   defp running_attempt! do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
@@ -214,7 +214,8 @@ defmodule Consigliere.ChaosSecurityTest do
   test "no protocol op reads SQLite, the trusted mirror, or adapter credentials" do
     for op <- ["sqlite.read", "mirror.read", "credentials.read", "home.read"] do
       resp = handle(op, %{"principal" => "attempt"}, %{})
-      assert resp["error"]["code"] == "invalid"
+      assert resp["ok"] == false
+      assert resp["error"]["code"] in ["invalid", "unauthorized"]
     end
   end
 
@@ -243,6 +244,49 @@ defmodule Consigliere.ChaosSecurityTest do
 
     assert send_result in [:ok, {:error, :closed}]
     assert match?({:error, _}, recv)
+  end
+
+  test "privileged socket ignores JSON principal without the boss secret" do
+    resp =
+      Client.request(
+        "ping",
+        %{},
+        %{"principal" => "boss"},
+        socket_path: Listener.privileged_socket_path()
+      )
+
+    # Client attaches the real secret for boss on priv.sock. A raw
+    # principal:boss with a wrong secret must fail.
+    {:ok, sock} =
+      :gen_tcp.connect(
+        {:local, Listener.privileged_socket_path()},
+        0,
+        [
+          :binary,
+          packet: :line,
+          active: false
+        ],
+        2_000
+      )
+
+    :ok =
+      :gen_tcp.send(
+        sock,
+        JSON.encode!(%{
+          "v" => 1,
+          "id" => "x",
+          "op" => "ping",
+          "actor" => %{"principal" => "boss"},
+          "secret" => "nope"
+        }) <> "\n"
+      )
+
+    {:ok, line} = :gen_tcp.recv(sock, 0, 2_000)
+    :gen_tcp.close(sock)
+    {:ok, decoded} = JSON.decode(String.trim(line))
+    assert decoded["ok"] == false
+    assert decoded["error"]["code"] == "unauthorized"
+    assert resp["ok"] == true
   end
 
   test "claiming boss on the capability socket is rejected" do

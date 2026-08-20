@@ -1,7 +1,12 @@
 defmodule Consigliere.Home.Lock do
-  @moduledoc false
+  @moduledoc """
+  Exclusive CS_HOME ownership via fcntl flock. Socket files are liveness
+  probes only; they are never unlinked until this process holds the lock.
+  """
 
   use GenServer
+
+  alias Consigliere.Home
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts)
@@ -9,41 +14,89 @@ defmodule Consigliere.Home.Lock do
 
   @impl true
   def init(opts) do
-    home = opts[:home] || Consigliere.Home.dir()
-    Consigliere.Home.ensure_dir!(home)
-    socket_path = Consigliere.Home.boss_socket_path(home)
+    home = opts[:home] || Home.dir()
+    Home.ensure_dir!(home)
 
-    case claim(socket_path) do
-      {:ok, listen_socket} ->
-        acceptor = spawn_link(fn -> accept_loop(listen_socket) end)
-        {:ok, %{socket_path: socket_path, listen_socket: listen_socket, acceptor: acceptor}}
+    case acquire_flock(Home.lock_path(home)) do
+      {:ok, port} ->
+        case bind_probe(Home.boss_socket_path(home)) do
+          {:ok, listen} ->
+            acceptor = spawn_link(fn -> accept_loop(listen) end)
+            {:ok, %{home: home, port: port, listen_socket: listen, acceptor: acceptor}}
+
+          {:error, reason} ->
+            close_port(port)
+            {:stop, {:bind_failed, reason}}
+        end
 
       :already_running ->
         {:stop, :already_running}
 
       {:error, reason} ->
-        {:stop, {:bind_failed, reason}}
+        {:stop, {:lock_failed, reason}}
     end
   end
 
-  defp claim(socket_path) do
-    case :gen_tcp.connect({:local, socket_path}, 0, [:binary, active: false], 200) do
-      {:ok, socket} ->
-        :gen_tcp.close(socket)
-        :already_running
+  defp acquire_flock(path) do
+    python = System.find_executable("python3") || System.find_executable("python")
+    script = Path.join(:code.priv_dir(:consigliere_daemon), "home_lock.py")
 
-      {:error, _not_live} ->
-        File.rm(socket_path)
-        :gen_tcp.listen(0, [:binary, ifaddr: {:local, socket_path}, backlog: 128])
+    if python && File.exists?(script) do
+      port =
+        Port.open({:spawn_executable, python}, [
+          :binary,
+          :exit_status,
+          :hide,
+          args: [script, path]
+        ])
+
+      receive do
+        {^port, {:data, data}} ->
+          case String.trim(to_string(data)) do
+            "ok" -> {:ok, port}
+            "locked" -> close_port(port, :already_running)
+            _ -> close_port(port, {:error, {:unexpected, data}})
+          end
+
+        {^port, {:exit_status, 2}} ->
+          :already_running
+
+        {^port, {:exit_status, status}} ->
+          {:error, {:lock_exit, status}}
+      after
+        2_000 ->
+          close_port(port, {:error, :timeout})
+      end
+    else
+      {:error, :python3_required}
     end
   end
 
-  # A status probe (ours or anyone else's) just connects and disconnects --
-  # nothing ever calls accept/1 on the other end, so an unaccepted
-  # connection sits in the kernel's backlog until something drains it.
-  # With no acceptor, that queue fills after a handful of probes and every
-  # later connect gets refused, making a perfectly live lock look :stale --
-  # which would make the next boot delete a live daemon's socket file.
+  defp close_port(port, result) do
+    close_port(port)
+    result
+  end
+
+  defp close_port(port) do
+    if Port.info(port), do: Port.close(port)
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp bind_probe(socket_path) do
+    File.rm(socket_path)
+
+    case :gen_tcp.listen(0, [:binary, ifaddr: {:local, socket_path}, backlog: 128]) do
+      {:ok, _listen} = ok ->
+        _ = File.chmod(socket_path, 0o600)
+        ok
+
+      other ->
+        other
+    end
+  end
+
   defp accept_loop(listen_socket) do
     case :gen_tcp.accept(listen_socket) do
       {:ok, conn} ->
@@ -53,15 +106,16 @@ defmodule Consigliere.Home.Lock do
       {:error, :closed} ->
         :ok
 
-      {:error, _other} ->
+      {:error, _} ->
         accept_loop(listen_socket)
     end
   end
 
   @impl true
   def terminate(_reason, state) do
-    :gen_tcp.close(state.listen_socket)
-    File.rm(state.socket_path)
+    if state[:listen_socket], do: :gen_tcp.close(state.listen_socket)
+    if state[:port], do: close_port(state.port)
+    if state[:home], do: File.rm(Home.boss_socket_path(state.home))
     :ok
   end
 end

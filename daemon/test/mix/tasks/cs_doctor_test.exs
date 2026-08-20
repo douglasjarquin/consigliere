@@ -21,7 +21,7 @@ defmodule Mix.Tasks.Cs.DoctorTest do
   test "reports not running when nothing has ever bound the socket" do
     output = capture_io(fn -> Mix.Tasks.Cs.Doctor.run([]) end)
 
-    assert output =~ "not running"
+    assert output =~ "probe socket: absent"
   end
 
   test "reports running when a live instance holds the lock", %{home: home} do
@@ -29,7 +29,7 @@ defmodule Mix.Tasks.Cs.DoctorTest do
 
     output = capture_io(fn -> Mix.Tasks.Cs.Doctor.run([]) end)
 
-    assert output =~ "running"
+    assert output =~ "probe socket: live"
     GenServer.stop(pid)
   end
 

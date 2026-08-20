@@ -20,9 +20,11 @@ defmodule Consigliere.NotificationDispatcherTest do
     {:ok, log: log}
   end
 
-  test "a routed Question is notified without the Question depending on that delivery", %{log: log} do
+  test "a routed Question is notified without the Question depending on that delivery", %{
+    log: log
+  } do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())

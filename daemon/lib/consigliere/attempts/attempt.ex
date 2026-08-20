@@ -4,7 +4,7 @@ defmodule Consigliere.Attempts.Attempt do
   import Ecto.Changeset
 
   @statuses ~w(planned starting running checkpoint_requested checkpointed
-               completed failed lost canceled superseded)
+               terminating completed failed lost canceled superseded)
 
   def statuses, do: @statuses
 

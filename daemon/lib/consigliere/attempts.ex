@@ -18,4 +18,8 @@ defmodule Consigliere.Attempts do
   def request_checkpoint(attempt_id, actor, attrs \\ %{}) do
     Transitions.request_checkpoint(attempt_id, actor, attrs)
   end
+
+  def classify_exit(attempt_id, attrs) do
+    Transitions.classify_exit(attempt_id, attrs)
+  end
 end

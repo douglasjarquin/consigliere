@@ -78,9 +78,10 @@ defmodule Consigliere.EventBus do
   defp do_poll(state) do
     events =
       Repo.all(
-        from e in DomainEvent,
+        from(e in DomainEvent,
           where: e.id > ^state.last_seen_id,
           order_by: [asc: e.id]
+        )
       )
 
     Enum.each(events, &dispatch/1)
@@ -98,7 +99,7 @@ defmodule Consigliere.EventBus do
   end
 
   defp current_max_id do
-    Repo.one(from e in DomainEvent, select: max(e.id)) || 0
+    Repo.one(from(e in DomainEvent, select: max(e.id))) || 0
   end
 
   defp schedule_tick(:infinity), do: :ok

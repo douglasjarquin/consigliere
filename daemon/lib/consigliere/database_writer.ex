@@ -36,7 +36,11 @@ defmodule Consigliere.DatabaseWriter do
   functions like insert_mission/1 over this escape hatch.
   """
   def transaction(fun, timeout \\ 10_000) do
-    GenServer.call(__MODULE__, {:transaction, fun}, timeout)
+    if self() == Process.whereis(__MODULE__) do
+      {:ok, fun.()}
+    else
+      GenServer.call(__MODULE__, {:transaction, fun}, timeout)
+    end
   end
 
   @impl true
@@ -58,5 +62,4 @@ defmodule Consigliere.DatabaseWriter do
 
     {:reply, result, state}
   end
-
 end

@@ -16,13 +16,16 @@ defmodule Consigliere.API.Client do
 
     try do
       body =
-        JSON.encode!(%{
-          "v" => Keyword.get(opts, :v, 1),
-          "id" => id,
-          "op" => op,
-          "actor" => actor,
-          "payload" => payload
-        })
+        JSON.encode!(
+          %{
+            "v" => Keyword.get(opts, :v, 1),
+            "id" => id,
+            "op" => op,
+            "actor" => actor,
+            "payload" => payload
+          }
+          |> maybe_secret(path)
+        )
 
       :ok = :gen_tcp.send(sock, body <> "\n")
       {:ok, line} = :gen_tcp.recv(sock, 0, 5_000)
@@ -30,6 +33,16 @@ defmodule Consigliere.API.Client do
       decoded
     after
       :gen_tcp.close(sock)
+    end
+  end
+
+  defp maybe_secret(map, path) do
+    priv = Consigliere.API.Listener.privileged_socket_path()
+
+    if path == priv and get_in(map, ["actor", "principal"]) == "boss" do
+      Map.put(map, "secret", Consigliere.Home.ensure_boss_secret!())
+    else
+      map
     end
   end
 end

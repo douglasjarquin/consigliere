@@ -5,7 +5,10 @@ defmodule Consigliere.HomeDiagnosticsTest do
 
   setup do
     home =
-      Path.join(System.tmp_dir!(), "cs-home-diagnostics-test-#{System.unique_integer([:positive])}")
+      Path.join(
+        System.tmp_dir!(),
+        "cs-home-diagnostics-test-#{System.unique_integer([:positive])}"
+      )
 
     on_exit(fn -> File.rm_rf!(home) end)
     %{home: home}

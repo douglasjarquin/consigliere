@@ -14,7 +14,7 @@ defmodule Consigliere.Attempts.Transitions do
   alias Consigliere.Incidents.Incident
 
   @terminal ~w(completed failed lost canceled superseded)
-  @lost_from ~w(starting running checkpoint_requested)
+  @lost_from ~w(starting running checkpoint_requested terminating)
 
   def schedule(mission_id, actor, attrs) do
     DatabaseWriter.transaction(fn -> schedule_txn(mission_id, actor, attrs) end)
@@ -188,10 +188,60 @@ defmodule Consigliere.Attempts.Transitions do
     DatabaseWriter.transaction(fn -> complete_txn(attempt_id, actor, attrs) end)
   end
 
+  def classify_exit(attempt_id, attrs) do
+    DatabaseWriter.transaction(fn -> classify_exit_txn(attempt_id, attrs) end)
+  end
+
+  def classify_exit_txn(attempt_id, attrs) do
+    attempt = fetch!(attempt_id)
+    death = Map.get(attrs, :process_group, :dead_unverified)
+    status = Map.get(attrs, :exit_status)
+    completed? = Map.get(attrs, :session_completed, false)
+    failed? = Map.get(attrs, :session_failed, false)
+    klass = Map.get(attrs, :exit_classification)
+    actor = Consigliere.Actor.system()
+
+    cond do
+      attempt.status in @terminal ->
+        attempt
+
+      attempt.status == "terminating" ->
+        cancel_txn(attempt.id, actor, %{
+          process_group: death,
+          exit_classification: klass || attempt.exit_classification || "canceled"
+        })
+
+      completed? and death == :dead_verified and status in [0, nil] ->
+        complete_txn(attempt.id, actor, %{process_group: death})
+
+      failed? and death == :dead_verified ->
+        fail_txn(attempt.id, actor, %{
+          process_group: death,
+          exit_classification: klass || "failed"
+        })
+
+      status == 0 and death == :dead_verified ->
+        mark_lost_txn(attempt.id, actor, %{inventory: :dead_verified})
+
+      death == :dead_verified ->
+        fail_txn(attempt.id, actor, %{
+          process_group: death,
+          exit_classification: klass || "harness_exited"
+        })
+
+      true ->
+        mark_lost_txn(attempt.id, actor, %{inventory: :unconfirmed})
+    end
+  end
+
   def complete_txn(attempt_id, actor, attrs) do
     Txn.require_principal(actor, ["daemon", "boss"])
     attempt = fetch!(attempt_id)
-    require_status!(attempt, "running", "completed")
+
+    unless attempt.status in ~w(running checkpoint_requested) do
+      Txn.illegal(attempt.status, "completed", :wrong_status)
+    end
+
     require_dead!(attempt, attrs, "completed")
 
     attempt =
@@ -209,11 +259,11 @@ defmodule Consigliere.Attempts.Transitions do
     Txn.require_principal(actor, ["daemon", "boss"])
     attempt = fetch!(attempt_id)
 
-    unless attempt.status in ~w(starting running) do
+    unless attempt.status in ~w(starting running terminating) do
       Txn.illegal(attempt.status, "failed", :wrong_status)
     end
 
-    if attempt.status == "running" do
+    if attempt.status in ~w(running terminating) do
       require_dead!(attempt, attrs, "failed")
     end
 
@@ -241,7 +291,13 @@ defmodule Consigliere.Attempts.Transitions do
     require_dead!(attempt, attrs, "canceled")
 
     attempt =
-      Txn.update!(Attempt.changeset(attempt, %{status: "canceled", finished_at: Txn.now()}))
+      Txn.update!(
+        Attempt.changeset(attempt, %{
+          status: "canceled",
+          finished_at: Txn.now(),
+          exit_classification: Map.get(attrs, :exit_classification, "canceled")
+        })
+      )
 
     Txn.append_event!("attempt.canceled", "attempt", attempt.id)
     attempt
@@ -307,6 +363,7 @@ defmodule Consigliere.Attempts.Transitions do
 
     apply_question_rule!(attempt)
     attempt = Txn.update!(Attempt.changeset(attempt, %{status: "superseded"}))
+
     Txn.append_event!("attempt.superseded", "attempt", attempt.id, %{
       replacement_id: replacement.id
     })

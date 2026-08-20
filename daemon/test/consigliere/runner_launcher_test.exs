@@ -53,6 +53,7 @@ defmodule Consigliere.RunnerLauncherTest do
 
     assert {:ok, %{"type" => "termination_complete"} = msg} =
              RunnerLauncher.recv_until(session, "termination_complete", 5_000)
+
     assert msg["verified_dead"] == true
     assert msg["termination_reason"] == "cancel"
 
@@ -86,6 +87,7 @@ defmodule Consigliere.RunnerLauncherTest do
 
     assert {:ok, %{"type" => "harness_exited"} = msg} =
              RunnerLauncher.recv_until(session, "harness_exited", 5_000)
+
     assert msg["exit_code"] == 0
 
     assert_receive {port, {:exit_status, 0}}, 2_000

@@ -18,7 +18,7 @@ defmodule Consigliere.DatabaseWriterAtomicityTest do
 
   test "a failed question insert inside needs_decision rolls back the gate status and writes no new event" do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())

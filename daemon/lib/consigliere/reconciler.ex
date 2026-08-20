@@ -130,7 +130,7 @@ defmodule Consigliere.Reconciler do
   end
 
   defp do_run(home) do
-    paths = Path.wildcard(Path.join([home, "runners", "*", "manifest.json"]))
+    paths = Path.wildcard(Path.join([Home.runtime_attempts_dir(home), "*", "manifest.json"]))
     seen = MapSet.new()
 
     {manifest_results, seen} =
@@ -141,8 +141,12 @@ defmodule Consigliere.Reconciler do
 
     attempt_results =
       occupying_attempts()
-      |> Enum.reject(fn attempt -> MapSet.member?(seen, attempt.id) or runner_live?(attempt.id) end)
-      |> Enum.map(fn attempt -> safe(attempt.id, fn -> reconcile_attempt_without_manifest(attempt) end) end)
+      |> Enum.reject(fn attempt ->
+        MapSet.member?(seen, attempt.id) or runner_live?(attempt.id)
+      end)
+      |> Enum.map(fn attempt ->
+        safe(attempt.id, fn -> reconcile_attempt_without_manifest(attempt) end)
+      end)
 
     manifest_results ++ attempt_results
   end
@@ -252,7 +256,7 @@ defmodule Consigliere.Reconciler do
   end
 
   defp occupying_attempts do
-    Repo.all(from a in Attempt, where: a.status in ^@occupying)
+    Repo.all(from(a in Attempt, where: a.status in ^@occupying))
   end
 
   defp fetch_attempt(id) when is_binary(id) do

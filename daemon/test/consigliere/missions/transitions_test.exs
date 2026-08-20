@@ -15,7 +15,7 @@ defmodule Consigliere.Missions.TransitionsTest do
   end
 
   defp attrs(overrides \\ %{}) do
-    Map.merge(%{objective: "o", scope: "s", acceptance_criteria: "a"}, overrides)
+    Map.merge(Fixtures.mission_attrs(), overrides)
   end
 
   defp draft!(actor) do
@@ -32,7 +32,12 @@ defmodule Consigliere.Missions.TransitionsTest do
 
   defp started! do
     mission = authorized!()
-    {:ok, result} = Missions.start(mission.id, Actor.system(), %{workspace_path: "/tmp/cs-#{System.unique_integer([:positive])}"})
+
+    {:ok, result} =
+      Missions.start(mission.id, Actor.system(), %{
+        workspace_path: "/tmp/cs-#{System.unique_integer([:positive])}"
+      })
+
     result
   end
 
@@ -100,7 +105,9 @@ defmodule Consigliere.Missions.TransitionsTest do
              Missions.mark_ready_for_review(mission.id, Actor.system())
 
     {:ok, _} =
-      Repo.update(Mission.changeset(Repo.get!(Mission, mission.id), %{current_checkpoint_sha: "abc"}))
+      Repo.update(
+        Mission.changeset(Repo.get!(Mission, mission.id), %{current_checkpoint_sha: "abc"})
+      )
 
     {:ok, gate} =
       Repo.insert(
@@ -131,7 +138,9 @@ defmodule Consigliere.Missions.TransitionsTest do
       )
 
     {:ok, mission} =
-      Missions.await_integration_authorization(mission.id, Actor.system(), %{delivery_sha: "deliv"})
+      Missions.await_integration_authorization(mission.id, Actor.system(), %{
+        delivery_sha: "deliv"
+      })
 
     assert {:error, {:illegal_transition, %{reason: :target_sha_mismatch}}} =
              Missions.grant_integration_authorization(mission.id, Actor.boss(), %{
@@ -179,6 +188,7 @@ defmodule Consigliere.Missions.TransitionsTest do
 
     {:ok, mission} = Missions.cancel(mission.id, Actor.boss(), "stop")
     assert mission.phase == "canceled"
+
     assert {:error, {:illegal_transition, %{reason: :terminal}}} =
              Missions.cancel(mission.id, Actor.boss(), "again")
   end

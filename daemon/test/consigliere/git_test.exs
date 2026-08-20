@@ -23,14 +23,20 @@ defmodule Consigliere.GitTest do
     assert {:ok, ^sha} = Git.import_sha(workspace, mirror, sha)
   end
 
-  test "refuses a SHA that is not a commit in the workspace", %{workspace: workspace, mirror: mirror} do
+  test "refuses a SHA that is not a commit in the workspace", %{
+    workspace: workspace,
+    mirror: mirror
+  } do
     Git.init_workspace(workspace)
     Git.commit_all(workspace, "empty")
     assert {:error, _} = Git.import_sha(workspace, mirror, String.duplicate("a", 40))
     refute File.dir?(mirror) && Git.mirror_has_commit?(mirror, String.duplicate("a", 40))
   end
 
-  test "refuses a SHA that is not a descendant of the base", %{workspace: workspace, mirror: mirror} do
+  test "refuses a SHA that is not a descendant of the base", %{
+    workspace: workspace,
+    mirror: mirror
+  } do
     Git.init_workspace(workspace)
     File.write!(Path.join(workspace, "a.txt"), "a\n")
     base = Git.commit_all(workspace, "a")
@@ -85,7 +91,11 @@ defmodule Consigliere.GitTest do
 
     {_, 0} = System.cmd("git", ["config", "core.fsmonitor", helper], cd: workspace)
     {_, 0} = System.cmd("git", ["config", "credential.helper", helper], cd: workspace)
-    {_, 0} = System.cmd("git", ["remote", "add", "origin", "https://evil.example/repo.git"], cd: workspace)
+
+    {_, 0} =
+      System.cmd("git", ["remote", "add", "origin", "https://evil.example/repo.git"],
+        cd: workspace
+      )
 
     assert {:ok, ^sha} = Git.import_sha(workspace, mirror, sha)
     refute File.exists?(sentinel)
@@ -102,14 +112,20 @@ defmodule Consigliere.GitTest do
     sha = Git.commit_all(workspace, "ok")
 
     sentinel = Path.join(root, "alias-fired")
+
     {_, 0} =
-      System.cmd("git", ["config", "alias.cat-file", "!touch #{sentinel} && git cat-file"], cd: workspace)
+      System.cmd("git", ["config", "alias.cat-file", "!touch #{sentinel} && git cat-file"],
+        cd: workspace
+      )
 
     assert {:ok, ^sha} = Git.import_sha(workspace, mirror, sha)
     refute File.exists?(sentinel)
   end
 
-  test "a marker file is not treated as a durable checkpoint", %{workspace: workspace, mirror: mirror} do
+  test "a marker file is not treated as a durable checkpoint", %{
+    workspace: workspace,
+    mirror: mirror
+  } do
     Git.init_workspace(workspace)
     File.write!(Path.join(workspace, "hello.txt"), "committed\n")
     sha = Git.commit_all(workspace, "committed")
@@ -117,6 +133,7 @@ defmodule Consigliere.GitTest do
     File.write!(Path.join(workspace, "hello.txt"), "dirty uncommitted\n")
 
     assert {:ok, ^sha} = Git.import_sha(workspace, mirror, sha)
+
     {blob, 0} =
       System.cmd("git", ["--git-dir", mirror, "show", "#{sha}:hello.txt"], stderr_to_stdout: true)
 
@@ -139,6 +156,7 @@ defmodule Consigliere.GitTest do
     {_, 0} = System.cmd("git", ["config", "receive.denyCurrentBranch", "ignore"], cd: dest)
 
     sentinel = Path.join(root, "origin-used")
+
     {_, 0} =
       System.cmd("git", ["remote", "add", "origin", "file://#{sentinel}"], cd: workspace)
 
@@ -193,4 +211,3 @@ defmodule Consigliere.GitTest do
     assert Git.mirror_has_commit?(dest, sha)
   end
 end
-

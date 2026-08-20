@@ -25,7 +25,9 @@ defmodule Consigliere.Made.Fake do
     end)
   end
 
-  defp sha_applies?(%{"scope" => "sha_bound", "input_sha" => sha}, input_sha), do: sha == input_sha
+  defp sha_applies?(%{"scope" => "sha_bound", "input_sha" => sha}, input_sha),
+    do: sha == input_sha
+
   defp sha_applies?(%{"scope" => "sha_bound"}, _), do: false
   defp sha_applies?(_, _), do: true
 end

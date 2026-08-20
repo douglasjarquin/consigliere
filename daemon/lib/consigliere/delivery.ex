@@ -7,8 +7,8 @@ defmodule Consigliere.Delivery do
   """
 
   alias Consigliere.Actor
+  alias Consigliere.Adapters
   alias Consigliere.Git
-  alias Consigliere.GitHub.Fake
   alias Consigliere.Missions
   alias Consigliere.Missions.Mission
   alias Consigliere.Repo
@@ -16,7 +16,7 @@ defmodule Consigliere.Delivery do
   def prepare(mission_id, spec) do
     sha = Map.fetch!(spec, :sha)
     github = Map.fetch!(spec, :github)
-    adapter = Map.get(spec, :adapter, Fake)
+    adapter = Map.get(spec, :adapter, Adapters.github())
 
     with {:ok, ^sha} <-
            Git.push_sha(spec.mirror, spec.remote_url, sha, spec.ref),
@@ -38,7 +38,7 @@ defmodule Consigliere.Delivery do
 
   def merge(mission_id, spec) do
     github = Map.fetch!(spec, :github)
-    adapter = Map.get(spec, :adapter, Fake)
+    adapter = Map.get(spec, :adapter, Adapters.github())
     pr = Map.fetch!(spec, :pr)
     mission = Repo.get!(Mission, mission_id)
     expected = mission.current_delivery_sha

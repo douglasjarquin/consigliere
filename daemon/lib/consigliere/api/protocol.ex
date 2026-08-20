@@ -3,7 +3,9 @@ defmodule Consigliere.API.Protocol do
 
   import Ecto.Query
 
+  alias Consigliere.API.Auth
   alias Consigliere.Actor
+  alias Consigliere.CommandReceipts
   alias Consigliere.Missions
   alias Consigliere.Missions.Mission
   alias Consigliere.MissionBlockers.MissionBlocker
@@ -13,6 +15,10 @@ defmodule Consigliere.API.Protocol do
   alias Consigliere.Repo
 
   @version 1
+  @mutating ~w(mission.create mission.submit mission.grant_work mission.cancel
+               mission.grant_integration question.open question.answer away.mark
+               away.return project.add)
+  @attempt_ops ~w(ping mission.get question.open)
 
   def handle(line, bound \\ :unbound) when is_binary(line) do
     case JSON.decode(String.trim(line)) do
@@ -26,59 +32,115 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp dispatch(%{"v" => @version, "id" => id, "op" => op} = req, bound) do
-    case bind_actor(actor(req), bound) do
+    case Auth.identify(req, bound) do
       {:error, reason} ->
         fail(id, "unauthorized", reason)
 
       actor ->
-        req
-        |> Map.get("payload", %{})
-        |> then(&run(op, &1, actor))
-        |> wrap(id)
+        payload = Map.get(req, "payload", %{})
+        run_maybe_once(op, payload, actor, req, id)
     end
   end
 
   defp dispatch(%{"id" => id}, _bound), do: fail(id, "invalid", "missing v or op")
   defp dispatch(_, _bound), do: fail(nil, "invalid", "missing id")
 
-  defp actor(%{"actor" => %{"principal" => principal} = raw}) when is_binary(principal) do
-    %Actor{
-      principal: principal,
-      attempt_id: raw["attempt_id"],
-      fencing_token: raw["fencing_token"],
-      channel: raw["channel"] || default_channel(principal)
-    }
+  defp run_maybe_once(op, payload, actor, req, id) when op in @mutating do
+    key = req["idempotency_key"] || id
+
+    CommandReceipts.remember(actor.principal, op, key, payload, fn ->
+      run(op, payload, actor)
+    end)
+    |> wrap(id)
   end
 
-  defp actor(_), do: {:error, "missing actor.principal"}
+  defp run_maybe_once(op, payload, actor, _req, id) do
+    run(op, payload, actor) |> wrap(id)
+  end
 
-  defp bind_actor({:error, reason}, _bound), do: {:error, reason}
-  defp bind_actor(actor, :unbound), do: actor
-  defp bind_actor(%{principal: "boss"} = actor, :privileged), do: actor
-  defp bind_actor(_actor, :privileged), do: {:error, "privileged socket requires boss"}
-
-  defp bind_actor(%{principal: "boss"}, :capability),
-    do: {:error, "capability socket cannot carry boss"}
-
-  defp bind_actor(actor, :capability), do: actor
-
-  defp default_channel("boss"), do: "privileged"
-  defp default_channel("attempt"), do: "capability"
-  defp default_channel("daemon"), do: "internal"
-  defp default_channel(_), do: "advisory"
+  defp run(op, _payload, %Actor{principal: "attempt"}) when op not in @attempt_ops do
+    {:error, {:unauthorized, :capability}}
+  end
 
   defp run("ping", _payload, _actor), do: {:ok, %{"pong" => true}}
 
   defp run("mission.create", payload, actor) do
-    Missions.create(
+    project_id = payload["project_id"]
+
+    if is_binary(project_id) and project_id != "" do
+      Missions.create(
+        %{
+          objective: payload["objective"],
+          scope: payload["scope"],
+          acceptance_criteria: payload["acceptance_criteria"],
+          project_id: project_id
+        },
+        actor
+      )
+      |> ok_mission()
+    else
+      {:error, {:invalid, "project_id required"}}
+    end
+  end
+
+  defp run("project.add", payload, actor) do
+    Consigliere.Projects.register(
       %{
-        objective: payload["objective"],
-        scope: payload["scope"],
-        acceptance_criteria: payload["acceptance_criteria"]
+        name: payload["name"],
+        repository_path: payload["repository_path"],
+        repository_url: payload["repository_url"],
+        default_branch: payload["default_branch"] || "main"
       },
       actor
     )
-    |> ok_mission()
+    |> case do
+      {:ok, project} ->
+        {:ok,
+         %{
+           "id" => project.id,
+           "name" => project.name,
+           "repository_url" => project.repository_url
+         }}
+
+      other ->
+        other
+    end
+  end
+
+  defp run("project.list", _payload, actor) do
+    if actor.principal in ["boss", "daemon"] do
+      projects = Repo.all(Consigliere.Projects.Project)
+
+      {:ok,
+       %{
+         "projects" =>
+           Enum.map(projects, fn p ->
+             %{"id" => p.id, "name" => p.name, "repository_url" => p.repository_url}
+           end)
+       }}
+    else
+      {:error, {:unauthorized, :principal}}
+    end
+  end
+
+  defp run("project.get", payload, actor) do
+    if actor.principal in ["boss", "daemon"] do
+      case Repo.get(Consigliere.Projects.Project, payload["project_id"]) do
+        nil ->
+          {:error, {:not_found, "project"}}
+
+        project ->
+          {:ok,
+           %{
+             "id" => project.id,
+             "name" => project.name,
+             "repository_url" => project.repository_url,
+             "default_branch" => project.default_branch
+           }}
+      end
+    else
+      {:error, {:unauthorized, :principal}}
+    end
   end
 
   defp run("mission.submit", payload, actor) do
@@ -218,6 +280,8 @@ defmodule Consigliere.API.Protocol do
 
   defp ok_question({:ok, %{id: id, status: status}}), do: {:ok, %{"id" => id, "status" => status}}
   defp ok_question(other), do: other
+
+  defp wrap({:ok, :replay, payload}, id), do: wrap({:ok, payload}, id)
 
   defp wrap({:ok, payload}, id),
     do: %{"v" => @version, "id" => id, "ok" => true, "payload" => payload}

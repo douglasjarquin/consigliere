@@ -23,7 +23,7 @@ defmodule Consigliere.GlobalSchedulerTest do
 
   test "a restarted scheduler rebuilds occupancy from occupying Attempt rows" do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
@@ -43,7 +43,9 @@ defmodule Consigliere.GlobalSchedulerTest do
     new_pid =
       Enum.reduce_while(1..50, nil, fn _, _ ->
         case Process.whereis(GlobalScheduler) do
-          p when is_pid(p) and p != pid -> {:halt, p}
+          p when is_pid(p) and p != pid ->
+            {:halt, p}
+
           _ ->
             Process.sleep(10)
             {:cont, nil}

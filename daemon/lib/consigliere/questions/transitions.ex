@@ -46,16 +46,18 @@ defmodule Consigliere.Questions.Transitions do
             })
           )
 
-        Txn.insert!(
-          MissionBlocker.changeset(%MissionBlocker{}, %{
-            mission_id: attempt.mission_id,
-            kind: "question",
-            reason: question.prompt,
-            status: "open",
-            subject_type: "question",
-            subject_id: question.id
-          })
-        )
+        unless question.subject_type == "gate" do
+          Txn.insert!(
+            MissionBlocker.changeset(%MissionBlocker{}, %{
+              mission_id: attempt.mission_id,
+              kind: "question",
+              reason: question.prompt,
+              status: "open",
+              subject_type: "question",
+              subject_id: question.id
+            })
+          )
+        end
 
         Txn.append_event!("question.opened", "question", question.id)
         question

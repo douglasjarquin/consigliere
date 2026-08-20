@@ -20,6 +20,11 @@ projects/
 # Python bytecode caches (bin/cs-detach.py) — build artifacts, never tracked.
 __pycache__/
 
+# Packaged runner and escript client — built, never tracked.
+daemon/priv/cs-runner
+daemon/cs
+daemon/csd
+
 # codegraph's local index - a directory (or a symlink to a central per-user
 # store) holding the graph database; codegraph's own .gitignore inside it
 # only covers its own contents, never the project root.

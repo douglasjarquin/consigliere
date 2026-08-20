@@ -24,7 +24,7 @@ defmodule Consigliere.ReconcilerPersistTest do
 
   defp running_attempt! do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
@@ -45,7 +45,7 @@ defmodule Consigliere.ReconcilerPersistTest do
   end
 
   defp write_manifest!(home, attempt_id, attrs) do
-    dir = Path.join([home, "runners", attempt_id])
+    dir = Path.join([home, "runtime", "attempts", attempt_id])
     File.mkdir_p!(dir)
 
     manifest =
@@ -81,10 +81,12 @@ defmodule Consigliere.ReconcilerPersistTest do
     assert Repo.aggregate(Incident, :count) >= 1
   end
 
-  test "a corrupt manifest records an incident and still reconciles a later Attempt", %{home: home} do
+  test "a corrupt manifest records an incident and still reconciles a later Attempt", %{
+    home: home
+  } do
     %{attempt: attempt} = running_attempt!()
     write_manifest!(home, "not-a-uuid", %{"state" => "nope"})
-    File.write!(Path.join([home, "runners", "not-a-uuid", "manifest.json"]), "{nope")
+    File.write!(Path.join([home, "runtime", "attempts", "not-a-uuid", "manifest.json"]), "{nope")
     write_manifest!(home, attempt.id, %{"state" => "dead_verified"})
 
     results = Reconciler.run(home: home)
@@ -105,7 +107,11 @@ defmodule Consigliere.ReconcilerPersistTest do
   test "occupying Attempt with no manifest and no live runner is marked lost unconfirmed" do
     %{attempt: attempt, workspace: workspace} = running_attempt!()
 
-    results = Reconciler.run(home: Path.join(System.tmp_dir!(), "empty-#{System.unique_integer([:positive])}"))
+    results =
+      Reconciler.run(
+        home: Path.join(System.tmp_dir!(), "empty-#{System.unique_integer([:positive])}")
+      )
+
     assert {:quarantined, id} = Enum.find(results, &match?({:quarantined, _}, &1))
     assert id == attempt.id
     assert Repo.get!(Workspace, workspace.id).status == "quarantined"
@@ -145,9 +151,12 @@ defmodule Consigliere.ReconcilerPersistTest do
 
     {:ok, _} =
       Repo.update(
-        Consigliere.Missions.Mission.changeset(Repo.get!(Consigliere.Missions.Mission, mission.id), %{
-          current_checkpoint_sha: "abc"
-        })
+        Consigliere.Missions.Mission.changeset(
+          Repo.get!(Consigliere.Missions.Mission, mission.id),
+          %{
+            current_checkpoint_sha: "abc"
+          }
+        )
       )
 
     write_manifest!(home, attempt.id, %{"state" => "dead_verified"})
@@ -198,7 +207,8 @@ defmodule Consigliere.ReconcilerPersistTest do
   end
 
   defp spawn_session_leader do
-    ruby = System.find_executable("ruby") || flunk("ruby is required to spawn a setsid process group")
+    ruby =
+      System.find_executable("ruby") || flunk("ruby is required to spawn a setsid process group")
 
     port =
       Port.open({:spawn_executable, ruby}, [
@@ -217,7 +227,9 @@ defmodule Consigliere.ReconcilerPersistTest do
       {out, 0} = System.cmd("ps", ["-o", "pgid=", "-p", to_string(pid)], stderr_to_stdout: true)
 
       case Integer.parse(String.trim(out)) do
-        {pgid, _} when pgid == pid -> {:halt, :ok}
+        {pgid, _} when pgid == pid ->
+          {:halt, :ok}
+
         _ ->
           Process.sleep(20)
           {:cont, :error}

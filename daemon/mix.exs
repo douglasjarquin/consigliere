@@ -10,7 +10,8 @@ defmodule Consigliere.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       aliases: aliases(),
-      releases: releases()
+      releases: releases(),
+      escript: [main_module: Consigliere.CLI, name: "cs"]
     ]
   end
 

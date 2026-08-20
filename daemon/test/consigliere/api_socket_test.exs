@@ -44,7 +44,8 @@ defmodule Consigliere.API.SocketTest do
       Client.request("mission.create", %{
         "objective" => "from-socket",
         "scope" => "s",
-        "acceptance_criteria" => "a"
+        "acceptance_criteria" => "a",
+        "project_id" => Fixtures.dummy_project!().id
       })
 
     assert resp["ok"] == true

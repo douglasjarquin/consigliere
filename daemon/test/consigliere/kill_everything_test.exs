@@ -19,7 +19,7 @@ defmodule Consigliere.KillEverythingTest do
 
   test "a boss Question survives daemon restart and only the boss channel can answer it" do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
@@ -56,7 +56,8 @@ defmodule Consigliere.KillEverythingTest do
     # The Question is a row, not a parked process. Killing the in-memory
     # coordinator (and any other Mission children) must not lose it.
     for {_, pid, _, _} <- DynamicSupervisor.which_children(Consigliere.MissionDynamicSupervisor) do
-      if is_pid(pid), do: DynamicSupervisor.terminate_child(Consigliere.MissionDynamicSupervisor, pid)
+      if is_pid(pid),
+        do: DynamicSupervisor.terminate_child(Consigliere.MissionDynamicSupervisor, pid)
     end
 
     assert Repo.get!(Question, question_id).status == "routed"

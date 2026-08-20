@@ -37,7 +37,7 @@ defmodule Consigliere.MissionCoordinatorRehydrateTest do
 
   defp authorized_mission! do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
@@ -96,7 +96,7 @@ defmodule Consigliere.MissionCoordinatorRehydrateTest do
 
   test "a mission.authorized event re-evaluates a waiting coordinator" do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     pid = start_coord!(mission.id)
@@ -135,7 +135,9 @@ defmodule Consigliere.MissionCoordinatorRehydrateTest do
     new_pid =
       Enum.reduce_while(1..20, nil, fn _, _ ->
         case Registry.lookup(Consigliere.Registry, {:mission, mission.id}) do
-          [{p, _}] when p != pid -> {:halt, p}
+          [{p, _}] when p != pid ->
+            {:halt, p}
+
           _ ->
             Process.sleep(20)
             {:cont, nil}

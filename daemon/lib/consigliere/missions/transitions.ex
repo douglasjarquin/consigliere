@@ -26,6 +26,13 @@ defmodule Consigliere.Missions.Transitions do
 
   def create_txn(attrs, actor) do
     Txn.require_principal(actor, @edit_principals)
+
+    project_id = Map.get(attrs, :project_id) || Map.get(attrs, "project_id")
+
+    unless is_binary(project_id) and project_id != "" do
+      Txn.illegal(nil, "draft", :project_required)
+    end
+
     attrs = Map.put_new(attrs, :phase, "draft")
     mission = Txn.insert!(Mission.changeset(%Mission{}, attrs))
     Txn.append_event!("mission.created", "mission", mission.id)
@@ -283,7 +290,10 @@ defmodule Consigliere.Missions.Transitions do
     mission =
       Txn.update!(Mission.changeset(mission, %{phase: "awaiting_integration_authorization"}))
 
-    Txn.append_event!("mission.integration_race_detected", "mission", mission.id, %{reason: reason})
+    Txn.append_event!("mission.integration_race_detected", "mission", mission.id, %{
+      reason: reason
+    })
+
     mission
   end
 
@@ -304,7 +314,7 @@ defmodule Consigliere.Missions.Transitions do
     end
 
     handle_open_questions_on_mission_end!(mission)
-    supersede_non_terminal_attempts!(mission)
+    Consigliere.Termination.request_live_attempts!(mission, "failed")
     cancel_inflight_gates!(mission)
 
     mission =
@@ -323,7 +333,7 @@ defmodule Consigliere.Missions.Transitions do
     mission = fetch_mission!(mission_id)
     refuse_hard_terminal!(mission, "canceled")
     handle_open_questions_on_mission_end!(mission)
-    supersede_non_terminal_attempts!(mission)
+    Consigliere.Termination.request_live_attempts!(mission, "canceled")
     cancel_inflight_gates!(mission)
     close_open_blockers!(mission, "withdrawn")
 
@@ -350,11 +360,12 @@ defmodule Consigliere.Missions.Transitions do
       )
 
     handle_open_questions_on_mission_end!(mission)
-    supersede_non_terminal_attempts!(mission)
+    Consigliere.Termination.request_live_attempts!(mission, "superseded")
     cancel_inflight_gates!(mission)
     close_open_blockers!(mission, "superseded")
 
     mission = Txn.update!(Mission.changeset(mission, %{phase: "superseded"}))
+
     Txn.append_event!("mission.superseded", "mission", mission.id, %{
       replacement_id: replacement.id
     })
@@ -363,7 +374,9 @@ defmodule Consigliere.Missions.Transitions do
   end
 
   def resume_after_decision(mission_id, actor, decision_id) do
-    DatabaseWriter.transaction(fn -> resume_after_decision_txn(mission_id, actor, decision_id) end)
+    DatabaseWriter.transaction(fn ->
+      resume_after_decision_txn(mission_id, actor, decision_id)
+    end)
   end
 
   def resume_after_decision_txn(mission_id, actor, decision_id) do
@@ -382,11 +395,13 @@ defmodule Consigliere.Missions.Transitions do
     end
 
     if decision.revoked_at, do: Txn.illegal(mission.phase, "active", :decision_revoked)
+
     if decision.mission_id && decision.mission_id != mission.id do
       Txn.illegal(mission.phase, "active", :decision_wrong_mission)
     end
 
     mission = Txn.update!(Mission.changeset(mission, %{phase: "active", terminal_reason: nil}))
+
     Txn.append_event!("mission.resumed_after_decision", "mission", mission.id, %{
       decision_id: decision.id
     })
@@ -422,10 +437,11 @@ defmodule Consigliere.Missions.Transitions do
 
   defp passed_gate?(mission, gate_type) do
     Repo.exists?(
-      from g in Gate,
+      from(g in Gate,
         where:
           g.mission_id == ^mission.id and g.gate_type == ^gate_type and g.status == "passed" and
             g.input_sha == ^mission.current_checkpoint_sha
+      )
     )
   end
 
@@ -495,17 +511,6 @@ defmodule Consigliere.Missions.Transitions do
           })
         )
       end)
-    end)
-  end
-
-  defp supersede_non_terminal_attempts!(mission) do
-    non_terminal = ~w(planned starting running checkpoint_requested checkpointed)
-
-    from(a in Attempt, where: a.mission_id == ^mission.id and a.status in ^non_terminal)
-    |> Repo.all()
-    |> Enum.each(fn attempt ->
-      Txn.update!(Attempt.changeset(attempt, %{status: "superseded"}))
-      Txn.append_event!("attempt.superseded", "attempt", attempt.id)
     end)
   end
 

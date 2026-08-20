@@ -14,10 +14,8 @@ defmodule Consigliere.MissionCoordinator do
 
   import Ecto.Query
 
-  alias Consigliere.Actor
+  alias Consigliere.Dispatch
   alias Consigliere.EventBus
-  alias Consigliere.GlobalScheduler
-  alias Consigliere.Missions
   alias Consigliere.Missions.Mission
   alias Consigliere.MissionBlockers.MissionBlocker
   alias Consigliere.Attempts.Attempt
@@ -108,40 +106,18 @@ defmodule Consigliere.MissionCoordinator do
         blockers = open_blockers(mission.id)
         occupying = occupying_attempts(mission.id)
         {runnable, reason} = runnability(mission, blockers, occupying)
-        view = %{phase: mission.phase, runnable: runnable, reason: reason, blockers: length(blockers)}
+
+        view = %{
+          phase: mission.phase,
+          runnable: runnable,
+          reason: reason,
+          blockers: length(blockers)
+        }
+
         state = %{state | view: view}
-        maybe_schedule(state, mission, runnable, occupying)
+        Dispatch.maybe_schedule(state, mission, runnable, occupying)
     end
   end
-
-  defp maybe_schedule(state, mission, true, []) when mission.phase == "authorized" do
-    case GlobalScheduler.request_slot(mission.id) do
-      {:ok, grant} ->
-        path = workspace_path(mission.id)
-
-        case Missions.start(mission.id, Actor.system(), %{workspace_path: path}) do
-          {:ok, %{attempt: attempt}} ->
-            {runner_pid, runner_ref} = attach_runner(attempt.id)
-
-            %{
-              state
-              | slot: grant,
-                attempt_id: attempt.id,
-                runner_pid: runner_pid,
-                runner_ref: runner_ref || state.runner_ref
-            }
-
-          {:error, _} ->
-            GlobalScheduler.release_slot(mission.id)
-            %{state | slot: nil}
-        end
-
-      {:error, :busy} ->
-        %{state | view: Map.put(state.view, :reason, :capacity)}
-    end
-  end
-
-  defp maybe_schedule(state, _mission, _runnable, _occupying), do: state
 
   defp runnability(mission, blockers, occupying) do
     cond do
@@ -170,15 +146,22 @@ defmodule Consigliere.MissionCoordinator do
   end
 
   defp open_blockers(mission_id) do
-    Repo.all(from b in MissionBlocker, where: b.mission_id == ^mission_id and b.status == "open")
+    Repo.all(from(b in MissionBlocker, where: b.mission_id == ^mission_id and b.status == "open"))
   end
 
   defp occupying_attempts(mission_id) do
     Repo.all(
-      from a in Attempt,
+      from(a in Attempt,
         where:
           a.mission_id == ^mission_id and
-            a.status in ["planned", "starting", "running", "checkpoint_requested"]
+            a.status in [
+              "planned",
+              "starting",
+              "running",
+              "checkpoint_requested",
+              "terminating"
+            ]
+      )
     )
   end
 
@@ -197,7 +180,7 @@ defmodule Consigliere.MissionCoordinator do
 
   defp relevant?(event, state) do
     event.subject_id == state.mission_id or
-      (state.attempt_id && event.subject_id == state.attempt_id) or
+      (is_binary(state.attempt_id) and event.subject_id == state.attempt_id) or
       payload_mission_id(event.payload) == state.mission_id
   end
 
@@ -215,14 +198,6 @@ defmodule Consigliere.MissionCoordinator do
       },
       state.view || %{}
     )
-  end
-
-  defp workspace_path(mission_id) do
-    root =
-      Application.get_env(:consigliere_daemon, __MODULE__, [])
-      |> Keyword.get(:workspace_root, Path.join(System.tmp_dir!(), "cs-workspaces"))
-
-    Path.join(root, to_string(mission_id))
   end
 
   defp schedule_tick(:infinity), do: :ok

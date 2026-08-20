@@ -51,7 +51,12 @@ defmodule Consigliere.API.ProtocolTest do
           "id" => "c",
           "op" => "mission.create",
           "actor" => %{"principal" => "boss"},
-          "payload" => %{"objective" => "o", "scope" => "s", "acceptance_criteria" => "a"}
+          "payload" => %{
+            "objective" => "o",
+            "scope" => "s",
+            "acceptance_criteria" => "a",
+            "project_id" => Fixtures.dummy_project!().id
+          }
         })
       )
 
@@ -99,7 +104,7 @@ defmodule Consigliere.API.ProtocolTest do
 
   test "attempt principal cannot answer a boss-authority Question" do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
@@ -160,7 +165,7 @@ defmodule Consigliere.API.ProtocolTest do
 
   test "inbox lists open questions for the boss" do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
@@ -203,7 +208,7 @@ defmodule Consigliere.API.ProtocolTest do
 
   test "attempt and model_advisory cannot grant integration" do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())

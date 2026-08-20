@@ -55,4 +55,34 @@ defmodule Consigliere.Home.LockTest do
 
     GenServer.stop(pid)
   end
+
+  test "a losing start does not unlink the winner's probe socket", %{home: home} do
+    Process.flag(:trap_exit, true)
+    assert {:ok, winner} = Lock.start_link(home: home)
+    socket = Home.boss_socket_path(home)
+    assert File.exists?(socket)
+
+    assert {:error, :already_running} = Lock.start_link(home: home)
+    assert File.exists?(socket)
+    assert Home.socket_status(home) == :live
+
+    GenServer.stop(winner)
+  end
+
+  test "two different homes can be locked at once" do
+    a = Path.join(System.tmp_dir!(), "cs-home-lock-a-#{System.unique_integer([:positive])}")
+    b = Path.join(System.tmp_dir!(), "cs-home-lock-b-#{System.unique_integer([:positive])}")
+
+    on_exit(fn ->
+      File.rm_rf(a)
+      File.rm_rf(b)
+    end)
+
+    assert {:ok, pa} = Lock.start_link(home: a)
+    assert {:ok, pb} = Lock.start_link(home: b)
+    assert Home.socket_status(a) == :live
+    assert Home.socket_status(b) == :live
+    GenServer.stop(pa)
+    GenServer.stop(pb)
+  end
 end

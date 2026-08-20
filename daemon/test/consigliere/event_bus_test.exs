@@ -16,10 +16,10 @@ defmodule Consigliere.EventBusTest do
     EventBus.subscribe()
 
     {:ok, first} =
-      Missions.create(%{objective: "one", scope: "s", acceptance_criteria: "a"}, Actor.system())
+      Missions.create(Fixtures.mission_attrs(%{objective: "one"}), Actor.system())
 
     {:ok, second} =
-      Missions.create(%{objective: "two", scope: "s", acceptance_criteria: "a"}, Actor.system())
+      Missions.create(Fixtures.mission_attrs(%{objective: "two"}), Actor.system())
 
     EventBus.poll()
 
@@ -37,7 +37,7 @@ defmodule Consigliere.EventBusTest do
 
     assert {:ok, mission} =
              Missions.create(
-               %{objective: "survives", scope: "s", acceptance_criteria: "a"},
+               Fixtures.mission_attrs(%{objective: "survives"}),
                Actor.system()
              )
 
@@ -54,7 +54,9 @@ defmodule Consigliere.EventBusTest do
     new_pid =
       Enum.reduce_while(1..50, nil, fn _, _ ->
         case Process.whereis(EventBus) do
-          pid when is_pid(pid) and pid != old -> {:halt, pid}
+          pid when is_pid(pid) and pid != old ->
+            {:halt, pid}
+
           _ ->
             Process.sleep(10)
             {:cont, nil}
@@ -67,7 +69,7 @@ defmodule Consigliere.EventBusTest do
     EventBus.subscribe()
 
     {:ok, mission} =
-      Missions.create(%{objective: "after-restart", scope: "s", acceptance_criteria: "a"}, Actor.system())
+      Missions.create(Fixtures.mission_attrs(%{objective: "after-restart"}), Actor.system())
 
     EventBus.poll()
     assert_receive {:domain_event, %{type: "mission.created", subject_id: id}}, 1_000

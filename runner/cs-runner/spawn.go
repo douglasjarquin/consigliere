@@ -73,11 +73,18 @@ func SpawnHarness(command []string, confirmTimeout time.Duration) (*HarnessHandl
 // so a shebang script can still find sleep/sh; it is not copied from
 // the runner.
 func scrubbedHarnessEnv() []string {
-	return []string{
+	env := []string{
 		"PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin",
 		"LANG=C",
 		"LC_ALL=C",
 		"HOME=/var/empty",
 		"TMPDIR=" + os.TempDir(),
 	}
+	if v := os.Getenv("CS_CAPABILITY"); v != "" {
+		env = append(env, "CS_CAPABILITY="+v)
+	}
+	if v := os.Getenv("CS_API_SOCKET"); v != "" {
+		env = append(env, "CS_API_SOCKET="+v)
+	}
+	return env
 }

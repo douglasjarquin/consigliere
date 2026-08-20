@@ -22,7 +22,8 @@ defmodule Consigliere.CLITest do
   test "doctor/0 reports not running with no failure when the home is untouched" do
     output = capture_io(fn -> Consigliere.CLI.doctor() end)
 
-    assert output =~ "not running"
+    assert output =~ "probe socket: absent"
+    assert output =~ "lock:"
     refute output =~ "last startup failure"
   end
 

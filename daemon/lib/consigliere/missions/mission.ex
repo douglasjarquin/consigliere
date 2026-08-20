@@ -14,6 +14,7 @@ defmodule Consigliere.Missions.Mission do
     field(:objective, :string)
     field(:scope, :string)
     field(:acceptance_criteria, :string)
+    field(:project_id, :binary_id)
     field(:phase, :string, default: "draft")
     field(:authorization_id, :binary_id)
     field(:replaces_mission_id, :binary_id)
@@ -29,6 +30,7 @@ defmodule Consigliere.Missions.Mission do
 
   @required [:objective, :scope, :acceptance_criteria, :phase]
   @optional [
+    :project_id,
     :authorization_id,
     :replaces_mission_id,
     :validation_policy,

@@ -20,7 +20,12 @@ defmodule Consigliere.DomainEvents.DomainEventTest do
   end
 
   test "missing type is rejected" do
-    attrs = %{subject_type: "mission", subject_id: Ecto.UUID.generate(), occurred_at: DateTime.utc_now()}
+    attrs = %{
+      subject_type: "mission",
+      subject_id: Ecto.UUID.generate(),
+      occurred_at: DateTime.utc_now()
+    }
+
     refute DomainEvent.changeset(%DomainEvent{}, attrs).valid?
   end
 end

@@ -15,7 +15,7 @@ defmodule Consigliere.OutboxItems.Transitions do
   def claim_due_txn(kinds, now, lease_until) do
     item =
       Repo.one(
-        from i in OutboxItem,
+        from(i in OutboxItem,
           where:
             i.kind in ^kinds and
               ((i.status == "queued" and
@@ -24,6 +24,7 @@ defmodule Consigliere.OutboxItems.Transitions do
                     i.leased_until <= ^now)),
           order_by: [asc: i.inserted_at],
           limit: 1
+        )
       )
 
     case item do

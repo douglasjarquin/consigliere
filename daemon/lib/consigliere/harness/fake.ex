@@ -11,7 +11,11 @@ defmodule Consigliere.Harness.Fake do
   def ensure_started! do
     case Process.whereis(__MODULE__) do
       nil ->
-        {:ok, _} = Agent.start_link(fn -> %{sessions: %{}, starts: 0, interrupted: MapSet.new()} end, name: __MODULE__)
+        {:ok, _} =
+          Agent.start_link(fn -> %{sessions: %{}, starts: 0, interrupted: MapSet.new()} end,
+            name: __MODULE__
+          )
+
         :ok
 
       _pid ->
@@ -87,7 +91,21 @@ defmodule Consigliere.Harness.Fake do
   def cancel(_ref), do: :ok
 
   @impl true
-  def snapshot(ref), do: %{native_session_id: ref.native_session_id, interrupted: interrupted?(ref)}
+  def snapshot(ref),
+    do: %{native_session_id: ref.native_session_id, interrupted: interrupted?(ref)}
+
+  def argv(opts) do
+    script = Path.join(:code.priv_dir(:consigliere_daemon), "fake_harness.sh")
+    heartbeat_file = Keyword.fetch!(opts, :heartbeat_file)
+    args = [script, heartbeat_file]
+
+    case Keyword.get(opts, :max_iterations) do
+      nil -> args
+      n -> args ++ [to_string(n)]
+    end
+  end
+
+  def decode_line(_line), do: :ignore
 
   def interrupted?(ref) do
     ensure_started!()

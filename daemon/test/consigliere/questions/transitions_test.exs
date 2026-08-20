@@ -21,7 +21,7 @@ defmodule Consigliere.Questions.TransitionsTest do
 
   defp running! do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
@@ -65,6 +65,29 @@ defmodule Consigliere.Questions.TransitionsTest do
     assert Fixtures.event_types(first.id) == ["question.opened"]
   end
 
+  test "a gate-subject question does not open a question blocker" do
+    attempt = running!()
+    mission = Repo.get!(Consigliere.Missions.Mission, attempt.mission_id)
+
+    {:ok, gate} =
+      Consigliere.Gates.create(mission.id, Actor.system(), %{
+        gate_type: "review",
+        input_sha: "in",
+        base_sha: "base",
+        policy_hash: "p"
+      })
+
+    {:ok, question} =
+      Questions.open(
+        open_attrs(attempt, %{subject_type: "gate", subject_id: gate.id}),
+        Actor.attempt(attempt.id, attempt.fencing_token)
+      )
+
+    assert question.subject_type == "gate"
+    assert question.subject_id == gate.id
+    assert Repo.aggregate(MissionBlocker, :count) == 0
+  end
+
   test "a fenced attempt cannot open a question" do
     attempt = running!()
 
@@ -90,21 +113,25 @@ defmodule Consigliere.Questions.TransitionsTest do
 
   test "boss can answer an open question without routing, producing no outbox row" do
     attempt = running!()
-    {:ok, question} = Questions.open(open_attrs(attempt, %{}), Actor.attempt(attempt.id, attempt.fencing_token))
+
+    {:ok, question} =
+      Questions.open(open_attrs(attempt, %{}), Actor.attempt(attempt.id, attempt.fencing_token))
 
     {:ok, question} =
       Questions.answer(question.id, Actor.boss(), %{answer: "yes", answer_channel: "privileged"})
 
     assert question.status == "answered"
     assert Repo.aggregate(OutboxItem, :count) == 0
-    blocker = Repo.one!(from b in MissionBlocker, where: b.subject_id == ^question.id)
+    blocker = Repo.one!(from(b in MissionBlocker, where: b.subject_id == ^question.id))
     assert blocker.status == "closed"
     assert blocker.closed_reason == "answered"
   end
 
   test "model_advisory cannot answer a boss-authority question" do
     attempt = running!()
-    {:ok, question} = Questions.open(open_attrs(attempt, %{}), Actor.attempt(attempt.id, attempt.fencing_token))
+
+    {:ok, question} =
+      Questions.open(open_attrs(attempt, %{}), Actor.attempt(attempt.id, attempt.fencing_token))
 
     assert {:error, {:unauthorized, :boss_required}} =
              Questions.answer(question.id, Actor.model_advisory(), %{answer: "no"})
@@ -114,7 +141,10 @@ defmodule Consigliere.Questions.TransitionsTest do
 
   test "route enqueues a notification outbox item; a second route is illegal" do
     attempt = running!()
-    {:ok, question} = Questions.open(open_attrs(attempt, %{}), Actor.attempt(attempt.id, attempt.fencing_token))
+
+    {:ok, question} =
+      Questions.open(open_attrs(attempt, %{}), Actor.attempt(attempt.id, attempt.fencing_token))
+
     {:ok, question} = Questions.route(question.id, Actor.system())
     assert question.route == "boss_inbox"
     assert Repo.aggregate(OutboxItem, :count) == 1
@@ -124,11 +154,14 @@ defmodule Consigliere.Questions.TransitionsTest do
 
   test "expire opens an incident and leaves the blocker open" do
     attempt = running!()
-    {:ok, question} = Questions.open(open_attrs(attempt, %{}), Actor.attempt(attempt.id, attempt.fencing_token))
+
+    {:ok, question} =
+      Questions.open(open_attrs(attempt, %{}), Actor.attempt(attempt.id, attempt.fencing_token))
+
     {:ok, question} = Questions.expire(question.id, Actor.system())
     assert question.status == "expired"
     assert Repo.aggregate(Incident, :count) == 1
-    blocker = Repo.one!(from b in MissionBlocker, where: b.subject_id == ^question.id)
+    blocker = Repo.one!(from(b in MissionBlocker, where: b.subject_id == ^question.id))
     assert blocker.status == "open"
   end
 

@@ -16,7 +16,7 @@ defmodule Consigliere.Harness.EventsTest do
 
   defp running_attempt! do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
@@ -84,10 +84,16 @@ defmodule Consigliere.Harness.EventsTest do
     actor = Actor.attempt(attempt.id, attempt.fencing_token)
 
     assert {:ok, :accepted} =
-             Events.ingest(envelope(attempt, %{"event_id" => "e-hi", "native_sequence" => 5}), actor)
+             Events.ingest(
+               envelope(attempt, %{"event_id" => "e-hi", "native_sequence" => 5}),
+               actor
+             )
 
     assert {:error, :stale_sequence} =
-             Events.ingest(envelope(attempt, %{"event_id" => "e-lo", "native_sequence" => 4}), actor)
+             Events.ingest(
+               envelope(attempt, %{"event_id" => "e-lo", "native_sequence" => 4}),
+               actor
+             )
 
     assert Repo.get!(Attempt, attempt.id).last_native_sequence == 5
   end
@@ -114,6 +120,28 @@ defmodule Consigliere.Harness.EventsTest do
              Events.ingest(%{"type" => "progress.reported", "attempt_id" => attempt.id}, actor)
 
     assert Repo.get!(Attempt, attempt.id).last_native_sequence == nil
+  end
+
+  test "session.completed records an exit classification on a live Attempt" do
+    attempt = running_attempt!()
+    actor = Actor.attempt(attempt.id, attempt.fencing_token)
+
+    assert {:ok, :accepted} =
+             Events.ingest(
+               envelope(attempt, %{"type" => "session.completed", "native_sequence" => 2}),
+               actor
+             )
+
+    assert Repo.get!(Attempt, attempt.id).exit_classification == "completed"
+    assert Repo.get!(Attempt, attempt.id).status == "running"
+  end
+
+  test "unknown event types are rejected" do
+    attempt = running_attempt!()
+    actor = Actor.attempt(attempt.id, attempt.fencing_token)
+
+    assert {:error, :unknown_event_type} =
+             Events.ingest(envelope(attempt, %{"type" => "evil.dump"}), actor)
   end
 
   test "late session.completed from a superseded Attempt is fenced" do

@@ -1,6 +1,8 @@
 defmodule Consigliere.Made.ValidateTest do
   use ExUnit.Case, async: false
 
+  import Ecto.Query
+
   alias Consigliere.Actor
   alias Consigliere.Attempts
   alias Consigliere.Decisions.Decision
@@ -8,7 +10,9 @@ defmodule Consigliere.Made.ValidateTest do
   alias Consigliere.Gates
   alias Consigliere.Gates.Gate
   alias Consigliere.Made.Validate
+  alias Consigliere.MissionBlockers.MissionBlocker
   alias Consigliere.Missions
+  alias Consigliere.Questions
   alias Consigliere.Questions.Question
   alias Consigliere.Repo
 
@@ -19,7 +23,7 @@ defmodule Consigliere.Made.ValidateTest do
 
   defp running_gate!(sha \\ "sha-a") do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
@@ -60,6 +64,7 @@ defmodule Consigliere.Made.ValidateTest do
     {attempt, gate} = running_gate!("sha-a")
     Validate.run(gate, attempt)
     question = Repo.one!(Question)
+    {:ok, question} = Questions.answer(question.id, Actor.boss(), %{answer: "waive"})
 
     {:ok, decision} =
       Repo.insert(
@@ -74,11 +79,14 @@ defmodule Consigliere.Made.ValidateTest do
       )
 
     {:ok, gate} = Gates.rerun_after_decision(gate.id, Actor.system(), decision.id)
+    assert Repo.aggregate(from(b in MissionBlocker, where: b.status == "open"), :count) == 0
     {:ok, gate} = Gates.start(gate.id, Actor.system(), %{managed_run_id: "run-2"})
 
     result =
       Validate.run(gate, attempt,
-        decisions: [%{"fingerprint" => "fp-default", "scope" => "sha_bound", "input_sha" => "sha-a"}]
+        decisions: [
+          %{"fingerprint" => "fp-default", "scope" => "sha_bound", "input_sha" => "sha-a"}
+        ]
       )
 
     assert result.outcome == :passed
@@ -104,7 +112,9 @@ defmodule Consigliere.Made.ValidateTest do
 
     result =
       Validate.run(gate_b, attempt,
-        decisions: [%{"fingerprint" => "fp-default", "scope" => "sha_bound", "input_sha" => "sha-a"}]
+        decisions: [
+          %{"fingerprint" => "fp-default", "scope" => "sha_bound", "input_sha" => "sha-a"}
+        ]
       )
 
     assert result.outcome == :needs_decision

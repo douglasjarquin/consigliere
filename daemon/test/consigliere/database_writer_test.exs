@@ -8,11 +8,24 @@ defmodule Consigliere.DatabaseWriterTest do
 
   setup do
     Consigliere.Fixtures.reset_phase1_tables!()
+    project = Consigliere.Fixtures.dummy_project!()
+
+    case Process.whereis(__MODULE__.ProjectId) do
+      nil -> {:ok, _} = Agent.start_link(fn -> project.id end, name: __MODULE__.ProjectId)
+      pid -> Agent.update(pid, fn _ -> project.id end)
+    end
+
     :ok
   end
 
   defp mission_attrs(objective) do
-    %{objective: objective, scope: "scope", acceptance_criteria: "criteria", phase: "draft"}
+    %{
+      objective: objective,
+      scope: "scope",
+      acceptance_criteria: "criteria",
+      phase: "draft",
+      project_id: Agent.get(__MODULE__.ProjectId, & &1)
+    }
   end
 
   describe "scenario 1: concurrent writers, no SQLITE_BUSY" do

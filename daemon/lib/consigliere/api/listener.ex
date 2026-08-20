@@ -31,6 +31,7 @@ defmodule Consigliere.API.Listener do
 
     case bind(socket_path) do
       {:ok, listen} ->
+        _ = File.chmod(socket_path, 0o600)
         acceptor = spawn_link(fn -> accept_loop(listen, bound) end)
         {:ok, %{socket_path: socket_path, listen: listen, acceptor: acceptor, bound: bound}}
 

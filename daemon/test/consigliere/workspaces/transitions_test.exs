@@ -13,7 +13,7 @@ defmodule Consigliere.Workspaces.TransitionsTest do
 
   defp mission! do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.system())
+      Missions.create(Fixtures.mission_attrs(), Actor.system())
 
     mission
   end
@@ -22,7 +22,9 @@ defmodule Consigliere.Workspaces.TransitionsTest do
     mission = mission!()
 
     {:ok, workspace} =
-      Workspaces.create(mission.id, Actor.system(), %{path: "/tmp/cs-#{System.unique_integer([:positive])}"})
+      Workspaces.create(mission.id, Actor.system(), %{
+        path: "/tmp/cs-#{System.unique_integer([:positive])}"
+      })
 
     assert workspace.status == "active"
 
@@ -30,7 +32,9 @@ defmodule Consigliere.Workspaces.TransitionsTest do
              Workspaces.mark_daemon_exclusive(workspace.id, Actor.system(), %{})
 
     {:ok, workspace} =
-      Workspaces.mark_daemon_exclusive(workspace.id, Actor.system(), %{process_group: :dead_verified})
+      Workspaces.mark_daemon_exclusive(workspace.id, Actor.system(), %{
+        process_group: :dead_verified
+      })
 
     {:ok, workspace} = Workspaces.release(workspace.id, Actor.system())
     assert workspace.status == "released"
@@ -40,7 +44,9 @@ defmodule Consigliere.Workspaces.TransitionsTest do
     mission = mission!()
 
     {:ok, workspace} =
-      Workspaces.create(mission.id, Actor.system(), %{path: "/tmp/cs-#{System.unique_integer([:positive])}"})
+      Workspaces.create(mission.id, Actor.system(), %{
+        path: "/tmp/cs-#{System.unique_integer([:positive])}"
+      })
 
     {:ok, workspace} = Workspaces.quarantine(workspace.id, Actor.system(), "unverified")
     assert workspace.status == "quarantined"

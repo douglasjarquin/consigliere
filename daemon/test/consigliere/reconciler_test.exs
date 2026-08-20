@@ -65,14 +65,20 @@ defmodule Consigliere.ReconcilerTest do
 
     test "a non-terminal state with no pgid at all is quarantined rather than assumed lost" do
       manifest = %{"state" => "running"}
-      assert Reconciler.classify_manifest(manifest, fn -> false end) == {:quarantine_incident, manifest}
+
+      assert Reconciler.classify_manifest(manifest, fn -> false end) ==
+               {:quarantine_incident, manifest}
     end
 
     for degenerate_pgid <- [0, 1, -5] do
       test "a non-terminal state with pgid #{degenerate_pgid} is quarantined rather than signaled, since kill(-#{degenerate_pgid}, ...) is a POSIX broadcast, not a specific group" do
         manifest = %{"state" => "running", "pgid" => unquote(degenerate_pgid)}
-        assert Reconciler.classify_manifest(manifest, fn -> true end) == {:quarantine_incident, manifest}
-        assert Reconciler.classify_manifest(manifest, fn -> false end) == {:quarantine_incident, manifest}
+
+        assert Reconciler.classify_manifest(manifest, fn -> true end) ==
+                 {:quarantine_incident, manifest}
+
+        assert Reconciler.classify_manifest(manifest, fn -> false end) ==
+                 {:quarantine_incident, manifest}
       end
     end
   end
@@ -100,7 +106,9 @@ defmodule Consigliere.ReconcilerTest do
       original_path = System.get_env("PATH")
       on_exit(fn -> System.put_env("PATH", original_path) end)
 
-      empty_path_dir = Path.join(System.tmp_dir!(), "empty-path-#{System.unique_integer([:positive])}")
+      empty_path_dir =
+        Path.join(System.tmp_dir!(), "empty-path-#{System.unique_integer([:positive])}")
+
       File.mkdir_p!(empty_path_dir)
       on_exit(fn -> File.rm_rf(empty_path_dir) end)
       System.put_env("PATH", empty_path_dir)
@@ -164,8 +172,10 @@ defmodule Consigliere.ReconcilerTest do
         )
 
       :ok = RunnerLauncher.cancel(session)
+
       assert {:ok, %{"type" => "termination_complete"}} =
                RunnerLauncher.recv_until(session, "termination_complete", 5_000)
+
       assert_receive {_port, {:exit_status, 0}}, 2_000
 
       assert {:lost, %{"state" => "dead_verified"}} = Reconciler.classify(manifest_path)

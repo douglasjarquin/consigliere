@@ -10,5 +10,6 @@ for i <- 1..1_000_000 do
     acceptance_criteria: "criteria",
     phase: "draft"
   })
+
   if rem(i, 50) == 0, do: IO.puts("crash_writer: committed through #{i}")
 end

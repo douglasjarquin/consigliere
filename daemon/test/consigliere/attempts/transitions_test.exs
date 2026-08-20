@@ -17,7 +17,7 @@ defmodule Consigliere.Attempts.TransitionsTest do
 
   defp started_attempt! do
     {:ok, mission} =
-      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
@@ -63,7 +63,9 @@ defmodule Consigliere.Attempts.TransitionsTest do
 
   test "record_checkpointed without verified death does not advance the mission sha" do
     %{attempt: attempt, mission: mission} = running_attempt!()
-    {:ok, _} = Attempts.request_checkpoint(attempt.id, Actor.system(), %{reported_checkpoint_sha: "sha1"})
+
+    {:ok, _} =
+      Attempts.request_checkpoint(attempt.id, Actor.system(), %{reported_checkpoint_sha: "sha1"})
 
     assert {:error, {:illegal_transition, %{reason: :death_not_verified}}} =
              Attempts.record_checkpointed(attempt.id, Actor.system(), %{imported_sha: "sha1"})
@@ -73,7 +75,9 @@ defmodule Consigliere.Attempts.TransitionsTest do
 
   test "record_checkpointed with verified death sets the mission checkpoint and daemon_exclusive workspace" do
     %{attempt: attempt, mission: mission, workspace: workspace} = running_attempt!()
-    {:ok, _} = Attempts.request_checkpoint(attempt.id, Actor.system(), %{reported_checkpoint_sha: "sha1"})
+
+    {:ok, _} =
+      Attempts.request_checkpoint(attempt.id, Actor.system(), %{reported_checkpoint_sha: "sha1"})
 
     {:ok, %{attempt: attempt}} =
       Attempts.record_checkpointed(attempt.id, Actor.system(), %{

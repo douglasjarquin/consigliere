@@ -8,25 +8,47 @@ defmodule Consigliere.RunnerLauncher do
   docs/protocols/runner.md, ahead of building the real supervised launcher.
   """
 
-  defstruct [:port, :socket, :manifest_path, :control_socket_path, :harness_pid, :runner_os_pid, :pgid]
+  defstruct [
+    :port,
+    :socket,
+    :manifest_path,
+    :control_socket_path,
+    :harness_pid,
+    :runner_os_pid,
+    :pgid
+  ]
 
   def cs_runner_source_dir do
     Path.expand("../../../runner/cs-runner", __DIR__)
   end
 
-  def cs_runner_bin_path do
-    Path.join(cs_runner_source_dir(), "cs-runner")
+  def ensure_binary! do
+    packaged = Path.join(:code.priv_dir(:consigliere_daemon), "cs-runner")
+
+    cond do
+      File.exists?(packaged) ->
+        packaged
+
+      true ->
+        path = cs_runner_bin_path()
+        source_dir = cs_runner_source_dir()
+
+        if source_newer_than_binary?(source_dir, path) do
+          {_, 0} = System.cmd("go", ["build", "-o", "cs-runner", "."], cd: source_dir)
+        end
+
+        path
+    end
   end
 
-  def ensure_binary! do
-    path = cs_runner_bin_path()
-    source_dir = cs_runner_source_dir()
+  def cs_runner_bin_path do
+    packaged = Path.join(:code.priv_dir(:consigliere_daemon), "cs-runner")
 
-    if source_newer_than_binary?(source_dir, path) do
-      {_, 0} = System.cmd("go", ["build", "-o", "cs-runner", "."], cd: source_dir)
+    if File.exists?(packaged) do
+      packaged
+    else
+      Path.join(cs_runner_source_dir(), "cs-runner")
     end
-
-    path
   end
 
   defp source_newer_than_binary?(source_dir, binary_path) do
@@ -59,11 +81,21 @@ defmodule Consigliere.RunnerLauncher do
         "--"
       ] ++ harness_command
 
-    port = Port.open({:spawn_executable, cs_runner_bin_path()}, [:binary, :exit_status, args: args])
+    port =
+      Port.open({:spawn_executable, cs_runner_bin_path()}, [
+        :binary,
+        :exit_status,
+        args: args,
+        env: Keyword.get(opts, :env, [])
+      ])
 
     with :ok <- wait_for_file(control_socket_path, 5_000),
          {:ok, socket} <-
-           :gen_tcp.connect({:local, control_socket_path}, 0, [:binary, active: false, packet: :line]),
+           :gen_tcp.connect({:local, control_socket_path}, 0, [
+             :binary,
+             active: false,
+             packet: :line
+           ]),
          {:ok, line} <- :gen_tcp.recv(socket, 0, 5_000),
          {:ok, %{"type" => "runner_started"} = started} <- JSON.decode(String.trim(line)) do
       {:ok,

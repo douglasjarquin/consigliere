@@ -8,8 +8,10 @@ defmodule Consigliere.RunnerProcess do
   require Logger
 
   alias Consigliere.Actor
+  alias Consigliere.Adapters
   alias Consigliere.Attempts
   alias Consigliere.Attempts.Attempt
+  alias Consigliere.ProcessGroup
   alias Consigliere.Repo
   alias Consigliere.RunnerLauncher
 
@@ -49,8 +51,9 @@ defmodule Consigliere.RunnerProcess do
            mission_id: mission_id,
            fencing_token: fencing_token,
            manifest_path: Path.join(runtime, "manifest.json"),
-           control_socket_path: Path.join(runtime, "control.sock"),
-           harness_command: harness_command
+           control_socket_path: control_socket_path(attempt_id),
+           harness_command: harness_command,
+           env: runner_env(opts)
          ) do
       {:ok, session} ->
         :ok = :inet.setopts(session.socket, active: :once)
@@ -109,7 +112,8 @@ defmodule Consigliere.RunnerProcess do
   end
 
   @impl true
-  def terminate(_reason, %{session: session}) do
+  def terminate(reason, %{session: session} = state) do
+    _ = classify_exit(reason, state)
     _ = RunnerLauncher.cancel(session)
     _ = :gen_tcp.close(session.socket)
     if Port.info(session.port), do: Port.close(session.port)
@@ -134,7 +138,9 @@ defmodule Consigliere.RunnerProcess do
   end
 
   defp handle_control_msg(%{"type" => "stdout_chunk"} = msg, state) do
-    bump_heartbeat(state, Map.get(msg, "data", ""))
+    data = Map.get(msg, "data", "")
+    state = ingest_stdout(data, state)
+    bump_heartbeat(state, data)
   end
 
   defp handle_control_msg(%{"type" => "harness_exited", "exit_code" => 0}, state) do
@@ -159,19 +165,107 @@ defmodule Consigliere.RunnerProcess do
         command
 
       _ ->
-        script = Path.join(:code.priv_dir(:consigliere_daemon), "fake_harness.sh")
-        heartbeat_file = Keyword.fetch!(opts, :heartbeat_file)
-        args = [script, heartbeat_file]
-
-        case Keyword.get(opts, :max_iterations) do
-          nil -> args
-          n -> args ++ [to_string(n)]
-        end
+        Adapters.harness().argv(opts)
     end
   end
 
+  defp runner_env(opts) do
+    env = [
+      {~c"CS_HOME", ~c""},
+      {~c"CS_API_SOCKET", String.to_charlist(Consigliere.Home.api_socket_path())}
+    ]
+
+    case Keyword.get(opts, :capability) do
+      secret when is_binary(secret) ->
+        [{~c"CS_CAPABILITY", String.to_charlist(secret)} | env]
+
+      _ ->
+        env
+    end
+  end
+
+  defp ingest_stdout(data, state) do
+    adapter = Adapters.harness()
+
+    if function_exported?(adapter, :decode_line, 1) do
+      data
+      |> to_string()
+      |> String.split("\n", trim: true)
+      |> Enum.reduce(state, fn line, st -> ingest_decoded(adapter.decode_line(line), st) end)
+    else
+      state
+    end
+  end
+
+  defp ingest_decoded({:event, type, payload}, state) do
+    seq = Map.get(state, :native_seq, 0) + 1
+
+    _ =
+      Consigliere.Harness.Events.ingest(
+        %{
+          "event_id" => "#{type}-#{state.attempt_id}-#{seq}",
+          "type" => type,
+          "native_sequence" => seq,
+          "attempt_id" => state.attempt_id,
+          "payload" => payload
+        },
+        Actor.attempt(state.attempt_id, state.fencing_token)
+      )
+
+    Map.put(state, :native_seq, seq)
+  rescue
+    _ -> state
+  end
+
+  defp ingest_decoded(_, state), do: state
+
+  defp classify_exit(reason, state) do
+    with {:ok, id} <- Ecto.UUID.cast(state.attempt_id),
+         %Attempt{} = attempt <- Repo.get(Attempt, id) do
+      {code, _} = exit_bits(reason, state)
+      death = death_of(state)
+      completed? = attempt.exit_classification == "completed"
+      failed? = failed_class?(attempt)
+
+      Attempts.classify_exit(id, %{
+        process_group: death,
+        exit_status: code,
+        session_completed: completed?,
+        session_failed: failed?,
+        exit_classification: attempt.exit_classification
+      })
+    else
+      _ -> :ok
+    end
+  end
+
+  defp failed_class?(%Attempt{exit_classification: klass})
+       when is_binary(klass) and klass not in ["completed", "canceled"] do
+    true
+  end
+
+  defp failed_class?(_), do: false
+
+  defp death_of(%{session: %{pgid: pgid}}) when is_integer(pgid) and pgid > 1 do
+    ProcessGroup.terminate(pgid)
+  end
+
+  defp death_of(_), do: :dead_verified
+
+  defp exit_bits({:harness_exited, code}, _), do: {code, :exited}
+  defp exit_bits(:normal, _), do: {0, :normal}
+  defp exit_bits(_, %{stop_reason: {:harness_exited, code}}), do: {code, :exited}
+  defp exit_bits(_, %{stop_reason: :normal}), do: {0, :normal}
+  defp exit_bits(_, _), do: {nil, :unknown}
+
   defp runtime_dir(attempt_id) do
-    Path.join(["/tmp", "csr-#{System.unique_integer([:positive])}", attempt_id])
+    Path.join(Consigliere.Home.runtime_attempts_dir(), to_string(attempt_id))
+  end
+
+  # macOS sun_path is ~104 bytes. Manifests live under CS_HOME; the
+  # control socket uses a short /tmp name derived from the Attempt.
+  defp control_socket_path(attempt_id) do
+    Path.join(System.tmp_dir!(), "cs-#{:erlang.phash2(attempt_id)}.sock")
   end
 
   defp maybe_persist_started(attempt_id, session, fencing_token) do

@@ -58,7 +58,11 @@ defmodule Consigliere.Git do
          :ok <- ensure_mirror(mirror),
          {:ok, _} <-
            privileged(
-             ["fetch", Path.join(workspace, ".git"), "#{sha}:refs/consigliere/checkpoints/#{sha}"],
+             [
+               "fetch",
+               Path.join(workspace, ".git"),
+               "#{sha}:refs/consigliere/checkpoints/#{sha}"
+             ],
              git_dir: mirror
            ) do
       {:ok, sha}
@@ -70,6 +74,16 @@ defmodule Consigliere.Git do
       {:ok, "commit\n"} -> true
       _ -> false
     end
+  end
+
+  def materialize(mirror, dest, sha) do
+    File.mkdir_p!(Path.dirname(dest))
+    if File.dir?(dest), do: raise("workspace already exists: #{dest}")
+
+    git!(["clone", "--", mirror, dest])
+    git!(["checkout", "--detach", sha], cd: dest)
+    _ = git_cmd(["remote", "remove", "origin"], cd: dest)
+    :ok
   end
 
   def push_sha(mirror, remote_url, sha, ref) do

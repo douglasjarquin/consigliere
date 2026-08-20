@@ -23,6 +23,9 @@ defmodule Consigliere.HomeTest do
 
     assert Home.ensure_dir!(home) == home
     assert File.dir?(home)
+    assert Bitwise.band(File.stat!(home).mode, 0o777) == 0o700
+    assert File.dir?(Home.workspaces_dir(home))
+    assert Home.database_path(home) == Path.join(home, "consigliere.db")
   end
 
   test "boss_socket_path/1 joins the home dir with boss.sock" do

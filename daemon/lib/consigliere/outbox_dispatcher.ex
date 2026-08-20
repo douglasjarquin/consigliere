@@ -48,7 +48,10 @@ defmodule Consigliere.OutboxDispatcher do
   def init(opts) do
     env = Application.get_env(:consigliere_daemon, __MODULE__, [])
     interval = Keyword.get(opts, :poll_interval_ms, Keyword.get(env, :poll_interval_ms, 500))
-    drain_on_notify = Keyword.get(opts, :drain_on_notify, Keyword.get(env, :drain_on_notify, true))
+
+    drain_on_notify =
+      Keyword.get(opts, :drain_on_notify, Keyword.get(env, :drain_on_notify, true))
+
     lease_ms = Keyword.get(opts, :lease_ms, Keyword.get(env, :lease_ms, 15_000))
     max_attempts = Keyword.get(opts, :max_attempts, Keyword.get(env, :max_attempts, 8))
     handlers = Map.merge(Keyword.get(env, :handlers, %{}), Keyword.get(opts, :handlers, %{}))
