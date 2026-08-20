@@ -31,7 +31,7 @@ defmodule Consigliere.ProcessHelpers do
       )
 
     script = """
-    Process.daemon(true, true)
+    Process.daemon(true, false)
     File.write(ARGV.fetch(0), Process.pid.to_s)
     sleep 60
     """
