@@ -41,5 +41,12 @@ defmodule Consigliere.CLI do
       IO.puts("- #{q["id"]} #{q["prompt"]}")
     end)
   end
-end
 
+  def cutover do
+    IO.puts(File.read!(runbook_path()))
+  end
+
+  def runbook_path do
+    Path.expand(Path.join([__DIR__, "..", "..", "..", "docs", "cutover.md"]))
+  end
+end
