@@ -11,3 +11,7 @@ config :consigliere_daemon, Consigliere.OutboxDispatcher,
 config :consigliere_daemon, Consigliere.MissionCoordinator, poll_interval_ms: 1_000
 
 config :consigliere_daemon, Consigliere.GlobalScheduler, limit: 1
+
+config :consigliere_daemon, Consigliere.Reconciler,
+  poll_interval_ms: 5_000,
+  run_on_boot: true

@@ -25,6 +25,7 @@ defmodule Consigliere.Application do
       Consigliere.EventBus,
       Consigliere.OutboxDispatcher,
       Consigliere.GlobalScheduler,
+      Consigliere.Reconciler,
       {Registry, keys: :unique, name: Consigliere.Registry},
       Consigliere.RunnerDynamicSupervisor,
       Consigliere.MissionDynamicSupervisor
