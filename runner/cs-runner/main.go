@@ -111,6 +111,11 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 		return fmt.Errorf("spawn harness: %w", err)
 	}
 
+	// Drain stdio immediately so the harness cannot block on a full pipe
+	// while we set up the control channel. Attach happens only after
+	// runner_started, so launch() always sees that message first.
+	forwarder := startStreamForwarder(handle.Stdout, handle.Stderr, attemptID, fencingToken)
+
 	// Start reaping the harness the moment it is spawned, not after control-
 	// channel setup: a later Terminate call's own process-group verification
 	// depends on the harness being promptly reaped by its actual parent (this
@@ -196,6 +201,7 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 		"mission_id":                missionID,
 		"fencing_token":             fencingToken,
 	})
+	forwarder.Attach(cc)
 
 	terminationTriggered := make(chan string, 1)
 	go cc.ReadLoop(

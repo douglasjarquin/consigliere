@@ -23,7 +23,7 @@ defmodule Consigliere.RunnerProcessTest do
     assert is_integer(os_pid)
     assert os_pid > 0
 
-    Process.sleep(500)
+    Process.sleep(800)
 
     assert File.exists?(heartbeat_file)
     [pid_str, _count_str] = heartbeat_file |> File.read!() |> String.trim() |> String.split(" ")

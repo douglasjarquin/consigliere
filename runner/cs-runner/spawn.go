@@ -2,15 +2,18 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os/exec"
 	"syscall"
 	"time"
 )
 
 type HarnessHandle struct {
-	Cmd  *exec.Cmd
-	PID  int
-	PGID int
+	Cmd    *exec.Cmd
+	PID    int
+	PGID   int
+	Stdout io.ReadCloser
+	Stderr io.ReadCloser
 }
 
 // SpawnHarness starts the harness command as a new session and process
@@ -28,6 +31,15 @@ func SpawnHarness(command []string, confirmTimeout time.Duration) (*HarnessHandl
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start harness: %w", err)
 	}
@@ -36,7 +48,7 @@ func SpawnHarness(command []string, confirmTimeout time.Duration) (*HarnessHandl
 	deadline := time.Now().Add(confirmTimeout)
 	for time.Now().Before(deadline) {
 		if pgid, err := syscall.Getpgid(pid); err == nil && pgid == pid {
-			return &HarnessHandle{Cmd: cmd, PID: pid, PGID: pgid}, nil
+			return &HarnessHandle{Cmd: cmd, PID: pid, PGID: pgid, Stdout: stdout, Stderr: stderr}, nil
 		}
 		time.Sleep(time.Millisecond)
 	}

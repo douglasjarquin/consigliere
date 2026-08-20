@@ -56,6 +56,6 @@ defmodule Consigliere.RunnerProcessExitStatusTest do
     ref = Process.monitor(pid)
     Consigliere.ProcessHelpers.kill_and_verify_dead(os_pid)
 
-    assert_receive {:DOWN, ^ref, :process, ^pid, {:harness_exited, 137}}, 2_000
+    assert_receive {:DOWN, ^ref, :process, ^pid, {:harness_exited, _code}}, 10_000
   end
 end

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -617,6 +618,113 @@ func TestRun_DescendantForkedDuringTheDescendantPhaseGracefulWindowIsStillCaught
 	if err := syscall.Kill(lateChildPID, 0); err != syscall.ESRCH {
 		t.Fatalf("child %d forked by an already-tracked escapee during the descendant phase's own graceful window is still alive (err=%v)", lateChildPID, err)
 	}
+}
+
+// TestRun_ForwardsHarnessStdoutOverControlChannel proves runner
+// responsibility 5: harness stdout is framed as stdout_chunk NDJSON on the
+// control channel (not inherited onto the runner's own stdout, which
+// exec.Command discards when Stdout is nil). Native sequence, attempt id,
+// and fencing token must ride along so a restarted daemon can drop stale
+// frames.
+func TestRun_ForwardsHarnessStdoutOverControlChannel(t *testing.T) {
+	dir := shortSocketDir(t)
+	manifestPath := filepath.Join(dir, "manifest.json")
+	controlSocketPath := filepath.Join(dir, "control.sock")
+
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- run("attempt-stdout", "mission-stdout", "fence-stdout", manifestPath, controlSocketPath,
+			[]string{"sh", "-c", "printf 'hello-from-harness\\n'; sleep 30"})
+	}()
+
+	conn := dialControlSocketWithRetry(t, controlSocketPath, 3*time.Second)
+	defer conn.Close()
+
+	reader := bufio.NewReader(conn)
+	skipLine(t, reader) // runner_started
+
+	msg := waitForControlType(t, conn, reader, "stdout_chunk", 3*time.Second)
+	data, _ := msg["data"].(string)
+	if !strings.Contains(data, "hello-from-harness") {
+		t.Fatalf("stdout_chunk data %q does not contain harness output", data)
+	}
+	if msg["attempt_id"] != "attempt-stdout" {
+		t.Fatalf("stdout_chunk attempt_id=%v", msg["attempt_id"])
+	}
+	if msg["fencing_token"] != "fence-stdout" {
+		t.Fatalf("stdout_chunk fencing_token=%v", msg["fencing_token"])
+	}
+	if _, ok := msg["native_sequence"]; !ok {
+		t.Fatalf("stdout_chunk missing native_sequence: %+v", msg)
+	}
+
+	conn.Close()
+	select {
+	case err := <-runErrCh:
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("run() never returned after control-channel close")
+	}
+}
+
+// TestRun_ForwardsHarnessStderrOverControlChannel is the stderr twin of
+// the stdout test: the two streams must be separate messages, never
+// spliced onto one writer (docs/protocols/runner.md responsibility 5).
+func TestRun_ForwardsHarnessStderrOverControlChannel(t *testing.T) {
+	dir := shortSocketDir(t)
+	manifestPath := filepath.Join(dir, "manifest.json")
+	controlSocketPath := filepath.Join(dir, "control.sock")
+
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- run("attempt-stderr", "mission-stderr", "fence-stderr", manifestPath, controlSocketPath,
+			[]string{"sh", "-c", "printf 'hello-from-harness-err\\n' >&2; sleep 30"})
+	}()
+
+	conn := dialControlSocketWithRetry(t, controlSocketPath, 3*time.Second)
+	defer conn.Close()
+
+	reader := bufio.NewReader(conn)
+	skipLine(t, reader) // runner_started
+
+	msg := waitForControlType(t, conn, reader, "stderr_chunk", 3*time.Second)
+	data, _ := msg["data"].(string)
+	if !strings.Contains(data, "hello-from-harness-err") {
+		t.Fatalf("stderr_chunk data %q does not contain harness output", data)
+	}
+
+	conn.Close()
+	select {
+	case err := <-runErrCh:
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("run() never returned after control-channel close")
+	}
+}
+
+func waitForControlType(t *testing.T, conn net.Conn, r *bufio.Reader, wantType string, timeout time.Duration) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		line, err := r.ReadString('\n')
+		if err != nil {
+			continue
+		}
+		var msg map[string]any
+		if json.Unmarshal([]byte(line), &msg) != nil {
+			continue
+		}
+		if msg["type"] == wantType {
+			return msg
+		}
+	}
+	t.Fatalf("never received control message type %s", wantType)
+	return nil
 }
 
 func skipLine(t *testing.T, r *bufio.Reader) {

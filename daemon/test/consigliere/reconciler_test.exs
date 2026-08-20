@@ -164,7 +164,8 @@ defmodule Consigliere.ReconcilerTest do
         )
 
       :ok = RunnerLauncher.cancel(session)
-      assert {:ok, %{"type" => "termination_complete"}} = RunnerLauncher.recv(session, 5_000)
+      assert {:ok, %{"type" => "termination_complete"}} =
+               RunnerLauncher.recv_until(session, "termination_complete", 5_000)
       assert_receive {_port, {:exit_status, 0}}, 2_000
 
       assert {:lost, %{"state" => "dead_verified"}} = Reconciler.classify(manifest_path)
@@ -192,7 +193,7 @@ defmodule Consigliere.ReconcilerTest do
       assert {:adopt_and_kill, %{"state" => "running"}} = Reconciler.classify(manifest_path)
 
       :ok = RunnerLauncher.cancel(session)
-      assert {:ok, _} = RunnerLauncher.recv(session, 5_000)
+      assert {:ok, _} = RunnerLauncher.recv_until(session, "termination_complete", 5_000)
       assert_receive {_port, {:exit_status, 0}}, 2_000
     end
 

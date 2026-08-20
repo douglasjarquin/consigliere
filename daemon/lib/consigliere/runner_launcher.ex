@@ -18,6 +18,24 @@ defmodule Consigliere.RunnerLauncher do
     Path.join(cs_runner_source_dir(), "cs-runner")
   end
 
+  def ensure_binary! do
+    path = cs_runner_bin_path()
+    source_dir = cs_runner_source_dir()
+
+    if source_newer_than_binary?(source_dir, path) do
+      {_, 0} = System.cmd("go", ["build", "-o", "cs-runner", "."], cd: source_dir)
+    end
+
+    path
+  end
+
+  defp source_newer_than_binary?(source_dir, binary_path) do
+    not File.exists?(binary_path) or
+      Enum.any?(Path.wildcard(Path.join(source_dir, "*.go")), fn file ->
+        File.stat!(file).mtime >= File.stat!(binary_path).mtime
+      end)
+  end
+
   def launch(opts) do
     attempt_id = Keyword.fetch!(opts, :attempt_id)
     mission_id = Keyword.fetch!(opts, :mission_id)
@@ -71,6 +89,30 @@ defmodule Consigliere.RunnerLauncher do
   def recv(%__MODULE__{socket: socket}, timeout) do
     with {:ok, line} <- :gen_tcp.recv(socket, 0, timeout) do
       JSON.decode(String.trim(line))
+    end
+  end
+
+  def recv_until(session, type, timeout) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_recv_until(session, type, deadline)
+  end
+
+  defp do_recv_until(session, type, deadline) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      {:error, :timeout}
+    else
+      case recv(session, remaining) do
+        {:ok, %{"type" => ^type} = msg} ->
+          {:ok, msg}
+
+        {:ok, %{"type" => skip}} when skip in ["stdout_chunk", "stderr_chunk"] ->
+          do_recv_until(session, type, deadline)
+
+        other ->
+          other
+      end
     end
   end
 
