@@ -2,8 +2,11 @@ package service
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/douglasjarquin/consigliere/cli/client"
@@ -76,6 +79,58 @@ func TestStatusAbsent(t *testing.T) {
 	code := Status(client.Home{Dir: dir}, &out)
 	if code != client.ExitAbsent {
 		t.Fatalf("code=%d out=%s", code, out.String())
+	}
+}
+
+func TestStop_ForeignPIDIsNeverSignaled(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CS_LAUNCH_AGENTS_DIR", filepath.Join(dir, "LaunchAgents"))
+	home := client.Home{Dir: dir}
+	cmd := exec.Command("sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if err := os.WriteFile(home.PIDPath(), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := Stop(home)
+	if err == nil {
+		t.Fatal("expected stop to refuse a foreign PID")
+	}
+	if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatalf("fixture process was signaled: %v", err)
+	}
+	if _, statErr := os.Stat(home.PIDPath()); statErr != nil {
+		t.Fatal("identity metadata must remain while shutdown is unresolved")
+	}
+}
+
+func TestRestart_AbortsWhenStopFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CS_LAUNCH_AGENTS_DIR", filepath.Join(dir, "LaunchAgents"))
+	t.Setenv("CS_HOME", dir)
+	t.Setenv("CS_CSD_FORCE_BACKGROUND", "1")
+	home := client.Home{Dir: dir}
+	if err := os.MkdirAll(home.Dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(home.LockPath(), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { lock.Close() })
+	fl := syscall.Flock_t{Type: syscall.F_WRLCK, Whence: 0, Start: 0, Len: 0}
+	if err := syscall.FcntlFlock(lock.Fd(), syscall.F_SETLK, &fl); err != nil {
+		t.Fatal(err)
+	}
+	err = Restart(home)
+	if err == nil {
+		t.Fatal("restart must abort when stop cannot verify the daemon is gone")
 	}
 }
 

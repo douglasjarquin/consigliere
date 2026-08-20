@@ -74,6 +74,38 @@ defmodule Consigliere.API.ProtocolTest do
     assert denied["error"]["code"] == "unauthorized"
   end
 
+  test "daemon.shutdown is boss-only and does not halt the test VM" do
+    denied =
+      decode(
+        Protocol.handle(
+          JSON.encode!(%{
+            "v" => 1,
+            "id" => "s",
+            "op" => "daemon.shutdown",
+            "actor" => %{"principal" => "model_advisory"}
+          })
+        )
+      )
+
+    assert denied["ok"] == false
+    assert denied["error"]["code"] == "unauthorized"
+
+    granted =
+      decode(
+        Protocol.handle(
+          JSON.encode!(%{
+            "v" => 1,
+            "id" => "s2",
+            "op" => "daemon.shutdown",
+            "actor" => %{"principal" => "boss"}
+          })
+        )
+      )
+
+    assert granted["ok"] == true
+    assert granted["payload"]["stopping"] == true
+  end
+
   test "rejects a non-1 protocol version" do
     line =
       JSON.encode!(%{"v" => 99, "id" => "x", "op" => "ping", "actor" => %{"principal" => "boss"}})

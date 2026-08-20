@@ -24,6 +24,8 @@ config :consigliere_daemon, Consigliere.MissionBootstrap,
   poll_interval_ms: :infinity,
   subscribe: false
 
+config :consigliere_daemon, halt_on_shutdown: false
+
 config :consigliere_daemon,
   harness_adapter: Consigliere.Harness.Fake,
   made_adapter: Consigliere.Made.Fake,

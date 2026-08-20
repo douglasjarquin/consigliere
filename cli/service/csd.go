@@ -51,8 +51,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "stopped")
 		return client.ExitOK
 	case "restart":
-		_ = Stop(home)
-		if err := Start(home); err != nil {
+		if err := Restart(home); err != nil {
 			fmt.Fprintln(stderr, err.Error())
 			return client.ExitError
 		}
@@ -226,51 +225,24 @@ func waitLive(home client.Home, d time.Duration) error {
 	return fmt.Errorf("daemon did not become live")
 }
 
-func Stop(home client.Home) error {
-	if runtime.GOOS == "darwin" {
-		_ = launchctl("bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+Label)
-	}
-	pid := readPID(home)
-	if pid > 1 {
-		proc, err := os.FindProcess(pid)
-		if err == nil {
-			_ = proc.Signal(syscall.SIGTERM)
-			for i := 0; i < 10; i++ {
-				if proc.Signal(syscall.Signal(0)) != nil {
-					break
-				}
-				time.Sleep(200 * time.Millisecond)
-			}
-			_ = proc.Signal(syscall.SIGKILL)
-		}
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if client.Probe(home.PrivilegedSocket()) != client.SocketLive &&
-			client.Probe(home.APISocket()) != client.SocketLive {
-			_ = os.Remove(home.PIDPath())
-			return nil
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	_ = os.Remove(home.PIDPath())
-	return nil
-}
-
-func readPID(home client.Home) int {
-	b, err := os.ReadFile(home.PIDPath())
-	if err != nil {
-		return 0
-	}
-	n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
-	return n
-}
-
 func Status(home client.Home, stdout io.Writer) int {
 	priv := client.Probe(home.PrivilegedSocket())
-	fmt.Fprintf(stdout, "home=%s priv=%s api=%s boss=%s\n",
-		home.Dir, priv, client.Probe(home.APISocket()), client.Probe(home.BossSocket()))
+	lock, holder := client.ProbeLock(home.LockPath())
+	ownerState := "absent"
+	if owner, err := readOwner(home); err == nil {
+		if identityMatches(home, owner) != nil {
+			ownerState = "stale"
+		} else {
+			ownerState = "verified"
+		}
+	}
+	fmt.Fprintf(stdout, "home=%s priv=%s api=%s boss=%s lock=%s holder=%d owner=%s\n",
+		home.Dir, priv, client.Probe(home.APISocket()), client.Probe(home.BossSocket()),
+		lock, holder, ownerState)
 	if priv == client.SocketLive {
+		return client.ExitOK
+	}
+	if lock == client.LockHeld {
 		return client.ExitOK
 	}
 	if priv == client.SocketStale {

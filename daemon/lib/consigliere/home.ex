@@ -93,10 +93,14 @@ defmodule Consigliere.Home do
   end
 
   def write_owner!(home \\ dir()) do
+    pid = String.to_integer(System.pid())
+
     payload =
       JSON.encode!(%{
-        "pid" => String.to_integer(System.pid()),
+        "pid" => pid,
         "started_at" => DateTime.to_iso8601(DateTime.utc_now()),
+        "starttime" => process_starttime(pid),
+        "exe" => process_exe(pid),
         "release" => to_string(Application.spec(:consigliere_daemon, :vsn) || "dev"),
         "home" => Path.expand(home),
         "uid" => File.stat!(lock_path(home)).uid,
@@ -147,4 +151,21 @@ defmodule Consigliere.Home do
     System.get_env("CS_FORCE_STARTUP_FAILURE")
   end
 
+  defp process_starttime(pid) do
+    case System.cmd("ps", ["-o", "lstart=", "-p", Integer.to_string(pid)], stderr_to_stdout: true) do
+      {out, 0} -> out |> String.split() |> Enum.join(" ")
+      _ -> ""
+    end
+  rescue
+    _ -> ""
+  end
+
+  defp process_exe(pid) do
+    case System.cmd("ps", ["-o", "comm=", "-p", Integer.to_string(pid)], stderr_to_stdout: true) do
+      {out, 0} -> String.trim(out)
+      _ -> ""
+    end
+  rescue
+    _ -> ""
+  end
 end

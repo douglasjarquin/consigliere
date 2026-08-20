@@ -307,6 +307,15 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
+  defp run_allowed("daemon.shutdown", _payload, actor) do
+    if actor.principal == "boss" do
+      request_stop()
+      {:ok, %{"stopping" => true}}
+    else
+      {:error, {:unauthorized, :principal}}
+    end
+  end
+
   defp run_allowed("mission.grant_integration", payload, actor) do
     Missions.grant_integration_authorization(payload["mission_id"], actor, %{
       target_sha: payload["target_sha"],
@@ -466,6 +475,17 @@ defmodule Consigliere.API.Protocol do
   defp error(code, reason), do: %{"code" => code, "reason" => to_string(reason)}
 
   defp encode(map), do: JSON.encode!(map)
+
+  defp request_stop do
+    if Application.get_env(:consigliere_daemon, :halt_on_shutdown, true) do
+      spawn(fn ->
+        Process.sleep(50)
+        System.stop(0)
+      end)
+    end
+
+    :ok
+  end
 
   defp require_reader(%Actor{principal: p}) when p in ["boss", "daemon", "model_advisory"],
     do: :ok
