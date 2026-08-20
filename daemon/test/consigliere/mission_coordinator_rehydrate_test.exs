@@ -70,7 +70,8 @@ defmodule Consigliere.MissionCoordinatorRehydrateTest do
   test "an authorized mission with no blockers takes the slot and starts an Attempt" do
     mission = authorized_mission!()
     pid = start_coord!(mission.id)
-    snap = MissionCoordinator.evaluate(pid)
+    await_until(fn -> Repo.get!(Mission, mission.id).phase == "active" end)
+    snap = MissionCoordinator.snapshot(pid)
 
     assert snap.runnable == true or snap.reason == :occupying
     reloaded = Repo.get!(Mission, mission.id)
@@ -84,12 +85,12 @@ defmodule Consigliere.MissionCoordinatorRehydrateTest do
     first = authorized_mission!()
     second = authorized_mission!()
 
-    pid1 = start_coord!(first.id)
-    _snap1 = MissionCoordinator.evaluate(pid1)
-    assert Repo.get!(Mission, first.id).phase == "active"
+    _pid1 = start_coord!(first.id)
+    await_until(fn -> Repo.get!(Mission, first.id).phase == "active" end)
 
     pid2 = start_coord!(second.id)
-    snap2 = MissionCoordinator.evaluate(pid2)
+    await_until(fn -> MissionCoordinator.snapshot(pid2).reason == :capacity end)
+    snap2 = MissionCoordinator.snapshot(pid2)
     assert snap2.reason == :capacity
     assert Repo.get!(Mission, second.id).phase == "authorized"
   end
@@ -125,7 +126,7 @@ defmodule Consigliere.MissionCoordinatorRehydrateTest do
   test "killing the coordinator does not require a RunnerProcess and rehydrates the same phase" do
     mission = authorized_mission!()
     pid = start_coord!(mission.id)
-    _ = MissionCoordinator.evaluate(pid)
+    await_until(fn -> Repo.get!(Mission, mission.id).phase == "active" end)
     assert Repo.get!(Mission, mission.id).phase == "active"
 
     ref = Process.monitor(pid)
@@ -147,5 +148,19 @@ defmodule Consigliere.MissionCoordinatorRehydrateTest do
     snap = MissionCoordinator.evaluate(new_pid)
     assert snap.phase == "active"
     assert snap.reason == :occupying
+  end
+
+  defp await_until(fun, remaining \\ 100) do
+    cond do
+      fun.() ->
+        :ok
+
+      remaining <= 0 ->
+        flunk("condition never became true")
+
+      true ->
+        Process.sleep(50)
+        await_until(fun, remaining - 1)
+    end
   end
 end

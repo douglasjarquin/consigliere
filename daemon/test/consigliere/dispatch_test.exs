@@ -43,7 +43,7 @@ defmodule Consigliere.DispatchTest do
     end)
 
     [{coord, _}] = Registry.lookup(Consigliere.Registry, {:mission, mission.id})
-    snapshot = MissionCoordinator.evaluate(coord)
+    snapshot = await_runner(coord)
     assert is_pid(snapshot.runner_pid)
 
     attempt = Repo.get_by(Attempt, mission_id: mission.id)
@@ -60,7 +60,7 @@ defmodule Consigliere.DispatchTest do
     {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
     {:ok, sup} = MissionDynamicSupervisor.start_mission(mission_id: mission.id)
     [{coord, _}] = Registry.lookup(Consigliere.Registry, {:mission, mission.id})
-    snapshot = MissionCoordinator.evaluate(coord)
+    snapshot = await_runner(coord)
     runner = snapshot.runner_pid
     assert is_pid(runner)
     ref = Process.monitor(runner)
@@ -68,5 +68,21 @@ defmodule Consigliere.DispatchTest do
     assert {:ok, _} = Missions.cancel(mission.id, Actor.boss(), "stop")
     assert_receive {:DOWN, ^ref, :process, ^runner, _}, 5_000
     _ = DynamicSupervisor.terminate_child(MissionDynamicSupervisor, sup)
+  end
+
+  defp await_runner(coord, remaining \\ 100) do
+    snap = MissionCoordinator.snapshot(coord)
+
+    cond do
+      is_pid(snap.runner_pid) ->
+        snap
+
+      remaining <= 0 ->
+        snap
+
+      true ->
+        Process.sleep(50)
+        await_runner(coord, remaining - 1)
+    end
   end
 end

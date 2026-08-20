@@ -28,11 +28,13 @@ defmodule Consigliere.MissionCoordinator do
 
   def via(mission_id), do: {:via, Registry, {Consigliere.Registry, {:mission, mission_id}}}
 
-  def runner_pid(pid), do: GenServer.call(pid, :runner_pid)
+  @call_timeout 30_000
 
-  def snapshot(pid), do: GenServer.call(pid, :snapshot)
+  def runner_pid(pid), do: GenServer.call(pid, :runner_pid, @call_timeout)
 
-  def evaluate(pid), do: GenServer.call(pid, :evaluate)
+  def snapshot(pid), do: GenServer.call(pid, :snapshot, @call_timeout)
+
+  def evaluate(pid), do: GenServer.call(pid, :evaluate, @call_timeout)
 
   @impl true
   def init(opts) do
@@ -49,6 +51,7 @@ defmodule Consigliere.MissionCoordinator do
       runner_ref: runner_ref,
       slot: nil,
       view: nil,
+      scheduling: false,
       poll_interval_ms: poll_interval_ms()
     }
 
@@ -66,38 +69,47 @@ defmodule Consigliere.MissionCoordinator do
   def handle_call(:snapshot, _from, state), do: {:reply, snapshot_from(state), state}
 
   def handle_call(:evaluate, _from, state) do
-    state = evaluate_state(state)
+    state = refresh_and_request_schedule(state)
     {:reply, snapshot_from(state), state}
   end
 
   @impl true
   def handle_info({:domain_event, event}, state) do
     if relevant?(event, state) do
-      {:noreply, evaluate_state(state)}
+      {:noreply, refresh_and_request_schedule(state)}
     else
       {:noreply, state}
     end
   end
 
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{runner_ref: ref} = state) do
-    {:noreply, evaluate_state(%{state | runner_pid: :not_found, runner_ref: nil})}
+    {:noreply, refresh_and_request_schedule(%{state | runner_pid: :not_found, runner_ref: nil})}
   end
 
   def handle_info(:tick, state) do
-    state = evaluate_state(state)
+    state = refresh_and_request_schedule(state)
     schedule_tick(state.poll_interval_ms)
     {:noreply, state}
+  end
+
+  def handle_info(:schedule, state) do
+    {:noreply, perform_schedule(state)}
   end
 
   def handle_info(_other, state), do: {:noreply, state}
 
   defp boot(state) do
-    state = evaluate_state(state)
+    state = refresh_and_request_schedule(state)
     schedule_tick(state.poll_interval_ms)
     state
   end
 
-  defp evaluate_state(state) do
+  defp refresh_and_request_schedule(state) do
+    state = refresh_view(state)
+    request_schedule(state)
+  end
+
+  defp refresh_view(state) do
     case load_mission(state.mission_id) do
       nil ->
         %{state | view: %{runnable: false, reason: :no_projection}}
@@ -107,14 +119,38 @@ defmodule Consigliere.MissionCoordinator do
         occupying = occupying_attempts(mission.id)
         {runnable, reason} = runnability(mission, blockers, occupying)
 
-        view = %{
-          phase: mission.phase,
-          runnable: runnable,
-          reason: reason,
-          blockers: length(blockers)
+        %{
+          state
+          | view: %{
+              phase: mission.phase,
+              runnable: runnable,
+              reason: reason,
+              blockers: length(blockers)
+            }
         }
+    end
+  end
 
-        state = %{state | view: view}
+  defp request_schedule(state) do
+    if state.view[:runnable] == true and state.view[:phase] == "authorized" and
+         state.scheduling != true do
+      send(self(), :schedule)
+      %{state | scheduling: true}
+    else
+      state
+    end
+  end
+
+  defp perform_schedule(state) do
+    state = %{state | scheduling: false}
+
+    case load_mission(state.mission_id) do
+      nil ->
+        state
+
+      mission ->
+        occupying = occupying_attempts(mission.id)
+        {runnable, _reason} = runnability(mission, open_blockers(mission.id), occupying)
         Dispatch.maybe_schedule(state, mission, runnable, occupying)
     end
   end
