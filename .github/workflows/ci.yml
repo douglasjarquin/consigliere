@@ -78,6 +78,7 @@ jobs:
           CS_HOME: ${{ runner.temp }}/cs-home
         run: |
           set -eu
+          export PATH="/usr/bin:/bin:/usr/local/bin:${PATH:-}"
           mkdir -p "$CS_HOME"
           REL=daemon/_build/prod/rel/consigliere_daemon/bin/consigliere_daemon
           "$REL" eval "Consigliere.Release.migrate()"

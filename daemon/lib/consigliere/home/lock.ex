@@ -37,8 +37,17 @@ defmodule Consigliere.Home.Lock do
     end
   end
 
+  @python_candidates [
+    "python3",
+    "python",
+    "/usr/bin/python3",
+    "/usr/bin/python",
+    "/usr/local/bin/python3",
+    "/opt/homebrew/bin/python3"
+  ]
+
   defp acquire_flock(path) do
-    python = System.find_executable("python3") || System.find_executable("python")
+    python = python_executable()
     script = Path.join(:code.priv_dir(:consigliere_daemon), "home_lock.py")
 
     if python && File.exists?(script) do
@@ -70,6 +79,16 @@ defmodule Consigliere.Home.Lock do
     else
       {:error, :python3_required}
     end
+  end
+
+  defp python_executable do
+    Enum.find_value(@python_candidates, fn name ->
+      if String.starts_with?(name, "/") do
+        if File.exists?(name), do: name
+      else
+        System.find_executable(name)
+      end
+    end)
   end
 
   defp close_port(port, result) do

@@ -113,10 +113,10 @@ defmodule Consigliere.RunnerProcess do
 
   @impl true
   def terminate(reason, %{session: session} = state) do
-    _ = classify_exit(reason, state)
     _ = RunnerLauncher.cancel(session)
     _ = :gen_tcp.close(session.socket)
     if Port.info(session.port), do: Port.close(session.port)
+    _ = classify_exit(reason, state)
     :ok
   rescue
     _ -> :ok

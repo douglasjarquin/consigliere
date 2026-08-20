@@ -73,9 +73,7 @@ defmodule Consigliere.Reconciler do
   end
 
   defp process_group_alive?(pgid) when is_integer(pgid) and pgid > 1 do
-    kill_result_alive?(System.cmd("kill", ["-0", "-#{pgid}"], stderr_to_stdout: true))
-  rescue
-    _ -> true
+    ProcessGroup.alive?(pgid)
   end
 
   defp process_group_alive?(_), do: true

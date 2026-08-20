@@ -209,7 +209,7 @@ defmodule Consigliere.ReconcilerTest do
 
     test "a manifest claiming running for a process group that is actually dead is classified as lost, via a real OS-level check (not the manifest's self-report)",
          %{manifest_path: manifest_path} do
-      dead_pgid = find_definitely_dead_pid()
+      dead_pgid = find_definitely_dead_pgid()
 
       manifest = %{
         "schema_version" => 1,
@@ -224,24 +224,11 @@ defmodule Consigliere.ReconcilerTest do
     end
   end
 
-  defp find_definitely_dead_pid do
-    {out, 0} = System.cmd("sh", ["-c", "true & echo $!"])
-    pid = out |> String.trim() |> String.to_integer()
-    wait_until_gone(pid, 50)
-    pid
-  end
-
-  defp wait_until_gone(pid, attempts) do
-    case System.cmd("kill", ["-0", to_string(pid)], stderr_to_stdout: true) do
-      {_, 0} when attempts > 0 ->
-        Process.sleep(20)
-        wait_until_gone(pid, attempts - 1)
-
-      {_, 0} ->
-        flunk("pid #{pid} never died; cannot use it as a definitely-dead fixture")
-
-      _ ->
-        :ok
-    end
+  defp find_definitely_dead_pgid do
+    {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
+    System.cmd("kill", ["-9", "-#{pgid}"], stderr_to_stdout: true)
+    if Port.info(port), do: Port.close(port)
+    Consigliere.ProcessHelpers.wait_group_gone(pgid)
+    pgid
   end
 end
