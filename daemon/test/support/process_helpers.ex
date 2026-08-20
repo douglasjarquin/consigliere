@@ -31,12 +31,12 @@ defmodule Consigliere.ProcessHelpers do
       )
 
     script = """
-    child_pid = fork do
+    fork do
       Process.setsid
+      File.write(ARGV.fetch(0), Process.pid.to_s)
       sleep 60
     end
-    File.write(ARGV.fetch(0), child_pid.to_s)
-    Process.wait(child_pid)
+    exit!(0)
     """
 
     port =
