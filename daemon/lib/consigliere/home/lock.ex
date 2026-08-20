@@ -130,7 +130,7 @@ defmodule Consigliere.Home.Lock do
           "--exclusive",
           path,
           "--command",
-          "sh -c 'printf ok\\n; exec cat'"
+          "sh -c 'echo ok; exec cat'"
         ]
       ])
 
