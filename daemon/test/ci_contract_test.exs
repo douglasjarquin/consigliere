@@ -48,17 +48,28 @@ defmodule CIContractTest do
   end
 
   test "go test is present and always on", %{jobs: jobs} do
-    job = job_with_command(jobs, "go test")
+    job = job_named(jobs, "runner")
     assert job, "CI must run go test from runner/cs-runner/"
     assert always_on?(job), "go test must not be skippable"
     assert working_directory(job) == "runner/cs-runner"
+    assert command?(job, "go test")
+  end
+
+  test "cli go test is present and always on", %{jobs: jobs} do
+    job = job_named(jobs, "cli")
+    assert job, "CI must run go test from cli/"
+    assert always_on?(job), "cli go test must not be skippable"
+    assert working_directory(job) == "cli"
+    assert command?(job, "go test")
+    assert command?(job, "go test -race")
   end
 
   test "go test -race is present and always on", %{jobs: jobs} do
-    job = job_with_command(jobs, "go test -race")
+    job = job_named(jobs, "runner")
     assert job, "CI must run go test -race from runner/cs-runner/"
     assert always_on?(job), "go test -race must not be skippable"
     assert working_directory(job) == "runner/cs-runner"
+    assert command?(job, "go test -race")
   end
 
   test "release smoke migrates, boots, pings, doctors, and restarts", %{yaml: yaml, jobs: jobs} do
@@ -67,8 +78,11 @@ defmodule CIContractTest do
     assert always_on?(job), "release smoke must not be skippable"
     assert yaml =~ "mix release"
     assert yaml =~ "Consigliere.Release.migrate"
-    assert yaml =~ "cs ping"
-    assert yaml =~ "cs doctor"
+    assert yaml =~ "cs ping" or yaml =~ ~s("$CS" ping)
+    assert yaml =~ "cs doctor" or yaml =~ ~s("$CS" doctor)
+    assert yaml =~ "prefix/bin/cs"
+    assert yaml =~ "install --no-load"
+    assert yaml =~ "strace"
     # Mix release start execs the BEAM. Foreground daemon/start aborts the
     # step on a boot ERROR before sockets can be observed. Smoke must
     # background start and wait on sockets instead of rpc stop
@@ -87,19 +101,19 @@ defmodule CIContractTest do
       assert job_with_command(selected, "mix test"),
              "unknown path #{path} skipped daemon mix test"
 
-      assert job_with_command(selected, "go test"),
-             "unknown path #{path} skipped go test"
+      assert job_named(selected, "runner"),
+             "unknown path #{path} skipped runner go test"
 
-      assert job_with_command(selected, "go test -race"),
-             "unknown path #{path} skipped go test -race"
+      assert job_named(selected, "cli"), "unknown path #{path} skipped cli go test"
     end
   end
 
   test "daemon and runner jobs are not gated on a lane detector", %{jobs: jobs} do
-    for command <- ["mix test", "go test", "go test -race"] do
-      job = job_with_command(jobs, command)
-      assert job, "missing job for #{command}"
-      refute lane_gated?(job), "#{command} is still gated on a changes/lanes job"
+    for {name, fragment} <- [{"daemon", "mix test"}, {"runner", "go test"}, {"cli", "go test"}] do
+      job = job_named(jobs, name)
+      assert job, "missing job #{name}"
+      assert command?(job, fragment), "#{name} missing #{fragment}"
+      refute lane_gated?(job), "#{name} is still gated on a changes/lanes job"
     end
   end
 
@@ -121,6 +135,8 @@ defmodule CIContractTest do
   defp job_with_command(jobs, fragment) do
     Enum.find_value(jobs, fn {_name, job} -> command?(job, fragment) && job end)
   end
+
+  defp job_named(jobs, name), do: Map.get(jobs, name)
 
   defp command?(job, fragment) do
     Enum.any?(job.run, &String.contains?(&1, fragment))

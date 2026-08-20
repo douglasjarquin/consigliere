@@ -185,6 +185,7 @@ defmodule Consigliere.RunnerProcess do
   end
 
   defp ingest_stdout(data, state) do
+    append_attempt_log(state.attempt_id, data)
     adapter = Adapters.harness()
 
     if function_exported?(adapter, :decode_line, 1) do
@@ -218,6 +219,14 @@ defmodule Consigliere.RunnerProcess do
   end
 
   defp ingest_decoded(_, state), do: state
+
+  defp append_attempt_log(attempt_id, data) do
+    path = Path.join(Consigliere.Home.logs_dir(), "attempts/#{attempt_id}.log")
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, to_string(data), [:append])
+  rescue
+    _ -> :ok
+  end
 
   defp classify_exit(reason, state) do
     with {:ok, id} <- Ecto.UUID.cast(state.attempt_id),

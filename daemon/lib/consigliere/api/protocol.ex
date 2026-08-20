@@ -17,8 +17,10 @@ defmodule Consigliere.API.Protocol do
   @version 1
   @mutating ~w(mission.create mission.submit mission.grant_work mission.cancel
                mission.grant_integration question.open question.answer away.mark
-               away.return project.add)
+               away.return project.add mission.pause mission.resume reconcile)
   @attempt_ops ~w(ping mission.get question.open)
+  @review_phases ~w(awaiting_authorization ready_for_review
+                    awaiting_integration_authorization failed)
 
   def handle(line, bound \\ :unbound) when is_binary(line) do
     case JSON.decode(String.trim(line)) do
@@ -63,6 +65,22 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp run("ping", _payload, _actor), do: {:ok, %{"pong" => true}}
+
+  defp run("health", _payload, actor) do
+    with :ok <- require_reader(actor) do
+      {:ok, health_payload()}
+    end
+  end
+
+  defp run("version", _payload, actor) do
+    with :ok <- require_reader(actor) do
+      {:ok,
+       %{
+         "protocol" => @version,
+         "release" => release_version()
+       }}
+    end
+  end
 
   defp run("mission.create", payload, actor) do
     project_id = payload["project_id"]
@@ -153,6 +171,130 @@ defmodule Consigliere.API.Protocol do
 
   defp run("mission.cancel", payload, actor) do
     Missions.cancel(payload["mission_id"], actor, payload["reason"] || "canceled") |> ok_mission()
+  end
+
+  defp run("mission.pause", payload, actor) do
+    Missions.pause(payload["mission_id"], actor, payload["reason"] || "boss pause")
+    |> ok_mission()
+  end
+
+  defp run("mission.resume", payload, actor) do
+    Missions.resume(payload["mission_id"], actor) |> ok_mission()
+  end
+
+  defp run("mission.list", _payload, actor) do
+    with :ok <- require_reader(actor) do
+      missions =
+        Repo.all(from(m in Mission, order_by: [desc: m.inserted_at]))
+
+      {:ok, %{"missions" => Enum.map(missions, &mission_summary/1)}}
+    end
+  end
+
+  defp run("mission.why", payload, actor) do
+    with :ok <- require_reader(actor) do
+      why_mission(payload["mission_id"], actor)
+    end
+  end
+
+  defp run("mission.review", _payload, actor) do
+    with :ok <- require_reader(actor) do
+      missions =
+        Repo.all(
+          from(m in Mission,
+            where: m.phase in ^@review_phases,
+            order_by: [asc: m.inserted_at]
+          )
+        )
+
+      {:ok, %{"missions" => Enum.map(missions, &mission_summary/1)}}
+    end
+  end
+
+  defp run("attempt.list", _payload, actor) do
+    with :ok <- require_reader(actor) do
+      attempts =
+        Repo.all(
+          from(a in Consigliere.Attempts.Attempt, order_by: [desc: a.inserted_at], limit: 100)
+        )
+
+      {:ok,
+       %{
+         "attempts" =>
+           Enum.map(attempts, fn a ->
+             %{
+               "id" => a.id,
+               "mission_id" => a.mission_id,
+               "status" => a.status,
+               "role" => a.role,
+               "harness" => a.harness
+             }
+           end)
+       }}
+    end
+  end
+
+  defp run("attempt.logs", payload, actor) do
+    with :ok <- require_reader(actor) do
+      attempt_logs(payload["attempt_id"])
+    end
+  end
+
+  defp run("incident.list", _payload, actor) do
+    with :ok <- require_reader(actor) do
+      incidents =
+        Repo.all(
+          from(i in Consigliere.Incidents.Incident, order_by: [desc: i.inserted_at], limit: 100)
+        )
+
+      {:ok,
+       %{
+         "incidents" =>
+           Enum.map(incidents, fn i ->
+             %{
+               "id" => i.id,
+               "mission_id" => i.mission_id,
+               "severity" => i.severity,
+               "reason" => i.reason
+             }
+           end)
+       }}
+    end
+  end
+
+  defp run("event.list", _payload, actor) do
+    with :ok <- require_reader(actor) do
+      events =
+        Repo.all(
+          from(e in Consigliere.DomainEvents.DomainEvent,
+            order_by: [desc: e.id],
+            limit: 100
+          )
+        )
+
+      {:ok,
+       %{
+         "events" =>
+           Enum.map(events, fn e ->
+             %{
+               "id" => e.id,
+               "type" => e.type,
+               "subject_type" => e.subject_type,
+               "subject_id" => e.subject_id,
+               "occurred_at" => datetime_to_iso(e.occurred_at)
+             }
+           end)
+       }}
+    end
+  end
+
+  defp run("reconcile", _payload, actor) do
+    if actor.principal == "boss" do
+      results = Consigliere.Reconciler.run()
+      {:ok, %{"count" => length(results)}}
+    else
+      {:error, {:unauthorized, :principal}}
+    end
   end
 
   defp run("mission.grant_integration", payload, actor) do
@@ -308,4 +450,178 @@ defmodule Consigliere.API.Protocol do
   defp error(code, reason), do: %{"code" => code, "reason" => to_string(reason)}
 
   defp encode(map), do: JSON.encode!(map)
+
+  defp require_reader(%Actor{principal: p}) when p in ["boss", "daemon", "model_advisory"],
+    do: :ok
+
+  defp require_reader(_), do: {:error, {:unauthorized, :principal}}
+
+  defp health_payload do
+    runner = runner_info()
+
+    %{
+      "status" => "ok",
+      "protocol" => @version,
+      "release" => release_version(),
+      "schema" => schema_version(),
+      "harness" => inspect(Consigliere.Adapters.harness()),
+      "made" => inspect(Consigliere.Adapters.made()),
+      "github" => inspect(Consigliere.Adapters.github()),
+      "runner" => runner,
+      "sockets" => %{
+        "boss" => to_string(Consigliere.Home.socket_status()),
+        "api" => to_string(Consigliere.Home.probe(Consigliere.Home.api_socket_path())),
+        "priv" => to_string(Consigliere.Home.probe(Consigliere.Home.privileged_socket_path()))
+      }
+    }
+  end
+
+  defp release_version do
+    to_string(Application.spec(:consigliere_daemon, :vsn) || "dev")
+  end
+
+  defp schema_version do
+    case Ecto.Migrator.migrated_versions(Repo) do
+      [] -> 0
+      versions -> List.last(versions)
+    end
+  end
+
+  defp runner_info do
+    path = Path.join(:code.priv_dir(:consigliere_daemon), "cs-runner")
+    %{"path" => path, "present" => File.exists?(path)}
+  rescue
+    _ -> %{"path" => nil, "present" => false}
+  end
+
+  defp mission_summary(mission) do
+    %{
+      "id" => mission.id,
+      "phase" => mission.phase,
+      "objective" => mission.objective,
+      "project_id" => mission.project_id
+    }
+  end
+
+  defp why_mission(nil, _actor), do: {:error, {:invalid, "mission_id required"}}
+
+  defp why_mission(mission_id, actor) do
+    case Repo.get(Mission, mission_id) do
+      nil ->
+        {:error, {:not_found, "mission"}}
+
+      mission ->
+        if actor.principal == "attempt" and not own_mission?(actor, mission) do
+          {:error, {:unauthorized, :scope}}
+        else
+          blockers =
+            Repo.all(
+              from(b in MissionBlocker,
+                where: b.mission_id == ^mission.id and b.status == "open"
+              )
+            )
+
+          occupying =
+            Repo.all(
+              from(a in Consigliere.Attempts.Attempt,
+                where:
+                  a.mission_id == ^mission.id and
+                    a.status in [
+                      "planned",
+                      "starting",
+                      "running",
+                      "checkpoint_requested",
+                      "terminating"
+                    ]
+              )
+            )
+
+          {runnable, reason} = why_runnability(mission, blockers, occupying)
+
+          {:ok,
+           %{
+             "id" => mission.id,
+             "phase" => mission.phase,
+             "objective" => mission.objective,
+             "runnable" => runnable,
+             "reason" => Atom.to_string(reason),
+             "phase_reason" => phase_reason(mission.phase),
+             "blockers" =>
+               Enum.map(blockers, fn b ->
+                 %{
+                   "kind" => b.kind,
+                   "reason" => b.reason,
+                   "subject_id" => b.subject_id,
+                   "status" => b.status
+                 }
+               end)
+           }}
+        end
+    end
+  end
+
+  defp why_runnability(mission, blockers, occupying) do
+    cond do
+      mission.phase not in ["authorized", "active"] -> {false, :phase}
+      blockers != [] -> {false, :blocked}
+      occupying != [] -> {false, :occupying}
+      mission.phase == "authorized" -> {true, :ready}
+      true -> {false, :waiting}
+    end
+  end
+
+  defp phase_reason("draft"), do: "not submitted for authorization"
+  defp phase_reason("awaiting_authorization"), do: "no work authorization yet"
+  defp phase_reason("authorized"), do: "authorized, waiting to start"
+  defp phase_reason("active"), do: "active"
+  defp phase_reason("ready_for_review"), do: "waiting on boss review"
+
+  defp phase_reason("awaiting_integration_authorization"),
+    do: "waiting on integration authorization"
+
+  defp phase_reason("integrating"), do: "integration in progress"
+  defp phase_reason("completed"), do: "completed"
+  defp phase_reason("failed"), do: "failed; needs an explicit decision"
+  defp phase_reason("canceled"), do: "canceled"
+  defp phase_reason("superseded"), do: "superseded"
+  defp phase_reason(other), do: other
+
+  defp attempt_logs(nil), do: {:error, {:invalid, "attempt_id required"}}
+
+  defp attempt_logs(attempt_id) do
+    case Repo.get(Consigliere.Attempts.Attempt, attempt_id) do
+      nil ->
+        {:error, {:not_found, "attempt"}}
+
+      attempt ->
+        path = Path.join(Consigliere.Home.logs_dir(), "attempts/#{attempt.id}.log")
+        lines = log_lines(path) ++ harness_event_lines(attempt.id)
+        {:ok, %{"attempt_id" => attempt.id, "path" => path, "lines" => lines}}
+    end
+  end
+
+  defp log_lines(path) do
+    case File.read(path) do
+      {:ok, contents} ->
+        contents |> String.split("\n", trim: true) |> Enum.take(-200)
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  defp harness_event_lines(attempt_id) do
+    Repo.all(
+      from(e in Consigliere.HarnessEvents.HarnessEvent,
+        where: e.attempt_id == ^attempt_id,
+        order_by: [asc: e.native_sequence],
+        limit: 200
+      )
+    )
+    |> Enum.map(fn e -> "#{e.native_sequence} #{e.type}" end)
+  end
+
+  defp datetime_to_iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  defp datetime_to_iso(%NaiveDateTime{} = dt), do: NaiveDateTime.to_iso8601(dt)
+  defp datetime_to_iso(other), do: to_string(other)
 end

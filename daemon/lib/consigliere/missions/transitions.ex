@@ -324,6 +324,57 @@ defmodule Consigliere.Missions.Transitions do
     mission
   end
 
+  def pause(mission_id, actor, reason \\ "boss pause") do
+    DatabaseWriter.transaction(fn -> pause_txn(mission_id, actor, reason) end)
+  end
+
+  def pause_txn(mission_id, actor, reason) do
+    Txn.require_principal(actor, ["boss"])
+    mission = fetch_mission!(mission_id)
+    refuse_hard_terminal!(mission, "paused")
+
+    existing =
+      Repo.one(
+        from(b in MissionBlocker,
+          where: b.mission_id == ^mission.id and b.kind == "paused" and b.status == "open",
+          limit: 1
+        )
+      )
+
+    if is_nil(existing) do
+      open_blocker!(mission, "paused", reason)
+      Txn.append_event!("mission.paused", "mission", mission.id, %{reason: reason})
+    end
+
+    mission
+  end
+
+  def resume(mission_id, actor) do
+    DatabaseWriter.transaction(fn -> resume_txn(mission_id, actor) end)
+  end
+
+  def resume_txn(mission_id, actor) do
+    Txn.require_principal(actor, ["boss"])
+    mission = fetch_mission!(mission_id)
+
+    from(b in MissionBlocker,
+      where: b.mission_id == ^mission.id and b.kind == "paused" and b.status == "open"
+    )
+    |> Repo.all()
+    |> Enum.each(fn blocker ->
+      Txn.update!(
+        MissionBlocker.changeset(blocker, %{
+          status: "closed",
+          closed_reason: "boss resume",
+          closed_at: Txn.now()
+        })
+      )
+    end)
+
+    Txn.append_event!("mission.resumed", "mission", mission.id)
+    mission
+  end
+
   def cancel(mission_id, actor, reason) do
     DatabaseWriter.transaction(fn -> cancel_txn(mission_id, actor, reason) end)
   end

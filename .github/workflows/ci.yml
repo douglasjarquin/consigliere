@@ -52,6 +52,23 @@ jobs:
       - run: go test -race -shuffle=on -count=1 ./...
       - run: go build ./...
 
+  cli:
+    name: Go cs/csd client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go test -race -shuffle=on -count=1 ./...
+      - run: go build ./cmd/cs ./cmd/csd
+
   smoke:
     name: Release smoke
     runs-on: ubuntu-latest
@@ -67,18 +84,24 @@ jobs:
       - name: Package runner into daemon priv
         run: (cd runner/cs-runner && go build -o ../../daemon/priv/cs-runner .)
       - name: Build OTP release and cs client
-        working-directory: daemon
         run: |
+          mkdir -p prefix/bin prefix/libexec prefix/share/consigliere
+          (cd cli && go build -o ../prefix/bin/cs ./cmd/cs && go build -o ../prefix/bin/csd ./cmd/csd)
+          cp docs/cutover.md prefix/share/consigliere/cutover.md
+          builtin cd daemon
           mix deps.get
           MIX_ENV=prod mix compile --warnings-as-errors
           MIX_ENV=prod mix release
-          MIX_ENV=prod mix escript.build
+          cp -R _build/prod/rel/consigliere_daemon ../prefix/libexec/consigliere_daemon
       - name: Migrate, boot, ping, doctor, restart
         env:
           CS_HOME: ${{ runner.temp }}/cs-home
+          CS_RELEASE: ${{ github.workspace }}/prefix/libexec/consigliere_daemon
         run: |
           set -eu
           export PATH="/usr/bin:/bin:/usr/local/bin:${PATH:-}"
+          CS="${{ github.workspace }}/prefix/bin/cs"
+          CSD="${{ github.workspace }}/prefix/bin/csd"
           mkdir -p "$CS_HOME"
           REL=daemon/_build/prod/rel/consigliere_daemon/bin/consigliere_daemon
           BOOT_LOG="$CS_HOME/boot.log"
@@ -151,8 +174,25 @@ jobs:
             exit 1
           fi
           test -S "$CS_HOME/api.sock"
-          daemon/cs ping
-          daemon/cs doctor
+          "$CS" ping
+          "$CS" doctor
+          "$CS" health
+          "$CS" version
+          "$CS" --json ping | grep '"ok":true'
+          "$CS" missions
+          "$CS" inbox
+          (cd /tmp && "$CS" ping)
+          if command -v strace >/dev/null; then
+            strace -f -e openat,open -o "$CS_HOME/cs.trace" "$CS" ping || true
+            if grep -E 'consigliere\.db' "$CS_HOME/cs.trace"; then
+              echo "cs opened sqlite"
+              exit 1
+            fi
+          fi
+          INST="${{ runner.temp }}/installed"
+          cp -a "${{ github.workspace }}/prefix" "$INST"
+          CS_RELEASE="$INST/libexec/consigliere_daemon" "$INST/bin/cs" ping
+          "$CSD" status
           stop_daemon
           sleep 2
           if pgrep -x cs-runner >/dev/null; then
@@ -168,8 +208,12 @@ jobs:
             stop_daemon
             exit 1
           fi
-          daemon/cs ping
+          "$CS" ping
           test -f "$CS_HOME/consigliere.db"
+          mkdir -p "$CS_HOME/LaunchAgents"
+          CS_LAUNCH_AGENTS_DIR="$CS_HOME/LaunchAgents" "$CSD" install --no-load
+          grep foreground "$CS_HOME/LaunchAgents/ai.consigliere.csd.plist"
+          grep ThrottleInterval "$CS_HOME/LaunchAgents/ai.consigliere.csd.plist"
           stop_daemon
 
   # UNCONDITIONAL ON PURPOSE: any commit can track a boss-private path or

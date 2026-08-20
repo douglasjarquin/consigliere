@@ -36,6 +36,11 @@ defmodule Consigliere.Missions do
   end
 
   defdelegate resume_after_decision(mission_id, actor, decision_id), to: Transitions
+  defdelegate resume(mission_id, actor), to: Transitions
+
+  def pause(mission_id, actor, reason \\ "boss pause") do
+    Transitions.pause(mission_id, actor, reason)
+  end
 
   def grant_work_authorization(mission_id, actor, attrs \\ %{}) do
     with {:ok, mission} <- Transitions.grant_work_authorization(mission_id, actor, attrs) do
