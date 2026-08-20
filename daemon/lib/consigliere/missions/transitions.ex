@@ -91,7 +91,13 @@ defmodule Consigliere.Missions.Transitions do
       )
 
     mission =
-      Txn.update!(Mission.changeset(mission, %{phase: "authorized", authorization_id: auth.id}))
+      Txn.update!(
+        Mission.changeset(mission, %{
+          phase: "authorized",
+          authorization_id: auth.id,
+          base_sha: Map.get(attrs, :base_sha, mission.base_sha)
+        })
+      )
 
     Txn.append_event!("mission.authorized", "mission", mission.id, %{authorization_id: auth.id})
     mission
@@ -113,7 +119,10 @@ defmodule Consigliere.Missions.Transitions do
           path: Map.fetch!(opts, :workspace_path),
           lease_id: Map.get(opts, :lease_id, "lease-#{Txn.mint_fencing_token()}"),
           fencing_token: Map.get(opts, :workspace_fencing_token, Txn.mint_fencing_token()),
-          status: "active"
+          status: "active",
+          project_id: mission.project_id,
+          base_sha: mission.base_sha,
+          parent_checkpoint_sha: mission.current_checkpoint_sha
         })
       )
 

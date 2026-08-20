@@ -15,12 +15,15 @@ defmodule Consigliere.Workspaces.Workspace do
     field(:fencing_token, :string)
     field(:status, :string, default: "active")
     field(:quarantine_reason, :string)
+    field(:project_id, :binary_id)
+    field(:base_sha, :string)
+    field(:parent_checkpoint_sha, :string)
 
     timestamps(type: :utc_datetime_usec)
   end
 
   @required [:mission_id, :path, :lease_id, :fencing_token, :status]
-  @optional [:quarantine_reason]
+  @optional [:quarantine_reason, :project_id, :base_sha, :parent_checkpoint_sha]
 
   def changeset(workspace, attrs) do
     workspace

@@ -12,6 +12,23 @@ defmodule Consigliere.GitTest do
     %{root: root, workspace: workspace, mirror: mirror}
   end
 
+  test "materialize copies objects instead of hardlinking the mirror", %{
+    workspace: workspace,
+    mirror: mirror,
+    root: root
+  } do
+    Git.init_workspace(workspace)
+    File.write!(Path.join(workspace, "hello.txt"), "hi\n")
+    sha = Git.commit_all(workspace, "hello")
+    assert {:ok, ^sha} = Git.import_sha(workspace, mirror, sha)
+
+    dest = Path.join(root, "clone")
+    Git.materialize(mirror, dest, sha)
+    refute Git.shares_object_inodes?(mirror, dest)
+    refute File.exists?(Path.join(dest, ".git/objects/info/alternates"))
+    assert Git.verify_workspace(dest, sha, mirror) == :ok
+  end
+
   test "imports a committed SHA into the trusted mirror", %{workspace: workspace, mirror: mirror} do
     Git.init_workspace(workspace)
     File.write!(Path.join(workspace, "hello.txt"), "hi\n")

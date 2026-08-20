@@ -43,9 +43,29 @@ defmodule Consigliere.Missions do
   end
 
   def grant_work_authorization(mission_id, actor, attrs \\ %{}) do
+    attrs = Map.put_new_lazy(attrs, :base_sha, fn -> peek_base_sha(mission_id) end)
+
     with {:ok, mission} <- Transitions.grant_work_authorization(mission_id, actor, attrs) do
       maybe_provision(mission)
       {:ok, mission}
+    end
+  end
+
+  defp peek_base_sha(mission_id) do
+    case Consigliere.Repo.get(Consigliere.Missions.Mission, mission_id) do
+      %{project_id: project_id} when is_binary(project_id) ->
+        case Consigliere.Repo.get(Consigliere.Projects.Project, project_id) do
+          %Consigliere.Projects.Project{} = project ->
+            if File.exists?(Path.join(project.trusted_mirror_path, "HEAD")) do
+              Consigliere.Projects.head_sha(project)
+            end
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
     end
   end
 
@@ -55,9 +75,9 @@ defmodule Consigliere.Missions do
       %Consigliere.Projects.Project{} = project ->
         if File.exists?(Path.join(project.trusted_mirror_path, "HEAD")) do
           dest = Path.join(Consigliere.Home.workspaces_dir(), mission.id)
+          sha = mission.base_sha || Consigliere.Projects.head_sha(project)
 
           unless File.dir?(dest) do
-            sha = Consigliere.Projects.head_sha(project)
             Consigliere.Projects.provision_workspace(project, mission.id, sha)
           end
         end

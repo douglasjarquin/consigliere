@@ -10,6 +10,8 @@ defmodule Consigliere.Projects.Project do
     field(:repository_url, :string)
     field(:default_branch, :string, default: "main")
     field(:trusted_mirror_path, :string)
+    field(:base_sha, :string)
+    field(:base_ref, :string)
     field(:dispatch_policy, :map, default: %{})
     field(:validation_policy, :map, default: %{})
     field(:integration_policy, :map, default: %{})
@@ -18,7 +20,14 @@ defmodule Consigliere.Projects.Project do
   end
 
   @required [:name, :repository_url, :default_branch, :trusted_mirror_path]
-  @optional [:repository_path, :dispatch_policy, :validation_policy, :integration_policy]
+  @optional [
+    :repository_path,
+    :base_sha,
+    :base_ref,
+    :dispatch_policy,
+    :validation_policy,
+    :integration_policy
+  ]
 
   def changeset(project, attrs) do
     project

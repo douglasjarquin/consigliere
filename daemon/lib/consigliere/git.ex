@@ -80,10 +80,119 @@ defmodule Consigliere.Git do
     File.mkdir_p!(Path.dirname(dest))
     if File.dir?(dest), do: raise("workspace already exists: #{dest}")
 
-    git!(["clone", "--", mirror, dest])
+    # file:// disables Git's local hardlink/alternate optimizations. Fetch
+    # the exact SHA rather than cloning HEAD, because the trusted mirror
+    # stores checkpoints on refs/consigliere/* rather than a branch.
+    git!(["init", "-b", "main", dest])
+    git!(
+      [
+        "fetch",
+        "--",
+        "file://#{Path.expand(mirror)}",
+        "+refs/consigliere/*:refs/cs/*"
+      ],
+      cd: dest
+    )
     git!(["checkout", "--detach", sha], cd: dest)
     _ = git_cmd(["remote", "remove", "origin"], cd: dest)
-    :ok
+
+    case verify_workspace(dest, sha, mirror) do
+      :ok -> :ok
+      {:error, reason} -> raise "workspace isolation failed: #{inspect(reason)}"
+    end
+  end
+
+  def branch_tip(source, branch) do
+    ref = "refs/heads/#{branch}"
+
+    case git_cmd(["rev-parse", "--verify", ref], cd: source) do
+      {:ok, out} -> {:ok, String.trim(out)}
+      {:error, _} -> {:error, {:missing_branch, branch}}
+    end
+  end
+
+  def update_ref(mirror, ref, sha) do
+    case privileged(["update-ref", ref, sha], git_dir: mirror) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def read_ref(mirror, ref) do
+    case privileged(["rev-parse", "--verify", ref], git_dir: mirror) do
+      {:ok, out} -> {:ok, String.trim(out)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def project_base_ref(project_id), do: "refs/consigliere/projects/#{project_id}/base"
+
+  def verify_workspace(workspace, sha, mirror \\ nil) do
+    with {:ok, head} <- git_cmd(["rev-parse", "HEAD"], cd: workspace),
+         true <- String.trim(head) == sha,
+         :ok <- reject_alternates(workspace),
+         :ok <- reject_privileged_remotes(workspace),
+         :ok <- reject_shared_objects(mirror, workspace) do
+      :ok
+    else
+      false -> {:error, :head_mismatch}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp reject_shared_objects(nil, _), do: :ok
+
+  defp reject_shared_objects(mirror, workspace) do
+    if shares_object_inodes?(mirror, workspace) do
+      {:error, :shared_objects}
+    else
+      :ok
+    end
+  end
+
+  def shares_object_inodes?(mirror, workspace) do
+    mirror_objects = object_inodes(mirror)
+    workspace_objects = object_inodes(Path.join(workspace, ".git"))
+
+    mirror_objects != MapSet.new() and
+      not MapSet.disjoint?(mirror_objects, workspace_objects)
+  end
+
+  defp object_inodes(git_dir) do
+    Path.join(git_dir, "objects")
+    |> Path.join("**/*")
+    |> Path.wildcard()
+    |> Enum.filter(&File.regular?/1)
+    |> Enum.reduce(MapSet.new(), fn path, acc ->
+      case File.lstat(path) do
+        {:ok, %File.Stat{type: :regular, inode: inode}} -> MapSet.put(acc, inode)
+        _ -> acc
+      end
+    end)
+  end
+
+  defp reject_alternates(workspace) do
+    path = Path.join(workspace, ".git/objects/info/alternates")
+
+    if File.exists?(path) do
+      {:error, :alternates_present}
+    else
+      :ok
+    end
+  end
+
+  defp reject_privileged_remotes(workspace) do
+    case git_cmd(["remote"], cd: workspace) do
+      {:ok, out} ->
+        if String.trim(out) == "" do
+          :ok
+        else
+          {:error, {:remotes_present, String.trim(out)}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   def push_sha(mirror, remote_url, sha, ref) do

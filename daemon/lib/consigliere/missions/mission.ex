@@ -19,6 +19,7 @@ defmodule Consigliere.Missions.Mission do
     field(:authorization_id, :binary_id)
     field(:replaces_mission_id, :binary_id)
     field(:validation_policy, :map, default: %{})
+    field(:base_sha, :string)
     field(:current_checkpoint_sha, :string)
     field(:current_delivery_sha, :string)
     field(:terminal_reason, :string)
@@ -34,6 +35,7 @@ defmodule Consigliere.Missions.Mission do
     :authorization_id,
     :replaces_mission_id,
     :validation_policy,
+    :base_sha,
     :current_checkpoint_sha,
     :current_delivery_sha,
     :terminal_reason,

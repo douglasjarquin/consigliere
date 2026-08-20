@@ -56,6 +56,65 @@ defmodule Consigliere.ProjectsTest do
     assert String.trim(head) == sha
   end
 
+  test "register imports the configured default branch tip, not checkout HEAD", %{source: source} do
+    {main, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: source)
+    main = String.trim(main)
+
+    {_, 0} = System.cmd("git", ["checkout", "-b", "feature"], cd: source)
+    File.write!(Path.join(source, "feature.txt"), "later\n")
+    feature = Git.commit_all(source, "feature")
+    refute feature == main
+
+    assert {:ok, project} =
+             Projects.register(
+               %{
+                 name: "demo",
+                 repository_path: source,
+                 repository_url: "file://#{source}-feature",
+                 default_branch: "main"
+               },
+               Actor.boss()
+             )
+
+    assert project.base_sha == main
+    assert project.base_ref == "refs/consigliere/projects/#{project.id}/base"
+    assert Projects.head_sha(project) == main
+    refute Projects.head_sha(project) == feature
+  end
+
+  test "importing a Mission checkpoint does not move another Mission's project base", %{
+    source: source,
+    sha: sha
+  } do
+    {:ok, project} =
+      Projects.register(
+        %{name: "demo", repository_path: source, repository_url: "file://#{source}-ckpt"},
+        Actor.boss()
+      )
+
+    File.write!(Path.join(source, "later.txt"), "ckpt\n")
+    later = Git.commit_all(source, "checkpoint")
+    assert {:ok, ^later} = Git.import_sha(source, project.trusted_mirror_path, later, sha)
+
+    assert Projects.head_sha(project) == sha
+    refute Projects.head_sha(project) == later
+  end
+
+  test "provision_workspace does not hardlink trusted-mirror objects", %{
+    source: source,
+    sha: sha
+  } do
+    {:ok, project} =
+      Projects.register(
+        %{name: "demo", repository_path: source, repository_url: "file://#{source}-hl"},
+        Actor.boss()
+      )
+
+    dest = Projects.provision_workspace(project, Ecto.UUID.generate(), sha)
+    refute Git.shares_object_inodes?(project.trusted_mirror_path, dest)
+    refute File.exists?(Path.join(dest, ".git/objects/info/alternates"))
+  end
+
   test "an Attempt principal cannot register a Project", %{source: source} do
     assert {:error, {:unauthorized, :principal}} =
              Projects.register(
