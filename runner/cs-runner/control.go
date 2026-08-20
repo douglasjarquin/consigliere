@@ -25,6 +25,7 @@ type ControlChannel struct {
 	listener net.Listener
 	mu       sync.Mutex
 	conn     net.Conn
+	reader   *bufio.Reader
 }
 
 func NewControlChannel(socketPath string) (*ControlChannel, error) {
@@ -79,20 +80,24 @@ func (c *ControlChannel) AcceptAuthenticated(token string, timeout time.Duration
 		if err := c.AcceptOnce(remaining); err != nil {
 			return err
 		}
-		if err := c.authenticate(token, 2*time.Second); err != nil {
+		reader, err := c.authenticate(token, 2*time.Second)
+		if err != nil {
 			c.closeConn()
 			continue
 		}
+		c.mu.Lock()
+		c.reader = reader
+		c.mu.Unlock()
 		return nil
 	}
 }
 
-func (c *ControlChannel) authenticate(token string, timeout time.Duration) error {
+func (c *ControlChannel) authenticate(token string, timeout time.Duration) (*bufio.Reader, error) {
 	c.mu.Lock()
 	conn := c.conn
 	c.mu.Unlock()
 	if conn == nil {
-		return fmt.Errorf("no client connected")
+		return nil, fmt.Errorf("no client connected")
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(timeout))
 	defer conn.SetReadDeadline(time.Time{})
@@ -100,20 +105,20 @@ func (c *ControlChannel) authenticate(token string, timeout time.Duration) error
 	reader := bufio.NewReaderSize(conn, 64*1024)
 	line, err := readBoundedLine(reader, 4096)
 	if err != nil {
-		return fmt.Errorf("read auth frame: %w", err)
+		return nil, fmt.Errorf("read auth frame: %w", err)
 	}
 	var msg map[string]any
 	if json.Unmarshal([]byte(strings.TrimSpace(line)), &msg) != nil {
-		return fmt.Errorf("auth frame is not json")
+		return nil, fmt.Errorf("auth frame is not json")
 	}
 	if msg["type"] != "auth" {
-		return fmt.Errorf("first frame must be auth, got %v", msg["type"])
+		return nil, fmt.Errorf("first frame must be auth, got %v", msg["type"])
 	}
 	got, _ := msg["token"].(string)
 	if !tokensEqual(token, got) {
-		return fmt.Errorf("control token mismatch")
+		return nil, fmt.Errorf("control token mismatch")
 	}
-	return nil
+	return reader, nil
 }
 
 func (c *ControlChannel) closeConn() {
@@ -123,6 +128,7 @@ func (c *ControlChannel) closeConn() {
 		c.conn.Close()
 		c.conn = nil
 	}
+	c.reader = nil
 }
 
 func tokensEqual(expected, got string) bool {
@@ -169,6 +175,7 @@ func (c *ControlChannel) Send(msg map[string]any) error {
 func (c *ControlChannel) ReadLoop(onMessage func(map[string]any), onEOF func()) {
 	c.mu.Lock()
 	conn := c.conn
+	reader := c.reader
 	c.mu.Unlock()
 
 	if conn == nil {
@@ -186,7 +193,9 @@ func (c *ControlChannel) ReadLoop(onMessage func(map[string]any), onEOF func()) 
 	// alive through one malformed frame, since giving up on it is exactly as
 	// bad as the daemon actually dying: onEOF only fires for a genuine read
 	// error (real disconnect), never for errLineTooLong.
-	reader := bufio.NewReaderSize(conn, 64*1024)
+	if reader == nil {
+		reader = bufio.NewReaderSize(conn, 64*1024)
+	}
 	for {
 		line, err := readBoundedLine(reader, maxControlLineBytes)
 		if errors.Is(err, errLineTooLong) {
@@ -244,6 +253,7 @@ func readBoundedLine(r *bufio.Reader, max int) (string, error) {
 func (c *ControlChannel) Close() error {
 	c.mu.Lock()
 	conn := c.conn
+	c.reader = nil
 	c.mu.Unlock()
 
 	if conn != nil {

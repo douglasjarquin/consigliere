@@ -194,6 +194,44 @@ func TestControlChannel_RejectsUnauthenticatedFirstClient(t *testing.T) {
 	}
 }
 
+func TestControlChannel_AuthPreservesFollowingFrame(t *testing.T) {
+	socketPath := filepath.Join(shortSocketDir(t), "control.sock")
+	cc, err := NewControlChannel(socketPath)
+	if err != nil {
+		t.Fatalf("NewControlChannel: %v", err)
+	}
+	defer cc.Close()
+
+	acceptErrCh := make(chan error, 1)
+	go func() { acceptErrCh <- cc.AcceptAuthenticated("secret-token", 3*time.Second) }()
+
+	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	frames := []byte(`{"type":"auth","token":"secret-token"}` + "\n" + `{"type":"cancel"}` + "\n")
+	if _, err := conn.Write(frames); err != nil {
+		t.Fatalf("write auth and cancel: %v", err)
+	}
+	if err := <-acceptErrCh; err != nil {
+		t.Fatalf("AcceptAuthenticated: %v", err)
+	}
+
+	received := make(chan map[string]any, 1)
+	go cc.ReadLoop(func(msg map[string]any) { received <- msg }, func() {})
+
+	select {
+	case msg := <-received:
+		if msg["type"] != "cancel" {
+			t.Fatalf("unexpected frame: %+v", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("frame following auth was not delivered")
+	}
+}
+
 func TestControlChannel_ReadLoopDeliversMessagesAndDetectsEOF(t *testing.T) {
 	socketPath := filepath.Join(shortSocketDir(t), "control.sock")
 	cc, err := NewControlChannel(socketPath)
