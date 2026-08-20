@@ -24,6 +24,7 @@ defmodule Consigliere.Application do
       {Registry, keys: :duplicate, name: Consigliere.EventBus.Registry},
       Consigliere.EventBus,
       Consigliere.OutboxDispatcher,
+      Consigliere.NotificationDispatcher,
       Consigliere.GlobalScheduler,
       Consigliere.Reconciler,
       {Registry, keys: :unique, name: Consigliere.Registry},

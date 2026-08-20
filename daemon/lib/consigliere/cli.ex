@@ -26,4 +26,20 @@ defmodule Consigliere.CLI do
       reason -> IO.puts("last startup failure: #{reason}")
     end
   end
+
+  def away do
+    Consigliere.Away.mark()
+    IO.puts("away")
+  end
+
+  def return do
+    digest = Consigliere.Away.return()
+    n = length(digest["questions"])
+    IO.puts("return: #{n} open question(s)")
+
+    Enum.each(digest["questions"], fn q ->
+      IO.puts("- #{q["id"]} #{q["prompt"]}")
+    end)
+  end
 end
+

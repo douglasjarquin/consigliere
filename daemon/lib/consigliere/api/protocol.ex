@@ -7,6 +7,7 @@ defmodule Consigliere.API.Protocol do
   alias Consigliere.Missions
   alias Consigliere.Missions.Mission
   alias Consigliere.MissionBlockers.MissionBlocker
+  alias Consigliere.Away
   alias Consigliere.Questions
   alias Consigliere.Questions.Question
   alias Consigliere.Repo
@@ -131,6 +132,23 @@ defmodule Consigliere.API.Protocol do
       answer_channel: payload["answer_channel"] || actor.channel
     })
     |> ok_question()
+  end
+
+  defp run("away.mark", _payload, actor) do
+    if actor.principal == "boss" do
+      Away.mark()
+      {:ok, %{"away" => true}}
+    else
+      {:error, {:unauthorized, :principal}}
+    end
+  end
+
+  defp run("away.return", _payload, actor) do
+    if actor.principal == "boss" do
+      {:ok, Away.return()}
+    else
+      {:error, {:unauthorized, :principal}}
+    end
   end
 
   defp run("questions.inbox", _payload, actor) do
