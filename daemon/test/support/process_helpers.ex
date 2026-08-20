@@ -19,28 +19,41 @@ defmodule Consigliere.ProcessHelpers do
   end
 
   def spawn_session_leader do
-    ruby =
-      System.find_executable("ruby") ||
-        System.find_executable("ruby3") ||
-        raise("ruby is required to spawn a setsid process group")
-
     pid_path =
       Path.join(
         System.tmp_dir!(),
         "consigliere-session-leader-#{System.unique_integer([:positive, :monotonic])}.pid"
       )
 
-    script = """
-    Process.daemon(true, false)
-    File.write(ARGV.fetch(0), Process.pid.to_s)
-    sleep 60
-    """
+    {executable, args} =
+      case System.find_executable("setsid") do
+        nil ->
+          ruby =
+            System.find_executable("ruby") ||
+              System.find_executable("ruby3") ||
+              raise("ruby is required to spawn a setsid process group")
+
+          script = """
+          Process.daemon(true, false)
+          File.write(ARGV.fetch(0), Process.pid.to_s)
+          sleep 60
+          """
+
+          {ruby, ["-e", script, pid_path]}
+
+        setsid ->
+          shell =
+            System.find_executable("sh") ||
+              raise("sh is required to spawn a setsid process group")
+
+          {setsid, [shell, "-c", ~S[echo "$$" > "$1"; exec sleep 60], "sh", pid_path]}
+      end
 
     port =
-      Port.open({:spawn_executable, ruby}, [
+      Port.open({:spawn_executable, executable}, [
         :binary,
         :exit_status,
-        args: ["-e", script, pid_path]
+        args: args
       ])
 
     pid = wait_session_leader_pid!(pid_path)
@@ -82,27 +95,22 @@ defmodule Consigliere.ProcessHelpers do
     {probe_output, probe_status} =
       System.cmd("kill", ["-0", "-#{pgid}"], stderr_to_stdout: true)
 
-    {term_output, term_status} =
-      System.cmd("kill", ["-TERM", "-#{pgid}"], stderr_to_stdout: true)
-
-    {kill_output, kill_status} =
-      System.cmd("kill", ["-KILL", "-#{pgid}"], stderr_to_stdout: true)
-
     inspect(%{
       members: members,
-      ps: {ps_status, String.trim(ps_output)},
       probe: {probe_status, String.trim(probe_output)},
-      term: {term_status, String.trim(term_output)},
-      kill: {kill_status, String.trim(kill_output)}
+      ps_status: ps_status
     })
   end
 
   defp wait_session_leader!(pid) do
-    Enum.reduce_while(1..50, :error, fn _, _ ->
-      {out, 0} = System.cmd("ps", ["-o", "pgid=", "-p", to_string(pid)], stderr_to_stdout: true)
+    expected_leader = to_string(pid)
 
-      case Integer.parse(String.trim(out)) do
-        {pgid, _} when pgid == pid ->
+    Enum.reduce_while(1..50, :error, fn _, _ ->
+      {out, 0} =
+        System.cmd("ps", ["-o", "pgid=,sid=", "-p", to_string(pid)], stderr_to_stdout: true)
+
+      case String.split(String.trim(out)) do
+        [leader, leader] when leader == expected_leader ->
           {:halt, :ok}
 
         _ ->
