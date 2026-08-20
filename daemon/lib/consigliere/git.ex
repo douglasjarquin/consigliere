@@ -72,6 +72,16 @@ defmodule Consigliere.Git do
     end
   end
 
+  def push_sha(mirror, remote_url, sha, ref) do
+    with true <- mirror_has_commit?(mirror, sha),
+         {:ok, _} <- privileged(["push", remote_url, "#{sha}:#{ref}"], git_dir: mirror) do
+      {:ok, sha}
+    else
+      false -> {:error, :missing_from_mirror}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp ensure_mirror(path) do
     if File.dir?(path), do: :ok, else: init_mirror(path)
   end

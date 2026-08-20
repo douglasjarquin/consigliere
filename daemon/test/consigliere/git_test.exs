@@ -123,4 +123,74 @@ defmodule Consigliere.GitTest do
     assert blob == "committed\n"
     refute blob =~ "dirty"
   end
+
+  test "privileged push goes from the trusted mirror, not the workspace origin", %{
+    workspace: workspace,
+    mirror: mirror,
+    root: root
+  } do
+    Git.init_workspace(workspace)
+    File.write!(Path.join(workspace, "ok.txt"), "ok\n")
+    sha = Git.commit_all(workspace, "ok")
+    assert {:ok, ^sha} = Git.import_sha(workspace, mirror, sha)
+
+    dest = Path.join(root, "dest.git")
+    Git.init_mirror(dest)
+    {_, 0} = System.cmd("git", ["config", "receive.denyCurrentBranch", "ignore"], cd: dest)
+
+    sentinel = Path.join(root, "origin-used")
+    {_, 0} =
+      System.cmd("git", ["remote", "add", "origin", "file://#{sentinel}"], cd: workspace)
+
+    assert {:ok, ^sha} = Git.push_sha(mirror, dest, sha, "refs/heads/delivery")
+    refute File.exists?(sentinel)
+    assert Git.mirror_has_commit?(dest, sha)
+  end
+
+  test "privileged push refuses a SHA the trusted mirror does not have", %{
+    workspace: workspace,
+    mirror: mirror,
+    root: root
+  } do
+    Git.init_workspace(workspace)
+    File.write!(Path.join(workspace, "ok.txt"), "ok\n")
+    sha = Git.commit_all(workspace, "ok")
+    Git.init_mirror(mirror)
+
+    dest = Path.join(root, "dest.git")
+    Git.init_mirror(dest)
+
+    assert {:error, :missing_from_mirror} =
+             Git.push_sha(mirror, dest, sha, "refs/heads/delivery")
+  end
+
+  test "a workspace update hook does not run during privileged push", %{
+    workspace: workspace,
+    mirror: mirror,
+    root: root
+  } do
+    Git.init_workspace(workspace)
+    File.write!(Path.join(workspace, "ok.txt"), "ok\n")
+    sha = Git.commit_all(workspace, "ok")
+    assert {:ok, ^sha} = Git.import_sha(workspace, mirror, sha)
+
+    dest = Path.join(root, "dest.git")
+    Git.init_mirror(dest)
+    {_, 0} = System.cmd("git", ["config", "receive.denyCurrentBranch", "ignore"], cd: dest)
+
+    sentinel = Path.join(root, "hook-fired")
+    hooks = Path.join(workspace, ".git/hooks")
+    File.mkdir_p!(hooks)
+
+    for name <- ["pre-push", "pre-commit", "update"] do
+      path = Path.join(hooks, name)
+      File.write!(path, "#!/bin/sh\ntouch '#{sentinel}'\n")
+      File.chmod!(path, 0o755)
+    end
+
+    assert {:ok, ^sha} = Git.push_sha(mirror, dest, sha, "refs/heads/delivery")
+    refute File.exists?(sentinel)
+    assert Git.mirror_has_commit?(dest, sha)
+  end
 end
+
