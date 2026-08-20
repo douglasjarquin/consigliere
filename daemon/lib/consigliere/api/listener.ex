@@ -3,31 +3,47 @@ defmodule Consigliere.API.Listener do
   use GenServer
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  def socket_path do
-    case Process.whereis(__MODULE__) do
-      nil -> Consigliere.Home.api_socket_path()
+  def socket_path(name \\ __MODULE__) do
+    case Process.whereis(name) do
+      nil -> default_path(name)
       pid -> GenServer.call(pid, :socket_path)
     end
   end
 
+  def privileged_socket_path, do: socket_path(Consigliere.API.PrivilegedListener)
+
+  defp default_path(Consigliere.API.PrivilegedListener),
+    do: Consigliere.Home.privileged_socket_path()
+
+  defp default_path(_), do: Consigliere.Home.api_socket_path()
+
   @impl true
   def init(opts) do
     home = opts[:home] || Consigliere.Home.dir()
+    which = Keyword.get(opts, :which, :api)
     Consigliere.Home.ensure_dir!(home)
-    socket_path = Consigliere.Home.api_socket_path(home)
+    socket_path = path_for(which, home)
+    bound = bound_for(which)
 
     case bind(socket_path) do
       {:ok, listen} ->
-        acceptor = spawn_link(fn -> accept_loop(listen) end)
-        {:ok, %{socket_path: socket_path, listen: listen, acceptor: acceptor}}
+        acceptor = spawn_link(fn -> accept_loop(listen, bound) end)
+        {:ok, %{socket_path: socket_path, listen: listen, acceptor: acceptor, bound: bound}}
 
       {:error, reason} ->
         {:stop, {:bind_failed, reason}}
     end
   end
+
+  defp path_for(:privileged, home), do: Consigliere.Home.privileged_socket_path(home)
+  defp path_for(:api, home), do: Consigliere.Home.api_socket_path(home)
+
+  defp bound_for(:privileged), do: :privileged
+  defp bound_for(:api), do: :capability
 
   @impl true
   def handle_call(:socket_path, _from, state), do: {:reply, state.socket_path, state}
@@ -47,14 +63,21 @@ defmodule Consigliere.API.Listener do
 
       {:error, _} ->
         File.rm(socket_path)
-        :gen_tcp.listen(0, [:binary, packet: :line, active: false, ifaddr: {:local, socket_path}, backlog: 128])
+
+        :gen_tcp.listen(0, [
+          :binary,
+          packet: :line,
+          active: false,
+          ifaddr: {:local, socket_path},
+          backlog: 128
+        ])
     end
   end
 
-  defp accept_loop(listen) do
+  defp accept_loop(listen, bound) do
     case :gen_tcp.accept(listen) do
       {:ok, conn} ->
-        spec = {Consigliere.API.Connection, conn}
+        spec = {Consigliere.API.Connection, {conn, bound}}
 
         case DynamicSupervisor.start_child(Consigliere.API.ConnectionSupervisor, spec) do
           {:ok, pid} ->
@@ -65,13 +88,13 @@ defmodule Consigliere.API.Listener do
             :gen_tcp.close(conn)
         end
 
-        accept_loop(listen)
+        accept_loop(listen, bound)
 
       {:error, :closed} ->
         :ok
 
       {:error, _} ->
-        accept_loop(listen)
+        accept_loop(listen, bound)
     end
   end
 end

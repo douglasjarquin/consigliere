@@ -18,6 +18,10 @@ defmodule Consigliere.Home do
     Path.join(home, "api.sock")
   end
 
+  def privileged_socket_path(home \\ dir()) do
+    Path.join(home, "priv.sock")
+  end
+
   def last_error_path(home \\ dir()) do
     Path.join(home, "last_error.log")
   end

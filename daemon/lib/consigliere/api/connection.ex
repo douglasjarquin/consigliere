@@ -1,30 +1,30 @@
 defmodule Consigliere.API.Connection do
   @moduledoc false
 
-  def child_spec(socket) do
+  def child_spec({socket, bound}) do
     %{
       id: make_ref(),
-      start: {__MODULE__, :start_link, [socket]},
+      start: {__MODULE__, :start_link, [socket, bound]},
       restart: :temporary
     }
   end
 
-  def start_link(socket) do
+  def start_link(socket, bound) do
     Task.start_link(fn ->
       receive do
-        :go -> loop(socket)
+        :go -> loop(socket, bound)
       after
         5_000 -> :gen_tcp.close(socket)
       end
     end)
   end
 
-  defp loop(socket) do
+  defp loop(socket, bound) do
     case :gen_tcp.recv(socket, 0, 30_000) do
       {:ok, line} ->
-        reply = Consigliere.API.Protocol.handle(line)
+        reply = Consigliere.API.Protocol.handle(line, bound)
         _ = :gen_tcp.send(socket, reply <> "\n")
-        loop(socket)
+        loop(socket, bound)
 
       {:error, _} ->
         :gen_tcp.close(socket)

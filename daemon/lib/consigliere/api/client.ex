@@ -2,7 +2,13 @@ defmodule Consigliere.API.Client do
   @moduledoc false
 
   def request(op, payload \\ %{}, actor \\ %{"principal" => "boss"}, opts \\ []) do
-    path = Keyword.get(opts, :socket_path, Consigliere.API.Listener.socket_path())
+    default_path =
+      case actor["principal"] do
+        "boss" -> Consigliere.API.Listener.privileged_socket_path()
+        _ -> Consigliere.API.Listener.socket_path()
+      end
+
+    path = Keyword.get(opts, :socket_path, default_path)
     id = Keyword.get(opts, :id, "req-#{System.unique_integer([:positive])}")
 
     {:ok, sock} =

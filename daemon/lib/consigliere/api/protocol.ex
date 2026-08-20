@@ -14,19 +14,19 @@ defmodule Consigliere.API.Protocol do
 
   @version 1
 
-  def handle(line) when is_binary(line) do
+  def handle(line, bound \\ :unbound) when is_binary(line) do
     case JSON.decode(String.trim(line)) do
-      {:ok, req} when is_map(req) -> encode(dispatch(req))
+      {:ok, req} when is_map(req) -> encode(dispatch(req, bound))
       _ -> encode(%{"v" => @version, "ok" => false, "error" => error("invalid", "not json")})
     end
   end
 
-  defp dispatch(%{"v" => v, "id" => id}) when v != @version do
+  defp dispatch(%{"v" => v, "id" => id}, _bound) when v != @version do
     fail(id, "protocol_version", "unsupported version #{inspect(v)}")
   end
 
-  defp dispatch(%{"v" => @version, "id" => id, "op" => op} = req) do
-    case actor(req) do
+  defp dispatch(%{"v" => @version, "id" => id, "op" => op} = req, bound) do
+    case bind_actor(actor(req), bound) do
       {:error, reason} ->
         fail(id, "unauthorized", reason)
 
@@ -38,8 +38,8 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp dispatch(%{"id" => id}), do: fail(id, "invalid", "missing v or op")
-  defp dispatch(_), do: fail(nil, "invalid", "missing id")
+  defp dispatch(%{"id" => id}, _bound), do: fail(id, "invalid", "missing v or op")
+  defp dispatch(_, _bound), do: fail(nil, "invalid", "missing id")
 
   defp actor(%{"actor" => %{"principal" => principal} = raw}) when is_binary(principal) do
     %Actor{
@@ -51,6 +51,16 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp actor(_), do: {:error, "missing actor.principal"}
+
+  defp bind_actor({:error, reason}, _bound), do: {:error, reason}
+  defp bind_actor(actor, :unbound), do: actor
+  defp bind_actor(%{principal: "boss"} = actor, :privileged), do: actor
+  defp bind_actor(_actor, :privileged), do: {:error, "privileged socket requires boss"}
+
+  defp bind_actor(%{principal: "boss"}, :capability),
+    do: {:error, "capability socket cannot carry boss"}
+
+  defp bind_actor(actor, :capability), do: actor
 
   defp default_channel("boss"), do: "privileged"
   defp default_channel("attempt"), do: "capability"
@@ -83,6 +93,14 @@ defmodule Consigliere.API.Protocol do
     Missions.cancel(payload["mission_id"], actor, payload["reason"] || "canceled") |> ok_mission()
   end
 
+  defp run("mission.grant_integration", payload, actor) do
+    Missions.grant_integration_authorization(payload["mission_id"], actor, %{
+      target_sha: payload["target_sha"],
+      target_pull_request: payload["target_pull_request"]
+    })
+    |> ok_mission()
+  end
+
   defp run("mission.get", payload, actor) do
     case Repo.get(Mission, payload["mission_id"]) do
       nil ->
@@ -94,8 +112,9 @@ defmodule Consigliere.API.Protocol do
         else
           blockers =
             Repo.all(
-              from b in MissionBlocker,
+              from(b in MissionBlocker,
                 where: b.mission_id == ^mission.id and b.status == "open"
+              )
             )
 
           {:ok,
@@ -156,7 +175,12 @@ defmodule Consigliere.API.Protocol do
       {:error, {:unauthorized, :principal}}
     else
       questions =
-        Repo.all(from q in Question, where: q.status in ["open", "routed"], order_by: [asc: q.inserted_at])
+        Repo.all(
+          from(q in Question,
+            where: q.status in ["open", "routed"],
+            order_by: [asc: q.inserted_at]
+          )
+        )
 
       {:ok,
        %{
@@ -186,16 +210,23 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp ok_mission({:ok, %{id: id, phase: phase}}), do: {:ok, %{"id" => id, "phase" => phase}}
-  defp ok_mission({:ok, %{mission: %{id: id, phase: phase}}}), do: {:ok, %{"id" => id, "phase" => phase}}
+
+  defp ok_mission({:ok, %{mission: %{id: id, phase: phase}}}),
+    do: {:ok, %{"id" => id, "phase" => phase}}
+
   defp ok_mission(other), do: other
 
   defp ok_question({:ok, %{id: id, status: status}}), do: {:ok, %{"id" => id, "status" => status}}
   defp ok_question(other), do: other
 
-  defp wrap({:ok, payload}, id), do: %{"v" => @version, "id" => id, "ok" => true, "payload" => payload}
+  defp wrap({:ok, payload}, id),
+    do: %{"v" => @version, "id" => id, "ok" => true, "payload" => payload}
 
   defp wrap({:error, {:unauthorized, reason}}, id), do: fail(id, "unauthorized", inspect(reason))
-  defp wrap({:error, {:illegal_transition, reason}}, id), do: fail(id, "illegal_transition", inspect(reason))
+
+  defp wrap({:error, {:illegal_transition, reason}}, id),
+    do: fail(id, "illegal_transition", inspect(reason))
+
   defp wrap({:error, {:fenced, attempt_id}}, id), do: fail(id, "fenced", attempt_id)
   defp wrap({:error, {:not_found, what}}, id), do: fail(id, "not_found", what)
   defp wrap({:error, {:invalid, reason}}, id), do: fail(id, "invalid", reason)

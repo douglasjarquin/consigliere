@@ -20,7 +20,9 @@ defmodule Consigliere.API.ProtocolTest do
   end
 
   test "rejects a non-1 protocol version" do
-    line = JSON.encode!(%{"v" => 99, "id" => "x", "op" => "ping", "actor" => %{"principal" => "boss"}})
+    line =
+      JSON.encode!(%{"v" => 99, "id" => "x", "op" => "ping", "actor" => %{"principal" => "boss"}})
+
     resp = decode(Protocol.handle(line))
     assert resp["ok"] == false
     assert resp["error"]["code"] == "protocol_version"
@@ -33,7 +35,9 @@ defmodule Consigliere.API.ProtocolTest do
   end
 
   test "ping" do
-    line = JSON.encode!(%{"v" => 1, "id" => "p1", "op" => "ping", "actor" => %{"principal" => "boss"}})
+    line =
+      JSON.encode!(%{"v" => 1, "id" => "p1", "op" => "ping", "actor" => %{"principal" => "boss"}})
+
     resp = decode(Protocol.handle(line))
     assert resp["ok"] == true
     assert resp["payload"]["pong"] == true
@@ -195,5 +199,75 @@ defmodule Consigliere.API.ProtocolTest do
 
     questions = decode(resp)["payload"]["questions"]
     assert Enum.any?(questions, &(&1["prompt"] == "choose"))
+  end
+
+  test "attempt and model_advisory cannot grant integration" do
+    {:ok, mission} =
+      Missions.create(%{objective: "o", scope: "s", acceptance_criteria: "a"}, Actor.boss())
+
+    {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
+
+    {:ok, %{mission: mission}} =
+      Missions.start(mission.id, Actor.system(), %{
+        workspace_path: "/tmp/cs-#{System.unique_integer([:positive])}"
+      })
+
+    {:ok, _} =
+      Consigliere.Repo.update(
+        Consigliere.Missions.Mission.changeset(
+          Consigliere.Repo.get!(Consigliere.Missions.Mission, mission.id),
+          %{phase: "awaiting_integration_authorization", current_delivery_sha: "deliv"}
+        )
+      )
+
+    payload = %{
+      "mission_id" => mission.id,
+      "target_sha" => "deliv",
+      "target_pull_request" => "1"
+    }
+
+    denied_attempt =
+      decode(
+        Protocol.handle(
+          JSON.encode!(%{
+            "v" => 1,
+            "id" => "g1",
+            "op" => "mission.grant_integration",
+            "actor" => %{"principal" => "attempt", "attempt_id" => "a", "fencing_token" => "f"},
+            "payload" => payload
+          })
+        )
+      )
+
+    denied_model =
+      decode(
+        Protocol.handle(
+          JSON.encode!(%{
+            "v" => 1,
+            "id" => "g2",
+            "op" => "mission.grant_integration",
+            "actor" => %{"principal" => "model_advisory"},
+            "payload" => payload
+          })
+        )
+      )
+
+    granted =
+      decode(
+        Protocol.handle(
+          JSON.encode!(%{
+            "v" => 1,
+            "id" => "g3",
+            "op" => "mission.grant_integration",
+            "actor" => %{"principal" => "boss"},
+            "payload" => payload
+          })
+        )
+      )
+
+    assert denied_attempt["error"]["code"] == "unauthorized"
+    assert denied_model["error"]["code"] == "unauthorized"
+    assert granted["payload"]["phase"] == "integrating"
   end
 end

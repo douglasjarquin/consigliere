@@ -13,9 +13,20 @@ defmodule Consigliere.API.Supervisor do
   def init(opts) do
     children = [
       {DynamicSupervisor, name: Consigliere.API.ConnectionSupervisor, strategy: :one_for_one},
-      {Consigliere.API.Listener, opts}
+      listener_spec(
+        :api_listener,
+        Keyword.merge(opts, name: Consigliere.API.Listener, which: :api)
+      ),
+      listener_spec(
+        :privileged_listener,
+        Keyword.merge(opts, name: Consigliere.API.PrivilegedListener, which: :privileged)
+      )
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  defp listener_spec(id, opts) do
+    %{id: id, start: {Consigliere.API.Listener, :start_link, [opts]}}
   end
 end
