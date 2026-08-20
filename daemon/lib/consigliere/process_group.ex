@@ -67,7 +67,45 @@ defmodule Consigliere.ProcessGroup do
   end
 
   defp runnable_members(pgid) do
-    case System.cmd("ps", ["-ax", "-o", "pgid=,stat="], stderr_to_stdout: true) do
+    case :os.type() do
+      {:unix, :linux} -> linux_runnable(pgid)
+      _ -> ps_runnable(pgid)
+    end
+  end
+
+  defp linux_runnable(pgid) do
+    stats =
+      Path.wildcard("/proc/[0-9]*/stat")
+      |> Enum.flat_map(&read_proc_stat(&1, pgid))
+      |> Enum.reject(&zombie?/1)
+
+    {:ok, stats}
+  rescue
+    _ -> :error
+  end
+
+  defp read_proc_stat(path, pgid) do
+    case File.read(path) do
+      {:ok, contents} -> parse_proc_stat(contents, pgid)
+      _ -> []
+    end
+  end
+
+  defp parse_proc_stat(contents, pgid) do
+    case Regex.run(~r/\) ([A-Za-z]) \d+ (\d+)/, contents) do
+      [_, state, pgrp] ->
+        case Integer.parse(pgrp) do
+          {^pgid, _} -> [state]
+          _ -> []
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  defp ps_runnable(pgid) do
+    case System.cmd("ps", ["-axo", "pgid=,stat="], stderr_to_stdout: true) do
       {out, 0} ->
         {:ok,
          out

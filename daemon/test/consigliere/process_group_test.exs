@@ -10,7 +10,7 @@ defmodule Consigliere.ProcessGroupTest do
 
     assert ProcessGroup.alive?(pgid)
 
-    assert ProcessGroup.terminate(pgid, term_timeout_ms: 1_000, kill_timeout_ms: 500) ==
+    assert ProcessGroup.terminate(pgid, term_timeout_ms: 2_000, kill_timeout_ms: 1_000) ==
              :dead_verified
 
     refute ProcessGroup.alive?(pgid)

@@ -82,8 +82,9 @@ jobs:
           mkdir -p "$CS_HOME"
           REL=daemon/_build/prod/rel/consigliere_daemon/bin/consigliere_daemon
           "$REL" eval "Consigliere.Release.migrate()"
-          "$REL" daemon &
-          echo $! > /tmp/csd.pid
+          "$REL" stop >/dev/null 2>&1 || true
+          sleep 1
+          "$REL" start
           i=0
           while [ "$i" -lt 30 ]; do
             if [ -S "$CS_HOME/priv.sock" ] && [ -S "$CS_HOME/api.sock" ]; then
@@ -96,15 +97,14 @@ jobs:
           test -S "$CS_HOME/api.sock"
           daemon/cs ping
           daemon/cs doctor
-          kill "$(cat /tmp/csd.pid)"
-          wait "$(cat /tmp/csd.pid)" || true
+          "$REL" stop
+          sleep 1
           if pgrep -f cs-runner >/dev/null; then
             echo "leftover cs-runner after stop"
             exit 1
           fi
           test -f "$CS_HOME/consigliere.db"
-          "$REL" daemon &
-          echo $! > /tmp/csd.pid
+          "$REL" start
           i=0
           while [ "$i" -lt 30 ]; do
             if [ -S "$CS_HOME/priv.sock" ]; then
@@ -115,8 +115,7 @@ jobs:
           done
           daemon/cs ping
           test -f "$CS_HOME/consigliere.db"
-          kill "$(cat /tmp/csd.pid)"
-          wait "$(cat /tmp/csd.pid)" || true
+          "$REL" stop
 
   # UNCONDITIONAL ON PURPOSE: any commit can track a boss-private path or
   # land a tracked symlink as a resolved regular file.
