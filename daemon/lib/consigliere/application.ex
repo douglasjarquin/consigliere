@@ -10,7 +10,9 @@ defmodule Consigliere.Application do
   @impl true
   def start(_type, _args) do
     Logger.info(
-      "consigliere boot command=#{inspect(System.get_env("RELEASE_COMMAND"))} children=#{length(children())}"
+      "consigliere boot command=#{inspect(System.get_env("RELEASE_COMMAND"))} " <>
+        "release_root=#{inspect(release?())} cs_home=#{inspect(System.get_env("CS_HOME"))} " <>
+        "home=#{inspect(Consigliere.Home.dir())} children=#{length(children())}"
     )
 
     with nil <- Consigliere.Home.forced_failure_reason() do
@@ -64,16 +66,26 @@ defmodule Consigliere.Application do
     record_boot_result(result, home)
   end
 
+  def lock_contention_outcome(home \\ Consigliere.Home.dir()) do
+    if Consigliere.Home.socket_status(home) == :live, do: :handoff, else: :error
+  end
+
   # Losing the boot race to a live instance is expected contention, not a
   # bug -- socket_status/1 already surfaces :live independently, so
   # recording this here would just read as a false alarm next to a
-  # perfectly healthy daemon.
+  # perfectly healthy daemon. A release second-start should exit 0 so
+  # the process holding stdout is not a failed CI step.
   def record_boot_result(
         {:error, {:shutdown, {:failed_to_start_child, Consigliere.Home.Lock, :already_running}}} =
           result,
-        _home
+        home
       ) do
-    result
+    if lock_contention_outcome(home) == :handoff and release?() do
+      Logger.info("consigliere boot: CS_HOME already owned; this VM exits 0")
+      System.halt(0)
+    else
+      result
+    end
   end
 
   def record_boot_result({:ok, _pid} = result, home) do
@@ -84,5 +96,9 @@ defmodule Consigliere.Application do
   def record_boot_result({:error, reason} = result, home) do
     Consigliere.Home.record_error!(home, inspect(reason))
     result
+  end
+
+  defp release? do
+    not is_nil(System.get_env("RELEASE_ROOT"))
   end
 end

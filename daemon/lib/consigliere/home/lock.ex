@@ -11,6 +11,8 @@ defmodule Consigliere.Home.Lock do
 
   use GenServer
 
+  require Logger
+
   alias Consigliere.Home
 
   def start_link(opts \\ []) do
@@ -46,21 +48,41 @@ defmodule Consigliere.Home.Lock do
       :live ->
         :already_running
 
-      _ ->
+      probe ->
         File.rm(socket_path)
 
-        case :gen_tcp.listen(0, [:binary, ifaddr: {:local, socket_path}, backlog: 128]) do
+        case listen_local(socket_path) do
           {:ok, listen} ->
             _ = File.chmod(socket_path, 0o600)
             {:ok, listen}
 
           {:error, :eaddrinuse} ->
-            :already_running
+            File.rm(socket_path)
+
+            case listen_local(socket_path) do
+              {:ok, listen} ->
+                _ = File.chmod(socket_path, 0o600)
+                {:ok, listen}
+
+              {:error, :eaddrinuse} ->
+                :already_running
+
+              other ->
+                other
+            end
 
           other ->
+            Logger.warning(
+              "home lock listen failed path=#{socket_path} probe=#{inspect(probe)} result=#{inspect(other)}"
+            )
+
             other
         end
     end
+  end
+
+  defp listen_local(socket_path) do
+    :gen_tcp.listen(0, [:binary, ifaddr: {:local, socket_path}, backlog: 128])
   end
 
   defp accept_loop(listen_socket) do

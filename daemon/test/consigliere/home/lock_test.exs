@@ -17,6 +17,17 @@ defmodule Consigliere.Home.LockTest do
     GenServer.stop(pid1)
   end
 
+  test "listen eaddrinuse after a leftover socket file is retried and bound", %{home: home} do
+    socket = Home.boss_socket_path(home)
+    File.mkdir_p!(home)
+    File.write!(socket, "not-a-socket")
+
+    assert {:ok, pid} = Lock.start_link(home: home)
+    assert File.exists?(socket)
+    assert Home.socket_status(home) == :live
+    GenServer.stop(pid)
+  end
+
   test "a stale socket left by a dead instance is cleaned up and rebound", %{home: home} do
     Process.flag(:trap_exit, true)
     assert {:ok, pid1} = Lock.start_link(home: home)

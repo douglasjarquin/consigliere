@@ -49,4 +49,14 @@ defmodule Consigliere.ApplicationBootResultTest do
 
     assert Home.last_error(home) == nil
   end
+
+  test "lock contention is a handoff when another instance already owns CS_HOME", %{home: home} do
+    {:ok, pid} = Consigliere.Home.Lock.start_link(home: home)
+    assert Consigliere.Application.lock_contention_outcome(home) == :handoff
+    GenServer.stop(pid)
+  end
+
+  test "lock contention is an error when nothing owns CS_HOME", %{home: home} do
+    assert Consigliere.Application.lock_contention_outcome(home) == :error
+  end
 end

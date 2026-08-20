@@ -81,61 +81,93 @@ jobs:
           export PATH="/usr/bin:/bin:/usr/local/bin:${PATH:-}"
           mkdir -p "$CS_HOME"
           REL=daemon/_build/prod/rel/consigliere_daemon/bin/consigliere_daemon
-          REL_LOG=daemon/_build/prod/rel/consigliere_daemon/tmp/log
+          BOOT_LOG="$CS_HOME/boot.log"
+
+          start_daemon() {
+            # Mix release start execs the BEAM and does not return.
+            # rpc stop is unusable: RELEASE_DISTRIBUTION=none.
+            "$REL" start >>"$BOOT_LOG" 2>&1 < /dev/null &
+            echo $! >"$CS_HOME/beam.pid"
+          }
+
+          wait_sock() {
+            i=0
+            while [ "$i" -lt 30 ]; do
+              if [ -S "$CS_HOME/priv.sock" ] && [ -S "$CS_HOME/api.sock" ]; then
+                return 0
+              fi
+              i=$((i + 1))
+              sleep 1
+            done
+            return 1
+          }
+
+          dump_boot() {
+            echo "boot failed; CS_HOME:"
+            ls -la "$CS_HOME" || true
+            echo "boot.log:"
+            cat "$BOOT_LOG" 2>/dev/null || true
+            echo "last_error:"
+            cat "$CS_HOME/last_error.log" 2>/dev/null || true
+            echo "beam.pid:"
+            cat "$CS_HOME/beam.pid" 2>/dev/null || true
+            ps aux | grep -E '[b]eam.smp|[c]onsigliere_daemon' || true
+          }
+
+          stop_daemon() {
+            pid=$(cat "$CS_HOME/beam.pid" 2>/dev/null || true)
+            if [ -n "${pid:-}" ]; then
+              kill "$pid" 2>/dev/null || true
+              i=0
+              while [ "$i" -lt 10 ]; do
+                kill -0 "$pid" 2>/dev/null || break
+                i=$((i + 1))
+                sleep 1
+              done
+              kill -9 "$pid" 2>/dev/null || true
+            fi
+            i=0
+            while [ "$i" -lt 10 ]; do
+              if [ ! -S "$CS_HOME/priv.sock" ] && [ ! -S "$CS_HOME/api.sock" ]; then
+                break
+              fi
+              i=$((i + 1))
+              sleep 1
+            done
+            rm -f "$CS_HOME/beam.pid" "$CS_HOME/priv.sock" "$CS_HOME/api.sock" "$CS_HOME/boss.sock"
+          }
+
           "$REL" eval "Consigliere.Release.migrate()"
           echo "post-eval CS_HOME:"
           ls -la "$CS_HOME"
-          # daemon returns; a double Application.start must not abort the waiter.
-          set +e
-          "$REL" daemon
-          set -e
-          i=0
-          while [ "$i" -lt 30 ]; do
-            if [ -S "$CS_HOME/priv.sock" ] && [ -S "$CS_HOME/api.sock" ]; then
-              break
-            fi
-            i=$((i + 1))
-            sleep 1
-          done
-          if [ ! -S "$CS_HOME/priv.sock" ]; then
-            echo "boot failed; release log:"
-            ls -la "$CS_HOME"
-            cat "$CS_HOME/last_error.log" 2>/dev/null || true
-            cat "$REL_LOG"/erlang.log.1 2>/dev/null || true
-            cat "$REL_LOG"/run_erl.log 2>/dev/null || true
+
+          start_daemon
+          if ! wait_sock; then
+            dump_boot
+            stop_daemon
             exit 1
           fi
           test -S "$CS_HOME/api.sock"
           daemon/cs ping
           daemon/cs doctor
-          "$REL" stop
+          stop_daemon
           sleep 2
           if pgrep -x cs-runner >/dev/null; then
             echo "leftover cs-runner after stop"
             exit 1
           fi
           test -f "$CS_HOME/consigliere.db"
-          set +e
-          "$REL" daemon
-          set -e
-          i=0
-          while [ "$i" -lt 30 ]; do
-            if [ -S "$CS_HOME/priv.sock" ]; then
-              break
-            fi
-            i=$((i + 1))
-            sleep 1
-          done
-          if [ ! -S "$CS_HOME/priv.sock" ]; then
-            echo "restart failed; release log:"
-            cat "$CS_HOME/last_error.log" 2>/dev/null || true
-            cat "$REL_LOG"/erlang.log.1 2>/dev/null || true
-            cat "$REL_LOG"/run_erl.log 2>/dev/null || true
+          : >"$BOOT_LOG"
+          start_daemon
+          if ! wait_sock; then
+            echo "restart failed"
+            dump_boot
+            stop_daemon
             exit 1
           fi
           daemon/cs ping
           test -f "$CS_HOME/consigliere.db"
-          "$REL" stop
+          stop_daemon
 
   # UNCONDITIONAL ON PURPOSE: any commit can track a boss-private path or
   # land a tracked symlink as a resolved regular file.

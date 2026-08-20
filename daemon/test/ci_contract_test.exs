@@ -69,6 +69,14 @@ defmodule CIContractTest do
     assert yaml =~ "Consigliere.Release.migrate"
     assert yaml =~ "cs ping"
     assert yaml =~ "cs doctor"
+    # Mix release start execs the BEAM. Foreground daemon/start aborts the
+    # step on a boot ERROR before sockets can be observed. Smoke must
+    # background start and wait on sockets instead of rpc stop
+    # (RELEASE_DISTRIBUTION=none).
+    assert yaml =~ "beam.pid"
+    assert yaml =~ ~r/"\$REL" start/
+    refute yaml =~ ~r/"\$REL" daemon\b/
+    refute yaml =~ ~r/"\$REL" stop/
   end
 
   test "an unknown changed path still selects daemon and runner jobs", %{jobs: jobs} do
