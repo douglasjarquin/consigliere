@@ -11,3 +11,7 @@ config :consigliere_daemon, Consigliere.OutboxDispatcher,
   drain_on_notify: false,
   lease_ms: 50,
   max_attempts: 3
+
+config :consigliere_daemon, Consigliere.MissionCoordinator, poll_interval_ms: :infinity
+
+config :consigliere_daemon, Consigliere.GlobalScheduler, limit: 1
