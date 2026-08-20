@@ -5,10 +5,20 @@ import fcntl
 import os
 import select
 import sys
-import time
 
 path = sys.argv[1]
 parent = os.getppid()
+
+try:
+    import ctypes
+    import signal
+
+    ctypes.CDLL(None).prctl(1, int(signal.SIGTERM))
+    if os.getppid() != parent:
+        sys.exit(0)
+except Exception:
+    pass
+
 fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
 lock = fcntl.LOCK_EX | fcntl.LOCK_NB
 try:

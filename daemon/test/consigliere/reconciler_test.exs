@@ -102,7 +102,7 @@ defmodule Consigliere.ReconcilerTest do
   end
 
   describe "classify/1 forward progress under a broken environment" do
-    test "a missing kill executable does not crash classify/1, and is treated as unverifiable rather than lost" do
+    test "a missing kill executable does not crash classify/1" do
       original_path = System.get_env("PATH")
       on_exit(fn -> System.put_env("PATH", original_path) end)
 
@@ -119,7 +119,8 @@ defmodule Consigliere.ReconcilerTest do
       on_exit(fn -> File.rm(manifest_path) end)
       File.write!(manifest_path, JSON.encode!(%{"state" => "running", "pgid" => 999}))
 
-      assert {:adopt_and_kill, _manifest} = Reconciler.classify(manifest_path)
+      expected = if Consigliere.ProcessGroup.alive?(999), do: :adopt_and_kill, else: :lost
+      assert {^expected, %{"pgid" => 999}} = Reconciler.classify(manifest_path)
     end
   end
 

@@ -11,7 +11,6 @@ defmodule Consigliere.Release do
     {:ok, _, _} =
       Ecto.Migrator.with_repo(Consigliere.Repo, &Ecto.Migrator.run(&1, :up, all: true))
 
-    _ = Application.stop(@app)
     :ok
   end
 

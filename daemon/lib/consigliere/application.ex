@@ -16,8 +16,14 @@ defmodule Consigliere.Application do
     end
   end
 
-  defp start_supervisor do
-    children = [
+  # Mix release eval/rpc/remote must not take CS_HOME or bind sockets.
+  # Ecto.Migrator.with_repo starts Repo on its own.
+  def children(command \\ System.get_env("RELEASE_COMMAND"))
+
+  def children(command) when command in ["eval", "rpc", "remote"], do: []
+
+  def children(_command) do
+    [
       Consigliere.Home.Lock,
       Consigliere.Repo,
       Consigliere.DatabaseWriter,
@@ -34,11 +40,13 @@ defmodule Consigliere.Application do
       Consigliere.MissionBootstrap,
       Consigliere.API.Supervisor
     ]
+  end
 
+  defp start_supervisor do
     # :one_for_one is deliberate: a crashed sibling must never kill unrelated work (see ADR-004).
     opts = [strategy: :one_for_one, name: Consigliere.Supervisor]
 
-    children
+    children()
     |> Supervisor.start_link(opts)
     |> record_boot_result(Consigliere.Home.dir())
   end
