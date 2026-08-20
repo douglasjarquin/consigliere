@@ -69,7 +69,7 @@ defmodule Consigliere.Home.LockTest do
     GenServer.stop(winner)
   end
 
-  test "a stripped PATH still finds a lock helper", %{home: home} do
+  test "a stripped PATH still takes CS_HOME", %{home: home} do
     previous = System.get_env("PATH")
     System.put_env("PATH", "/nonexistent")
 
