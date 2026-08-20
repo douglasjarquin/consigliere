@@ -85,7 +85,7 @@ jobs:
           "$REL" eval "Consigliere.Release.migrate()"
           echo "post-eval CS_HOME:"
           ls -la "$CS_HOME"
-          "$REL" daemon
+          "$REL" start >"$CS_HOME/start.log" 2>&1 &
           i=0
           while [ "$i" -lt 30 ]; do
             if [ -S "$CS_HOME/priv.sock" ] && [ -S "$CS_HOME/api.sock" ]; then
@@ -95,10 +95,10 @@ jobs:
             sleep 1
           done
           if [ ! -S "$CS_HOME/priv.sock" ]; then
-            echo "boot failed; release log:"
+            echo "boot failed; start.log:"
             ls -la "$CS_HOME"
+            cat "$CS_HOME/start.log" || true
             cat "$REL_LOG"/erlang.log.1 2>/dev/null || true
-            cat "$REL_LOG"/run_erl.log 2>/dev/null || true
             exit 1
           fi
           test -S "$CS_HOME/api.sock"
@@ -111,7 +111,7 @@ jobs:
             exit 1
           fi
           test -f "$CS_HOME/consigliere.db"
-          "$REL" daemon
+          "$REL" start >"$CS_HOME/restart.log" 2>&1 &
           i=0
           while [ "$i" -lt 30 ]; do
             if [ -S "$CS_HOME/priv.sock" ]; then
@@ -121,9 +121,9 @@ jobs:
             sleep 1
           done
           if [ ! -S "$CS_HOME/priv.sock" ]; then
-            echo "restart failed; release log:"
+            echo "restart failed; restart.log:"
+            cat "$CS_HOME/restart.log" || true
             cat "$REL_LOG"/erlang.log.1 2>/dev/null || true
-            cat "$REL_LOG"/run_erl.log 2>/dev/null || true
             exit 1
           fi
           daemon/cs ping

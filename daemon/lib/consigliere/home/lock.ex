@@ -71,33 +71,15 @@ defmodule Consigliere.Home.Lock do
   end
 
   defp acquire_once(home, path) do
-    {first, second} =
-      case :os.type() do
-        {:unix, :linux} -> {"flock", "python"}
-        _ -> {"python", "flock"}
-      end
-
     cond do
-      helper = acquire_helper(first, home, path) ->
-        helper
+      python = python_executable() ->
+        acquire_python(python, materialize_script!(home), path)
 
-      helper = acquire_helper(second, home, path) ->
-        helper
+      flock = helper_executable("flock") ->
+        acquire_util_linux_flock(flock, path)
 
       true ->
         {:error, :python3_required}
-    end
-  end
-
-  defp acquire_helper("python", home, path) do
-    if python = python_executable() do
-      acquire_python(python, materialize_script!(home), path)
-    end
-  end
-
-  defp acquire_helper("flock", _home, path) do
-    if flock = helper_executable("flock") do
-      acquire_util_linux_flock(flock, path)
     end
   end
 
@@ -124,7 +106,7 @@ defmodule Consigliere.Home.Lock do
           "--exclusive",
           path,
           "--command",
-          "sh -c 'echo ok; exec cat'"
+          "/bin/sh -c '/bin/echo ok; exec /bin/cat'"
         ]
       ])
 
