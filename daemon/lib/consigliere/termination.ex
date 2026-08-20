@@ -9,13 +9,16 @@ defmodule Consigliere.Termination do
   import Ecto.Query
 
   alias Consigliere.Actor
+  alias Consigliere.AttemptStates
   alias Consigliere.Attempts
   alias Consigliere.Attempts.Attempt
   alias Consigliere.Capabilities
   alias Consigliere.GlobalScheduler
+  alias Consigliere.Home
   alias Consigliere.OutboxItems.OutboxItem
   alias Consigliere.ProcessGroup
   alias Consigliere.Repo
+  alias Consigliere.Runtime.Inventory
   alias Consigliere.Txn
   alias Consigliere.OutboxDispatcher
   alias Consigliere.Workspaces
@@ -31,7 +34,7 @@ defmodule Consigliere.Termination do
   end
 
   def request_live_attempts!(mission, cause) do
-    live = ~w(starting running checkpoint_requested checkpointed)
+    live = AttemptStates.process_may_exist()
 
     from(a in Attempt, where: a.mission_id == ^mission.id and a.status in ^live)
     |> Repo.all()
@@ -98,7 +101,7 @@ defmodule Consigliere.Termination do
       is_nil(attempt) ->
         :ok
 
-      attempt.status in ~w(completed failed lost canceled superseded) ->
+      AttemptStates.terminal?(attempt.status) ->
         release_if_idle(attempt)
         :ok
 
@@ -129,9 +132,47 @@ defmodule Consigliere.Termination do
   end
 
   defp verify_death(attempt) do
-    case attempt.pgid do
-      pgid when is_integer(pgid) and pgid > 1 -> ProcessGroup.terminate(pgid)
-      _ -> :dead_verified
+    case resolve_pgid(attempt) do
+      {:ok, pgid} -> ProcessGroup.terminate(pgid)
+      :none -> :dead_verified
+      :unknown -> :dead_unverified
+    end
+  end
+
+  defp resolve_pgid(attempt) do
+    cond do
+      is_integer(attempt.pgid) and attempt.pgid > 1 ->
+        {:ok, attempt.pgid}
+
+      runner_registered?(attempt.id) ->
+        :unknown
+
+      true ->
+        home = Home.dir()
+
+        case Inventory.verify(Inventory.path_for(home, attempt.id), home) do
+          {:valid_live, %{"pgid" => pgid}, _} when is_integer(pgid) and pgid > 1 ->
+            {:ok, pgid}
+
+          {:valid_terminal, _, _} ->
+            :none
+
+          :missing when attempt.status == "planned" ->
+            :none
+
+          :missing ->
+            :unknown
+
+          _ ->
+            :unknown
+        end
+    end
+  end
+
+  defp runner_registered?(attempt_id) do
+    case Registry.lookup(Consigliere.Registry, {:runner, attempt_id}) do
+      [{pid, _}] -> Process.alive?(pid)
+      _ -> false
     end
   end
 
@@ -149,18 +190,12 @@ defmodule Consigliere.Termination do
   end
 
   defp release_if_idle(attempt) do
+    occupying = AttemptStates.occupying()
+
     still =
       Repo.all(
         from(a in Attempt,
-          where:
-            a.mission_id == ^attempt.mission_id and
-              a.status in [
-                "planned",
-                "starting",
-                "running",
-                "checkpoint_requested",
-                "terminating"
-              ]
+          where: a.mission_id == ^attempt.mission_id and a.status in ^occupying
         )
       )
 

@@ -26,7 +26,7 @@ defmodule Consigliere.Missions.TransitionsTest do
   defp authorized! do
     mission = draft!(Actor.boss())
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
-    {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Fixtures.grant_work_quietly(mission.id, Actor.boss())
     mission
   end
 

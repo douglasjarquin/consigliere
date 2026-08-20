@@ -72,7 +72,7 @@ defmodule Consigliere.API.CLIOpsTest do
   test "pause opens a blocker and resume closes it; attempts cannot pause" do
     {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
-    {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Fixtures.grant_work_quietly(mission.id, Actor.boss())
 
     denied =
       call("mission.pause", %{"mission_id" => mission.id}, %{

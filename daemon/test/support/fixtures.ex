@@ -20,7 +20,35 @@ defmodule Consigliere.Fixtures do
   # tests run inside an Ecto Sandbox transaction (matching this project's
   # existing non-sandboxed test style) -- leftover rows from one test file
   # otherwise accumulate and break any other file's blanket table cleanup.
+  def grant_work_quietly(mission_id, actor \\ Consigliere.Actor.boss(), attrs \\ %{}) do
+    Consigliere.Missions.Transitions.grant_work_authorization(mission_id, actor, attrs)
+  end
+
+  def stop_runtime! do
+    stop_children(Consigliere.MissionDynamicSupervisor)
+    stop_children(Consigliere.RunnerDynamicSupervisor)
+    :ok
+  end
+
+  defp stop_children(sup) do
+    case Process.whereis(sup) do
+      nil ->
+        :ok
+
+      _ ->
+        Enum.each(DynamicSupervisor.which_children(sup), fn
+          {_, pid, _, _} when is_pid(pid) ->
+            _ = DynamicSupervisor.terminate_child(sup, pid)
+
+          _ ->
+            :ok
+        end)
+    end
+  end
+
   def reset_phase1_tables! do
+    stop_runtime!()
+    Repo.delete_all(Consigliere.DispatchOperations.DispatchOperation)
     Repo.update_all(Mission, set: [authorization_id: nil])
     Repo.delete_all(Decision)
     Repo.delete_all(Question)

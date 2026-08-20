@@ -12,7 +12,27 @@ defmodule Consigliere.MissionDynamicSupervisor do
   # topology exists to prevent (this exact regression happened twice before
   # this function existed).
   def start_mission(opts) do
-    DynamicSupervisor.start_child(__MODULE__, {Consigliere.MissionSupervisor, opts})
+    mission_id = Keyword.fetch!(opts, :mission_id)
+
+    case Registry.lookup(Consigliere.Registry, {:mission_supervisor, mission_id}) do
+      [{pid, _}] ->
+        {:ok, pid}
+
+      [] ->
+        case DynamicSupervisor.start_child(__MODULE__, {Consigliere.MissionSupervisor, opts}) do
+          {:ok, pid} ->
+            {:ok, pid}
+
+          {:error, {:already_started, pid}} ->
+            {:ok, pid}
+
+          {:error, _} = err ->
+            case Registry.lookup(Consigliere.Registry, {:mission_supervisor, mission_id}) do
+              [{pid, _}] -> {:ok, pid}
+              [] -> err
+            end
+        end
+    end
   end
 
   @impl true

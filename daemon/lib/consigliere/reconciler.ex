@@ -11,21 +11,15 @@ defmodule Consigliere.Reconciler do
 
   import Ecto.Query
 
-  alias Consigliere.Actor
-  alias Consigliere.Attempts
+  alias Consigliere.AttemptStates
   alias Consigliere.Attempts.Attempt
-  alias Consigliere.DatabaseWriter
-  alias Consigliere.GlobalScheduler
   alias Consigliere.Home
-  alias Consigliere.Incidents.Incident
-  alias Consigliere.Missions.Mission
   alias Consigliere.ProcessGroup
+  alias Consigliere.Reconciler.Pass
   alias Consigliere.Repo
-  alias Consigliere.Txn
+  alias Consigliere.Runtime.Inventory
 
   @non_terminal_states ["starting", "running", "terminating"]
-  @occupying ~w(starting running checkpoint_requested)
-  @terminal ~w(completed failed lost canceled superseded)
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, Keyword.put_new(opts, :name, __MODULE__))
@@ -133,7 +127,7 @@ defmodule Consigliere.Reconciler do
 
     {manifest_results, seen} =
       Enum.map_reduce(paths, seen, fn path, seen ->
-        result = safe(path, fn -> reconcile_manifest(path) end)
+        result = safe(path, fn -> reconcile_path(path, home) end)
         {result, remember(seen, result)}
       end)
 
@@ -143,128 +137,45 @@ defmodule Consigliere.Reconciler do
         MapSet.member?(seen, attempt.id) or runner_live?(attempt.id)
       end)
       |> Enum.map(fn attempt ->
-        safe(attempt.id, fn -> reconcile_attempt_without_manifest(attempt) end)
+        safe(attempt.id, fn -> reconcile_attempt_without_manifest(attempt, home) end)
       end)
 
     manifest_results ++ attempt_results
   end
 
-  defp reconcile_manifest(path) do
-    case classify(path) do
-      {:quarantine_incident, :corrupt} ->
-        record_incident(%{severity: "warning", reason: "corrupt runner manifest: #{path}"})
-        {:incident, :corrupt}
+  defp reconcile_path(path, home) do
+    case Inventory.verify(path, home) do
+      {:valid_live, manifest, attempt} ->
+        Pass.apply_live(manifest, attempt, runner_live?(attempt.id))
 
-      {kind, manifest} when is_map(manifest) ->
-        apply_manifest(kind, manifest)
+      {:valid_terminal, manifest, attempt} ->
+        Pass.apply_terminal_manifest(manifest, attempt, runner_live?(attempt.id))
 
-      other ->
-        {:skipped, other}
+      :identity_mismatch ->
+        Pass.mismatch(path, :identity)
+
+      :stale_generation ->
+        Pass.mismatch(path, :stale)
+
+      :unsafe_pgid ->
+        Pass.mismatch(path, :unsafe_pgid)
+
+      :corrupt ->
+        Pass.corrupt(path)
+
+      :missing ->
+        {:skipped, :missing}
     end
   end
 
-  defp apply_manifest(kind, manifest) do
-    attempt = fetch_attempt(manifest["attempt_id"])
-
-    cond do
-      is_nil(attempt) ->
-        _ = adopt_kill(kind, manifest)
-
-        record_incident(%{
-          severity: "warning",
-          reason: "manifest #{kind} with no Attempt row (#{manifest["attempt_id"]})"
-        })
-
-        {:orphan, kind}
-
-      attempt.status in @terminal ->
-        {:skipped, attempt.id}
-
-      runner_live?(attempt.id) ->
-        {:skipped, attempt.id}
-
-      kind == :lost ->
-        finalize_dead(attempt, :dead_verified)
-
-      kind == :quarantine_incident ->
-        finalize_dead(attempt, :unconfirmed)
-
-      kind == :adopt_and_kill ->
-        record_incident(%{
-          mission_id: attempt.mission_id,
-          subject_type: "attempt",
-          subject_id: attempt.id,
-          severity: "warning",
-          reason: "orphaned live process group; adopt-and-kill"
-        })
-
-        finalize_dead(attempt, adopt_kill(kind, manifest))
-    end
-  end
-
-  defp reconcile_attempt_without_manifest(attempt) do
-    cond do
-      runner_live?(attempt.id) ->
-        {:skipped, attempt.id}
-
-      valid_pgid?(attempt.pgid) and process_group_alive?(attempt.pgid) ->
-        record_incident(%{
-          mission_id: attempt.mission_id,
-          subject_type: "attempt",
-          subject_id: attempt.id,
-          severity: "warning",
-          reason: "occupying Attempt has no manifest and a live process group"
-        })
-
-        finalize_dead(attempt, adopt_kill(:adopt_and_kill, %{"pgid" => attempt.pgid}))
-
-      valid_pgid?(attempt.pgid) ->
-        finalize_dead(attempt, :dead_verified)
-
-      true ->
-        finalize_dead(attempt, :unconfirmed)
-    end
-  end
-
-  defp finalize_dead(attempt, inventory) do
-    result =
-      if checkpoint_imported?(attempt) do
-        Attempts.record_checkpointed(attempt.id, Actor.system(), %{
-          imported_sha: attempt.reported_checkpoint_sha,
-          process_group: :dead_verified
-        })
-
-        {:checkpointed, attempt.id}
-      else
-        Attempts.mark_lost(attempt.id, Actor.system(), %{inventory: inventory})
-        if inventory == :unconfirmed, do: {:quarantined, attempt.id}, else: {:lost, attempt.id}
-      end
-
-    _ = GlobalScheduler.release_slot(attempt.mission_id)
-    result
-  end
-
-  defp checkpoint_imported?(attempt) do
-    attempt.status == "checkpoint_requested" and
-      is_binary(attempt.reported_checkpoint_sha) and
-      case Repo.get(Mission, attempt.mission_id) do
-        %Mission{current_checkpoint_sha: sha} -> sha == attempt.reported_checkpoint_sha
-        _ -> false
-      end
+  defp reconcile_attempt_without_manifest(attempt, _home) do
+    Pass.without_manifest(attempt, runner_live?(attempt.id))
   end
 
   defp occupying_attempts do
-    Repo.all(from(a in Attempt, where: a.status in ^@occupying))
+    statuses = AttemptStates.process_may_exist()
+    Repo.all(from(a in Attempt, where: a.status in ^statuses))
   end
-
-  defp fetch_attempt(id) when is_binary(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> Repo.get(Attempt, uuid)
-      :error -> nil
-    end
-  end
-
-  defp fetch_attempt(_), do: nil
 
   defp runner_live?(attempt_id) do
     case Registry.lookup(Consigliere.Registry, {:runner, attempt_id}) do
@@ -273,27 +184,21 @@ defmodule Consigliere.Reconciler do
     end
   end
 
-  defp valid_pgid?(pgid) when is_integer(pgid) and pgid > 1, do: true
-  defp valid_pgid?(_), do: false
+  defp remember(seen, {tag, id})
+       when is_binary(id) and
+              tag in [
+                :lost,
+                :quarantined,
+                :checkpointed,
+                :adopt_and_kill,
+                :skipped,
+                :reaped,
+                :completed,
+                :failed
+              ],
+       do: MapSet.put(seen, id)
 
-  defp adopt_kill(:adopt_and_kill, %{"pgid" => pgid}) do
-    if ProcessGroup.terminate(pgid) == :dead_verified, do: :dead_verified, else: :unconfirmed
-  end
-
-  defp adopt_kill(_, _), do: :unconfirmed
-
-  defp remember(seen, {:lost, id}) when is_binary(id), do: MapSet.put(seen, id)
-  defp remember(seen, {:quarantined, id}) when is_binary(id), do: MapSet.put(seen, id)
-  defp remember(seen, {:checkpointed, id}) when is_binary(id), do: MapSet.put(seen, id)
-  defp remember(seen, {:adopt_and_kill, id}) when is_binary(id), do: MapSet.put(seen, id)
-  defp remember(seen, {:skipped, id}) when is_binary(id), do: MapSet.put(seen, id)
   defp remember(seen, _), do: seen
-
-  defp record_incident(attrs) do
-    DatabaseWriter.transaction(fn ->
-      Txn.insert!(Incident.changeset(%Incident{}, attrs))
-    end)
-  end
 
   defp safe(item, fun) do
     fun.()

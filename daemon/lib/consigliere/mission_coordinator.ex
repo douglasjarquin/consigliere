@@ -14,6 +14,7 @@ defmodule Consigliere.MissionCoordinator do
 
   import Ecto.Query
 
+  alias Consigliere.AttemptStates
   alias Consigliere.Dispatch
   alias Consigliere.EventBus
   alias Consigliere.Missions.Mission
@@ -132,13 +133,17 @@ defmodule Consigliere.MissionCoordinator do
   end
 
   defp request_schedule(state) do
-    if state.view[:runnable] == true and state.view[:phase] == "authorized" and
-         state.scheduling != true do
+    if should_schedule?(state) and state.scheduling != true do
       send(self(), :schedule)
       %{state | scheduling: true}
     else
       state
     end
+  end
+
+  defp should_schedule?(state) do
+    state.view[:runnable] == true and
+      (state.view[:phase] == "authorized" or state.view[:reason] == :recover)
   end
 
   defp perform_schedule(state) do
@@ -156,6 +161,9 @@ defmodule Consigliere.MissionCoordinator do
   end
 
   defp runnability(mission, blockers, occupying) do
+    recoverable = Enum.filter(occupying, &AttemptStates.recoverable?(&1.status))
+    blocking = occupying -- recoverable
+
     cond do
       mission.phase not in ["authorized", "active"] ->
         {false, :phase}
@@ -163,8 +171,11 @@ defmodule Consigliere.MissionCoordinator do
       blockers != [] ->
         {false, :blocked}
 
-      occupying != [] ->
+      blocking != [] ->
         {false, :occupying}
+
+      recoverable != [] ->
+        {true, :recover}
 
       mission.phase == "authorized" ->
         {true, :ready}
@@ -186,17 +197,11 @@ defmodule Consigliere.MissionCoordinator do
   end
 
   defp occupying_attempts(mission_id) do
+    occupying = AttemptStates.occupying()
+
     Repo.all(
       from(a in Attempt,
-        where:
-          a.mission_id == ^mission_id and
-            a.status in [
-              "planned",
-              "starting",
-              "running",
-              "checkpoint_requested",
-              "terminating"
-            ]
+        where: a.mission_id == ^mission_id and a.status in ^occupying
       )
     )
   end

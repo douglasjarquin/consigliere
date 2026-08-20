@@ -12,10 +12,9 @@ defmodule Consigliere.GlobalScheduler do
 
   import Ecto.Query
 
+  alias Consigliere.AttemptStates
   alias Consigliere.Repo
   alias Consigliere.Attempts.Attempt
-
-  @occupying ~w(planned starting running checkpoint_requested terminating)
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, Keyword.put_new(opts, :name, __MODULE__))
@@ -71,7 +70,8 @@ defmodule Consigliere.GlobalScheduler do
   end
 
   defp rebuild_occupants do
-    Repo.all(from(a in Attempt, where: a.status in ^@occupying, select: a.mission_id))
+    occupying = AttemptStates.occupying()
+    Repo.all(from(a in Attempt, where: a.status in ^occupying, select: a.mission_id))
     |> MapSet.new()
   end
 end

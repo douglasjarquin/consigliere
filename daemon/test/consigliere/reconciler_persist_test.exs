@@ -27,7 +27,7 @@ defmodule Consigliere.ReconcilerPersistTest do
       Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
-    {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Fixtures.grant_work_quietly(mission.id, Actor.boss())
 
     {:ok, %{mission: mission, attempt: attempt, workspace: workspace}} =
       Missions.start(mission.id, Actor.system(), %{
@@ -94,7 +94,9 @@ defmodule Consigliere.ReconcilerPersistTest do
     assert Repo.get!(Attempt, attempt.id).status == "lost"
   end
 
-  test "an already-terminal Attempt is left untouched", %{home: home} do
+  test "an already-terminal Attempt with a dead_verified manifest is left untouched", %{
+    home: home
+  } do
     %{attempt: attempt} = running_attempt!()
     {:ok, _} = Attempts.fail(attempt.id, Actor.system(), %{process_group: :dead_verified})
     write_manifest!(home, attempt.id, %{"state" => "dead_verified"})
@@ -102,6 +104,81 @@ defmodule Consigliere.ReconcilerPersistTest do
     results = Reconciler.run(home: home)
     assert {:skipped, _} = Enum.find(results, &match?({:skipped, _}, &1))
     assert Repo.get!(Attempt, attempt.id).status == "failed"
+  end
+
+  test "a live manifest for a terminal Attempt is terminated, not skipped", %{home: home} do
+    %{attempt: attempt} = running_attempt!()
+    {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
+
+    on_exit(fn ->
+      System.cmd("kill", ["-9", "-#{pgid}"], stderr_to_stdout: true)
+      if Port.info(port), do: Port.close(port)
+    end)
+
+    {:ok, _} = Repo.update(Attempt.changeset(attempt, %{pgid: pgid}))
+    {:ok, _} = Attempts.fail(attempt.id, Actor.system(), %{process_group: :dead_verified})
+    write_manifest!(home, attempt.id, %{"state" => "running", "pgid" => pgid})
+
+    results = Reconciler.run(home: home)
+    assert Enum.any?(results, &match?({:reaped, _}, &1))
+    assert Repo.get!(Attempt, attempt.id).status == "failed"
+    Consigliere.ProcessHelpers.wait_group_gone(pgid)
+  end
+
+  test "accepted session.completed is completed, not lost, after verified death", %{home: home} do
+    %{attempt: attempt} = running_attempt!()
+
+    {:ok, _} =
+      Repo.update(Attempt.changeset(attempt, %{exit_classification: "completed"}))
+
+    write_manifest!(home, attempt.id, %{"state" => "dead_verified"})
+    results = Reconciler.run(home: home)
+    assert {:completed, _} = Enum.find(results, &match?({:completed, _}, &1))
+    assert Repo.get!(Attempt, attempt.id).status == "completed"
+  end
+
+  test "nil Attempt.pgid with a live matching manifest does not claim verified death", %{
+    home: home
+  } do
+    %{attempt: attempt} = running_attempt!()
+    {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
+
+    on_exit(fn ->
+      System.cmd("kill", ["-9", "-#{pgid}"], stderr_to_stdout: true)
+      if Port.info(port), do: Port.close(port)
+    end)
+
+    {:ok, _} = Repo.update(Attempt.changeset(attempt, %{pgid: nil}))
+    write_manifest!(home, attempt.id, %{"state" => "running", "pgid" => pgid})
+
+    results = Reconciler.run(home: home)
+    Consigliere.ProcessHelpers.wait_group_gone(pgid)
+    refute Consigliere.ProcessGroup.alive?(pgid)
+    assert Enum.any?(results, fn
+             {:lost, id} -> id == attempt.id
+             {:quarantined, id} -> id == attempt.id
+             _ -> false
+           end)
+  end
+
+  test "a forged manifest pgid of an unrelated live process is never signaled", %{home: home} do
+    {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
+
+    on_exit(fn ->
+      System.cmd("kill", ["-9", "-#{pgid}"], stderr_to_stdout: true)
+      if Port.info(port), do: Port.close(port)
+    end)
+
+    write_manifest!(home, Ecto.UUID.generate(), %{
+      "state" => "running",
+      "pgid" => pgid,
+      "mission_id" => Ecto.UUID.generate(),
+      "fencing_token" => "forge"
+    })
+
+    _results = Reconciler.run(home: home)
+    assert Consigliere.ProcessGroup.alive?(pgid)
+    if Port.info(port), do: :ok
   end
 
   test "occupying Attempt with no manifest and no live runner is marked lost unconfirmed" do
@@ -165,7 +242,7 @@ defmodule Consigliere.ReconcilerPersistTest do
     assert Repo.get!(Attempt, attempt.id).status == "checkpointed"
   end
 
-  test "a running manifest with no Attempt row adopt-and-kills the live process group", %{
+  test "a running manifest with no Attempt row does not signal the claimed process group", %{
     home: home
   } do
     {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
@@ -175,15 +252,21 @@ defmodule Consigliere.ReconcilerPersistTest do
       if Port.info(port), do: Port.close(port)
     end)
 
-    write_manifest!(home, "orphan-#{System.unique_integer([:positive])}", %{
+    write_manifest!(home, Ecto.UUID.generate(), %{
       "state" => "running",
       "pgid" => pgid
     })
 
     results = Reconciler.run(home: home)
-    assert Enum.any?(results, &match?({:orphan, :adopt_and_kill}, &1))
-    Consigliere.ProcessHelpers.wait_group_gone(pgid)
+    assert Enum.any?(results, fn
+             {:incident, _} -> true
+             {:skipped, _} -> true
+             _ -> false
+           end)
+
+    assert Consigliere.ProcessGroup.alive?(pgid)
     assert Repo.aggregate(Incident, :count) >= 1
+    if Port.info(port), do: :ok
   end
 
   test "adopt-and-kill of a live group with an Attempt row terminates it and marks the Attempt lost",

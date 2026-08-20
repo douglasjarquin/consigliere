@@ -30,11 +30,21 @@ defmodule Consigliere.ProcessGroup do
     end
   end
 
+  def probe(pgid) when is_integer(pgid) and pgid > 1 do
+    Consigliere.ProcessGroup.NIF.probe(pgid)
+  rescue
+    _ -> :unknown
+  catch
+    _, _ -> :unknown
+  end
+
+  def probe(_), do: :unsafe
+
   def alive?(pgid) when is_integer(pgid) and pgid > 1 do
     case runnable_members(pgid) do
       {:ok, []} -> false
       {:ok, _} -> true
-      :error -> kill_probe_alive?(pgid)
+      :error -> probe(pgid) != :absent
     end
   end
 
@@ -136,15 +146,4 @@ defmodule Consigliere.ProcessGroup do
   defp zombie?(stat) when is_binary(stat), do: String.starts_with?(stat, "Z")
   defp zombie?(_), do: false
 
-  defp kill_probe_alive?(pgid) do
-    {out, status} = System.cmd("kill", ["-0", "-#{pgid}"], stderr_to_stdout: true)
-    status == 0 or not esrch?(out)
-  rescue
-    _ -> true
-  end
-
-  defp esrch?(out) do
-    down = String.downcase(out)
-    String.contains?(down, "no such process") or String.contains?(down, "esrch")
-  end
 end

@@ -47,6 +47,7 @@ defmodule Consigliere.Missions do
 
     with {:ok, mission} <- Transitions.grant_work_authorization(mission_id, actor, attrs) do
       maybe_provision(mission)
+      _ = Consigliere.MissionBootstrap.ensure_mission(mission.id)
       {:ok, mission}
     end
   end

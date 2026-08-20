@@ -147,7 +147,7 @@ defmodule Consigliere.MissionCoordinatorRehydrateTest do
 
     snap = MissionCoordinator.evaluate(new_pid)
     assert snap.phase == "active"
-    assert snap.reason == :occupying
+    assert snap.reason in [:occupying, :recover]
   end
 
   defp await_until(fun, remaining \\ 100) do

@@ -20,6 +20,10 @@ config :consigliere_daemon, Consigliere.Reconciler,
   poll_interval_ms: :infinity,
   run_on_boot: false
 
+config :consigliere_daemon, Consigliere.MissionBootstrap,
+  poll_interval_ms: :infinity,
+  subscribe: false
+
 config :consigliere_daemon,
   harness_adapter: Consigliere.Harness.Fake,
   made_adapter: Consigliere.Made.Fake,

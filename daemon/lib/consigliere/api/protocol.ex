@@ -537,18 +537,14 @@ defmodule Consigliere.API.Protocol do
               )
             )
 
+          occupying_statuses = Consigliere.AttemptStates.occupying()
+
           occupying =
             Repo.all(
               from(a in Consigliere.Attempts.Attempt,
                 where:
                   a.mission_id == ^mission.id and
-                    a.status in [
-                      "planned",
-                      "starting",
-                      "running",
-                      "checkpoint_requested",
-                      "terminating"
-                    ]
+                    a.status in ^occupying_statuses
               )
             )
 

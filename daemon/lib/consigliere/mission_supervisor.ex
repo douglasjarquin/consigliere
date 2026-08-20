@@ -28,7 +28,11 @@ defmodule Consigliere.MissionSupervisor do
   end
 
   def start_link(opts) do
-    Supervisor.start_link(__MODULE__, opts)
+    mission_id = Keyword.fetch!(opts, :mission_id)
+
+    Supervisor.start_link(__MODULE__, opts,
+      name: {:via, Registry, {Consigliere.Registry, {:mission_supervisor, mission_id}}}
+    )
   end
 
   @impl true

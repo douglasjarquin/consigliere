@@ -20,7 +20,7 @@ defmodule Consigliere.Attempts.TransitionsTest do
       Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
-    {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Fixtures.grant_work_quietly(mission.id, Actor.boss())
 
     {:ok, %{mission: mission, attempt: attempt, workspace: workspace}} =
       Missions.start(mission.id, Actor.system(), %{
