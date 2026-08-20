@@ -31,12 +31,9 @@ defmodule Consigliere.ProcessHelpers do
       )
 
     script = """
-    fork do
-      Process.setsid
-      File.write(ARGV.fetch(0), Process.pid.to_s)
-      sleep 60
-    end
-    exit!(0)
+    Process.daemon(true, true)
+    File.write(ARGV.fetch(0), Process.pid.to_s)
+    sleep 60
     """
 
     port =
