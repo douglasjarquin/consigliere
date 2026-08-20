@@ -1,9 +1,9 @@
 # Boss-private operational home — never tracked.
-data/
-state/
-config/
-host/
-projects/
+/data/
+/state/
+/config/
+/host/
+/projects/
 .no-mistakes/
 
 # Elixir's config/ convention is source, not the boss-private tree above.
