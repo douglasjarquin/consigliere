@@ -24,14 +24,30 @@ defmodule Consigliere.ProcessHelpers do
         System.find_executable("ruby3") ||
         raise("ruby is required to spawn a setsid process group")
 
+    pid_path =
+      Path.join(
+        System.tmp_dir!(),
+        "consigliere-session-leader-#{System.unique_integer([:positive, :monotonic])}.pid"
+      )
+
+    script = """
+    child_pid = fork do
+      Process.setsid
+      sleep 60
+    end
+    File.write(ARGV.fetch(0), child_pid.to_s)
+    Process.wait(child_pid)
+    """
+
     port =
       Port.open({:spawn_executable, ruby}, [
         :binary,
         :exit_status,
-        args: ["-e", "Process.setsid; sleep 60"]
+        args: ["-e", script, pid_path]
       ])
 
-    {:os_pid, pid} = Port.info(port, :os_pid)
+    pid = wait_session_leader_pid!(pid_path)
+    File.rm(pid_path)
     wait_session_leader!(pid)
     {port, pid}
   end
@@ -67,5 +83,27 @@ defmodule Consigliere.ProcessHelpers do
       :ok -> :ok
       :error -> raise "pid #{pid} never became its own session leader"
     end
+  end
+
+  defp wait_session_leader_pid!(path, attempts \\ 50) do
+    case File.read(path) do
+      {:ok, contents} ->
+        case Integer.parse(String.trim(contents)) do
+          {pid, ""} -> pid
+          _ -> retry_session_leader_pid!(path, attempts)
+        end
+
+      {:error, _} ->
+        retry_session_leader_pid!(path, attempts)
+    end
+  end
+
+  defp retry_session_leader_pid!(path, attempts) when attempts > 0 do
+    Process.sleep(20)
+    wait_session_leader_pid!(path, attempts - 1)
+  end
+
+  defp retry_session_leader_pid!(path, 0) do
+    raise "session leader pid file #{path} was not written"
   end
 end
