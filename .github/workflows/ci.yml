@@ -86,8 +86,11 @@ jobs:
           start_daemon() {
             # Mix release start execs the BEAM and does not return.
             # rpc stop is unusable: RELEASE_DISTRIBUTION=none.
-            "$REL" start >>"$BOOT_LOG" 2>&1 < /dev/null &
+            # setsid moves the BEAM out of the Actions step process group so
+            # a boot ERROR cannot abort this script before the socket wait.
+            setsid "$REL" start >>"$BOOT_LOG" 2>&1 < /dev/null &
             echo $! >"$CS_HOME/beam.pid"
+            disown || true
           }
 
           wait_sock() {

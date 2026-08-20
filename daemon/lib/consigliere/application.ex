@@ -10,8 +10,10 @@ defmodule Consigliere.Application do
   @impl true
   def start(_type, _args) do
     Logger.info(
-      "consigliere boot command=#{inspect(System.get_env("RELEASE_COMMAND"))} " <>
-        "release_root=#{inspect(release?())} cs_home=#{inspect(System.get_env("CS_HOME"))} " <>
+      "consigliere boot pid=#{System.pid()} command=#{inspect(System.get_env("RELEASE_COMMAND"))} " <>
+        "os_command=#{inspect(os_env(~c"RELEASE_COMMAND"))} " <>
+        "os_root=#{inspect(os_env(~c"RELEASE_ROOT"))} " <>
+        "cs_home=#{inspect(System.get_env("CS_HOME"))} " <>
         "home=#{inspect(Consigliere.Home.dir())} children=#{length(children())}"
     )
 
@@ -80,7 +82,7 @@ defmodule Consigliere.Application do
           result,
         home
       ) do
-    if lock_contention_outcome(home) == :handoff and release?() do
+    if lock_contention_outcome(home) == :handoff and halt_on_lock_contention?() do
       Logger.info("consigliere boot: CS_HOME already owned; this VM exits 0")
       System.halt(0)
     else
@@ -98,7 +100,14 @@ defmodule Consigliere.Application do
     result
   end
 
-  defp release? do
-    not is_nil(System.get_env("RELEASE_ROOT"))
+  defp halt_on_lock_contention? do
+    not Code.ensure_loaded?(Mix)
+  end
+
+  defp os_env(name) do
+    case :os.getenv(name) do
+      false -> nil
+      value -> List.to_string(value)
+    end
   end
 end

@@ -74,6 +74,7 @@ defmodule CIContractTest do
     # background start and wait on sockets instead of rpc stop
     # (RELEASE_DISTRIBUTION=none).
     assert yaml =~ "beam.pid"
+    assert yaml =~ "setsid"
     assert yaml =~ ~r/"\$REL" start/
     refute yaml =~ ~r/"\$REL" daemon\b/
     refute yaml =~ ~r/"\$REL" stop/
