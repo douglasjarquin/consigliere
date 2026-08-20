@@ -18,7 +18,13 @@ defmodule Consigliere.Home.Lock do
   @helper_path "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/opt/python@3/bin"
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts)
+    home = opts[:home] || Home.dir()
+    name = Keyword.get(opts, :name, {:global, {__MODULE__, Path.expand(home)}})
+
+    case GenServer.start_link(__MODULE__, opts, name: name) do
+      {:error, {:already_started, _pid}} -> {:error, :already_running}
+      other -> other
+    end
   end
 
   @impl true
@@ -54,17 +60,7 @@ defmodule Consigliere.Home.Lock do
   defp acquire_flock(home, remaining \\ @lock_retry_times) do
     path = Home.lock_path(home)
 
-    result =
-      cond do
-        python = python_executable() ->
-          acquire_python(python, materialize_script!(home), path)
-
-        flock = helper_executable("flock") ->
-          acquire_util_linux_flock(flock, path)
-
-        true ->
-          {:error, :python3_required}
-      end
+    result = acquire_once(home, path)
 
     case result do
       :already_running ->
@@ -77,6 +73,37 @@ defmodule Consigliere.Home.Lock do
 
       other ->
         other
+    end
+  end
+
+  defp acquire_once(home, path) do
+    {first, second} =
+      case :os.type() do
+        {:unix, :linux} -> {"flock", "python"}
+        _ -> {"python", "flock"}
+      end
+
+    cond do
+      helper = acquire_helper(first, home, path) ->
+        helper
+
+      helper = acquire_helper(second, home, path) ->
+        helper
+
+      true ->
+        {:error, :python3_required}
+    end
+  end
+
+  defp acquire_helper("python", home, path) do
+    if python = python_executable() do
+      acquire_python(python, materialize_script!(home), path)
+    end
+  end
+
+  defp acquire_helper("flock", _home, path) do
+    if flock = helper_executable("flock") do
+      acquire_util_linux_flock(flock, path)
     end
   end
 
