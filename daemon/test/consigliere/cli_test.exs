@@ -8,10 +8,11 @@ defmodule Consigliere.CLITest do
     home =
       Path.join(System.tmp_dir!(), "cs-home-cli-test-#{System.unique_integer([:positive])}")
 
+    previous = System.get_env("CS_HOME")
     System.put_env("CS_HOME", home)
 
     on_exit(fn ->
-      System.delete_env("CS_HOME")
+      if previous, do: System.put_env("CS_HOME", previous), else: System.delete_env("CS_HOME")
       File.rm_rf!(home)
     end)
 

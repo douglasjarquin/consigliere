@@ -14,6 +14,10 @@ defmodule Consigliere.Home do
     Path.join(home, "boss.sock")
   end
 
+  def api_socket_path(home \\ dir()) do
+    Path.join(home, "api.sock")
+  end
+
   def last_error_path(home \\ dir()) do
     Path.join(home, "last_error.log")
   end

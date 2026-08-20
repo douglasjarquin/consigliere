@@ -28,7 +28,8 @@ defmodule Consigliere.Application do
       Consigliere.Reconciler,
       {Registry, keys: :unique, name: Consigliere.Registry},
       Consigliere.RunnerDynamicSupervisor,
-      Consigliere.MissionDynamicSupervisor
+      Consigliere.MissionDynamicSupervisor,
+      Consigliere.API.Supervisor
     ]
 
     # :one_for_one is deliberate: a crashed sibling must never kill unrelated work (see ADR-004).
