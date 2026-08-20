@@ -65,4 +65,49 @@ defmodule Consigliere.CommandReceiptsTest do
     assert conflict["ok"] == false
     assert conflict["error"]["reason"] =~ "idempotency_conflict"
   end
+
+  test "the same key used for a different operation is a conflict" do
+    project_id = Fixtures.dummy_project!().id
+
+    created =
+      handle("k-op", "mission.create", %{
+        "objective" => "o",
+        "scope" => "s",
+        "acceptance_criteria" => "a",
+        "project_id" => project_id
+      })
+
+    assert created["ok"]
+    id = created["payload"]["id"]
+
+    conflict = handle("k-op", "mission.submit", %{"mission_id" => id})
+    assert conflict["ok"] == false
+    assert conflict["error"]["reason"] =~ "idempotency_conflict"
+  end
+
+  test "a failed command replays as the same failure, not ok true" do
+    missing = Ecto.UUID.generate()
+    first = handle("k-fail", "mission.submit", %{"mission_id" => missing})
+    second = handle("k-fail", "mission.submit", %{"mission_id" => missing})
+
+    assert first["ok"] == false
+    assert second["ok"] == false
+    assert first["error"]["code"] == second["error"]["code"]
+  end
+
+  test "two Attempts may reuse the same idempotency key" do
+    a = Consigliere.Actor.attempt("att-1", "fence-1")
+    b = Consigliere.Actor.attempt("att-2", "fence-2")
+    payload = %{"ping" => true}
+
+    assert {:ok, %{"pong" => 1}} =
+             Consigliere.CommandReceipts.remember(a, "ping", "shared", payload, fn ->
+               {:ok, %{"pong" => 1}}
+             end)
+
+    assert {:ok, %{"pong" => 2}} =
+             Consigliere.CommandReceipts.remember(b, "ping", "shared", payload, fn ->
+               {:ok, %{"pong" => 2}}
+             end)
+  end
 end

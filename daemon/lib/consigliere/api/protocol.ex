@@ -53,7 +53,7 @@ defmodule Consigliere.API.Protocol do
   defp run_maybe_once(op, payload, actor, req, id) when op in @mutating do
     key = req["idempotency_key"] || id
 
-    CommandReceipts.remember(actor.principal, op, key, payload, fn ->
+    CommandReceipts.remember(actor, op, key, payload, fn ->
       run(op, payload, actor)
     end)
     |> wrap(id)
@@ -433,7 +433,13 @@ defmodule Consigliere.API.Protocol do
   defp ok_question({:ok, %{id: id, status: status}}), do: {:ok, %{"id" => id, "status" => status}}
   defp ok_question(other), do: other
 
-  defp wrap({:ok, :replay, payload}, id), do: wrap({:ok, payload}, id)
+  defp wrap({:ok, :replay, %{"ok" => true, "payload" => payload}}, id),
+    do: wrap({:ok, payload}, id)
+
+  defp wrap({:ok, :replay, %{"ok" => false, "code" => code, "reason" => reason}}, id),
+    do: fail(id, code, reason)
+
+  defp wrap({:ok, :replay, payload}, id) when is_map(payload), do: wrap({:ok, payload}, id)
 
   defp wrap({:ok, payload}, id),
     do: %{"v" => @version, "id" => id, "ok" => true, "payload" => payload}
