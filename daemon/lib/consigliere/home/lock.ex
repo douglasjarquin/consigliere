@@ -2,11 +2,20 @@ defmodule Consigliere.Home.Lock do
   @moduledoc """
   Exclusive CS_HOME ownership via fcntl flock. Socket files are liveness
   probes only; they are never unlinked until this process holds the lock.
+
+  Mix releases replace PATH with erts/bin. Python and flock are found
+  on a fixed Unix path. The lock helper is compiled into the BEAM so a
+  missing priv copy cannot fail boot.
   """
 
   use GenServer
 
   alias Consigliere.Home
+
+  @lock_script_path Path.expand("../../../priv/home_lock.py", __DIR__)
+  @external_resource @lock_script_path
+  @lock_script File.read!(@lock_script_path)
+  @helper_path "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/opt/python@3/bin"
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts)
@@ -17,7 +26,7 @@ defmodule Consigliere.Home.Lock do
     home = opts[:home] || Home.dir()
     Home.ensure_dir!(home)
 
-    case acquire_flock(Home.lock_path(home)) do
+    case acquire_flock(home) do
       {:ok, port} ->
         case bind_probe(Home.boss_socket_path(home)) do
           {:ok, listen} ->
@@ -37,56 +46,91 @@ defmodule Consigliere.Home.Lock do
     end
   end
 
-  @python_candidates [
-    "python3",
-    "python",
-    "/usr/bin/python3",
-    "/usr/bin/python",
-    "/usr/local/bin/python3",
-    "/opt/homebrew/bin/python3"
-  ]
+  defp acquire_flock(home) do
+    path = Home.lock_path(home)
 
-  defp acquire_flock(path) do
-    python = python_executable()
-    script = Path.join(:code.priv_dir(:consigliere_daemon), "home_lock.py")
+    cond do
+      python = python_executable() ->
+        acquire_python(python, materialize_script!(home), path)
 
-    if python && File.exists?(script) do
-      port =
-        Port.open({:spawn_executable, python}, [
-          :binary,
-          :exit_status,
-          :hide,
-          args: [script, path]
-        ])
+      flock = helper_executable("flock") ->
+        acquire_util_linux_flock(flock, path)
 
-      receive do
-        {^port, {:data, data}} ->
-          case String.trim(to_string(data)) do
-            "ok" -> {:ok, port}
-            "locked" -> close_port(port, :already_running)
-            _ -> close_port(port, {:error, {:unexpected, data}})
-          end
-
-        {^port, {:exit_status, 2}} ->
-          :already_running
-
-        {^port, {:exit_status, status}} ->
-          {:error, {:lock_exit, status}}
-      after
-        2_000 ->
-          close_port(port, {:error, :timeout})
-      end
-    else
-      {:error, :python3_required}
+      true ->
+        {:error, :python3_required}
     end
   end
 
+  defp acquire_python(python, script, path) do
+    port =
+      Port.open({:spawn_executable, python}, [
+        :binary,
+        :exit_status,
+        :hide,
+        args: [script, path]
+      ])
+
+    await_lock(port)
+  end
+
+  defp acquire_util_linux_flock(flock, path) do
+    port =
+      Port.open({:spawn_executable, flock}, [
+        :binary,
+        :exit_status,
+        :hide,
+        args: [
+          "--nonblock",
+          "--exclusive",
+          path,
+          "--command",
+          "sh -c 'printf ok\\n; exec cat'"
+        ]
+      ])
+
+    await_lock(port)
+  end
+
+  defp await_lock(port) do
+    receive do
+      {^port, {:data, data}} ->
+        case String.trim(to_string(data)) do
+          "ok" -> {:ok, port}
+          "locked" -> close_port(port, :already_running)
+          _ -> close_port(port, {:error, {:unexpected, data}})
+        end
+
+      {^port, {:exit_status, status}} when status in [1, 2] ->
+        :already_running
+
+      {^port, {:exit_status, status}} ->
+        {:error, {:lock_exit, status}}
+    after
+      2_000 ->
+        close_port(port, {:error, :timeout})
+    end
+  end
+
+  defp materialize_script!(home) do
+    dest = Path.join(home, "bin/home_lock.py")
+    File.mkdir_p!(Path.dirname(dest))
+    File.write!(dest, @lock_script)
+    File.chmod!(dest, 0o700)
+    dest
+  end
+
   defp python_executable do
-    Enum.find_value(@python_candidates, fn name ->
-      if String.starts_with?(name, "/") do
-        if File.exists?(name), do: name
-      else
-        System.find_executable(name)
+    helper_executable("python3") || helper_executable("python")
+  end
+
+  defp helper_executable(name) do
+    (@helper_path <> ":" <> (System.get_env("PATH") || ""))
+    |> String.split(":", trim: true)
+    |> Enum.find_value(fn dir ->
+      path = Path.join(dir, name)
+
+      if File.exists?(path) do
+        path
       end
     end)
   end

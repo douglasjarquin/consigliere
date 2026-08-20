@@ -69,6 +69,19 @@ defmodule Consigliere.Home.LockTest do
     GenServer.stop(winner)
   end
 
+  test "a stripped PATH still finds a lock helper", %{home: home} do
+    previous = System.get_env("PATH")
+    System.put_env("PATH", "/nonexistent")
+
+    on_exit(fn ->
+      if previous, do: System.put_env("PATH", previous), else: System.delete_env("PATH")
+    end)
+
+    assert {:ok, pid} = Lock.start_link(home: home)
+    assert File.exists?(Path.join(home, "bin/home_lock.py"))
+    GenServer.stop(pid)
+  end
+
   test "two different homes can be locked at once" do
     a = Path.join(System.tmp_dir!(), "cs-home-lock-a-#{System.unique_integer([:positive])}")
     b = Path.join(System.tmp_dir!(), "cs-home-lock-b-#{System.unique_integer([:positive])}")
