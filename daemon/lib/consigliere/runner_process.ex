@@ -122,25 +122,30 @@ defmodule Consigliere.RunnerProcess do
 
   defp handle_control(line, state) do
     case JSON.decode(line) do
-      {:ok, %{"type" => "stdout_chunk"} = msg} ->
-        bump_heartbeat(state, Map.get(msg, "data", ""))
-
-      {:ok, %{"type" => "harness_exited", "exit_code" => 0}} ->
-        %{state | stop_reason: :normal}
-
-      {:ok, %{"type" => "harness_exited", "exit_code" => code}} ->
-        %{state | stop_reason: {:harness_exited, code}}
-
-      {:ok, %{"type" => "termination_complete"}} ->
+      {:ok, %{"fencing_token" => token}} when token != state.fencing_token ->
         state
 
-      {:ok, _} ->
-        state
+      {:ok, msg} ->
+        handle_control_msg(msg, state)
 
       {:error, _} ->
         state
     end
   end
+
+  defp handle_control_msg(%{"type" => "stdout_chunk"} = msg, state) do
+    bump_heartbeat(state, Map.get(msg, "data", ""))
+  end
+
+  defp handle_control_msg(%{"type" => "harness_exited", "exit_code" => 0}, state) do
+    %{state | stop_reason: :normal}
+  end
+
+  defp handle_control_msg(%{"type" => "harness_exited", "exit_code" => code}, state) do
+    %{state | stop_reason: {:harness_exited, code}}
+  end
+
+  defp handle_control_msg(_msg, state), do: state
 
   defp bump_heartbeat(state, data) do
     lines = data |> to_string() |> String.split("\n", trim: true) |> length()

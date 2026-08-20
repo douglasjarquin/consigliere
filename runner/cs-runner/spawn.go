@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -30,6 +31,7 @@ func SpawnHarness(command []string, confirmTimeout time.Duration) (*HarnessHandl
 
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Env = scrubbedHarnessEnv()
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -63,4 +65,19 @@ func SpawnHarness(command []string, confirmTimeout time.Duration) (*HarnessHandl
 	syscall.Kill(pid, syscall.SIGKILL)
 	cmd.Wait()
 	return &HarnessHandle{PID: pid}, fmt.Errorf("harness pid %d never completed its own setsid() within %v", pid, confirmTimeout)
+}
+
+// scrubbedHarnessEnv is the only environment the harness process is
+// allowed to inherit. CS_HOME, credentials, and the daemon's own env
+// must not leak (Phase 2 test 12 / threat-model T3). PATH is rebuilt
+// so a shebang script can still find sleep/sh; it is not copied from
+// the runner.
+func scrubbedHarnessEnv() []string {
+	return []string{
+		"PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin",
+		"LANG=C",
+		"LC_ALL=C",
+		"HOME=/var/empty",
+		"TMPDIR=" + os.TempDir(),
+	}
 }
