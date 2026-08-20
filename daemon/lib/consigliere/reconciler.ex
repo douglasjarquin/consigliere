@@ -19,6 +19,7 @@ defmodule Consigliere.Reconciler do
   alias Consigliere.Home
   alias Consigliere.Incidents.Incident
   alias Consigliere.Missions.Mission
+  alias Consigliere.ProcessGroup
   alias Consigliere.Repo
   alias Consigliere.Txn
 
@@ -165,6 +166,8 @@ defmodule Consigliere.Reconciler do
 
     cond do
       is_nil(attempt) ->
+        _ = adopt_kill(kind, manifest)
+
         record_incident(%{
           severity: "warning",
           reason: "manifest #{kind} with no Attempt row (#{manifest["attempt_id"]})"
@@ -190,10 +193,10 @@ defmodule Consigliere.Reconciler do
           subject_type: "attempt",
           subject_id: attempt.id,
           severity: "warning",
-          reason: "orphaned live process group; adopt-and-kill is Phase 2"
+          reason: "orphaned live process group; adopt-and-kill"
         })
 
-        {:adopt_and_kill, attempt.id}
+        finalize_dead(attempt, adopt_kill(kind, manifest))
     end
   end
 
@@ -211,7 +214,7 @@ defmodule Consigliere.Reconciler do
           reason: "occupying Attempt has no manifest and a live process group"
         })
 
-        {:adopt_and_kill, attempt.id}
+        finalize_dead(attempt, adopt_kill(:adopt_and_kill, %{"pgid" => attempt.pgid}))
 
       valid_pgid?(attempt.pgid) ->
         finalize_dead(attempt, :dead_verified)
@@ -270,6 +273,12 @@ defmodule Consigliere.Reconciler do
 
   defp valid_pgid?(pgid) when is_integer(pgid) and pgid > 1, do: true
   defp valid_pgid?(_), do: false
+
+  defp adopt_kill(:adopt_and_kill, %{"pgid" => pgid}) do
+    if ProcessGroup.terminate(pgid) == :dead_verified, do: :dead_verified, else: :unconfirmed
+  end
+
+  defp adopt_kill(_, _), do: :unconfirmed
 
   defp remember(seen, {:lost, id}) when is_binary(id), do: MapSet.put(seen, id)
   defp remember(seen, {:quarantined, id}) when is_binary(id), do: MapSet.put(seen, id)

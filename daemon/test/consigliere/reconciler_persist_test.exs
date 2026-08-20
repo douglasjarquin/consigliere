@@ -156,29 +156,92 @@ defmodule Consigliere.ReconcilerPersistTest do
     assert Repo.get!(Attempt, attempt.id).status == "checkpointed"
   end
 
-  test "an orphan live process group is not marked lost (adopt-and-kill deferred)", %{home: home} do
-    %{attempt: attempt} = running_attempt!()
-
-    port = Port.open({:spawn_executable, "/bin/sleep"}, [:exit_status, args: ["60"]])
-    {:os_pid, os_pid} = Port.info(port, :os_pid)
+  test "a running manifest with no Attempt row adopt-and-kills the live process group", %{
+    home: home
+  } do
+    {port, pgid} = spawn_session_leader()
 
     on_exit(fn ->
+      System.cmd("kill", ["-9", "-#{pgid}"], stderr_to_stdout: true)
       if Port.info(port), do: Port.close(port)
-      System.cmd("kill", ["-9", to_string(os_pid)], stderr_to_stdout: true)
     end)
 
-    {:ok, attempt} = Repo.update(Attempt.changeset(attempt, %{pgid: os_pid}))
-    write_manifest!(home, attempt.id, %{"state" => "running", "pgid" => os_pid})
+    write_manifest!(home, "orphan-#{System.unique_integer([:positive])}", %{
+      "state" => "running",
+      "pgid" => pgid
+    })
 
     results = Reconciler.run(home: home)
+    assert Enum.any?(results, &match?({:orphan, :adopt_and_kill}, &1))
+    refute_process_group_alive(pgid)
+    assert Repo.aggregate(Incident, :count) >= 1
+  end
 
-    if Enum.any?(results, &match?({:adopt_and_kill, _}, &1)) do
-      assert Repo.get!(Attempt, attempt.id).status == "running"
-    else
-      # /bin/sleep may not be its own process group on this OS; classification
-      # must still not crash, and a conclusively-dead group is lost.
-      assert Enum.any?(results, &match?({:lost, _}, &1)) or
-               Enum.any?(results, &match?({:quarantined, _}, &1))
+  test "adopt-and-kill of a live group with an Attempt row terminates it and marks the Attempt lost",
+       %{home: home} do
+    %{attempt: attempt} = running_attempt!()
+    {port, pgid} = spawn_session_leader()
+
+    on_exit(fn ->
+      System.cmd("kill", ["-9", "-#{pgid}"], stderr_to_stdout: true)
+      if Port.info(port), do: Port.close(port)
+    end)
+
+    {:ok, _} = Repo.update(Attempt.changeset(attempt, %{pgid: pgid}))
+    write_manifest!(home, attempt.id, %{"state" => "running", "pgid" => pgid})
+
+    results = Reconciler.run(home: home)
+    assert {:lost, id} = Enum.find(results, &match?({:lost, _}, &1))
+    assert id == attempt.id
+    assert Repo.get!(Attempt, attempt.id).status == "lost"
+    refute_process_group_alive(pgid)
+  end
+
+  defp spawn_session_leader do
+    ruby = System.find_executable("ruby") || flunk("ruby is required to spawn a setsid process group")
+
+    port =
+      Port.open({:spawn_executable, ruby}, [
+        :binary,
+        :exit_status,
+        args: ["-e", "Process.setsid; sleep 60"]
+      ])
+
+    {:os_pid, pid} = Port.info(port, :os_pid)
+    wait_session_leader!(pid)
+    {port, pid}
+  end
+
+  defp wait_session_leader!(pid) do
+    Enum.reduce_while(1..50, :error, fn _, _ ->
+      {out, 0} = System.cmd("ps", ["-o", "pgid=", "-p", to_string(pid)], stderr_to_stdout: true)
+
+      case Integer.parse(String.trim(out)) do
+        {pgid, _} when pgid == pid -> {:halt, :ok}
+        _ ->
+          Process.sleep(20)
+          {:cont, :error}
+      end
+    end)
+    |> case do
+      :ok -> :ok
+      :error -> flunk("pid #{pid} never became its own session leader")
+    end
+  end
+
+  defp refute_process_group_alive(pgid, attempts \\ 40) do
+    {out, status} = System.cmd("kill", ["-0", "-#{pgid}"], stderr_to_stdout: true)
+
+    cond do
+      status != 0 and String.contains?(out, "No such process") ->
+        :ok
+
+      attempts > 0 ->
+        Process.sleep(50)
+        refute_process_group_alive(pgid, attempts - 1)
+
+      true ->
+        flunk("process group #{pgid} is still alive")
     end
   end
 end
