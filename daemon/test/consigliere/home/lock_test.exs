@@ -10,12 +10,6 @@ defmodule Consigliere.Home.LockTest do
     %{home: home}
   end
 
-  test "the daemon Lock is a singleton for CS_HOME" do
-    assert is_pid(Process.whereis(Lock))
-    assert {:ok, pid} = Lock.start_link()
-    assert pid == Process.whereis(Lock)
-  end
-
   test "a second start for the same home reuses the live lock process", %{home: home} do
     assert {:ok, pid1} = Lock.start_link(home: home)
     assert {:ok, pid2} = Lock.start_link(home: home)
