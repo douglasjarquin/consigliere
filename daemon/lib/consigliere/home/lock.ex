@@ -15,7 +15,15 @@ defmodule Consigliere.Home.Lock do
 
   def start_link(opts \\ []) do
     home = opts[:home] || Home.dir()
-    name = {:global, {__MODULE__, Path.expand(home)}}
+
+    name =
+      Keyword.get_lazy(opts, :name, fn ->
+        if home == Home.dir() do
+          __MODULE__
+        else
+          {:global, {__MODULE__, Path.expand(home)}}
+        end
+      end)
 
     case GenServer.start_link(__MODULE__, Keyword.put(opts, :home, home), name: name) do
       {:error, {:already_started, pid}} -> {:ok, pid}

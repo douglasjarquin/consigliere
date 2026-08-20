@@ -51,10 +51,17 @@ defmodule Consigliere.Application do
   defp start_supervisor do
     # :one_for_one is deliberate: a crashed sibling must never kill unrelated work (see ADR-004).
     opts = [strategy: :one_for_one, name: Consigliere.Supervisor]
+    home = Consigliere.Home.dir()
 
-    children()
-    |> Supervisor.start_link(opts)
-    |> record_boot_result(Consigliere.Home.dir())
+    # Mix release boot runs start.boot and elixir start_cli. Both call
+    # Application.start. The second must reuse the live supervisor.
+    result =
+      case Supervisor.start_link(children(), opts) do
+        {:error, {:already_started, pid}} -> {:ok, pid}
+        other -> other
+      end
+
+    record_boot_result(result, home)
   end
 
   # Losing the boot race to a live instance is expected contention, not a
