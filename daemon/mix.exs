@@ -8,6 +8,9 @@ defmodule Consigliere.MixProject do
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
+      compilers: [:elixir_make] ++ Mix.compilers(),
+      make_targets: ["all"],
+      make_clean: ["clean"],
       deps: deps(),
       aliases: aliases(),
       releases: releases()
@@ -30,7 +33,8 @@ defmodule Consigliere.MixProject do
     [
       {:ecto_sql, "~> 3.11"},
       {:ecto_sqlite3, "~> 0.15"},
-      {:jason, "~> 1.4"}
+      {:jason, "~> 1.4"},
+      {:elixir_make, "~> 0.9", runtime: false}
     ]
   end
 

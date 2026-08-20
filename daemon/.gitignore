@@ -27,3 +27,7 @@ consigliere_daemon-*.tar
 /priv/*.db-wal
 /priv/*.db-shm
 
+# NIF/probe binaries belong in MIX_APP_PATH/priv, not source priv.
+/priv/*.so
+/priv/cs_lock_probe
+

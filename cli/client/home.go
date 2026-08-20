@@ -29,6 +29,7 @@ func (h Home) PrivilegedSocket() string { return filepath.Join(h.Dir, "priv.sock
 func (h Home) APISocket() string        { return filepath.Join(h.Dir, "api.sock") }
 func (h Home) BossSocket() string       { return filepath.Join(h.Dir, "boss.sock") }
 func (h Home) LockPath() string         { return filepath.Join(h.Dir, "lock") }
+func (h Home) OwnerPath() string        { return filepath.Join(h.Dir, "owner.json") }
 func (h Home) LastErrorPath() string    { return filepath.Join(h.Dir, "last_error.log") }
 func (h Home) DatabasePath() string     { return filepath.Join(h.Dir, "consigliere.db") }
 func (h Home) LogsDir() string          { return filepath.Join(h.Dir, "logs") }
@@ -50,6 +51,37 @@ const (
 	SocketStale  SocketState = "stale"
 	SocketAbsent SocketState = "absent"
 )
+
+type LockState string
+
+const (
+	LockHeld    LockState = "held"
+	LockUnowned LockState = "unowned"
+	LockStale   LockState = "stale"
+)
+
+func ProbeLock(path string) (LockState, int) {
+	fd, err := unixOpen(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return LockUnowned, 0
+		}
+		if _, statErr := os.Stat(path); statErr == nil {
+			return LockStale, 0
+		}
+		return LockUnowned, 0
+	}
+	defer unixClose(fd)
+
+	held, pid, err := unixGetlk(fd)
+	if err != nil {
+		return LockStale, 0
+	}
+	if held {
+		return LockHeld, pid
+	}
+	return LockStale, 0
+}
 
 func Probe(path string) SocketState {
 	if _, err := os.Stat(path); err != nil {

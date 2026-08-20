@@ -69,7 +69,10 @@ defmodule Consigliere.Application do
   end
 
   def lock_contention_outcome(home \\ Consigliere.Home.dir()) do
-    if Consigliere.Home.socket_status(home) == :live, do: :handoff, else: :error
+    case Consigliere.Home.lock_status(home) do
+      {:held, _} -> :handoff
+      _ -> if Consigliere.Home.socket_status(home) == :live, do: :handoff, else: :error
+    end
   end
 
   # Losing the boot race to a live instance is expected contention, not a

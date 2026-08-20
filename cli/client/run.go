@@ -328,9 +328,10 @@ func runDoctor(home Home, jsonOut bool, stdout, stderr io.Writer) int {
 	boss := Probe(home.BossSocket())
 	priv := Probe(home.PrivilegedSocket())
 	api := Probe(home.APISocket())
-	lock := "absent"
-	if _, err := os.Stat(home.LockPath()); err == nil {
-		lock = "present"
+	lockState, lockPid := ProbeLock(home.LockPath())
+	lock := string(lockState)
+	if lockState == LockHeld && lockPid > 0 {
+		lock = "held"
 	}
 	cred := "absent"
 	if _, err := os.Stat(home.CredentialPath()); err == nil {
@@ -340,6 +341,7 @@ func runDoctor(home Home, jsonOut bool, stdout, stderr io.Writer) int {
 		"home":        home.Dir,
 		"database":    home.DatabasePath(),
 		"lock":        lock,
+		"lock_pid":    lockPid,
 		"credential":  cred,
 		"boss_socket": string(boss),
 		"priv_socket": string(priv),
@@ -374,7 +376,11 @@ func runDoctor(home Home, jsonOut bool, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "home: %s\n", home.Dir)
 	fmt.Fprintf(stdout, "database: %s\n", home.DatabasePath())
-	fmt.Fprintf(stdout, "lock: %s %s\n", home.LockPath(), lock)
+	if lockState == LockHeld && lockPid > 0 {
+		fmt.Fprintf(stdout, "lock: %s held pid=%d\n", home.LockPath(), lockPid)
+	} else {
+		fmt.Fprintf(stdout, "lock: %s %s\n", home.LockPath(), lock)
+	}
 	fmt.Fprintf(stdout, "credential: %s\n", cred)
 	fmt.Fprintf(stdout, "probe socket: %s (%s)\n", boss, home.BossSocket())
 	fmt.Fprintf(stdout, "priv socket: %s\n", priv)

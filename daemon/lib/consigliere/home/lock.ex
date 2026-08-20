@@ -1,12 +1,10 @@
 defmodule Consigliere.Home.Lock do
   @moduledoc """
-  Exclusive CS_HOME ownership by binding boss.sock.
+  Exclusive CS_HOME ownership via a kernel fcntl lock.
 
-  A live instance answers connect(). A dead instance leaves a stale
-  socket file; that file is unlinked only after connect() fails.
-
-  Mix release start.boot and elixir start_cli can both start the OTP
-  app. The same home reuses one lock process.
+  The lock file descriptor lives in this BEAM process so crash or
+  SIGKILL releases it. Socket files are diagnostic only and are cleaned
+  only after the kernel lock is held.
   """
 
   use GenServer
@@ -14,6 +12,7 @@ defmodule Consigliere.Home.Lock do
   require Logger
 
   alias Consigliere.Home
+  alias Consigliere.Home.Lock.NIF
 
   def start_link(opts \\ []) do
     home = opts[:home] || Home.dir()
@@ -25,59 +24,45 @@ defmodule Consigliere.Home.Lock do
     end
   end
 
+  def probe_binary do
+    Path.join(:code.priv_dir(:consigliere_daemon), "cs_lock_probe")
+  end
+
   @impl true
   def init(opts) do
     home = opts[:home] || Home.dir()
-    Home.ensure_dir!(home)
+    Home.prepare_dir!(home)
 
-    case bind_exclusive(Home.boss_socket_path(home)) do
-      {:ok, listen} ->
-        acceptor = spawn_link(fn -> accept_loop(listen) end)
-        {:ok, %{home: home, listen_socket: listen, acceptor: acceptor}}
+    case NIF.acquire(Home.lock_path(home)) do
+      {:ok, lock} ->
+        Home.write_owner!(home)
+        Home.ensure_secrets!(home)
+        bind_probe_socket(home, lock)
 
-      :already_running ->
+      {:error, :busy} ->
         {:stop, :already_running}
 
       {:error, reason} ->
-        {:stop, {:bind_failed, reason}}
+        {:stop, {:lock_failed, reason}}
     end
   end
 
-  defp bind_exclusive(socket_path) do
-    case Home.probe(socket_path) do
-      :live ->
-        :already_running
+  defp bind_probe_socket(home, lock) do
+    socket_path = Home.boss_socket_path(home)
+    File.rm(socket_path)
 
-      probe ->
-        File.rm(socket_path)
+    case listen_local(socket_path) do
+      {:ok, listen} ->
+        _ = File.chmod(socket_path, 0o600)
+        acceptor = spawn_link(fn -> accept_loop(listen) end)
+        {:ok, %{home: home, lock: lock, listen_socket: listen, acceptor: acceptor}}
 
-        case listen_local(socket_path) do
-          {:ok, listen} ->
-            _ = File.chmod(socket_path, 0o600)
-            {:ok, listen}
+      {:error, :eaddrinuse} ->
+        {:stop, {:bind_failed, :eaddrinuse}}
 
-          {:error, :eaddrinuse} ->
-            File.rm(socket_path)
-
-            case listen_local(socket_path) do
-              {:ok, listen} ->
-                _ = File.chmod(socket_path, 0o600)
-                {:ok, listen}
-
-              {:error, :eaddrinuse} ->
-                :already_running
-
-              other ->
-                other
-            end
-
-          other ->
-            Logger.warning(
-              "home lock listen failed path=#{socket_path} probe=#{inspect(probe)} result=#{inspect(other)}"
-            )
-
-            other
-        end
+      other ->
+        Logger.warning("home lock listen failed path=#{socket_path} result=#{inspect(other)}")
+        {:stop, {:bind_failed, other}}
     end
   end
 
@@ -101,8 +86,13 @@ defmodule Consigliere.Home.Lock do
 
   @impl true
   def terminate(_reason, state) do
-    if state[:listen_socket], do: :gen_tcp.close(state.listen_socket)
-    if state[:home], do: File.rm(Home.boss_socket_path(state.home))
+    if is_map(state) do
+      if state[:listen_socket], do: :gen_tcp.close(state.listen_socket)
+      if state[:home], do: File.rm(Home.boss_socket_path(state.home))
+      if state[:lock], do: NIF.release(state.lock)
+      if state[:home], do: File.rm(Home.owner_path(state.home))
+    end
+
     :ok
   end
 end

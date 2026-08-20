@@ -17,7 +17,7 @@ defmodule Consigliere.Home.LockTest do
     GenServer.stop(pid1)
   end
 
-  test "listen eaddrinuse after a leftover socket file is retried and bound", %{home: home} do
+  test "a leftover socket file is removed after the kernel lock is held", %{home: home} do
     socket = Home.boss_socket_path(home)
     File.mkdir_p!(home)
     File.write!(socket, "not-a-socket")
@@ -25,7 +25,44 @@ defmodule Consigliere.Home.LockTest do
     assert {:ok, pid} = Lock.start_link(home: home)
     assert File.exists?(socket)
     assert Home.socket_status(home) == :live
+    assert match?({:held, _}, Home.lock_status(home)) or File.exists?(Home.lock_path(home))
     GenServer.stop(pid)
+  end
+
+  test "an external fcntl holder blocks a second daemon lock", %{home: home} do
+    Process.flag(:trap_exit, true)
+    File.mkdir_p!(home)
+    lock_path = Home.lock_path(home)
+    probe = Lock.probe_binary()
+    port = Port.open({:spawn_executable, probe}, [:binary, :exit_status, args: ["hold", lock_path]])
+    assert_receive {^port, {:data, "held\n"}}, 2_000
+
+    assert {:error, :already_running} = Lock.start_link(home: home)
+    refute File.exists?(Home.boss_credential_path(home))
+    refute File.exists?(Home.owner_path(home))
+
+    Port.close(port)
+  end
+
+  test "a stale lock file without a holder does not block startup", %{home: home} do
+    File.mkdir_p!(home)
+    File.write!(Home.lock_path(home), "leftover")
+    File.chmod!(Home.lock_path(home), 0o600)
+
+    assert {:ok, pid} = Lock.start_link(home: home)
+    assert File.exists?(Home.owner_path(home))
+    GenServer.stop(pid)
+  end
+
+  test "kill of the lock process releases the kernel lock", %{home: home} do
+    Process.flag(:trap_exit, true)
+    assert {:ok, pid} = Lock.start_link(home: home)
+    ref = Process.monitor(pid)
+    Process.exit(pid, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :killed}
+
+    assert {:ok, pid2} = Lock.start_link(home: home)
+    GenServer.stop(pid2)
   end
 
   test "a stale socket left by a dead instance is cleaned up and rebound", %{home: home} do

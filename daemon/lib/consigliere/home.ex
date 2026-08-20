@@ -6,6 +6,12 @@ defmodule Consigliere.Home do
   end
 
   def ensure_dir!(home \\ dir()) do
+    prepare_dir!(home)
+    ensure_secrets!(home)
+    home
+  end
+
+  def prepare_dir!(home \\ dir()) do
     File.mkdir_p!(home)
     File.chmod!(home, 0o700)
     File.mkdir_p!(credentials_dir(home))
@@ -15,6 +21,10 @@ defmodule Consigliere.Home do
     File.mkdir_p!(evidence_dir(home))
     File.mkdir_p!(logs_dir(home))
     File.chmod!(credentials_dir(home), 0o700)
+    home
+  end
+
+  def ensure_secrets!(home \\ dir()) do
     _ = ensure_boss_secret!(home)
     home
   end
@@ -34,6 +44,7 @@ defmodule Consigliere.Home do
 
   def database_path(home \\ dir()), do: Path.join(home, "consigliere.db")
   def lock_path(home \\ dir()), do: Path.join(home, "lock")
+  def owner_path(home \\ dir()), do: Path.join(home, "owner.json")
   def credentials_dir(home \\ dir()), do: Path.join(home, "credentials")
   def trusted_projects_dir(home \\ dir()), do: Path.join(home, "trusted/projects")
   def workspaces_dir(home \\ dir()), do: Path.join(home, "workspaces")
@@ -66,8 +77,42 @@ defmodule Consigliere.Home do
     end
   end
 
+  def write_owner!(home \\ dir()) do
+    payload =
+      JSON.encode!(%{
+        "pid" => String.to_integer(System.pid()),
+        "started_at" => DateTime.to_iso8601(DateTime.utc_now()),
+        "release" => to_string(Application.spec(:consigliere_daemon, :vsn) || "dev"),
+        "home" => Path.expand(home),
+        "uid" => File.stat!(lock_path(home)).uid,
+        "lock" => "fcntl"
+      })
+
+    File.write!(owner_path(home), payload)
+    File.chmod!(owner_path(home), 0o600)
+    :ok
+  end
+
+  def lock_status(home \\ dir()) do
+    expanded = Path.expand(home)
+    path = lock_path(expanded)
+
+    case :global.whereis_name({Consigliere.Home.Lock, expanded}) do
+      pid when is_pid(pid) ->
+        {:held, String.to_integer(System.pid())}
+
+      :undefined ->
+        case Consigliere.Home.Lock.NIF.inspect(path) do
+          {:held, holder} when is_integer(holder) and holder > 0 -> {:held, holder}
+          :absent -> :unowned
+          :free -> if File.exists?(path), do: :stale, else: :unowned
+          {:error, _} -> if File.exists?(path), do: :stale, else: :unowned
+        end
+    end
+  end
+
   def record_error!(home \\ dir(), reason) do
-    ensure_dir!(home)
+    prepare_dir!(home)
     File.write!(last_error_path(home), reason)
   end
 
@@ -86,4 +131,5 @@ defmodule Consigliere.Home do
   def forced_failure_reason do
     System.get_env("CS_FORCE_STARTUP_FAILURE")
   end
+
 end

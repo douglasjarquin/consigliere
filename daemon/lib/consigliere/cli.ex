@@ -149,7 +149,11 @@ defmodule Consigliere.CLI do
   end
 
   defp lock_word(home) do
-    if File.exists?(Home.lock_path(home)), do: "present", else: "absent"
+    case Home.lock_status(home) do
+      {:held, pid} -> "held pid=#{pid}"
+      :stale -> "stale"
+      :unowned -> "unowned"
+    end
   end
 
   def away do

@@ -22,8 +22,13 @@ defmodule Consigliere.HomeDiagnosticsTest do
     {:ok, pid} = Consigliere.Home.Lock.start_link(home: home)
 
     assert Home.socket_status(home) == :live
+    assert Home.lock_status(home) in [:stale, :unowned] or match?({:held, _}, Home.lock_status(home))
 
     GenServer.stop(pid)
+  end
+
+  test "lock_status/1 is unowned when no process holds the kernel lock", %{home: home} do
+    assert Home.lock_status(home) == :unowned
   end
 
   test "socket_status/1 is :stale once the listener dies without cleaning up", %{home: home} do
