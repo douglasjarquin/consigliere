@@ -14,6 +14,7 @@ defmodule Consigliere.Fixtures do
   alias Consigliere.Decisions.Decision
   alias Consigliere.DomainEvents.DomainEvent
   alias Consigliere.OutboxItems.OutboxItem
+  alias Consigliere.HarnessEvents.HarnessEvent
 
   # FK-safe delete order: children before parents, since none of these
   # tests run inside an Ecto Sandbox transaction (matching this project's
@@ -27,6 +28,7 @@ defmodule Consigliere.Fixtures do
     Repo.delete_all(MissionBlocker)
     Repo.delete_all(MissionValidationLedger)
     Repo.delete_all(Incident)
+    Repo.delete_all(HarnessEvent)
     Repo.delete_all(Attempt)
     Repo.delete_all(Workspace)
     Repo.delete_all(Authorization)
