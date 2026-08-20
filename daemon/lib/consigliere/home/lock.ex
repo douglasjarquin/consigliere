@@ -46,18 +46,37 @@ defmodule Consigliere.Home.Lock do
     end
   end
 
-  defp acquire_flock(home) do
+  # A just-exited eval VM can leave the helper alive for one poll interval.
+  # Refuse immediately if a live probe is already bound.
+  @lock_retry_times 20
+  @lock_retry_ms 50
+
+  defp acquire_flock(home, remaining \\ @lock_retry_times) do
     path = Home.lock_path(home)
 
-    cond do
-      python = python_executable() ->
-        acquire_python(python, materialize_script!(home), path)
+    result =
+      cond do
+        python = python_executable() ->
+          acquire_python(python, materialize_script!(home), path)
 
-      flock = helper_executable("flock") ->
-        acquire_util_linux_flock(flock, path)
+        flock = helper_executable("flock") ->
+          acquire_util_linux_flock(flock, path)
 
-      true ->
-        {:error, :python3_required}
+        true ->
+          {:error, :python3_required}
+      end
+
+    case result do
+      :already_running ->
+        if remaining > 0 and Home.socket_status(home) != :live do
+          Process.sleep(@lock_retry_ms)
+          acquire_flock(home, remaining - 1)
+        else
+          :already_running
+        end
+
+      other ->
+        other
     end
   end
 

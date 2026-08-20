@@ -5,8 +5,14 @@ defmodule Consigliere.Application do
 
   use Application
 
+  require Logger
+
   @impl true
   def start(_type, _args) do
+    Logger.info(
+      "consigliere boot command=#{inspect(System.get_env("RELEASE_COMMAND"))} children=#{length(children())}"
+    )
+
     with nil <- Consigliere.Home.forced_failure_reason() do
       start_supervisor()
     else

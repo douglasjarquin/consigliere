@@ -81,8 +81,11 @@ jobs:
           export PATH="/usr/bin:/bin:/usr/local/bin:${PATH:-}"
           mkdir -p "$CS_HOME"
           REL=daemon/_build/prod/rel/consigliere_daemon/bin/consigliere_daemon
+          REL_LOG=daemon/_build/prod/rel/consigliere_daemon/tmp/log
           "$REL" eval "Consigliere.Release.migrate()"
-          "$REL" start >"$CS_HOME/start.log" 2>&1 &
+          echo "post-eval CS_HOME:"
+          ls -la "$CS_HOME"
+          "$REL" daemon
           i=0
           while [ "$i" -lt 30 ]; do
             if [ -S "$CS_HOME/priv.sock" ] && [ -S "$CS_HOME/api.sock" ]; then
@@ -92,8 +95,10 @@ jobs:
             sleep 1
           done
           if [ ! -S "$CS_HOME/priv.sock" ]; then
-            echo "boot failed; start.log:"
-            cat "$CS_HOME/start.log" || true
+            echo "boot failed; release log:"
+            ls -la "$CS_HOME"
+            cat "$REL_LOG"/erlang.log.1 2>/dev/null || true
+            cat "$REL_LOG"/run_erl.log 2>/dev/null || true
             exit 1
           fi
           test -S "$CS_HOME/api.sock"
@@ -101,12 +106,12 @@ jobs:
           daemon/cs doctor
           "$REL" stop
           sleep 2
-          if pgrep -f cs-runner >/dev/null; then
+          if pgrep -x cs-runner >/dev/null; then
             echo "leftover cs-runner after stop"
             exit 1
           fi
           test -f "$CS_HOME/consigliere.db"
-          "$REL" start >"$CS_HOME/restart.log" 2>&1 &
+          "$REL" daemon
           i=0
           while [ "$i" -lt 30 ]; do
             if [ -S "$CS_HOME/priv.sock" ]; then
@@ -116,8 +121,9 @@ jobs:
             sleep 1
           done
           if [ ! -S "$CS_HOME/priv.sock" ]; then
-            echo "restart failed; restart.log:"
-            cat "$CS_HOME/restart.log" || true
+            echo "restart failed; release log:"
+            cat "$REL_LOG"/erlang.log.1 2>/dev/null || true
+            cat "$REL_LOG"/run_erl.log 2>/dev/null || true
             exit 1
           fi
           daemon/cs ping
