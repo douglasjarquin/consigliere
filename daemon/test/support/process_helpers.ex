@@ -59,8 +59,42 @@ defmodule Consigliere.ProcessHelpers do
         wait_group_gone(pgid, attempts - 1)
 
       true ->
-        raise "process group #{pgid} is still alive"
+        raise "process group #{pgid} is still alive: #{group_diagnostic(pgid)}"
     end
+  end
+
+  defp group_diagnostic(pgid) do
+    {ps_output, ps_status} =
+      System.cmd("ps", ["-axo", "pid=,ppid=,pgid=,sid=,stat=,comm=,args="],
+        stderr_to_stdout: true
+      )
+
+    members =
+      ps_output
+      |> String.split("\n", trim: true)
+      |> Enum.filter(fn line ->
+        case String.split(String.trim(line), ~r/\s+/, parts: 4) do
+          [_, _, group, _] -> group == to_string(pgid)
+          _ -> false
+        end
+      end)
+
+    {probe_output, probe_status} =
+      System.cmd("kill", ["-0", "-#{pgid}"], stderr_to_stdout: true)
+
+    {term_output, term_status} =
+      System.cmd("kill", ["-TERM", "-#{pgid}"], stderr_to_stdout: true)
+
+    {kill_output, kill_status} =
+      System.cmd("kill", ["-KILL", "-#{pgid}"], stderr_to_stdout: true)
+
+    inspect(%{
+      members: members,
+      ps: {ps_status, String.trim(ps_output)},
+      probe: {probe_status, String.trim(probe_output)},
+      term: {term_status, String.trim(term_output)},
+      kill: {kill_status, String.trim(kill_output)}
+    })
   end
 
   defp wait_session_leader!(pid) do
