@@ -34,10 +34,21 @@ func (h Home) LastErrorPath() string    { return filepath.Join(h.Dir, "last_erro
 func (h Home) DatabasePath() string     { return filepath.Join(h.Dir, "consigliere.db") }
 func (h Home) LogsDir() string          { return filepath.Join(h.Dir, "logs") }
 func (h Home) CredentialPath() string   { return filepath.Join(h.Dir, "credentials", "boss") }
+func (h Home) AdvisoryCredentialPath() string {
+	return filepath.Join(h.Dir, "credentials", "advisory")
+}
 func (h Home) PIDPath() string          { return filepath.Join(h.Dir, "csd.pid") }
 
 func (h Home) BossSecret() (string, error) {
 	b, err := os.ReadFile(h.CredentialPath())
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (h Home) AdvisorySecret() (string, error) {
+	b, err := os.ReadFile(h.AdvisoryCredentialPath())
 	if err != nil {
 		return "", err
 	}

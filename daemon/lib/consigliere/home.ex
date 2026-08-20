@@ -26,6 +26,7 @@ defmodule Consigliere.Home do
 
   def ensure_secrets!(home \\ dir()) do
     _ = ensure_boss_secret!(home)
+    _ = ensure_advisory_secret!(home)
     home
   end
 
@@ -33,6 +34,19 @@ defmodule Consigliere.Home do
     File.mkdir_p!(credentials_dir(home))
     File.chmod!(credentials_dir(home), 0o700)
     path = boss_credential_path(home)
+
+    unless File.exists?(path) do
+      File.write!(path, Base.encode16(:crypto.strong_rand_bytes(32), case: :lower))
+    end
+
+    File.chmod!(path, 0o600)
+    File.read!(path)
+  end
+
+  def ensure_advisory_secret!(home \\ dir()) do
+    File.mkdir_p!(credentials_dir(home))
+    File.chmod!(credentials_dir(home), 0o700)
+    path = advisory_credential_path(home)
 
     unless File.exists?(path) do
       File.write!(path, Base.encode16(:crypto.strong_rand_bytes(32), case: :lower))
@@ -52,6 +66,7 @@ defmodule Consigliere.Home do
   def evidence_dir(home \\ dir()), do: Path.join(home, "evidence")
   def logs_dir(home \\ dir()), do: Path.join(home, "logs")
   def boss_credential_path(home \\ dir()), do: Path.join(credentials_dir(home), "boss")
+  def advisory_credential_path(home \\ dir()), do: Path.join(credentials_dir(home), "advisory")
 
   def boss_socket_path(home \\ dir()), do: Path.join(home, "boss.sock")
   def api_socket_path(home \\ dir()), do: Path.join(home, "api.sock")

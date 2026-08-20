@@ -43,7 +43,21 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runVersion(home, jsonOut, stdout, stderr)
 	}
 
+	boss := false
+	if cmd == "boss" {
+		if len(rest) == 0 {
+			fmt.Fprintln(stderr, "usage: cs boss <command>")
+			return ExitUsage
+		}
+		boss = true
+		cmd, rest = rest[0], rest[1:]
+		opts, pos = parseFlags(rest)
+	}
+
 	d := NewDialer(home)
+	if boss {
+		d = NewBossDialer(home)
+	}
 	if v := os.Getenv("CS_PROTOCOL_VERSION"); v != "" {
 		fmt.Sscanf(v, "%d", &d.Version)
 	}
@@ -79,7 +93,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 }
 
 func usage() string {
-	return `cs - consigliere boss client
+	return `cs - consigliere client
 
 cs health
 cs version
@@ -92,22 +106,24 @@ cs mission <id>
 cs mission create --project-id ID --objective TEXT --scope TEXT --acceptance TEXT
 cs why <mission-id>
 cs inbox
-cs away
-cs return
-cs answer <question-id> --text TEXT
 cs review
-cs authorize-merge <mission-id> --pr N --sha SHA
-cs pause <mission-id>
-cs resume <mission-id>
-cs cancel <mission-id>
 cs attempts
 cs attempt logs <attempt-id>
 cs incidents
 cs events
-cs reconcile
 cs cutover
 
-Use --json for machine output. Boss commands talk to CS_HOME/priv.sock.
+cs boss away
+cs boss return
+cs boss answer <question-id> --text TEXT
+cs boss authorize-merge <mission-id> --pr N --sha SHA
+cs boss pause <mission-id>
+cs boss resume <mission-id>
+cs boss cancel <mission-id>
+cs boss reconcile
+
+Use --json for machine output. Default cs is advisory (api.sock).
+cs boss talks to CS_HOME/priv.sock with the human credential.
 `
 }
 

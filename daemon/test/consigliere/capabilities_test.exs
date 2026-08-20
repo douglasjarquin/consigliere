@@ -43,6 +43,7 @@ defmodule Consigliere.CapabilitiesTest do
 
     assert actor.principal == "attempt"
     assert actor.attempt_id == attempt.id
+    assert actor.allowed_ops == ["ping", "mission.get", "question.open"]
 
     assert {:error, "capability actor mismatch"} =
              Auth.identify(

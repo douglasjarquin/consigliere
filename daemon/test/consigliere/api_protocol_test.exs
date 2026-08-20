@@ -19,6 +19,61 @@ defmodule Consigliere.API.ProtocolTest do
     map
   end
 
+  test "attempt capability allowlist is enforced at dispatch" do
+    {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
+    {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
+
+    {:ok, %{attempt: attempt}} =
+      Missions.start(mission.id, Actor.system(), %{
+        workspace_path: "/tmp/cs-#{System.unique_integer([:positive])}"
+      })
+
+    {:ok, attempt} = Attempts.request_spawn(attempt.id, Actor.system())
+
+    {:ok, attempt} =
+      Attempts.mark_running(attempt.id, Actor.system(), %{fencing_token: attempt.fencing_token})
+
+    {:ok, secret} = Consigliere.Capabilities.mint(attempt, ops: ["ping"])
+
+    ping =
+      decode(
+        Protocol.handle(
+          JSON.encode!(%{
+            "v" => 1,
+            "id" => "p",
+            "op" => "ping",
+            "capability" => secret
+          }),
+          :capability
+        )
+      )
+
+    assert ping["ok"] == true
+
+    denied =
+      decode(
+        Protocol.handle(
+          JSON.encode!(%{
+            "v" => 1,
+            "id" => "q",
+            "op" => "question.open",
+            "capability" => secret,
+            "payload" => %{
+              "attempt_id" => attempt.id,
+              "blocking_scope" => "mission",
+              "requested_authority" => "boss",
+              "prompt" => "x"
+            }
+          }),
+          :capability
+        )
+      )
+
+    assert denied["ok"] == false
+    assert denied["error"]["code"] == "unauthorized"
+  end
+
   test "rejects a non-1 protocol version" do
     line =
       JSON.encode!(%{"v" => 99, "id" => "x", "op" => "ping", "actor" => %{"principal" => "boss"}})

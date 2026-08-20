@@ -63,19 +63,30 @@ defmodule Consigliere.API.Protocol do
     run(op, payload, actor) |> wrap(id)
   end
 
+  defp run(op, payload, %Actor{principal: "attempt", allowed_ops: ops} = actor)
+       when is_list(ops) do
+    if op in ops do
+      run_allowed(op, payload, actor)
+    else
+      {:error, {:unauthorized, :capability}}
+    end
+  end
+
   defp run(op, _payload, %Actor{principal: "attempt"}) when op not in @attempt_ops do
     {:error, {:unauthorized, :capability}}
   end
 
-  defp run("ping", _payload, _actor), do: {:ok, %{"pong" => true}}
+  defp run(op, payload, actor), do: run_allowed(op, payload, actor)
 
-  defp run("health", _payload, actor) do
+  defp run_allowed("ping", _payload, _actor), do: {:ok, %{"pong" => true}}
+
+  defp run_allowed("health", _payload, actor) do
     with :ok <- require_reader(actor) do
       {:ok, health_payload()}
     end
   end
 
-  defp run("version", _payload, actor) do
+  defp run_allowed("version", _payload, actor) do
     with :ok <- require_reader(actor) do
       {:ok,
        %{
@@ -85,7 +96,7 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp run("mission.create", payload, actor) do
+  defp run_allowed("mission.create", payload, actor) do
     project_id = payload["project_id"]
 
     if is_binary(project_id) and project_id != "" do
@@ -104,7 +115,7 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp run("project.add", payload, actor) do
+  defp run_allowed("project.add", payload, actor) do
     Consigliere.Projects.register(
       %{
         name: payload["name"],
@@ -128,8 +139,8 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp run("project.list", _payload, actor) do
-    if actor.principal in ["boss", "daemon"] do
+  defp run_allowed("project.list", _payload, actor) do
+    with :ok <- require_reader(actor) do
       projects = Repo.all(Consigliere.Projects.Project)
 
       {:ok,
@@ -139,13 +150,11 @@ defmodule Consigliere.API.Protocol do
              %{"id" => p.id, "name" => p.name, "repository_url" => p.repository_url}
            end)
        }}
-    else
-      {:error, {:unauthorized, :principal}}
     end
   end
 
-  defp run("project.get", payload, actor) do
-    if actor.principal in ["boss", "daemon"] do
+  defp run_allowed("project.get", payload, actor) do
+    with :ok <- require_reader(actor) do
       case Repo.get(Consigliere.Projects.Project, payload["project_id"]) do
         nil ->
           {:error, {:not_found, "project"}}
@@ -159,33 +168,31 @@ defmodule Consigliere.API.Protocol do
              "default_branch" => project.default_branch
            }}
       end
-    else
-      {:error, {:unauthorized, :principal}}
     end
   end
 
-  defp run("mission.submit", payload, actor) do
+  defp run_allowed("mission.submit", payload, actor) do
     Missions.submit_for_authorization(payload["mission_id"], actor) |> ok_mission()
   end
 
-  defp run("mission.grant_work", payload, actor) do
+  defp run_allowed("mission.grant_work", payload, actor) do
     Missions.grant_work_authorization(payload["mission_id"], actor) |> ok_mission()
   end
 
-  defp run("mission.cancel", payload, actor) do
+  defp run_allowed("mission.cancel", payload, actor) do
     Missions.cancel(payload["mission_id"], actor, payload["reason"] || "canceled") |> ok_mission()
   end
 
-  defp run("mission.pause", payload, actor) do
+  defp run_allowed("mission.pause", payload, actor) do
     Missions.pause(payload["mission_id"], actor, payload["reason"] || "boss pause")
     |> ok_mission()
   end
 
-  defp run("mission.resume", payload, actor) do
+  defp run_allowed("mission.resume", payload, actor) do
     Missions.resume(payload["mission_id"], actor) |> ok_mission()
   end
 
-  defp run("mission.list", _payload, actor) do
+  defp run_allowed("mission.list", _payload, actor) do
     with :ok <- require_reader(actor) do
       missions =
         Repo.all(from(m in Mission, order_by: [desc: m.inserted_at]))
@@ -194,13 +201,13 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp run("mission.why", payload, actor) do
+  defp run_allowed("mission.why", payload, actor) do
     with :ok <- require_reader(actor) do
       why_mission(payload["mission_id"], actor)
     end
   end
 
-  defp run("mission.review", _payload, actor) do
+  defp run_allowed("mission.review", _payload, actor) do
     with :ok <- require_reader(actor) do
       missions =
         Repo.all(
@@ -214,7 +221,7 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp run("attempt.list", _payload, actor) do
+  defp run_allowed("attempt.list", _payload, actor) do
     with :ok <- require_reader(actor) do
       attempts =
         Repo.all(
@@ -237,13 +244,13 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp run("attempt.logs", payload, actor) do
+  defp run_allowed("attempt.logs", payload, actor) do
     with :ok <- require_reader(actor) do
       attempt_logs(payload["attempt_id"])
     end
   end
 
-  defp run("incident.list", _payload, actor) do
+  defp run_allowed("incident.list", _payload, actor) do
     with :ok <- require_reader(actor) do
       incidents =
         Repo.all(
@@ -265,7 +272,7 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp run("event.list", _payload, actor) do
+  defp run_allowed("event.list", _payload, actor) do
     with :ok <- require_reader(actor) do
       events =
         Repo.all(
@@ -291,7 +298,7 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp run("reconcile", _payload, actor) do
+  defp run_allowed("reconcile", _payload, actor) do
     if actor.principal == "boss" do
       results = Consigliere.Reconciler.run()
       {:ok, %{"count" => length(results)}}
@@ -300,7 +307,7 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp run("mission.grant_integration", payload, actor) do
+  defp run_allowed("mission.grant_integration", payload, actor) do
     Missions.grant_integration_authorization(payload["mission_id"], actor, %{
       target_sha: payload["target_sha"],
       target_pull_request: payload["target_pull_request"]
@@ -308,7 +315,7 @@ defmodule Consigliere.API.Protocol do
     |> ok_mission()
   end
 
-  defp run("mission.get", payload, actor) do
+  defp run_allowed("mission.get", payload, actor) do
     case Repo.get(Mission, payload["mission_id"]) do
       nil ->
         {:error, {:not_found, "mission"}}
@@ -338,7 +345,7 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp run("question.open", payload, actor) do
+  defp run_allowed("question.open", payload, actor) do
     Questions.open(
       %{
         attempt_id: payload["attempt_id"] || actor.attempt_id,
@@ -352,7 +359,7 @@ defmodule Consigliere.API.Protocol do
     |> ok_question()
   end
 
-  defp run("question.answer", payload, actor) do
+  defp run_allowed("question.answer", payload, actor) do
     Questions.answer(payload["question_id"], actor, %{
       answer: payload["answer"],
       answer_channel: payload["answer_channel"] || actor.channel
@@ -360,7 +367,7 @@ defmodule Consigliere.API.Protocol do
     |> ok_question()
   end
 
-  defp run("away.mark", _payload, actor) do
+  defp run_allowed("away.mark", _payload, actor) do
     if actor.principal == "boss" do
       Away.mark()
       {:ok, %{"away" => true}}
@@ -369,7 +376,7 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp run("away.return", _payload, actor) do
+  defp run_allowed("away.return", _payload, actor) do
     if actor.principal == "boss" do
       {:ok, Away.return()}
     else
@@ -377,7 +384,7 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp run("questions.inbox", _payload, actor) do
+  defp run_allowed("questions.inbox", _payload, actor) do
     if actor.principal not in ["boss", "daemon", "model_advisory"] do
       {:error, {:unauthorized, :principal}}
     else
@@ -405,7 +412,7 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp run(_op, _payload, _actor), do: {:error, {:invalid, "unknown op"}}
+  defp run_allowed(_op, _payload, _actor), do: {:error, {:invalid, "unknown op"}}
 
   defp own_mission?(%Actor{attempt_id: nil}, _), do: false
 

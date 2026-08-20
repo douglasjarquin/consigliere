@@ -14,7 +14,7 @@ defmodule Consigliere.API.Auth do
     end
   end
 
-  def identify(req, :capability) do
+  def identify(req, bound) when bound in [:capability, :api] do
     token = req["capability"] || req["secret"] || get_in(req, ["actor", "capability"])
 
     case Consigliere.Capabilities.authenticate(token) do
@@ -22,11 +22,16 @@ defmodule Consigliere.API.Auth do
         if declared_mismatch?(req, cap) do
           {:error, "capability actor mismatch"}
         else
-          Actor.attempt(cap.attempt_id, cap.fencing_token)
+          allow = get_in(cap.ops, ["allow"]) || []
+          Actor.attempt(cap.attempt_id, cap.fencing_token, allow)
         end
 
-      {:error, reason} ->
-        {:error, reason}
+      {:error, _} ->
+        if advisory_ok?(token) do
+          Actor.model_advisory()
+        else
+          {:error, "api auth failed"}
+        end
     end
   end
 
@@ -61,6 +66,13 @@ defmodule Consigliere.API.Auth do
     expected = Home.ensure_boss_secret!()
     is_binary(given) and given != "" and secure_eq?(given, expected)
   end
+
+  defp advisory_ok?(token) when is_binary(token) and token != "" do
+    expected = Home.ensure_advisory_secret!()
+    secure_eq?(token, expected)
+  end
+
+  defp advisory_ok?(_), do: false
 
   defp secure_eq?(a, b) do
     :crypto.hash(:sha256, a) == :crypto.hash(:sha256, b)

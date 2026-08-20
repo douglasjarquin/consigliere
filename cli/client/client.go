@@ -65,11 +65,17 @@ type Dialer struct {
 func NewDialer(home Home) Dialer {
 	return Dialer{
 		Home:           home,
-		Socket:         home.PrivilegedSocket(),
+		Socket:         home.APISocket(),
 		ConnectTimeout: 2 * time.Second,
 		ReadTimeout:    30 * time.Second,
 		Version:        ProtocolVersion,
 	}
+}
+
+func NewBossDialer(home Home) Dialer {
+	d := NewDialer(home)
+	d.Socket = home.PrivilegedSocket()
+	return d
 }
 
 func (d Dialer) Call(op string, payload map[string]any, id, idem string) (*Response, error) {
@@ -82,10 +88,20 @@ func (d Dialer) Call(op string, payload map[string]any, id, idem string) (*Respo
 	}
 
 	secret := d.Secret
-	if secret == "" && d.Socket == d.Home.PrivilegedSocket() {
-		s, err := d.Home.BossSecret()
+	principal := "model_advisory"
+	if d.Socket == d.Home.PrivilegedSocket() {
+		principal = "boss"
+		if secret == "" {
+			s, err := d.Home.BossSecret()
+			if err != nil {
+				return nil, fmt.Errorf("boss credential: %w", err)
+			}
+			secret = s
+		}
+	} else if secret == "" && d.Socket == d.Home.APISocket() {
+		s, err := d.Home.AdvisorySecret()
 		if err != nil {
-			return nil, fmt.Errorf("boss credential: %w", err)
+			return nil, fmt.Errorf("advisory credential: %w", err)
 		}
 		secret = s
 	}
@@ -101,7 +117,7 @@ func (d Dialer) Call(op string, payload map[string]any, id, idem string) (*Respo
 		V:              d.Version,
 		ID:             id,
 		Op:             op,
-		Actor:          map[string]any{"principal": "boss"},
+		Actor:          map[string]any{"principal": principal},
 		Payload:        payload,
 		Secret:         secret,
 		IdempotencyKey: idem,

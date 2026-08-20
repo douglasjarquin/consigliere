@@ -29,8 +29,24 @@ func serve(t *testing.T, handler func(map[string]any) map[string]any) (home Home
 	home = Home{Dir: dir}
 	os.MkdirAll(filepath.Join(dir, "credentials"), 0o700)
 	os.WriteFile(home.CredentialPath(), []byte("secret"), 0o600)
+	os.WriteFile(home.AdvisoryCredentialPath(), []byte("advisory"), 0o600)
 	sock = home.PrivilegedSocket()
-	ln, err := net.Listen("unix", sock)
+	listenUnix(t, home.PrivilegedSocket(), handler)
+	listenUnix(t, home.APISocket(), handler)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if Probe(home.PrivilegedSocket()) == SocketLive && Probe(home.APISocket()) == SocketLive {
+			return home, sock
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("listener never became live")
+	return home, sock
+}
+
+func listenUnix(t *testing.T, path string, handler func(map[string]any) map[string]any) {
+	t.Helper()
+	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,15 +77,6 @@ func serve(t *testing.T, handler func(map[string]any) map[string]any) (home Home
 			}(c)
 		}
 	}()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if Probe(sock) == SocketLive {
-			return home, sock
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("listener never became live")
-	return home, sock
 }
 
 func TestPingAndJSON(t *testing.T) {
@@ -77,7 +84,7 @@ func TestPingAndJSON(t *testing.T) {
 		if req["op"] != "ping" {
 			t.Errorf("op=%v", req["op"])
 		}
-		if req["secret"] != "secret" {
+		if req["secret"] != "advisory" {
 			t.Errorf("missing secret")
 		}
 		if req["v"].(float64) != 1 {
@@ -151,7 +158,7 @@ func TestAbsentAndStale(t *testing.T) {
 		t.Fatalf("absent exit %d stderr=%s", code, errb.String())
 	}
 
-	os.WriteFile(filepath.Join(dir, "priv.sock"), []byte("junk"), 0o600)
+	os.WriteFile(filepath.Join(dir, "api.sock"), []byte("junk"), 0o600)
 	errb.Reset()
 	code = Run([]string{"ping"}, &out, &errb)
 	if code != ExitStale {

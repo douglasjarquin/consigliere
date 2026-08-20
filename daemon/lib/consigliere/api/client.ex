@@ -38,11 +38,17 @@ defmodule Consigliere.API.Client do
 
   defp maybe_secret(map, path) do
     priv = Consigliere.API.Listener.privileged_socket_path()
+    api = Consigliere.API.Listener.socket_path()
 
-    if path == priv and get_in(map, ["actor", "principal"]) == "boss" do
-      Map.put(map, "secret", Consigliere.Home.ensure_boss_secret!())
-    else
-      map
+    cond do
+      path == priv and get_in(map, ["actor", "principal"]) == "boss" ->
+        Map.put(map, "secret", Consigliere.Home.ensure_boss_secret!())
+
+      path == api and is_nil(map["capability"]) ->
+        Map.put(map, "secret", Consigliere.Home.ensure_advisory_secret!())
+
+      true ->
+        map
     end
   end
 end
