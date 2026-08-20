@@ -4,7 +4,9 @@ defmodule Consigliere.Home.Lock do
 
   A live instance answers connect(). A dead instance leaves a stale
   socket file; that file is unlinked only after connect() fails.
-  No helper process, so Mix-release PATH cannot fail boot.
+
+  Mix release start.boot and elixir start_cli can both start the OTP
+  app. The same home reuses one lock process.
   """
 
   use GenServer
@@ -12,7 +14,13 @@ defmodule Consigliere.Home.Lock do
   alias Consigliere.Home
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts)
+    home = opts[:home] || Home.dir()
+    name = {:global, {__MODULE__, Path.expand(home)}}
+
+    case GenServer.start_link(__MODULE__, Keyword.put(opts, :home, home), name: name) do
+      {:error, {:already_started, pid}} -> {:ok, pid}
+      other -> other
+    end
   end
 
   @impl true

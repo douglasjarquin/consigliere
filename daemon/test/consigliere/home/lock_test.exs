@@ -10,12 +10,10 @@ defmodule Consigliere.Home.LockTest do
     %{home: home}
   end
 
-  test "a second start is refused while the first instance is live", %{home: home} do
-    Process.flag(:trap_exit, true)
+  test "a second start for the same home reuses the live lock process", %{home: home} do
     assert {:ok, pid1} = Lock.start_link(home: home)
-
-    assert {:error, :already_running} = Lock.start_link(home: home)
-
+    assert {:ok, pid2} = Lock.start_link(home: home)
+    assert pid1 == pid2
     GenServer.stop(pid1)
   end
 
@@ -56,13 +54,12 @@ defmodule Consigliere.Home.LockTest do
     GenServer.stop(pid)
   end
 
-  test "a losing start does not unlink the winner's probe socket", %{home: home} do
-    Process.flag(:trap_exit, true)
+  test "a second start for the same home does not unbind the live probe", %{home: home} do
     assert {:ok, winner} = Lock.start_link(home: home)
     socket = Home.boss_socket_path(home)
     assert File.exists?(socket)
 
-    assert {:error, :already_running} = Lock.start_link(home: home)
+    assert {:ok, ^winner} = Lock.start_link(home: home)
     assert File.exists?(socket)
     assert Home.socket_status(home) == :live
 
