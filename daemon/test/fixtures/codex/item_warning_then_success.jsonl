@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"thr-warn"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"type":"error","text":"tool warning: retrying"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"recovered and finished"}}
+{"type":"turn.completed","usage":{"input_tokens":40,"output_tokens":8}}

@@ -1,30 +1,52 @@
 defmodule Consigliere.Harness.Codex do
   @moduledoc """
   Production Codex adapter. cs-runner owns the OS process group; this
-  module owns protocol translation and native session metadata.
+  module owns argv, JSONL translation, and isolated CODEX_HOME. Session
+  state is not kept in an Elixir Agent.
   """
   @behaviour Consigliere.Harness.Adapter
+
+  @max_text 4_096
 
   @impl true
   def capabilities do
     %{
-      "supports_native_resume" => true,
-      "supports_interrupt" => true,
+      "supports_native_resume" => false,
+      "supports_interrupt" => false,
       "harness_name" => "codex",
       "adapter_contract_version" => 1
     }
   end
 
+  def policy(project) do
+    dp = (project && project.dispatch_policy) || %{}
+
+    %{
+      "model" => dp["model"] || "gpt-5",
+      "effort" => dp["effort"] || dp["reasoning_effort"] || "high",
+      "sandbox" => dp["sandbox"] || "workspace-write",
+      "approval" => dp["approval"] || dp["ask_for_approval"] || "never"
+    }
+  end
+
   def argv(opts) do
-    bin = binary!()
     workspace = Keyword.get(opts, :workspace_path, ".")
-    prompt = Keyword.get(opts, :prompt, default_prompt(opts))
+    prompt = Keyword.fetch!(opts, :prompt)
+    policy = Keyword.get(opts, :policy, %{})
 
     [
-      bin,
+      binary!(),
       "exec",
       "--json",
       "--skip-git-repo-check",
+      "--model",
+      to_string(Map.get(policy, "model", "gpt-5")),
+      "--sandbox",
+      to_string(Map.get(policy, "sandbox", "workspace-write")),
+      "--ask-for-approval",
+      to_string(Map.get(policy, "approval", "never")),
+      "-c",
+      "model_reasoning_effort=#{Map.get(policy, "effort", "high")}",
       "-C",
       workspace,
       prompt
@@ -35,6 +57,24 @@ defmodule Consigliere.Harness.Codex do
     System.get_env("CS_CODEX_BIN") || System.find_executable("codex") ||
       raise("production harness missing: set CS_CODEX_BIN or install codex")
   end
+
+  @impl true
+  def start(_spec), do: {:error, :runner_owned}
+
+  @impl true
+  def resume(_native_session_id, _spec), do: {:error, :unsupported}
+
+  @impl true
+  def send(_ref, _input), do: {:error, :runner_owned}
+
+  @impl true
+  def interrupt(_ref), do: {:error, :unsupported}
+
+  @impl true
+  def cancel(_ref), do: {:error, :runner_owned}
+
+  @impl true
+  def snapshot(ref), do: %{native_session_id: Map.get(ref, :native_session_id)}
 
   def decode_line(line) when is_binary(line) do
     case JSON.decode(String.trim(line)) do
@@ -57,13 +97,19 @@ defmodule Consigliere.Harness.Codex do
         {:event, "turn.started", %{}}
 
       "agent_message" ->
-        {:event, "progress.reported", %{"text" => Map.get(map, "text", "")}}
+        {:event, "progress.reported", %{"text" => bound_text(Map.get(map, "text", ""))}}
 
       "progress.reported" ->
         {:event, "progress.reported", Map.get(map, "payload", %{})}
 
       "item.completed" ->
-        {:event, "artifact.created", Map.get(map, "item") || %{}}
+        item_event(map["item"] || %{})
+
+      "item.started" ->
+        :ignore
+
+      "item.updated" ->
+        :ignore
 
       "checkpoint.created" ->
         {:event, "checkpoint.created",
@@ -76,7 +122,11 @@ defmodule Consigliere.Harness.Codex do
         {:event, "question.requested", Map.get(map, "payload", map)}
 
       "turn.completed" ->
-        {:event, "turn.completed", %{}}
+        {:event, "session.completed", %{"usage" => map["usage"] || %{}}}
+
+      "turn.failed" ->
+        {:event, "session.failed",
+         %{"reason" => failed_reason(map), "class" => "turn_failed"}}
 
       "thread.completed" ->
         {:event, "session.completed", %{}}
@@ -88,7 +138,7 @@ defmodule Consigliere.Harness.Codex do
         {:event, "session.failed", %{"reason" => map["reason"] || map["class"] || "failed"}}
 
       "error" ->
-        {:event, "session.failed", %{"reason" => map["message"] || "error"}}
+        {:event, "session.failed", %{"reason" => map["message"] || "error", "class" => "fatal"}}
 
       "usage.updated" ->
         {:event, "usage.updated", Map.get(map, "payload", map)}
@@ -100,83 +150,31 @@ defmodule Consigliere.Harness.Codex do
 
   def normalize(_), do: :ignore
 
-  @impl true
-  def start(spec) do
-    ensure_started!()
-    session_id = "codex-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
-    pack = Map.get(spec, :context_pack, "")
-    hash = :crypto.hash(:sha256, to_string(pack)) |> Base.encode16(case: :lower)
-
-    Agent.update(__MODULE__, fn st ->
-      %{st | sessions: Map.put(st.sessions, session_id, spec), starts: st.starts + 1}
-    end)
-
-    emit(spec, "session.started", 1, %{
-      "native_session_id" => session_id,
-      "input_context_hash" => hash
-    })
-
-    emit(spec, "turn.started", 2, %{})
-    {:ok, %{native_session_id: session_id, attempt_id: spec.attempt_id, seq: 2}}
+  defp item_event(%{"type" => "agent_message"} = item) do
+    {:event, "progress.reported", %{"text" => bound_text(item["text"] || "")}}
   end
 
-  @impl true
-  def resume(native_session_id, spec) do
-    ensure_started!()
+  defp item_event(%{"type" => "error"} = item) do
+    {:event, "progress.reported", %{"text" => bound_text(item["text"] || "item error")}}
+  end
 
-    case Agent.get(__MODULE__, &Map.get(&1.sessions, native_session_id)) do
-      nil -> {:error, :unknown_session}
-      _ -> {:ok, %{native_session_id: native_session_id, attempt_id: spec.attempt_id}}
+  defp item_event(item) when is_map(item) do
+    {:event, "artifact.created", item}
+  end
+
+  defp item_event(_), do: :ignore
+
+  defp failed_reason(map) do
+    case map do
+      %{"error" => %{"message" => msg}} when is_binary(msg) -> msg
+      %{"message" => msg} when is_binary(msg) -> msg
+      _ -> "turn_failed"
     end
   end
 
-  @impl true
-  def send(_ref, _input), do: :ok
-
-  @impl true
-  def interrupt(_ref), do: :ok
-
-  @impl true
-  def cancel(_ref), do: :ok
-
-  @impl true
-  def snapshot(ref), do: %{native_session_id: ref.native_session_id}
-
-  def start_count do
-    ensure_started!()
-    Agent.get(__MODULE__, & &1.starts)
+  defp bound_text(text) when is_binary(text) do
+    if byte_size(text) <= @max_text, do: text, else: binary_part(text, 0, @max_text)
   end
 
-  def reset! do
-    ensure_started!()
-    Agent.update(__MODULE__, fn _ -> %{sessions: %{}, starts: 0} end)
-  end
-
-  defp ensure_started! do
-    case Process.whereis(__MODULE__) do
-      nil ->
-        {:ok, _} = Agent.start_link(fn -> %{sessions: %{}, starts: 0} end, name: __MODULE__)
-        :ok
-
-      _ ->
-        :ok
-    end
-  end
-
-  defp default_prompt(opts) do
-    Keyword.get(opts, :objective, "complete the authorized mission")
-  end
-
-  defp emit(spec, type, seq, payload) do
-    Consigliere.Harness.Events.ingest(
-      %{
-        "event_id" => "#{type}-#{spec.attempt_id}-#{seq}",
-        "type" => type,
-        "native_sequence" => seq,
-        "attempt_id" => spec.attempt_id,
-        "payload" => payload
-      },
-      Consigliere.Actor.attempt(spec.attempt_id, spec.fencing_token)
-    )
-  end
+  defp bound_text(_), do: ""
 end

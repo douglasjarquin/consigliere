@@ -86,5 +86,8 @@ func scrubbedHarnessEnv() []string {
 	if v := os.Getenv("CS_API_SOCKET"); v != "" {
 		env = append(env, "CS_API_SOCKET="+v)
 	}
+	if v := os.Getenv("CODEX_HOME"); v != "" {
+		env = append(env, "CODEX_HOME="+v)
+	}
 	return env
 }

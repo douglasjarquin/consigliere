@@ -366,6 +366,14 @@ func runDoctor(home Home, jsonOut bool, stdout, stderr io.Writer) int {
 	if err := home.LastError(); err != "" {
 		doc["last_error"] = err
 	}
+	codexAuth := filepath.Join(home.Dir, "runtime", "codex", "auth.json")
+	codexStatus := "absent"
+	if _, err := os.Stat(codexAuth); err == nil {
+		codexStatus = "ready"
+	} else if _, err := os.Stat(filepath.Join(home.Dir, "runtime", "codex")); err == nil {
+		codexStatus = "missing"
+	}
+	doc["codex_auth"] = codexStatus
 
 	exit := ExitOK
 	switch priv {
@@ -404,6 +412,7 @@ func runDoctor(home Home, jsonOut bool, stdout, stderr io.Writer) int {
 	if err := home.LastError(); err != "" {
 		fmt.Fprintf(stdout, "last startup failure: %s\n", strings.TrimSpace(err))
 	}
+	fmt.Fprintf(stdout, "codex auth: %s\n", codexStatus)
 	if health, ok := doc["health"].(map[string]any); ok {
 		fmt.Fprintf(stdout, "release: %v schema: %v harness: %v runner: %v\n",
 			health["release"], health["schema"], health["harness"], health["runner"])

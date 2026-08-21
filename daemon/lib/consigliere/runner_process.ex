@@ -175,7 +175,8 @@ defmodule Consigliere.RunnerProcess do
   defp runner_env(opts) do
     env = [
       {~c"CS_HOME", ~c""},
-      {~c"CS_API_SOCKET", String.to_charlist(Consigliere.Home.api_socket_path())}
+      {~c"CS_API_SOCKET", String.to_charlist(Consigliere.Home.api_socket_path())},
+      {~c"CODEX_HOME", String.to_charlist(Consigliere.Home.ensure_codex_home!())}
     ]
 
     case Keyword.get(opts, :capability) do

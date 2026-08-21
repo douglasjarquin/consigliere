@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -26,6 +27,27 @@ func TestSpawnHarness_ConfirmsOwnProcessGroupBeforeReturning(t *testing.T) {
 	}
 	if actualPgid != handle.PGID || actualPgid != handle.PID {
 		t.Fatalf("SpawnHarness returned before setsid actually took effect: pgid=%d pid=%d actual=%d", handle.PGID, handle.PID, actualPgid)
+	}
+}
+
+func TestScrubbedHarnessEnv_ForwardsCodexHomeNotSecrets(t *testing.T) {
+	t.Setenv("CS_HOME", "/secret/cs-home")
+	t.Setenv("CODEX_HOME", "/safe/codex-home")
+	t.Setenv("GITHUB_TOKEN", "gh-secret")
+	t.Setenv("CS_CAPABILITY", "cap-token")
+	t.Setenv("CS_API_SOCKET", "/tmp/api.sock")
+	env := strings.Join(scrubbedHarnessEnv(), "\n")
+	if !strings.Contains(env, "CODEX_HOME=/safe/codex-home") {
+		t.Fatalf("missing CODEX_HOME: %s", env)
+	}
+	if !strings.Contains(env, "CS_CAPABILITY=cap-token") {
+		t.Fatalf("missing capability: %s", env)
+	}
+	if strings.Contains(env, "CS_HOME=") && strings.Contains(env, "/secret/cs-home") {
+		t.Fatalf("CS_HOME leaked: %s", env)
+	}
+	if strings.Contains(env, "GITHUB_TOKEN") {
+		t.Fatalf("github token leaked: %s", env)
 	}
 }
 

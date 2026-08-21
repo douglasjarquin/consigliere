@@ -132,7 +132,8 @@ defmodule Consigliere.Missions.Transitions do
           mission_id: mission.id,
           workspace_id: workspace.id,
           role: Map.get(opts, :role, "soldier"),
-          harness: Map.get(opts, :harness, "claude"),
+          harness:
+            Map.get(opts, :harness, Consigliere.Adapters.harness().capabilities()["harness_name"]),
           status: "planned",
           fencing_token: Txn.mint_fencing_token()
         })

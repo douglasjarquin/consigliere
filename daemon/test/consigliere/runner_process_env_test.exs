@@ -57,6 +57,51 @@ defmodule Consigliere.RunnerProcessEnvTest do
            "harness saw secrets #{inspect(leaked)} (CS_HOME and adapter credentials must not leak)"
   end
 
+  test "CODEX_HOME is forwarded and does not contain boss or sqlite files" do
+    home = Path.join(System.tmp_dir!(), "cs-home-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(home, "credentials"))
+    File.write!(Path.join(home, "credentials/boss"), "boss-secret\n")
+    File.write!(Path.join(home, "consigliere.db"), "sqlite\n")
+    previous = System.get_env("CS_HOME")
+    System.put_env("CS_HOME", home)
+
+    on_exit(fn ->
+      if previous, do: System.put_env("CS_HOME", previous), else: System.delete_env("CS_HOME")
+      File.rm_rf(home)
+    end)
+
+    dest = Consigliere.Home.ensure_codex_home!(home)
+    refute File.exists?(Path.join(dest, "boss"))
+    refute File.exists?(Path.join(dest, "consigliere.db"))
+
+    out = Path.join(System.tmp_dir!(), "codex-env-#{System.unique_integer([:positive])}.out")
+    heartbeat_file = Path.join(System.tmp_dir!(), "codex-env-#{System.unique_integer([:positive])}.hb")
+
+    {:ok, pid} =
+      RunnerProcess.start_link(
+        attempt_id: "env-#{System.unique_integer([:positive])}",
+        heartbeat_file: heartbeat_file,
+        harness_command: [
+          "sh",
+          "-c",
+          "(printenv CODEX_HOME; printenv CS_HOME; printenv GITHUB_TOKEN; true) > '#{out}' 2>/dev/null; sleep 5"
+        ]
+      )
+
+    os_pid = RunnerProcess.os_pid(pid)
+
+    on_exit(fn ->
+      Consigliere.ProcessHelpers.kill_and_verify_dead(os_pid)
+      File.rm(out)
+      File.rm(heartbeat_file)
+    end)
+
+    wait_for_file(out)
+    lines = File.read!(out) |> String.split("\n", trim: true)
+    assert dest in lines
+    refute home in lines
+  end
+
   defp wait_for_file(path, attempts \\ 50) do
     cond do
       File.exists?(path) ->

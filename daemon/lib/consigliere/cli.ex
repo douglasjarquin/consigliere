@@ -146,6 +146,8 @@ defmodule Consigliere.CLI do
       nil -> :ok
       reason -> IO.puts("last startup failure: #{reason}")
     end
+
+    IO.puts("codex auth: #{Home.codex_auth_status(home)}")
   end
 
   defp lock_word(home) do

@@ -27,7 +27,10 @@ defmodule Consigliere.MissionGrantDispatchTest do
 
     attempts = Repo.all(from_attempts(mission.id))
     assert length(attempts) == 1
-    assert hd(attempts).status in ~w(starting running)
+    attempt = hd(attempts)
+    assert attempt.status in ~w(starting running)
+    assert is_binary(attempt.input_context_hash)
+    assert byte_size(attempt.input_context_hash) == 64
 
     assert {:ok, _} = MissionDynamicSupervisor.start_mission(mission_id: mission.id)
     assert length(Repo.all(from_attempts(mission.id))) == 1

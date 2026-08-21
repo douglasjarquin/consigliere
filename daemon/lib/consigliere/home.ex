@@ -63,6 +63,36 @@ defmodule Consigliere.Home do
   def trusted_projects_dir(home \\ dir()), do: Path.join(home, "trusted/projects")
   def workspaces_dir(home \\ dir()), do: Path.join(home, "workspaces")
   def runtime_attempts_dir(home \\ dir()), do: Path.join(home, "runtime/attempts")
+  def codex_home(home \\ dir()), do: Path.join(home, "runtime/codex")
+
+  def ensure_codex_home!(home \\ dir()) do
+    dest = codex_home(home)
+    File.mkdir_p!(dest)
+    File.chmod!(dest, 0o700)
+    src = System.get_env("CS_CODEX_AUTH_HOME") || Path.expand("~/.codex")
+
+    Enum.each(["auth.json", "config.toml"], fn name ->
+      from = Path.join(src, name)
+      to = Path.join(dest, name)
+
+      if File.regular?(from) do
+        File.cp!(from, to)
+        File.chmod!(to, 0o600)
+      end
+    end)
+
+    dest
+  end
+
+  def codex_auth_status(home \\ dir()) do
+    dest = codex_home(home)
+
+    cond do
+      File.regular?(Path.join(dest, "auth.json")) -> "ready"
+      File.dir?(dest) -> "missing"
+      true -> "absent"
+    end
+  end
   def evidence_dir(home \\ dir()), do: Path.join(home, "evidence")
   def logs_dir(home \\ dir()), do: Path.join(home, "logs")
   def boss_credential_path(home \\ dir()), do: Path.join(credentials_dir(home), "boss")

@@ -6,16 +6,23 @@ defmodule Consigliere.Dispatch do
   """
 
   alias Consigliere.Actor
+  alias Consigliere.Adapters
   alias Consigliere.AttemptStates
   alias Consigliere.Attempts
   alias Consigliere.Attempts.Attempt
   alias Consigliere.Capabilities
+  alias Consigliere.DatabaseWriter
   alias Consigliere.DispatchOperations
   alias Consigliere.GlobalScheduler
+  alias Consigliere.Harness.Codex
+  alias Consigliere.Harness.ContextPack
   alias Consigliere.Home
   alias Consigliere.Missions
+  alias Consigliere.Projects.Project
+  alias Consigliere.Repo
   alias Consigliere.RunnerDynamicSupervisor
   alias Consigliere.RunnerProcess
+  alias Consigliere.Txn
 
   @max_spawn_attempts 3
 
@@ -108,10 +115,34 @@ defmodule Consigliere.Dispatch do
   end
 
   defp launch(state, mission, grant, attempt) do
+    workspace = Path.join(Home.workspaces_dir(), to_string(mission.id))
+    project = mission.project_id && Repo.get(Project, mission.project_id)
+    policy = Codex.policy(project)
+
+    extras = %{
+      workspace_path: workspace,
+      base_sha: mission.base_sha,
+      role: attempt.role
+    }
+
+    case ContextPack.compose(mission, extras) do
+      {:error, :too_large} ->
+        _ = Attempts.mark_spawn_failed(attempt.id, Actor.system(), "context pack too large")
+        GlobalScheduler.release_slot(mission.id)
+        %{state | slot: nil, attempt_id: attempt.id, runner_pid: nil}
+
+      {:ok, pack} ->
+        {:ok, attempt} = persist_pack(attempt, pack, policy)
+        start_runner(state, mission, grant, attempt, workspace, pack, policy)
+    end
+  end
+
+  defp start_runner(state, mission, grant, attempt, workspace, pack, policy) do
     {:ok, capability} = Capabilities.mint(attempt)
     runtime = Path.join(Home.runtime_attempts_dir(), attempt.id)
     File.mkdir_p!(runtime)
-    workspace = Path.join(Home.workspaces_dir(), to_string(mission.id))
+    File.write!(Path.join(runtime, "context_pack.json"), pack.encoded)
+    File.write!(Path.join(runtime, "dispatch.json"), JSON.encode!(policy))
 
     spec =
       {RunnerProcess,
@@ -121,7 +152,9 @@ defmodule Consigliere.Dispatch do
          fencing_token: attempt.fencing_token,
          heartbeat_file: Path.join(runtime, "heartbeat"),
          workspace_path: workspace,
-         capability: capability
+         capability: capability,
+         prompt: pack.encoded,
+         policy: policy
        ]}
 
     case DynamicSupervisor.start_child(RunnerDynamicSupervisor, spec) do
@@ -158,6 +191,17 @@ defmodule Consigliere.Dispatch do
 
   defp slot_name(:granted), do: "granted"
   defp slot_name(_), do: "held"
+
+  defp persist_pack(attempt, pack, _policy) do
+    DatabaseWriter.transaction(fn ->
+      Txn.update!(
+        Attempt.changeset(attempt, %{
+          input_context_hash: pack.hash,
+          harness: Adapters.harness().capabilities()["harness_name"]
+        })
+      )
+    end)
+  end
 
   defp inventory_path(attempt_id),
     do: Path.join(Home.runtime_attempts_dir(), "#{attempt_id}/manifest.json")
