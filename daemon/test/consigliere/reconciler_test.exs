@@ -227,7 +227,7 @@ defmodule Consigliere.ReconcilerTest do
 
   defp find_definitely_dead_pgid do
     {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
-    System.cmd("kill", ["-9", "-#{pgid}"], stderr_to_stdout: true)
+    System.cmd("kill", ["-9", "--", "-#{pgid}"], stderr_to_stdout: true)
     if Port.info(port), do: Port.close(port)
     Consigliere.ProcessHelpers.wait_group_gone(pgid)
     pgid

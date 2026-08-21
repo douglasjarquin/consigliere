@@ -93,7 +93,7 @@ defmodule Consigliere.ProcessHelpers do
       end)
 
     {probe_output, probe_status} =
-      System.cmd("kill", ["-0", "-#{pgid}"], stderr_to_stdout: true)
+      System.cmd("kill", ["-0", "--", "-#{pgid}"], stderr_to_stdout: true)
 
     inspect(%{
       members: members,

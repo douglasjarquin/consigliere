@@ -111,7 +111,7 @@ defmodule Consigliere.ReconcilerPersistTest do
     {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
 
     on_exit(fn ->
-      System.cmd("kill", ["-9", "-#{pgid}"], stderr_to_stdout: true)
+      System.cmd("kill", ["-9", "--", "-#{pgid}"], stderr_to_stdout: true)
       if Port.info(port), do: Port.close(port)
     end)
 
@@ -144,7 +144,7 @@ defmodule Consigliere.ReconcilerPersistTest do
     {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
 
     on_exit(fn ->
-      System.cmd("kill", ["-9", "-#{pgid}"], stderr_to_stdout: true)
+      System.cmd("kill", ["-9", "--", "-#{pgid}"], stderr_to_stdout: true)
       if Port.info(port), do: Port.close(port)
     end)
 
@@ -166,7 +166,7 @@ defmodule Consigliere.ReconcilerPersistTest do
     {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
 
     on_exit(fn ->
-      System.cmd("kill", ["-9", "-#{pgid}"], stderr_to_stdout: true)
+      System.cmd("kill", ["-9", "--", "-#{pgid}"], stderr_to_stdout: true)
       if Port.info(port), do: Port.close(port)
     end)
 
@@ -249,7 +249,7 @@ defmodule Consigliere.ReconcilerPersistTest do
     {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
 
     on_exit(fn ->
-      System.cmd("kill", ["-9", "-#{pgid}"], stderr_to_stdout: true)
+      System.cmd("kill", ["-9", "--", "-#{pgid}"], stderr_to_stdout: true)
       if Port.info(port), do: Port.close(port)
     end)
 
@@ -277,7 +277,7 @@ defmodule Consigliere.ReconcilerPersistTest do
     {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
 
     on_exit(fn ->
-      System.cmd("kill", ["-9", "-#{pgid}"], stderr_to_stdout: true)
+      System.cmd("kill", ["-9", "--", "-#{pgid}"], stderr_to_stdout: true)
       if Port.info(port), do: Port.close(port)
     end)
 

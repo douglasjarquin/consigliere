@@ -53,7 +53,7 @@ defmodule Consigliere.ProcessGroup do
   def gone?(pgid), do: not alive?(pgid)
 
   defp signal(pgid, sig) do
-    System.cmd("kill", [sig, "-#{pgid}"], stderr_to_stdout: true)
+    System.cmd("kill", [sig, "--", "-#{pgid}"], stderr_to_stdout: true)
   rescue
     _ -> {"", 1}
   end
