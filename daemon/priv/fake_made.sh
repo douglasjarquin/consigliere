@@ -3,6 +3,9 @@
 # Honors --decisions and CS_FAKE_MADE_OUTCOME. Always exits.
 set -eu
 run_id=""
+invocation_id=""
+mission_id=""
+gate_id=""
 workspace="."
 input_sha=""
 base_sha=""
@@ -15,6 +18,9 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     validate|--managed|--json-events) shift ;;
     --run-id) run_id="$2"; shift 2 ;;
+    --invocation-id) invocation_id="$2"; shift 2 ;;
+    --mission-id) mission_id="$2"; shift 2 ;;
+    --gate-id) gate_id="$2"; shift 2 ;;
     --workspace) workspace="$2"; shift 2 ;;
     --input-sha) input_sha="$2"; shift 2 ;;
     --base-sha) base_sha="$2"; shift 2 ;;
@@ -23,6 +29,14 @@ while [ "$#" -gt 0 ]; do
     *) shift ;;
   esac
 done
+
+if [ -z "$invocation_id" ]; then
+  invocation_id="$run_id"
+fi
+
+if [ -z "$gate_id" ]; then
+  gate_id="$run_id"
+fi
 
 waived=0
 if [ -n "$decisions" ] && [ -f "$decisions" ]; then
@@ -45,37 +59,47 @@ if [ -z "$outcome" ]; then
   outcome="needs_decision"
 fi
 
-printf '%s\n' "{\"event\":\"stage.started\",\"run_id\":\"$run_id\",\"stage\":\"review\",\"input_sha\":\"$input_sha\",\"base_sha\":\"$base_sha\",\"policy_hash\":\"$policy_hash\"}"
+common="\"schema_version\":\"1\",\"protocol_version\":\"consigliere.made.managed.v1\",\"run_id\":\"$run_id\",\"invocation_id\":\"$invocation_id\",\"mission_id\":\"$mission_id\",\"gate_id\":\"$gate_id\",\"base_sha\":\"$base_sha\",\"input_sha\":\"$input_sha\",\"policy_hash\":\"$policy_hash\""
+
+seq=1
+printf '%s\n' "{\"event\":\"stage.started\",${common},\"sequence\":${seq}}"
+
+emit_terminal() {
+  seq=$((seq + 1))
+  printf '%s\n' "{\"event\":\"run.completed\",${common},\"sequence\":${seq},\"outcome\":\"$1\"}"
+}
 
 case "$outcome" in
   passed)
-    printf '%s\n' "{\"event\":\"run.terminal\",\"run_id\":\"$run_id\",\"outcome\":\"passed\",\"input_sha\":\"$input_sha\",\"base_sha\":\"$base_sha\",\"policy_hash\":\"$policy_hash\"}"
+    emit_terminal "passed"
     exit 0
     ;;
   needs_decision)
-    printf '%s\n' "{\"event\":\"stage.finding\",\"run_id\":\"$run_id\",\"stage\":\"review\",\"finding\":{\"finding_code\":\"REVIEW\",\"finding_class\":\"correctness\",\"path\":\"lib/x.ex\",\"symbol\":\"run\",\"description\":\"needs a decision\",\"severity\":\"blocking\",\"fingerprint\":\"$fingerprint\"}}"
-    printf '%s\n' "{\"event\":\"run.needs_decision\",\"run_id\":\"$run_id\",\"stage\":\"review\",\"findings\":[{\"finding_code\":\"REVIEW\",\"fingerprint\":\"$fingerprint\"}],\"decision_request\":{\"question\":\"waive $fingerprint?\",\"options\":[\"waive\",\"block\"]}}"
-    printf '%s\n' "{\"event\":\"run.terminal\",\"run_id\":\"$run_id\",\"outcome\":\"needs_decision\",\"input_sha\":\"$input_sha\",\"base_sha\":\"$base_sha\",\"policy_hash\":\"$policy_hash\"}"
+    seq=$((seq + 1))
+    printf '%s\n' "{\"event\":\"stage.finding\",${common},\"sequence\":${seq},\"finding\":{\"finding_code\":\"REVIEW\",\"finding_class\":\"correctness\",\"path\":\"lib/x.ex\",\"symbol\":\"run\",\"description\":\"needs a decision\",\"severity\":\"blocking\",\"fingerprint\":\"$fingerprint\"}}"
+    seq=$((seq + 1))
+    printf '%s\n' "{\"event\":\"run.needs_decision\",${common},\"sequence\":${seq},\"findings\":[{\"finding_code\":\"REVIEW\",\"fingerprint\":\"$fingerprint\"}],\"decision_request\":{\"question\":\"waive $fingerprint?\",\"options\":[\"waive\",\"block\"]}}"
+    emit_terminal "needs_decision"
     exit 2
     ;;
   failed_retryable)
-    printf '%s\n' "{\"event\":\"run.terminal\",\"run_id\":\"$run_id\",\"outcome\":\"failed_retryable\",\"input_sha\":\"$input_sha\",\"base_sha\":\"$base_sha\",\"policy_hash\":\"$policy_hash\"}"
+    emit_terminal "failed_retryable"
     exit 3
     ;;
   failed_terminal)
-    printf '%s\n' "{\"event\":\"run.terminal\",\"run_id\":\"$run_id\",\"outcome\":\"failed_terminal\",\"input_sha\":\"$input_sha\",\"base_sha\":\"$base_sha\",\"policy_hash\":\"$policy_hash\"}"
+    emit_terminal "failed_terminal"
     exit 4
     ;;
   infrastructure_error)
-    printf '%s\n' "{\"event\":\"run.terminal\",\"run_id\":\"$run_id\",\"outcome\":\"infrastructure_error\",\"input_sha\":\"$input_sha\",\"base_sha\":\"$base_sha\",\"policy_hash\":\"$policy_hash\"}"
+    emit_terminal "infrastructure_error"
     exit 5
     ;;
   canceled)
-    printf '%s\n' "{\"event\":\"run.terminal\",\"run_id\":\"$run_id\",\"outcome\":\"canceled\",\"input_sha\":\"$input_sha\",\"base_sha\":\"$base_sha\",\"policy_hash\":\"$policy_hash\"}"
+    emit_terminal "canceled"
     exit 6
     ;;
   *)
-    printf '%s\n' "{\"event\":\"run.terminal\",\"run_id\":\"$run_id\",\"outcome\":\"infrastructure_error\",\"input_sha\":\"$input_sha\",\"base_sha\":\"$base_sha\",\"policy_hash\":\"$policy_hash\"}"
+    emit_terminal "infrastructure_error"
     exit 5
     ;;
 esac

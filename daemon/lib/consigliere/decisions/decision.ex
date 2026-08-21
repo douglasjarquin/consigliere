@@ -14,6 +14,8 @@ defmodule Consigliere.Decisions.Decision do
     field(:scope, :string)
     field(:input_sha, :string)
     field(:base_sha, :string)
+    field(:policy_hash, :string)
+    field(:finding_fingerprint, :string)
     field(:granted_by_principal, :string)
     field(:reason, :string)
     field(:expires_at, :utc_datetime_usec)
@@ -29,6 +31,8 @@ defmodule Consigliere.Decisions.Decision do
     :question_id,
     :input_sha,
     :base_sha,
+    :policy_hash,
+    :finding_fingerprint,
     :reason,
     :expires_at,
     :maximum_uses,

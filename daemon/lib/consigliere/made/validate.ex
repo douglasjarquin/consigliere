@@ -19,7 +19,9 @@ defmodule Consigliere.Made.Validate do
     result =
       adapter.validate(%{
         run_id: gate.managed_run_id || gate.id,
+        invocation_id: "#{gate.managed_run_id || gate.id}:#{System.unique_integer([:positive])}",
         mission_id: gate.mission_id,
+        gate_id: gate.id,
         workspace: workspace,
         input_sha: gate.input_sha,
         base_sha: gate.base_sha,
@@ -35,17 +37,20 @@ defmodule Consigliere.Made.Validate do
     Map.put(result, :gate, gate)
   end
 
-  defp apply_outcome(gate, attempt, %{outcome: :needs_decision}, fingerprint) do
+  defp apply_outcome(gate, attempt, %{outcome: :needs_decision} = result, fingerprint) do
+    finding = List.first(Map.get(result, :findings) || []) || %{}
+    digest = finding["fingerprint"] || fingerprint
+
     {:ok, %{gate: gate}} =
       Gates.needs_decision(gate.id, Actor.system(), %{
         managed_run_id: gate.managed_run_id,
-        finding_digest: fingerprint,
+        finding_digest: digest,
         question_attrs: %{
           attempt_id: attempt.id,
           request_id: "made-#{gate.id}",
           blocking_scope: "mission",
           requested_authority: "boss",
-          prompt: "Made needs a decision on #{fingerprint}"
+          prompt: finding_prompt(finding, digest)
         }
       })
 
@@ -87,4 +92,19 @@ defmodule Consigliere.Made.Validate do
     {:ok, gate} = Gates.cancel(gate.id, Actor.system())
     gate
   end
+
+  defp finding_prompt(finding, fingerprint) when map_size(finding) > 0 do
+    [
+      "Made finding #{fingerprint}",
+      "code: #{finding["finding_code"]}",
+      "class: #{finding["finding_class"]}",
+      "path: #{finding["path"]}",
+      "symbol: #{finding["symbol"]}",
+      finding["description"]
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp finding_prompt(_finding, fingerprint), do: "Made needs a decision on #{fingerprint}"
 end

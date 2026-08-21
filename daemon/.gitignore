@@ -30,4 +30,5 @@ consigliere_daemon-*.tar
 # NIF/probe binaries belong in MIX_APP_PATH/priv, not source priv.
 /priv/*.so
 /priv/cs_lock_probe
+/priv/cs_setsid
 

@@ -108,6 +108,15 @@ defmodule Consigliere.Gates.Blockers do
       Txn.sha_mismatch({gate.input_sha, gate.base_sha}, {decision.input_sha, decision.base_sha})
     end
 
+    unless is_binary(decision.policy_hash) and decision.policy_hash == gate.policy_hash do
+      Txn.illegal(gate.status, "pending", :policy_hash_mismatch)
+    end
+
+    if is_binary(decision.finding_fingerprint) and decision.finding_fingerprint != "" and
+         decision.finding_fingerprint != gate.finding_digest do
+      Txn.illegal(gate.status, "pending", :fingerprint_mismatch)
+    end
+
     if uses_exhausted?(gate, decision) do
       Txn.illegal(gate.status, "pending", :decision_uses_exhausted)
     end

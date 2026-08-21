@@ -7,6 +7,7 @@ BUILD ?= $(MIX_APP_PATH)/obj
 NIF = $(PREFIX)/cs_home_lock.so
 PROC_NIF = $(PREFIX)/cs_proc.so
 PROBE = $(PREFIX)/cs_lock_probe
+SETSID = $(PREFIX)/cs_setsid
 
 KERNEL_NAME := $(shell uname -s)
 
@@ -22,7 +23,7 @@ endif
 
 .PHONY: all clean
 
-all: $(NIF) $(PROC_NIF) $(PROBE)
+all: $(NIF) $(PROC_NIF) $(PROBE) $(SETSID)
 
 $(PREFIX):
 	mkdir -p $(PREFIX)
@@ -48,5 +49,11 @@ $(PROC_NIF): $(BUILD)/cs_proc.o | $(PREFIX)
 $(PROBE): $(BUILD)/cs_lock_probe.o | $(PREFIX)
 	$(CC) -o $@ $<
 
+$(BUILD)/cs_setsid.o: c_src/cs_setsid.c | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(SETSID): $(BUILD)/cs_setsid.o | $(PREFIX)
+	$(CC) -o $@ $<
+
 clean:
-	rm -f $(NIF) $(PROC_NIF) $(PROBE) $(BUILD)/cs_home_lock.o $(BUILD)/cs_proc.o $(BUILD)/cs_lock_probe.o
+	rm -f $(NIF) $(PROC_NIF) $(PROBE) $(SETSID) $(BUILD)/cs_home_lock.o $(BUILD)/cs_proc.o $(BUILD)/cs_lock_probe.o $(BUILD)/cs_setsid.o

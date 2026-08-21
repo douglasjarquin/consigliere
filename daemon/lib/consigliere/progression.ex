@@ -40,7 +40,7 @@ defmodule Consigliere.Progression do
         run(attempt.id)
 
       attempt.exit_classification == "completed" and
-          attempt.status in ["running", "checkpoint_requested"] and not sha_present?(attempt) ->
+        attempt.status in ["running", "checkpoint_requested"] and not sha_present?(attempt) ->
         protocol_fail(attempt, "semantic completion without a committed SHA")
 
       true ->
@@ -237,5 +237,4 @@ defmodule Consigliere.Progression do
   end
 
   defp mirror_of(_), do: Path.join(System.tmp_dir!(), "cs-missing-mirror")
-
 end

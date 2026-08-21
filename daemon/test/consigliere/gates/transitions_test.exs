@@ -89,7 +89,8 @@ defmodule Consigliere.Gates.TransitionsTest do
               scope: "sha_bound",
               granted_by_principal: "boss",
               input_sha: gate.input_sha,
-              base_sha: gate.base_sha
+              base_sha: gate.base_sha,
+              policy_hash: gate.policy_hash
             },
             overrides
           )
@@ -344,6 +345,16 @@ defmodule Consigliere.Gates.TransitionsTest do
 
     assert Repo.get!(Gate, gate.id).status == "needs_decision"
     assert length(open_validation(gate)) == 1
+  end
+
+  test "rerun_after_decision refuses a decision from a different policy hash" do
+    %{gate: gate, attempt: attempt} = running_gate!()
+    %{gate: gate, question: question} = ask!(gate, attempt)
+    {:ok, question} = Questions.answer(question.id, Actor.boss(), %{answer: "waive"})
+    decision = grant!(gate, question, %{policy_hash: "other-policy"})
+
+    assert {:error, {:illegal_transition, %{reason: :policy_hash_mismatch}}} =
+             Gates.rerun_after_decision(gate.id, Actor.system(), decision.id)
   end
 
   test "rerun_after_decision refuses a decision from another gate with the same SHAs" do

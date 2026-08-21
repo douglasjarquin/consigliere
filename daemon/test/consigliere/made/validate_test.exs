@@ -74,6 +74,8 @@ defmodule Consigliere.Made.ValidateTest do
           scope: "sha_bound",
           input_sha: "sha-a",
           base_sha: "base",
+          policy_hash: "p1",
+          finding_fingerprint: "fp-default",
           granted_by_principal: "boss"
         })
       )

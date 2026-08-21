@@ -1,8 +1,12 @@
 defmodule Consigliere.Made.Process do
   @moduledoc """
-  Short-lived `made validate --managed` adapter. The validator process
-  is always gone before this function returns (ADR-007).
+  Short-lived `made validate --managed` adapter. Production never falls
+  back to a fixture. The validator is gone before this returns.
   """
+
+  alias Consigliere.Home
+  alias Consigliere.Made.Events
+  alias Consigliere.Made.Exec
 
   @outcomes %{
     0 => :passed,
@@ -13,57 +17,168 @@ defmodule Consigliere.Made.Process do
     6 => :canceled
   }
 
-  def validate(spec) do
-    binary = binary()
-    decisions_path = write_decisions!(spec)
-    {output, status} = run(binary, spec, decisions_path)
-    _ = File.rm(decisions_path)
-    live_pid = nil
-    outcome = Map.get(@outcomes, status, :infrastructure_error)
+  @named %{
+    "passed" => :passed,
+    "needs_decision" => :needs_decision,
+    "failed_retryable" => :failed_retryable,
+    "failed_terminal" => :failed_terminal,
+    "infrastructure_error" => :infrastructure_error,
+    "canceled" => :canceled
+  }
 
-    %{
-      outcome: outcome,
-      exit_code: status,
-      output: output,
-      events: parse_events(output),
-      live_pid: live_pid,
-      findings: findings(output)
-    }
+  def validate(spec) do
+    case resolve_binary() do
+      {:ok, binary} -> run_validate(binary, spec)
+      {:error, reason} -> fail_closed(reason)
+    end
+  end
+
+  def resolve_binary do
+    case System.get_env("CS_MADE_BIN") do
+      path when is_binary(path) and path != "" -> usable(path)
+      _ -> find_made()
+    end
   end
 
   def binary do
-    System.get_env("CS_MADE_BIN") || System.find_executable("made") || fixture_binary()
+    case resolve_binary() do
+      {:ok, path} -> path
+      {:error, reason} -> raise ArgumentError, "made binary #{reason}"
+    end
   end
 
   def fixture_binary do
     Path.join(:code.priv_dir(:consigliere_daemon), "fake_made.sh")
   end
 
-  defp run(binary, spec, decisions_path) do
-    args = [
+  defp find_made do
+    case System.find_executable("made") do
+      nil -> {:error, :made_missing}
+      path -> if fixture?(path), do: {:error, :made_fixture_forbidden}, else: usable(path)
+    end
+  end
+
+  defp usable(path) do
+    if File.regular?(path) and executable?(path), do: {:ok, path}, else: {:error, :made_unusable}
+  end
+
+  defp executable?(path) do
+    case File.stat(path) do
+      {:ok, %{mode: mode}} -> Bitwise.band(mode, 0o111) != 0
+      _ -> false
+    end
+  end
+
+  defp fixture?(path), do: Path.expand(path) == Path.expand(fixture_binary())
+
+  defp run_validate(binary, spec) do
+    identity = identity(spec)
+    {dir, decisions_path} = write_decisions!(spec, identity)
+    tmpdir = Path.join(dir, "tmp")
+    File.mkdir_p!(tmpdir)
+    File.chmod!(tmpdir, 0o700)
+
+    result =
+      case Exec.run(binary, args(spec, identity, decisions_path), env(binary, spec, tmpdir),
+             timeout_ms: Map.get(spec, :timeout_ms, 30_000)
+           ) do
+        {:ok, output, status, _pid} ->
+          finish(output, status, identity)
+
+        {:error, reason, output, _pid} ->
+          fail_closed(reason, output)
+      end
+
+    _ = File.rm(decisions_path)
+    result
+  end
+
+  defp finish(output, status, identity) do
+    expected = Map.get(@outcomes, status, :infrastructure_error)
+
+    case Events.parse(output, identity) do
+      {:ok, parsed} ->
+        terminal = Map.get(@named, parsed.terminal["outcome"])
+
+        if terminal == expected do
+          %{
+            outcome: terminal,
+            exit_code: status,
+            output: output,
+            events: parsed.events,
+            findings: parsed.findings,
+            live_pid: nil
+          }
+        else
+          fail_closed(:exit_mismatch, output)
+        end
+
+      {:error, reason} ->
+        fail_closed(reason, output)
+    end
+  end
+
+  defp fail_closed(reason, output \\ "") do
+    %{
+      outcome: :infrastructure_error,
+      exit_code: nil,
+      output: output,
+      events: [],
+      findings: [],
+      live_pid: nil,
+      reason: reason
+    }
+  end
+
+  defp identity(spec) do
+    %{
+      run_id: to_string(spec.run_id),
+      invocation_id: to_string(Map.get(spec, :invocation_id) || spec.run_id),
+      mission_id: to_string(Map.get(spec, :mission_id) || ""),
+      gate_id: to_string(Map.get(spec, :gate_id) || spec.run_id),
+      base_sha: to_string(spec.base_sha),
+      input_sha: to_string(spec.input_sha),
+      policy_hash: to_string(spec.policy_hash)
+    }
+  end
+
+  defp args(spec, identity, decisions_path) do
+    [
       "validate",
       "--managed",
+      "--json-events",
       "--run-id",
-      to_string(spec.run_id),
+      identity.run_id,
+      "--invocation-id",
+      identity.invocation_id,
+      "--mission-id",
+      identity.mission_id,
+      "--gate-id",
+      identity.gate_id,
       "--workspace",
       to_string(Map.get(spec, :workspace) || Map.get(spec, :workspace_path) || "."),
       "--input-sha",
-      to_string(spec.input_sha),
+      identity.input_sha,
       "--base-sha",
-      to_string(spec.base_sha),
+      identity.base_sha,
       "--policy-hash",
-      to_string(spec.policy_hash),
+      identity.policy_hash,
       "--decisions",
-      decisions_path,
-      "--json-events"
+      decisions_path
     ]
+  end
 
-    env = [
+  defp env(binary, spec, tmpdir) do
+    path = Enum.join([Path.dirname(binary), "/usr/bin", "/bin", "/usr/sbin"], ":")
+
+    [
+      {"PATH", path},
+      {"LANG", "C"},
+      {"LC_ALL", "C"},
+      {"TMPDIR", tmpdir},
       {"CS_FAKE_MADE_OUTCOME", outcome_name(spec)},
       {"CS_FAKE_MADE_FINGERPRINT", to_string(Map.get(spec, :fingerprint, "fp-default"))}
     ]
-
-    System.cmd(binary, args, stderr_to_stdout: true, env: env)
   end
 
   defp outcome_name(spec) do
@@ -73,31 +188,32 @@ defmodule Consigliere.Made.Process do
     end
   end
 
-  defp write_decisions!(spec) do
-    path =
-      Path.join(System.tmp_dir!(), "cs-made-decisions-#{System.unique_integer([:positive])}.json")
+  defp write_decisions!(spec, identity) do
+    dir =
+      Path.join([
+        Home.evidence_dir(),
+        "validation",
+        identity.run_id,
+        identity.invocation_id
+      ])
 
-    File.write!(path, JSON.encode!(Map.get(spec, :decisions, [])))
-    path
-  end
+    File.mkdir_p!(dir)
+    File.chmod!(dir, 0o700)
+    path = Path.join(dir, "decisions.json")
 
-  defp parse_events(output) do
-    output
-    |> String.split("\n", trim: true)
-    |> Enum.flat_map(fn line ->
-      case JSON.decode(line) do
-        {:ok, map} -> [map]
-        _ -> []
-      end
-    end)
-  end
+    payload = %{
+      "run_id" => identity.run_id,
+      "invocation_id" => identity.invocation_id,
+      "mission_id" => identity.mission_id,
+      "gate_id" => identity.gate_id,
+      "input_sha" => identity.input_sha,
+      "base_sha" => identity.base_sha,
+      "policy_hash" => identity.policy_hash,
+      "decisions" => Map.get(spec, :decisions, [])
+    }
 
-  defp findings(output) do
-    parse_events(output)
-    |> Enum.flat_map(fn
-      %{"event" => "stage.finding", "finding" => finding} -> [finding]
-      %{"event" => "run.needs_decision", "findings" => list} when is_list(list) -> list
-      _ -> []
-    end)
+    File.write!(path, JSON.encode!(payload))
+    File.chmod!(path, 0o600)
+    {dir, path}
   end
 end
