@@ -136,4 +136,17 @@ defmodule Consigliere.DeliveryTest do
     assert mission.phase == "awaiting_integration_authorization"
     assert "mission.integration_race_detected" in Fixtures.event_types(mission.id)
   end
+
+  test "merge refuses an authorization granted for a different PR", ctx do
+    {:ok, %{mission: mission, pr: pr}} = Delivery.prepare(ctx.mission.id, spec(ctx, %{}))
+
+    {:ok, mission} =
+      Missions.grant_integration_authorization(mission.id, Actor.boss(), %{
+        target_sha: ctx.sha,
+        target_pull_request: to_string(pr.number)
+      })
+
+    assert {:error, :authorization_pr_mismatch} =
+             Delivery.merge(mission.id, %{github: ctx.github, pr: pr.number + 1})
+  end
 end

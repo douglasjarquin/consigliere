@@ -13,7 +13,7 @@ defmodule Consigliere.GitHub.Fake do
       number = Map.get(state.prs, branch, map_size(state.prs) + 1)
       pr = %{number: number, branch: branch, head_sha: sha}
 
-      {pr,
+      {{:ok, pr},
        %{
          state
          | prs: Map.put(state.prs, branch, number),

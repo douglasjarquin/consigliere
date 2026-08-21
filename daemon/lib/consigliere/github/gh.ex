@@ -5,19 +5,7 @@ defmodule Consigliere.GitHub.Gh do
   """
 
   def ci_status(repo, sha, runner \\ &System.cmd/3) do
-    case gh(runner, ["api", "repos/#{repo}/commits/#{sha}/status"]) do
-      {:ok, body} ->
-        case JSON.decode(body) do
-          {:ok, %{"state" => "success"}} -> :success
-          {:ok, %{"state" => "pending"}} -> :pending
-          {:ok, %{"state" => "failure"}} -> :failure
-          {:ok, %{"state" => "error"}} -> :failure
-          _ -> :unknown
-        end
-
-      {:error, _} ->
-        :unknown
-    end
+    combine_status(combined_status(repo, sha, runner), check_runs(repo, sha, runner))
   end
 
   def upsert_pr(repo, branch, sha, runner \\ &System.cmd/3) do
@@ -35,25 +23,22 @@ defmodule Consigliere.GitHub.Gh do
          ]) do
       {:ok, body} ->
         case JSON.decode(body) do
-          {:ok, [%{"number" => number} | _]} ->
-            _ =
-              gh(runner, [
-                "api",
-                "-X",
-                "PATCH",
-                "repos/#{repo}/pulls/#{number}",
-                "-f",
-                "head=#{sha}"
-              ])
+          {:ok, [%{"number" => number, "headRefOid" => head} | _]} when is_integer(number) ->
+            if head == sha do
+              {:ok, %{number: number, branch: branch, head_sha: sha}}
+            else
+              {:error, {:stale_pr_head, head}}
+            end
 
-            %{number: number, branch: branch, head_sha: sha}
+          {:ok, []} ->
+            create_pr(repo, branch, sha, title, runner)
 
           _ ->
-            create_pr(repo, branch, sha, title, runner)
+            {:error, :unrecognized_pr_list}
         end
 
-      {:error, _} ->
-        create_pr(repo, branch, sha, title, runner)
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -89,9 +74,14 @@ defmodule Consigliere.GitHub.Gh do
          ]) do
       {:ok, body} ->
         case JSON.decode(body) do
-          {:ok, %{"sha" => merged}} -> {:ok, merged}
-          {:ok, %{"merged" => true}} -> {:ok, expected_sha}
-          _ -> {:ok, expected_sha}
+          {:ok, %{"merged" => true, "sha" => merged}} when is_binary(merged) and merged != "" ->
+            {:ok, merged}
+
+          {:ok, %{"sha" => merged, "merged" => true}} when is_binary(merged) and merged != "" ->
+            {:ok, merged}
+
+          _ ->
+            {:error, :unrecognized_merge}
         end
 
       {:error, reason} ->
@@ -99,7 +89,7 @@ defmodule Consigliere.GitHub.Gh do
     end
   end
 
-  defp create_pr(repo, branch, sha, title, runner) do
+  def create_pr(repo, branch, sha, title, runner \\ &System.cmd/3) do
     case gh(runner, [
            "pr",
            "create",
@@ -113,13 +103,72 @@ defmodule Consigliere.GitHub.Gh do
            "exact-SHA delivery"
          ]) do
       {:ok, url} ->
-        number = url |> String.trim() |> String.split("/") |> List.last() |> String.to_integer()
-        %{number: number, branch: branch, head_sha: sha}
+        case url |> String.trim() |> String.split("/") |> List.last() |> Integer.parse() do
+          {number, ""} -> {:ok, %{number: number, branch: branch, head_sha: sha}}
+          _ -> {:error, :unrecognized_pr_url}
+        end
 
-      {:error, _} ->
-        %{number: 1, branch: branch, head_sha: sha}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
+
+  defp combined_status(repo, sha, runner) do
+    case gh(runner, ["api", "repos/#{repo}/commits/#{sha}/status"]) do
+      {:ok, body} ->
+        case JSON.decode(body) do
+          {:ok, %{"state" => "success"}} -> :success
+          {:ok, %{"state" => "pending"}} -> :pending
+          {:ok, %{"state" => "failure"}} -> :failure
+          {:ok, %{"state" => "error"}} -> :failure
+          _ -> :unknown
+        end
+
+      {:error, _} ->
+        :unknown
+    end
+  end
+
+  defp check_runs(repo, sha, runner) do
+    case gh(runner, ["api", "repos/#{repo}/commits/#{sha}/check-runs"]) do
+      {:ok, body} ->
+        case JSON.decode(body) do
+          {:ok, %{"check_runs" => runs}} when is_list(runs) ->
+            cond do
+              Enum.any?(runs, &(&1["conclusion"] in ["failure", "timed_out", "cancelled"])) ->
+                :failure
+
+              Enum.any?(runs, &(&1["status"] in ["queued", "in_progress"])) ->
+                :pending
+
+              runs != [] and
+                  Enum.all?(
+                    runs,
+                    &(&1["status"] == "completed" and &1["conclusion"] == "success")
+                  ) ->
+                :success
+
+              true ->
+                :unknown
+            end
+
+          _ ->
+            :unknown
+        end
+
+      {:error, _} ->
+        :unknown
+    end
+  end
+
+  defp combine_status(:failure, _), do: :failure
+  defp combine_status(_, :failure), do: :failure
+  defp combine_status(:pending, _), do: :pending
+  defp combine_status(_, :pending), do: :pending
+  defp combine_status(:success, :success), do: :success
+  defp combine_status(:success, :unknown), do: :unknown
+  defp combine_status(:unknown, :success), do: :success
+  defp combine_status(_, _), do: :unknown
 
   defp gh(runner, args) do
     case runner.("gh", args, stderr_to_stdout: true) do

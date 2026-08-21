@@ -77,6 +77,8 @@ defmodule Consigliere.Missions do
       _ ->
         nil
     end
+  rescue
+    _ -> nil
   end
 
   defp maybe_provision(mission) do
@@ -97,6 +99,8 @@ defmodule Consigliere.Missions do
       _ ->
         :ok
     end
+  rescue
+    _ -> :ok
   end
 
   defp terminate_runners(mission_id) do
