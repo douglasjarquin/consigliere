@@ -29,18 +29,13 @@ document:
     into one.
     Tracked Markdown is one full sentence per line, plain dash, never an em dash.
 
-# Pin lint to the canonical gate instead of leaving it to no-mistakes' default
-# handling, which does not invoke this repository's own lint definition.
-# bin/cs-lint.sh owns the complete definition, .github/workflows/ci.yml invokes it
-# directly, and tests/cs-ci-contract.test.sh asserts that parity.
-#
-# commands.test is deliberately NOT pinned to a full tests/*.test.sh walk. Local
-# no-mistakes Test is intent-targeted validation of whether this change meets its
-# brief; .github/workflows/ci.yml owns broad regression through bin/cs-test-run.sh
-# (portable, real-Herdr, coverage) plus the repo-invariant lanes. A full-suite
-# override here would duplicate CI and defeat the targeted Test contract.
+# Pin lint and test to the replacement implementation. Local no-mistakes Test
+# is still intent-targeted; these names are the canonical gates CI also runs
+# (daemon mix test, runner go test) so a gate agent cannot fall back to deleted
+# Bash suites.
 commands:
-  lint: 'bin/cs-lint.sh'
+  lint: 'cd daemon && mix format --check-formatted && cd ../runner/cs-runner && test -z "$(gofmt -l .)"'
+  test: 'cd daemon && mix test && cd ../runner/cs-runner && go test ./...'
 
 # Keep test evidence in the repo, under the gitignored local operational directory.
 # .gitignore already excludes .no-mistakes/, so evidence stays on this machine
