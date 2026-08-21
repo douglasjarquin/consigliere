@@ -15,8 +15,7 @@ defmodule Consigliere.Harness.ContextPack do
       "mission_id" => mission.id,
       "checkpoint_sha" => mission.current_checkpoint_sha,
       "base_sha" => Map.get(extras, :base_sha) || Map.get(extras, "base_sha") || mission.base_sha,
-      "workspace_path" =>
-        Map.get(extras, :workspace_path) || Map.get(extras, "workspace_path"),
+      "workspace_path" => Map.get(extras, :workspace_path) || Map.get(extras, "workspace_path"),
       "role" => Map.get(extras, :role) || Map.get(extras, "role") || "soldier",
       "authority" => %{
         "may_grant_work" => false,

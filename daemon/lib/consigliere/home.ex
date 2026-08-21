@@ -93,6 +93,7 @@ defmodule Consigliere.Home do
       true -> "absent"
     end
   end
+
   def evidence_dir(home \\ dir()), do: Path.join(home, "evidence")
   def logs_dir(home \\ dir()), do: Path.join(home, "logs")
   def boss_credential_path(home \\ dir()), do: Path.join(credentials_dir(home), "boss")

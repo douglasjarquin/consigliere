@@ -78,9 +78,7 @@ defmodule Consigliere.ProcessHelpers do
 
   defp group_diagnostic(pgid) do
     {ps_output, ps_status} =
-      System.cmd("ps", ["-axo", "pid=,ppid=,pgid=,stat=,comm="],
-        stderr_to_stdout: true
-      )
+      System.cmd("ps", ["-axo", "pid=,ppid=,pgid=,stat=,comm="], stderr_to_stdout: true)
 
     members =
       ps_output

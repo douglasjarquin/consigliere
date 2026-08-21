@@ -125,8 +125,7 @@ defmodule Consigliere.Harness.Codex do
         {:event, "session.completed", %{"usage" => map["usage"] || %{}}}
 
       "turn.failed" ->
-        {:event, "session.failed",
-         %{"reason" => failed_reason(map), "class" => "turn_failed"}}
+        {:event, "session.failed", %{"reason" => failed_reason(map), "class" => "turn_failed"}}
 
       "thread.completed" ->
         {:event, "session.completed", %{}}

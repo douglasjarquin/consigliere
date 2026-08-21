@@ -75,7 +75,9 @@ defmodule Consigliere.RunnerProcessEnvTest do
     refute File.exists?(Path.join(dest, "consigliere.db"))
 
     out = Path.join(System.tmp_dir!(), "codex-env-#{System.unique_integer([:positive])}.out")
-    heartbeat_file = Path.join(System.tmp_dir!(), "codex-env-#{System.unique_integer([:positive])}.hb")
+
+    heartbeat_file =
+      Path.join(System.tmp_dir!(), "codex-env-#{System.unique_integer([:positive])}.hb")
 
     {:ok, pid} =
       RunnerProcess.start_link(

@@ -17,7 +17,9 @@ defmodule Consigliere.Harness.CodexTest do
     System.put_env("CS_CODEX_BIN", "/usr/bin/true")
 
     on_exit(fn ->
-      if previous, do: System.put_env("CS_CODEX_BIN", previous), else: System.delete_env("CS_CODEX_BIN")
+      if previous,
+        do: System.put_env("CS_CODEX_BIN", previous),
+        else: System.delete_env("CS_CODEX_BIN")
     end)
 
     :ok
@@ -32,7 +34,11 @@ defmodule Consigliere.Harness.CodexTest do
   test "argv uses the context pack as the prompt and pins dispatch policy" do
     {:ok, mission} =
       Missions.create(
-        Fixtures.mission_attrs(%{objective: "add ping", scope: "lib", acceptance_criteria: "pong"}),
+        Fixtures.mission_attrs(%{
+          objective: "add ping",
+          scope: "lib",
+          acceptance_criteria: "pong"
+        }),
         Actor.boss()
       )
 
@@ -67,6 +73,7 @@ defmodule Consigliere.Harness.CodexTest do
     assert "session.started" in types
     assert "session.completed" in types
     refute "session.failed" in types
+
     {:event, "session.completed", payload} =
       Enum.find(events, &match?({:event, "session.completed", _}, &1))
 

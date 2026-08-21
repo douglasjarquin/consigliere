@@ -40,6 +40,7 @@ defmodule Consigliere.Harness.ContextPackTest do
     refute result.encoded =~ "boss.secret"
     refute result.encoded =~ "complete the authorized mission"
     assert result.hash == ContextPack.hash(result.encoded)
+
     assert {:ok, again} =
              ContextPack.compose(mission, %{
                workspace_path: "/tmp/ws",
