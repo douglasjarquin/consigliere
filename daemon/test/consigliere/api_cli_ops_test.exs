@@ -85,15 +85,17 @@ defmodule Consigliere.API.CLIOpsTest do
 
     paused = call("mission.pause", %{"mission_id" => mission.id})
     assert paused["ok"] == true
-    assert paused["payload"]["phase"] in ["authorized", "active"]
+    assert paused["payload"]["phase"] == "paused"
+    assert paused["payload"]["pause_status"] == "paused"
 
     why = call("mission.why", %{"mission_id" => mission.id})
     assert why["payload"]["runnable"] == false
-    assert why["payload"]["reason"] == "blocked"
+    assert why["payload"]["reason"] == "phase"
     assert Enum.any?(why["payload"]["blockers"], &(&1["kind"] == "paused"))
 
     resumed = call("mission.resume", %{"mission_id" => mission.id})
     assert resumed["ok"] == true
+    assert resumed["payload"]["phase"] == "authorized"
 
     why2 = call("mission.why", %{"mission_id" => mission.id})
 

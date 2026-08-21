@@ -37,10 +37,18 @@ defmodule Consigliere.Missions do
 
   defdelegate resume_after_decision(mission_id, actor, decision_id), to: Transitions
   defdelegate required_gate_types(mission), to: Transitions
-  defdelegate resume(mission_id, actor), to: Transitions
+
+  def resume(mission_id, actor) do
+    with {:ok, mission} <- Transitions.resume(mission_id, actor) do
+      _ = Consigliere.MissionBootstrap.ensure_mission(mission.id)
+      {:ok, mission}
+    end
+  end
 
   def pause(mission_id, actor, reason \\ "boss pause") do
-    Transitions.pause(mission_id, actor, reason)
+    with {:ok, mission} <- Transitions.pause(mission_id, actor, reason) do
+      Consigliere.Pause.settle(mission.id)
+    end
   end
 
   def grant_work_authorization(mission_id, actor, attrs \\ %{}) do

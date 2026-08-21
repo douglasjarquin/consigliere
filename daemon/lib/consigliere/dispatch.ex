@@ -40,7 +40,8 @@ defmodule Consigliere.Dispatch do
   def maybe_schedule(state, _mission, _runnable, _occupying), do: state
 
   defp start(state, mission, grant) do
-    path = Path.join(Home.workspaces_dir(), to_string(mission.id))
+    path = workspace_dest(mission)
+    maybe_materialize(mission, path)
 
     case Missions.start(mission.id, Actor.system(), %{workspace_path: path}) do
       {:ok, %{attempt: attempt}} ->
@@ -191,6 +192,27 @@ defmodule Consigliere.Dispatch do
 
   defp slot_name(:granted), do: "granted"
   defp slot_name(_), do: "held"
+
+  defp workspace_dest(mission) do
+    base = Path.join(Home.workspaces_dir(), to_string(mission.id))
+
+    if File.dir?(base) do
+      Path.join(Home.workspaces_dir(), "#{mission.id}-#{System.unique_integer([:positive])}")
+    else
+      base
+    end
+  end
+
+  defp maybe_materialize(mission, path) do
+    sha = mission.current_checkpoint_sha || mission.base_sha
+    project = mission.project_id && Repo.get(Project, mission.project_id)
+
+    if match?(%Project{}, project) and is_binary(sha) and sha != "" and not File.dir?(path) do
+      Consigliere.Projects.provision_workspace(project, Path.basename(path), sha)
+    end
+  rescue
+    _ -> :ok
+  end
 
   defp persist_pack(attempt, pack, _policy) do
     DatabaseWriter.transaction(fn ->

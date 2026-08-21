@@ -432,6 +432,16 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
+  defp ok_mission({:ok, %{mission: %{id: id, phase: phase}, status: status} = result}) do
+    {:ok,
+     %{
+       "id" => id,
+       "phase" => phase,
+       "pause_status" => to_string(status),
+       "checkpoint_sha" => Map.get(result, :checkpoint_sha)
+     }}
+  end
+
   defp ok_mission({:ok, %{id: id, phase: phase}}), do: {:ok, %{"id" => id, "phase" => phase}}
 
   defp ok_mission({:ok, %{mission: %{id: id, phase: phase}}}),
@@ -595,10 +605,18 @@ defmodule Consigliere.API.Protocol do
 
   defp why_runnability(mission, blockers, occupying) do
     cond do
-      mission.phase not in ["authorized", "active"] -> {false, :phase}
-      blockers != [] -> {false, :blocked}
-      occupying != [] -> {false, :occupying}
-      mission.phase == "authorized" -> {true, :ready}
+      mission.phase not in ["authorized", "active"] ->
+        {false, :phase}
+
+      blockers != [] ->
+        {false, :blocked}
+
+      occupying != [] ->
+        {false, :occupying}
+
+      mission.phase == "authorized" ->
+        {true, :ready}
+
       true ->
         case Consigliere.Progression.next_action(mission) do
           :none -> {false, :waiting}
@@ -611,6 +629,7 @@ defmodule Consigliere.API.Protocol do
   defp phase_reason("awaiting_authorization"), do: "no work authorization yet"
   defp phase_reason("authorized"), do: "authorized, waiting to start"
   defp phase_reason("active"), do: "active"
+  defp phase_reason("paused"), do: "paused by boss"
   defp phase_reason("ready_for_review"), do: "waiting on boss review"
 
   defp phase_reason("awaiting_integration_authorization"),

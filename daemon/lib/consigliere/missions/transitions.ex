@@ -341,22 +341,24 @@ defmodule Consigliere.Missions.Transitions do
   def pause_txn(mission_id, actor, reason) do
     Txn.require_principal(actor, ["boss"])
     mission = fetch_mission!(mission_id)
-    refuse_hard_terminal!(mission, "paused")
 
-    existing =
-      Repo.one(
-        from(b in MissionBlocker,
-          where: b.mission_id == ^mission.id and b.kind == "paused" and b.status == "open",
-          limit: 1
-        )
-      )
+    cond do
+      mission.phase == "paused" ->
+        mission
 
-    if is_nil(existing) do
-      open_blocker!(mission, "paused", reason)
-      Txn.append_event!("mission.paused", "mission", mission.id, %{reason: reason})
+      mission.phase in @hard_terminal ->
+        Txn.illegal(mission.phase, "paused", :terminal)
+
+      open_blocker_kind?(mission, ["pausing"]) ->
+        mission
+
+      true ->
+        revoke_and_fence!(mission)
+        Consigliere.Termination.request_live_attempts!(mission, "paused")
+        open_blocker!(mission, "pausing", reason)
+        Txn.append_event!("mission.pause_requested", "mission", mission.id, %{reason: reason})
+        mission
     end
-
-    mission
   end
 
   def resume(mission_id, actor) do
@@ -367,22 +369,22 @@ defmodule Consigliere.Missions.Transitions do
     Txn.require_principal(actor, ["boss"])
     mission = fetch_mission!(mission_id)
 
-    from(b in MissionBlocker,
-      where: b.mission_id == ^mission.id and b.kind == "paused" and b.status == "open"
-    )
-    |> Repo.all()
-    |> Enum.each(fn blocker ->
-      Txn.update!(
-        MissionBlocker.changeset(blocker, %{
-          status: "closed",
-          closed_reason: "boss resume",
-          closed_at: Txn.now()
-        })
-      )
-    end)
+    cond do
+      mission.phase == "paused" or open_blocker_kind?(mission, ["paused"]) ->
+        close_pause_blockers!(mission)
+        mission = Txn.update!(Mission.changeset(mission, %{phase: "authorized"}))
+        Txn.append_event!("mission.resumed", "mission", mission.id)
+        mission
 
-    Txn.append_event!("mission.resumed", "mission", mission.id)
-    mission
+      open_blocker_kind?(mission, ["pausing"]) ->
+        Txn.illegal(mission.phase, "authorized", :cleanup_pending)
+
+      mission.phase == "authorized" ->
+        mission
+
+      true ->
+        Txn.illegal(mission.phase, "authorized", :not_paused)
+    end
   end
 
   def cancel(mission_id, actor, reason) do
@@ -523,6 +525,42 @@ defmodule Consigliere.Missions.Transitions do
         auth -> Txn.update!(Authorization.changeset(auth, %{consumed_at: Txn.now()}))
       end
     end
+  end
+
+  defp revoke_and_fence!(mission) do
+    live = ~w(planned starting running checkpoint_requested terminating)
+
+    from(a in Attempt, where: a.mission_id == ^mission.id and a.status in ^live)
+    |> Repo.all()
+    |> Enum.each(fn attempt ->
+      _ = Consigliere.Capabilities.revoke_for_attempt(attempt.id)
+      Txn.update!(Attempt.changeset(attempt, %{fencing_token: Txn.mint_fencing_token()}))
+    end)
+  end
+
+  defp open_blocker_kind?(mission, kinds) do
+    Repo.exists?(
+      from(b in MissionBlocker,
+        where: b.mission_id == ^mission.id and b.kind in ^kinds and b.status == "open"
+      )
+    )
+  end
+
+  defp close_pause_blockers!(mission) do
+    from(b in MissionBlocker,
+      where:
+        b.mission_id == ^mission.id and b.kind in ["paused", "pausing"] and b.status == "open"
+    )
+    |> Repo.all()
+    |> Enum.each(fn blocker ->
+      Txn.update!(
+        MissionBlocker.changeset(blocker, %{
+          status: "closed",
+          closed_reason: "boss resume",
+          closed_at: Txn.now()
+        })
+      )
+    end)
   end
 
   defp open_blocker!(mission, kind, reason) do

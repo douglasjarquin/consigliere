@@ -3,7 +3,7 @@ defmodule Consigliere.Missions.Mission do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @phases ~w(draft awaiting_authorization authorized active ready_for_review
+  @phases ~w(draft awaiting_authorization authorized active paused ready_for_review
              awaiting_integration_authorization integrating completed failed
              canceled superseded)
 
