@@ -78,7 +78,7 @@ defmodule Consigliere.ProcessHelpers do
 
   defp group_diagnostic(pgid) do
     {ps_output, ps_status} =
-      System.cmd("ps", ["-axo", "pid=,ppid=,pgid=,sid=,stat=,comm=,args="],
+      System.cmd("ps", ["-axo", "pid=,ppid=,pgid=,stat=,comm="],
         stderr_to_stdout: true
       )
 
@@ -106,16 +106,14 @@ defmodule Consigliere.ProcessHelpers do
     expected_leader = to_string(pid)
 
     Enum.reduce_while(1..50, :error, fn _, _ ->
-      {out, 0} =
-        System.cmd("ps", ["-o", "pgid=,sid=", "-p", to_string(pid)], stderr_to_stdout: true)
+      {out, status} =
+        System.cmd("ps", ["-o", "pgid=", "-p", to_string(pid)], stderr_to_stdout: true)
 
-      case String.split(String.trim(out)) do
-        [leader, leader] when leader == expected_leader ->
-          {:halt, :ok}
-
-        _ ->
-          Process.sleep(20)
-          {:cont, :error}
+      if status == 0 and String.trim(out) == expected_leader do
+        {:halt, :ok}
+      else
+        Process.sleep(20)
+        {:cont, :error}
       end
     end)
     |> case do
