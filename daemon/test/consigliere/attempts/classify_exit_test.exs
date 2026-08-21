@@ -31,7 +31,7 @@ defmodule Consigliere.Attempts.ClassifyExitTest do
     attempt
   end
 
-  test "session.completed plus verified death completes the Attempt" do
+  test "session.completed plus verified death without a SHA is a protocol failure" do
     attempt = running_attempt!()
 
     {:ok, attempt} =
@@ -44,7 +44,8 @@ defmodule Consigliere.Attempts.ClassifyExitTest do
         session_completed: true
       })
 
-    assert done.status == "completed"
+    assert done.status == "failed"
+    assert done.exit_classification == "protocol_failure"
   end
 
   test "exit 0 without session.completed is lost not completed" do

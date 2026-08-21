@@ -211,6 +211,15 @@ defmodule Consigliere.Attempts.Transitions do
           exit_classification: klass || attempt.exit_classification || "canceled"
         })
 
+      protocol_missing_sha?(attempt, completed?, death) ->
+        fail_txn(attempt.id, actor, %{
+          process_group: death,
+          exit_classification: "protocol_failure"
+        })
+
+      progress_after_death?(attempt, completed?, death) ->
+        attempt
+
       completed? and death == :dead_verified and status in [0, nil] ->
         complete_txn(attempt.id, actor, %{process_group: death})
 
@@ -247,6 +256,19 @@ defmodule Consigliere.Attempts.Transitions do
     attempt =
       Txn.update!(Attempt.changeset(attempt, %{status: "completed", finished_at: Txn.now()}))
 
+    if sha = Map.get(attrs, :imported_sha) do
+      mission = Repo.get!(Mission, attempt.mission_id)
+      Txn.update!(Mission.changeset(mission, %{current_checkpoint_sha: sha}))
+
+      if attempt.workspace_id do
+        workspace = Repo.get!(Workspace, attempt.workspace_id)
+
+        if workspace.status == "active" do
+          Txn.update!(Workspace.changeset(workspace, %{status: "daemon_exclusive"}))
+        end
+      end
+    end
+
     Txn.append_event!("attempt.completed", "attempt", attempt.id)
     attempt
   end
@@ -259,11 +281,11 @@ defmodule Consigliere.Attempts.Transitions do
     Txn.require_principal(actor, ["daemon", "boss"])
     attempt = fetch!(attempt_id)
 
-    unless attempt.status in ~w(starting running terminating) do
+    unless attempt.status in ~w(starting running terminating checkpoint_requested) do
       Txn.illegal(attempt.status, "failed", :wrong_status)
     end
 
-    if attempt.status in ~w(running terminating) do
+    if attempt.status in ~w(running terminating checkpoint_requested) do
       require_dead!(attempt, attrs, "failed")
     end
 
@@ -369,6 +391,18 @@ defmodule Consigliere.Attempts.Transitions do
     })
 
     %{attempt: attempt, replacement: replacement}
+  end
+
+  defp protocol_missing_sha?(attempt, completed?, death) do
+    death == :dead_verified and
+      (completed? or attempt.status == "checkpoint_requested") and
+      (not is_binary(attempt.reported_checkpoint_sha) or attempt.reported_checkpoint_sha == "")
+  end
+
+  defp progress_after_death?(attempt, completed?, death) do
+    death == :dead_verified and
+      is_binary(attempt.reported_checkpoint_sha) and attempt.reported_checkpoint_sha != "" and
+      (completed? or attempt.status == "checkpoint_requested")
   end
 
   defp fetch!(id) do

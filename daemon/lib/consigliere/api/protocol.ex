@@ -577,6 +577,7 @@ defmodule Consigliere.API.Protocol do
              "objective" => mission.objective,
              "runnable" => runnable,
              "reason" => Atom.to_string(reason),
+             "next_step" => Atom.to_string(reason),
              "phase_reason" => phase_reason(mission.phase),
              "blockers" =>
                Enum.map(blockers, fn b ->
@@ -598,7 +599,11 @@ defmodule Consigliere.API.Protocol do
       blockers != [] -> {false, :blocked}
       occupying != [] -> {false, :occupying}
       mission.phase == "authorized" -> {true, :ready}
-      true -> {false, :waiting}
+      true ->
+        case Consigliere.Progression.next_action(mission) do
+          :none -> {false, :waiting}
+          action -> {false, action}
+        end
     end
   end
 

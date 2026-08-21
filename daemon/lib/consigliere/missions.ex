@@ -36,6 +36,7 @@ defmodule Consigliere.Missions do
   end
 
   defdelegate resume_after_decision(mission_id, actor, decision_id), to: Transitions
+  defdelegate required_gate_types(mission), to: Transitions
   defdelegate resume(mission_id, actor), to: Transitions
 
   def pause(mission_id, actor, reason \\ "boss pause") do

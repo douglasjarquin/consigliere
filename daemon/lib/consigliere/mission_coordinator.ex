@@ -155,7 +155,12 @@ defmodule Consigliere.MissionCoordinator do
 
       mission ->
         occupying = occupying_attempts(mission.id)
-        {runnable, _reason} = runnability(mission, open_blockers(mission.id), occupying)
+        {runnable, reason} = runnability(mission, open_blockers(mission.id), occupying)
+
+        if reason in [:import, :validate] do
+          _ = Consigliere.Progression.maybe_progress(mission.id)
+        end
+
         Dispatch.maybe_schedule(state, mission, runnable, occupying)
     end
   end
@@ -181,7 +186,10 @@ defmodule Consigliere.MissionCoordinator do
         {true, :ready}
 
       true ->
-        {false, :waiting}
+        case Consigliere.Progression.next_action(mission) do
+          :none -> {false, :waiting}
+          action -> {false, action}
+        end
     end
   end
 

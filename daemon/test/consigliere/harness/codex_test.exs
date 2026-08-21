@@ -121,7 +121,8 @@ defmodule Consigliere.Harness.CodexTest do
         session_completed: reloaded.exit_classification == "completed"
       })
 
-    assert done.status == "completed"
+    assert done.status == "failed"
+    assert done.exit_classification == "protocol_failure"
   end
 
   test "exit 0 without a terminal event is lost" do

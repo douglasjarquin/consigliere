@@ -489,7 +489,7 @@ defmodule Consigliere.Missions.Transitions do
   defp blank?(""), do: true
   defp blank?(_), do: false
 
-  defp required_gate_types(mission) do
+  def required_gate_types(mission) do
     case mission.validation_policy do
       %{"required_gate_types" => types} when is_list(types) and types != [] -> types
       _ -> ["review"]

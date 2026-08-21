@@ -121,13 +121,21 @@ defmodule Consigliere.Reconciler.Pass do
   end
 
   defp complete_or_lost(attempt) do
-    case Attempts.complete(attempt.id, Actor.system(), %{process_group: :dead_verified}) do
+    case Consigliere.Progression.after_classify(attempt) do
+      {:ok, %Consigliere.Attempts.Attempt{status: "completed"}} ->
+        {:completed, attempt.id}
+
+      {:ok, %Consigliere.Attempts.Attempt{status: "checkpointed"}} ->
+        {:checkpointed, attempt.id}
+
+      {:ok, %Consigliere.Attempts.Attempt{status: "failed"}} ->
+        {:failed, attempt.id}
+
       {:ok, _} ->
         {:completed, attempt.id}
 
-      {:error, _} ->
-        Attempts.mark_lost(attempt.id, Actor.system(), %{inventory: :dead_verified})
-        {:lost, attempt.id}
+      {:error, :protocol_failure} ->
+        {:failed, attempt.id}
     end
   end
 

@@ -1,6 +1,7 @@
 defmodule Consigliere.Attempts do
   @moduledoc false
 
+  alias Consigliere.Attempts.Attempt
   alias Consigliere.Attempts.Transitions
 
   defdelegate schedule(mission_id, actor, attrs), to: Transitions
@@ -20,6 +21,9 @@ defmodule Consigliere.Attempts do
   end
 
   def classify_exit(attempt_id, attrs) do
-    Transitions.classify_exit(attempt_id, attrs)
+    with {:ok, attempt} <- Transitions.classify_exit(attempt_id, attrs) do
+      Consigliere.Progression.after_classify(attempt)
+      {:ok, Consigliere.Repo.get!(Attempt, attempt_id)}
+    end
   end
 end

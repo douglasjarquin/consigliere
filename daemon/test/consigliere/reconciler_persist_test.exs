@@ -125,7 +125,7 @@ defmodule Consigliere.ReconcilerPersistTest do
     Consigliere.ProcessHelpers.wait_group_gone(pgid)
   end
 
-  test "accepted session.completed is completed, not lost, after verified death", %{home: home} do
+  test "accepted session.completed without a SHA is protocol failure, not lost", %{home: home} do
     %{attempt: attempt} = running_attempt!()
 
     {:ok, _} =
@@ -133,8 +133,9 @@ defmodule Consigliere.ReconcilerPersistTest do
 
     write_manifest!(home, attempt.id, %{"state" => "dead_verified"})
     results = Reconciler.run(home: home)
-    assert {:completed, _} = Enum.find(results, &match?({:completed, _}, &1))
-    assert Repo.get!(Attempt, attempt.id).status == "completed"
+    assert {:failed, _} = Enum.find(results, &match?({:failed, _}, &1))
+    assert Repo.get!(Attempt, attempt.id).status == "failed"
+    assert Repo.get!(Attempt, attempt.id).exit_classification == "protocol_failure"
   end
 
   test "nil Attempt.pgid with a live matching manifest does not claim verified death", %{

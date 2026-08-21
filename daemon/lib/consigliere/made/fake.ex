@@ -5,15 +5,25 @@ defmodule Consigliere.Made.Fake do
   """
 
   def validate(spec) do
-    code = if waived?(spec), do: 0, else: 2
+    {outcome, code} = outcome_and_code(spec)
     {output, status} = System.cmd("sh", ["-c", "exit #{code}"], stderr_to_stdout: true)
 
     %{
-      outcome: if(status == 0, do: :passed, else: :needs_decision),
+      outcome: if(status == 0, do: :passed, else: outcome),
       exit_code: status,
       output: output,
       live_pid: nil
     }
+  end
+
+  defp outcome_and_code(spec) do
+    case Map.get(spec, :forced_outcome) do
+      :passed -> {:passed, 0}
+      :failed_terminal -> {:failed_terminal, 4}
+      :needs_decision -> {:needs_decision, 2}
+      nil -> if waived?(spec), do: {:passed, 0}, else: {:needs_decision, 2}
+      other -> {other, 2}
+    end
   end
 
   defp waived?(spec) do
