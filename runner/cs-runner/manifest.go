@@ -28,6 +28,7 @@ type Manifest struct {
 	FencingGeneration       string        `json:"fencing_generation"`
 	FencingToken            string        `json:"fencing_token"`
 	RunnerPID               int           `json:"runner_pid"`
+	RunnerExecutablePath    string        `json:"runner_executable_path"`
 	HarnessPID              int           `json:"harness_pid"`
 	PGID                    int           `json:"pgid"`
 	HarnessExecutablePath   string        `json:"harness_executable_path"`

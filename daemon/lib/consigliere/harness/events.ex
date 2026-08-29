@@ -6,6 +6,8 @@ defmodule Consigliere.Harness.Events do
   cannot complete (Phase 3 late-completion test).
   """
 
+  import Ecto.Query
+
   alias Consigliere.Attempts.Attempt
   alias Consigliere.Capabilities
   alias Consigliere.DatabaseWriter
@@ -23,6 +25,7 @@ defmodule Consigliere.Harness.Events do
   @types ~w(session.started turn.started progress.reported artifact.created
             question.requested checkpoint.created usage.updated turn.completed
             session.completed session.failed)
+  @terminal_types ~w(session.completed session.failed)
 
   def ingest(event, actor) do
     DatabaseWriter.transaction(fn -> ingest_txn(event, actor) end)
@@ -54,6 +57,10 @@ defmodule Consigliere.Harness.Events do
         :duplicate
 
       nil ->
+        if type in @terminal_types and terminal_event_exists?(attempt.id) do
+          Repo.rollback(:terminal_already_recorded)
+        end
+
         reject_stale_sequence!(attempt, seq)
 
         Txn.insert!(
@@ -142,6 +149,16 @@ defmodule Consigliere.Harness.Events do
       nil -> Txn.illegal(nil, nil, :not_found)
       attempt -> attempt
     end
+  end
+
+  defp terminal_event_exists?(attempt_id) do
+    terminal_types = @terminal_types
+
+    Repo.exists?(
+      from(e in HarnessEvent,
+        where: e.attempt_id == ^attempt_id and e.type in ^terminal_types
+      )
+    )
   end
 
   defp require_fence!(actor, attempt) do

@@ -5,7 +5,9 @@ defmodule Consigliere.Runtime.InventoryTest do
   alias Consigliere.Fixtures
   alias Consigliere.Home
   alias Consigliere.Missions
+  alias Consigliere.ProcessGroup
   alias Consigliere.Runtime.Inventory
+  alias Consigliere.Runtime.ProcessIdentity
 
   setup do
     Fixtures.reset_phase1_tables!()
@@ -85,6 +87,33 @@ defmodule Consigliere.Runtime.InventoryTest do
     refute Inventory.signalable?(:identity_mismatch)
   end
 
+  test "liveness categories fail closed for unsafe and absent process groups" do
+    assert Inventory.liveness(%{"pgid" => 0}) == :identity_mismatch
+    assert Inventory.liveness(%{"pgid" => 1}) == :identity_mismatch
+    assert ProcessGroup.liveness(0) == :identity_mismatch
+
+    dead_pgid = find_dead_pgid()
+    assert Inventory.liveness(%{"pgid" => dead_pgid}) == :absent
+
+    {port, live_pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
+
+    on_exit(fn ->
+      System.cmd("kill", ["-9", "--", "-#{live_pgid}"], stderr_to_stdout: true)
+      if Port.info(port), do: Port.close(port)
+    end)
+
+    assert Inventory.liveness(%{"pgid" => live_pgid}) == :identity_mismatch
+
+    assert ProcessIdentity.verify(System.pid(), "/definitely/not-the-daemon") ==
+             :identity_mismatch
+
+    assert Inventory.liveness(%{
+             "pgid" => dead_pgid,
+             "runner_pid" => String.to_integer(System.pid()),
+             "runner_executable_path" => "/definitely/not-the-daemon"
+           }) == :identity_mismatch
+  end
+
   defp running_attempt! do
     {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
@@ -126,5 +155,13 @@ defmodule Consigliere.Runtime.InventoryTest do
     path = Path.join(dir, "manifest.json")
     File.write!(path, JSON.encode!(manifest))
     path
+  end
+
+  defp find_dead_pgid do
+    {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
+    System.cmd("kill", ["-9", "--", "-#{pgid}"], stderr_to_stdout: true)
+    Consigliere.ProcessHelpers.wait_group_gone(pgid)
+    if Port.info(port), do: Port.close(port)
+    pgid
   end
 end

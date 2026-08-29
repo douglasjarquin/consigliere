@@ -13,17 +13,29 @@ defmodule Consigliere.Reconciler.Pass do
   alias Consigliere.Missions.Mission
   alias Consigliere.ProcessGroup
   alias Consigliere.Repo
+  alias Consigliere.Runtime.Inventory
   alias Consigliere.Txn
 
   def apply_live(manifest, attempt, runner_live?) do
+    liveness = Inventory.liveness(manifest)
+
     cond do
       runner_live? ->
         {:skipped, attempt.id}
 
+      liveness in [:identity_mismatch, :permission_unknown, :observation_failed] ->
+        incident(attempt, "runner inventory liveness #{liveness}")
+
+        if AttemptStates.terminal?(attempt.status) do
+          {:skipped, attempt.id}
+        else
+          finalize_dead(attempt, :unconfirmed)
+        end
+
       AttemptStates.terminal?(attempt.status) ->
         reap_live(manifest, attempt)
 
-      process_group_alive?(manifest["pgid"]) ->
+      liveness == :verified ->
         incident(attempt, "orphaned live process group; adopt-and-kill")
         finalize_dead(attempt, adopt_kill(manifest))
 
@@ -56,12 +68,19 @@ defmodule Consigliere.Reconciler.Pass do
       AttemptStates.recoverable?(attempt.status) ->
         {:skipped, attempt.id}
 
-      valid_pgid?(attempt.pgid) and process_group_alive?(attempt.pgid) ->
-        incident(attempt, "occupying Attempt has no manifest and a live process group")
-        finalize_dead(attempt, adopt_kill(%{"pgid" => attempt.pgid}))
-
       valid_pgid?(attempt.pgid) ->
-        finalize_dead(attempt, :dead_verified)
+        case ProcessGroup.liveness(attempt.pgid) do
+          :absent ->
+            finalize_dead(attempt, :dead_verified)
+
+          liveness ->
+            incident(
+              attempt,
+              "occupying Attempt has no manifest; process group liveness #{liveness} is not signalable"
+            )
+
+            finalize_dead(attempt, :unconfirmed)
+        end
 
       true ->
         finalize_dead(attempt, :unconfirmed)
@@ -169,17 +188,16 @@ defmodule Consigliere.Reconciler.Pass do
       end
   end
 
-  defp process_group_alive?(pgid) when is_integer(pgid) and pgid > 1 do
-    ProcessGroup.alive?(pgid)
-  end
-
-  defp process_group_alive?(_), do: true
-
   defp valid_pgid?(pgid) when is_integer(pgid) and pgid > 1, do: true
   defp valid_pgid?(_), do: false
 
-  defp adopt_kill(%{"pgid" => pgid}) do
-    if ProcessGroup.terminate(pgid) == :dead_verified, do: :dead_verified, else: :unconfirmed
+  defp adopt_kill(%{"pgid" => pgid} = manifest) do
+    if Inventory.liveness(manifest) == :verified and
+         ProcessGroup.terminate(pgid) == :dead_verified do
+      :dead_verified
+    else
+      :unconfirmed
+    end
   end
 
   defp adopt_kill(_), do: :unconfirmed

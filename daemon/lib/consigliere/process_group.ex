@@ -40,12 +40,29 @@ defmodule Consigliere.ProcessGroup do
 
   def probe(_), do: :unsafe
 
-  def alive?(pgid) when is_integer(pgid) and pgid > 1 do
+  def liveness(pgid) when is_integer(pgid) and pgid > 1 do
     case runnable_members(pgid) do
-      {:ok, []} -> false
-      {:ok, _} -> true
-      :error -> probe(pgid) != :absent
+      {:ok, []} ->
+        :absent
+
+      {:ok, _members} ->
+        :verified
+
+      :error ->
+        case probe(pgid) do
+          :alive -> :verified
+          :absent -> :absent
+          :forbidden -> :permission_unknown
+          :unknown -> :observation_failed
+          _ -> :observation_failed
+        end
     end
+  end
+
+  def liveness(_), do: :identity_mismatch
+
+  def alive?(pgid) when is_integer(pgid) and pgid > 1 do
+    liveness(pgid) != :absent
   end
 
   def alive?(_), do: false

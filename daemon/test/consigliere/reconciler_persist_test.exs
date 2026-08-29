@@ -117,7 +117,12 @@ defmodule Consigliere.ReconcilerPersistTest do
 
     {:ok, _} = Repo.update(Attempt.changeset(attempt, %{pgid: pgid}))
     {:ok, _} = Attempts.fail(attempt.id, Actor.system(), %{process_group: :dead_verified})
-    write_manifest!(home, attempt.id, %{"state" => "running", "pgid" => pgid})
+
+    write_manifest!(
+      home,
+      attempt.id,
+      Map.merge(live_process_attrs(pgid), %{"state" => "running", "pgid" => pgid})
+    )
 
     results = Reconciler.run(home: home)
     assert Enum.any?(results, &match?({:reaped, _}, &1))
@@ -150,7 +155,12 @@ defmodule Consigliere.ReconcilerPersistTest do
     end)
 
     {:ok, _} = Repo.update(Attempt.changeset(attempt, %{pgid: nil}))
-    write_manifest!(home, attempt.id, %{"state" => "running", "pgid" => pgid})
+
+    write_manifest!(
+      home,
+      attempt.id,
+      Map.merge(live_process_attrs(pgid), %{"state" => "running", "pgid" => pgid})
+    )
 
     results = Reconciler.run(home: home)
     Consigliere.ProcessHelpers.wait_group_gone(pgid)
@@ -283,12 +293,44 @@ defmodule Consigliere.ReconcilerPersistTest do
     end)
 
     {:ok, _} = Repo.update(Attempt.changeset(attempt, %{pgid: pgid}))
-    write_manifest!(home, attempt.id, %{"state" => "running", "pgid" => pgid})
+
+    write_manifest!(
+      home,
+      attempt.id,
+      Map.merge(live_process_attrs(pgid), %{"state" => "running", "pgid" => pgid})
+    )
 
     results = Reconciler.run(home: home)
     assert {:lost, id} = Enum.find(results, &match?({:lost, _}, &1))
     assert id == attempt.id
     assert Repo.get!(Attempt, attempt.id).status == "lost"
     Consigliere.ProcessHelpers.wait_group_gone(pgid)
+  end
+
+  test "an Attempt without a manifest never signals an unverified live process group", %{
+    home: home
+  } do
+    %{attempt: attempt, workspace: workspace} = running_attempt!()
+    {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
+
+    on_exit(fn ->
+      System.cmd("kill", ["-9", "--", "-#{pgid}"], stderr_to_stdout: true)
+      if Port.info(port), do: Port.close(port)
+    end)
+
+    {:ok, _} = Repo.update(Attempt.changeset(attempt, %{pgid: pgid}))
+    results = Reconciler.run(home: home)
+
+    assert {:quarantined, id} = Enum.find(results, &match?({:quarantined, _}, &1))
+    assert id == attempt.id
+    assert Consigliere.ProcessGroup.liveness(pgid) == :verified
+    assert Repo.get!(Workspace, workspace.id).status == "quarantined"
+  end
+
+  defp live_process_attrs(pid) do
+    %{
+      "runner_pid" => pid,
+      "runner_executable_path" => System.find_executable("sleep") || "/bin/sleep"
+    }
   end
 end

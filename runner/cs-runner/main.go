@@ -212,6 +212,7 @@ func runAuthenticated(identity InvocationIdentity, manifestPath, controlSocketPa
 	runnerHash, _ := sha256File(runnerPath)
 
 	base.RunnerPID = os.Getpid()
+	base.RunnerExecutablePath, _ = os.Executable()
 	base.HarnessPID = handle.PID
 	base.PGID = handle.PGID
 	base.HarnessExecutablePath = execPath

@@ -136,6 +136,36 @@ defmodule Consigliere.Harness.EventsTest do
     assert Repo.get!(Attempt, attempt.id).status == "running"
   end
 
+  test "the first terminal event is preserved and later terminal events are rejected" do
+    attempt = running_attempt!()
+    actor = Actor.attempt(attempt.id, attempt.fencing_token)
+
+    first =
+      envelope(attempt, %{
+        "event_id" => "terminal-first",
+        "type" => "session.completed",
+        "native_sequence" => 2
+      })
+
+    assert {:ok, :accepted} = Events.ingest(first, actor)
+    assert {:ok, :duplicate} = Events.ingest(first, actor)
+
+    assert {:error, :terminal_already_recorded} =
+             Events.ingest(
+               envelope(attempt, %{
+                 "event_id" => "terminal-late",
+                 "type" => "session.failed",
+                 "native_sequence" => 3,
+                 "payload" => %{"class" => "late"}
+               }),
+               actor
+             )
+
+    updated = Repo.get!(Attempt, attempt.id)
+    assert updated.exit_classification == "completed"
+    assert updated.last_native_sequence == 2
+  end
+
   test "unknown event types are rejected" do
     attempt = running_attempt!()
     actor = Actor.attempt(attempt.id, attempt.fencing_token)
