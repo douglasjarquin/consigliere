@@ -47,6 +47,13 @@ defmodule CIContractTest do
     assert working_directory(job) == "daemon"
   end
 
+  test "daemon job installs Go for runner-backed daemon tests", %{yaml: yaml} do
+    [_, body] = Regex.run(~r/\n  daemon:\n([\s\S]*?)(?=\n  [A-Za-z0-9_-]+:)/, yaml)
+
+    assert body =~ "actions/setup-go@v5"
+    assert body =~ "go-version-file: runner/cs-runner/go.mod"
+  end
+
   test "go test is present and always on", %{jobs: jobs} do
     job = job_named(jobs, "runner")
     assert job, "CI must run go test from runner/cs-runner/"
