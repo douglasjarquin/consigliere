@@ -61,6 +61,10 @@ defmodule Consigliere.Missions do
     end
   end
 
+  def grant_work_authorization_command(mission_id, actor, attrs \\ %{}) do
+    Transitions.grant_work_authorization(mission_id, actor, attrs)
+  end
+
   defp peek_base_sha(mission_id) do
     case Consigliere.Repo.get(Consigliere.Missions.Mission, mission_id) do
       %{project_id: project_id} when is_binary(project_id) ->

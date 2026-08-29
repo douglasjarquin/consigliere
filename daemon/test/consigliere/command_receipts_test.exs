@@ -2,21 +2,25 @@ defmodule Consigliere.CommandReceiptsTest do
   use ExUnit.Case, async: false
 
   alias Consigliere.API.Protocol
+  alias Consigliere.Actor
+  alias Consigliere.CommandReceipts
+  alias Consigliere.DatabaseWriter
   alias Consigliere.Fixtures
+  alias Consigliere.Repo
 
   setup do
     Fixtures.reset_phase1_tables!()
     :ok
   end
 
-  defp handle(id, op, payload, actor \\ %{"principal" => "boss"}) do
+  defp handle(id, op, payload, actor \\ %{"principal" => "boss"}, idem \\ nil) do
     {:ok, map} =
       JSON.decode(
         Protocol.handle(
           JSON.encode!(%{
             "v" => 1,
             "id" => id,
-            "idempotency_key" => id,
+            "idempotency_key" => idem || id,
             "op" => op,
             "actor" => actor,
             "payload" => payload
@@ -95,19 +99,189 @@ defmodule Consigliere.CommandReceiptsTest do
     assert first["error"]["code"] == second["error"]["code"]
   end
 
+  test "an invalid first request stores and replays one bounded failure" do
+    first =
+      handle(
+        "invalid-correlation-1",
+        "mission.submit",
+        %{},
+        %{"principal" => "boss"},
+        "invalid-key"
+      )
+
+    second =
+      handle(
+        "invalid-correlation-2",
+        "mission.submit",
+        %{},
+        %{"principal" => "boss"},
+        "invalid-key"
+      )
+
+    assert first["id"] != second["id"]
+    assert first["ok"] == false
+    assert first["error"] == second["error"]
+    assert first["error"]["code"] == "invalid"
+    assert Repo.aggregate(Consigliere.CommandReceipts.CommandReceipt, :count) == 1
+  end
+
+  test "boot reconciliation closes pending receipts once without invoking work" do
+    payload = %{"name" => "project", "repository_path" => "/tmp/project"}
+
+    {:ok, request_hash} =
+      CommandReceipts.request_hash(Actor.boss(), "project.add", "pending-key", payload)
+
+    {:ok, receipt} =
+      Repo.insert(
+        Consigliere.CommandReceipts.CommandReceipt.changeset(
+          %Consigliere.CommandReceipts.CommandReceipt{},
+          %{
+            idempotency_key: "pending-key",
+            op: "project.add",
+            principal: "boss",
+            payload_hash: request_hash,
+            response: %{},
+            status: "pending"
+          }
+        )
+      )
+
+    assert {:ok, 1} = CommandReceipts.reconcile_pending()
+
+    assert Repo.get!(Consigliere.CommandReceipts.CommandReceipt, receipt.id).status ==
+             "recovery_required"
+
+    assert {:ok, :replay, envelope} =
+             CommandReceipts.remember(Actor.boss(), "project.add", "pending-key", payload, fn ->
+               flunk("recovered receipt must not invoke external work")
+             end)
+
+    assert envelope["ok"] == false
+    assert envelope["error"]["code"] == "operation_recovery_required"
+    assert envelope["error"]["operation_id"] == receipt.id
+    assert {:ok, 0} = CommandReceipts.reconcile_pending()
+  end
+
+  test "a supplied canonical request hash must match the authenticated request" do
+    project_id = Fixtures.dummy_project!().id
+
+    payload = %{
+      "objective" => "o",
+      "scope" => "s",
+      "acceptance_criteria" => "a",
+      "project_id" => project_id
+    }
+
+    {:ok, response} =
+      JSON.decode(
+        Protocol.handle(
+          JSON.encode!(%{
+            "v" => 1,
+            "id" => "hash-check",
+            "operation_version" => 1,
+            "canonical_hash" => "not-the-request-hash",
+            "idempotency_key" => "hash-key",
+            "op" => "mission.create",
+            "actor" => %{"principal" => "boss"},
+            "payload" => payload
+          })
+        )
+      )
+
+    assert response["ok"] == false
+    assert response["error"]["reason"] == "canonical_request_mismatch"
+    assert Repo.aggregate(Consigliere.Missions.Mission, :count) == 0
+  end
+
   test "two Attempts may reuse the same idempotency key" do
-    a = Consigliere.Actor.attempt("att-1", "fence-1")
-    b = Consigliere.Actor.attempt("att-2", "fence-2")
+    a = Actor.attempt("att-1", "fence-1")
+    b = Actor.attempt("att-2", "fence-2")
     payload = %{"ping" => true}
 
     assert {:ok, %{"pong" => 1}} =
-             Consigliere.CommandReceipts.remember(a, "ping", "shared", payload, fn ->
+             CommandReceipts.remember(a, "ping", "shared", payload, fn ->
                {:ok, %{"pong" => 1}}
              end)
 
     assert {:ok, %{"pong" => 2}} =
-             Consigliere.CommandReceipts.remember(b, "ping", "shared", payload, fn ->
+             CommandReceipts.remember(b, "ping", "shared", payload, fn ->
                {:ok, %{"pong" => 2}}
              end)
+  end
+
+  test "canonical request bytes bind scope, operation version, key, and sorted payload" do
+    assert {:ok, canonical} =
+             CommandReceipts.canonical_request(
+               Actor.attempt("att-1", "fence-1"),
+               "mission.create",
+               "key-1",
+               %{
+                 "z" => 2,
+                 "a" => 1,
+                 "project_id" => "project-1",
+                 "objective" => "objective",
+                 "scope" => "scope",
+                 "acceptance_criteria" => "criteria"
+               }
+             )
+
+    assert canonical ==
+             ~s({"authority_scope":"attempt:att-1:fence-1","idempotency_key":"key-1","operation":{"name":"mission.create","version":1},"payload":{"a":1,"acceptance_criteria":"criteria","objective":"objective","project_id":"project-1","scope":"scope","z":2}})
+  end
+
+  test "fresh receipts persist a versioned bounded result envelope" do
+    project_id = Fixtures.dummy_project!().id
+
+    response =
+      handle(
+        "envelope-correlation",
+        "mission.create",
+        %{
+          "objective" => "o",
+          "scope" => "s",
+          "acceptance_criteria" => "a",
+          "project_id" => project_id
+        },
+        %{"principal" => "boss"},
+        "envelope-key"
+      )
+
+    assert response["ok"]
+
+    receipt =
+      Repo.get_by!(Consigliere.CommandReceipts.CommandReceipt, idempotency_key: "envelope-key")
+
+    assert receipt.response["v"] == 1
+    assert receipt.response["ok"] == true
+    assert receipt.response["payload"]["id"] == response["payload"]["id"]
+  end
+
+  test "a slow external callback does not hold the serialized writer" do
+    parent = self()
+
+    task =
+      Task.async(fn ->
+        CommandReceipts.remember(
+          Actor.boss(),
+          "project.add",
+          "slow-external",
+          %{"name" => "project", "repository_path" => "/tmp/project"},
+          fn ->
+            send(parent, {:callback_process, self()})
+            Process.sleep(500)
+            {:ok, %{"id" => "external-1"}}
+          end
+        )
+      end)
+
+    assert_receive {:callback_process, callback_pid}, 1_000
+    refute callback_pid == Process.whereis(DatabaseWriter)
+
+    started = System.monotonic_time(:millisecond)
+    assert {:ok, _mission} = DatabaseWriter.insert_mission(Fixtures.mission_attrs())
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    assert elapsed < 400
+    assert {:ok, _} = Task.await(task, 2_000)
   end
 end

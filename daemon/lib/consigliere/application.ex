@@ -94,6 +94,10 @@ defmodule Consigliere.Application do
   end
 
   def record_boot_result({:ok, _pid} = result, home) do
+    if Process.whereis(Consigliere.DatabaseWriter) do
+      _ = Consigliere.CommandReceipts.reconcile_pending()
+    end
+
     Consigliere.Home.clear_error!(home)
     result
   end

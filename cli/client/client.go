@@ -44,13 +44,15 @@ type Response struct {
 }
 
 type Request struct {
-	V              int            `json:"v"`
-	ID             string         `json:"id"`
-	Op             string         `json:"op"`
-	Actor          map[string]any `json:"actor"`
-	Payload        map[string]any `json:"payload,omitempty"`
-	Secret         string         `json:"secret,omitempty"`
-	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	V                int            `json:"v"`
+	ID               string         `json:"id"`
+	Op               string         `json:"op"`
+	OperationVersion int            `json:"operation_version,omitempty"`
+	Actor            map[string]any `json:"actor"`
+	Payload          map[string]any `json:"payload,omitempty"`
+	Secret           string         `json:"secret,omitempty"`
+	IdempotencyKey   string         `json:"idempotency_key,omitempty"`
+	CanonicalHash    string         `json:"canonical_hash,omitempty"`
 }
 
 type Dialer struct {
@@ -112,15 +114,29 @@ func (d Dialer) Call(op string, payload map[string]any, id, idem string) (*Respo
 	if id == "" {
 		id = fmt.Sprintf("req-%d", time.Now().UnixNano())
 	}
+	version, mutating := operationVersion(op)
+	if mutating && idem == "" {
+		idem = generatedIdempotencyKey()
+	}
+	canonicalHash := ""
+	if mutating {
+		var err error
+		canonicalHash, err = CanonicalRequestHash(canonicalScope(principal), op, version, idem, payload)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	req := Request{
-		V:              d.Version,
-		ID:             id,
-		Op:             op,
-		Actor:          map[string]any{"principal": principal},
-		Payload:        payload,
-		Secret:         secret,
-		IdempotencyKey: idem,
+		V:                d.Version,
+		ID:               id,
+		Op:               op,
+		OperationVersion: version,
+		Actor:            map[string]any{"principal": principal},
+		Payload:          payload,
+		Secret:           secret,
+		IdempotencyKey:   idem,
+		CanonicalHash:    canonicalHash,
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -128,6 +144,21 @@ func (d Dialer) Call(op string, payload map[string]any, id, idem string) (*Respo
 	}
 	body = append(body, '\n')
 
+	attempts := 1
+	if mutating {
+		attempts = 2
+	}
+	for attempt := 0; attempt < attempts; attempt++ {
+		resp, callErr := d.callOnce(body)
+		if callErr == nil || !mutating || attempt+1 == attempts || !retryable(callErr) {
+			return resp, callErr
+		}
+		boundedRetryDelay()
+	}
+	return nil, ErrMalformed
+}
+
+func (d Dialer) callOnce(body []byte) (*Response, error) {
 	conn, err := net.DialTimeout("unix", d.Socket, d.ConnectTimeout)
 	if err != nil {
 		if Probe(d.Socket) == SocketStale {
@@ -162,6 +193,10 @@ func (d Dialer) Call(op string, payload map[string]any, id, idem string) (*Respo
 		}
 	}
 	return &resp, nil
+}
+
+func retryable(err error) bool {
+	return errors.Is(err, ErrMalformed) || errors.Is(err, ErrStale)
 }
 
 func ExitFor(err error, resp *Response) int {

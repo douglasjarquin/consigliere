@@ -15,12 +15,6 @@ defmodule Consigliere.API.Protocol do
   alias Consigliere.Repo
 
   @version 1
-  # reconcile is a batch pass with its own per-item writes. Putting it in
-  # @mutating holds DatabaseWriter for the whole scan, including any
-  # ProcessGroup.terminate wait (up to 7s per leftover manifest).
-  @mutating ~w(mission.create mission.submit mission.grant_work mission.cancel
-               mission.grant_integration question.open question.answer away.mark
-               away.return project.add mission.pause mission.resume)
   @attempt_ops ~w(ping mission.get question.open)
   @review_phases ~w(awaiting_authorization ready_for_review
                     awaiting_integration_authorization failed)
@@ -43,24 +37,28 @@ defmodule Consigliere.API.Protocol do
 
       actor ->
         payload = Map.get(req, "payload", %{})
-        run_maybe_once(op, payload, actor, req, id)
+
+        case validate_request_contract(req, actor, op, payload, id) do
+          :ok -> run_maybe_once(op, payload, actor, req, id)
+          {:error, reason} -> fail(id, "invalid", reason)
+        end
     end
   end
 
   defp dispatch(%{"id" => id}, _bound), do: fail(id, "invalid", "missing v or op")
   defp dispatch(_, _bound), do: fail(nil, "invalid", "missing id")
 
-  defp run_maybe_once(op, payload, actor, req, id) when op in @mutating do
-    key = req["idempotency_key"] || id
+  defp run_maybe_once(op, payload, actor, req, id) do
+    if Consigliere.Operations.mutating?(op) do
+      key = req["idempotency_key"] || id
 
-    CommandReceipts.remember(actor, op, key, payload, fn ->
-      run(op, payload, actor)
-    end)
-    |> wrap(id)
-  end
-
-  defp run_maybe_once(op, payload, actor, _req, id) do
-    run(op, payload, actor) |> wrap(id)
+      CommandReceipts.remember(actor, op, key, payload, fn ->
+        run(op, payload, actor)
+      end)
+      |> wrap(id)
+    else
+      run(op, payload, actor) |> wrap(id)
+    end
   end
 
   defp run(op, payload, %Actor{principal: "attempt", allowed_ops: ops} = actor)
@@ -77,6 +75,39 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp run(op, payload, actor), do: run_allowed(op, payload, actor)
+
+  defp validate_request_contract(req, actor, op, payload, fallback_id) do
+    version = req["operation_version"]
+    canonical_hash = req["canonical_hash"]
+
+    if is_nil(version) and is_nil(canonical_hash) do
+      :ok
+    else
+      key = req["idempotency_key"] || fallback_id
+
+      with {:ok, expected_version} <- Consigliere.Operations.version(op),
+           true <- version in [nil, expected_version],
+           :ok <- verify_canonical_hash(canonical_hash, actor, op, key, payload) do
+        :ok
+      else
+        false -> {:error, "operation_version_mismatch"}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  defp verify_canonical_hash(nil, _actor, _op, _key, _payload), do: :ok
+
+  defp verify_canonical_hash(hash, actor, op, key, payload) when is_binary(hash) do
+    case CommandReceipts.request_hash(actor, op, key, payload) do
+      {:ok, ^hash} -> :ok
+      {:ok, _other} -> {:error, "canonical_request_mismatch"}
+      {:error, _reason} -> :ok
+    end
+  end
+
+  defp verify_canonical_hash(_hash, _actor, _op, _key, _payload),
+    do: {:error, "canonical_request_invalid"}
 
   defp run_allowed("ping", _payload, _actor), do: {:ok, %{"pong" => true}}
 
@@ -175,8 +206,12 @@ defmodule Consigliere.API.Protocol do
     Missions.submit_for_authorization(payload["mission_id"], actor) |> ok_mission()
   end
 
+  defp run_allowed("mission.request_changes", payload, actor) do
+    Missions.request_changes(payload["mission_id"], actor) |> ok_mission()
+  end
+
   defp run_allowed("mission.grant_work", payload, actor) do
-    Missions.grant_work_authorization(payload["mission_id"], actor) |> ok_mission()
+    Missions.grant_work_authorization_command(payload["mission_id"], actor) |> ok_mission()
   end
 
   defp run_allowed("mission.cancel", payload, actor) do
@@ -452,37 +487,31 @@ defmodule Consigliere.API.Protocol do
   defp ok_question({:ok, %{id: id, status: status}}), do: {:ok, %{"id" => id, "status" => status}}
   defp ok_question(other), do: other
 
-  defp wrap({:ok, :replay, %{"ok" => true, "payload" => payload}}, id),
-    do: wrap({:ok, payload}, id)
-
-  defp wrap({:ok, :replay, %{"ok" => false, "code" => code, "reason" => reason}}, id),
-    do: fail(id, code, reason)
-
-  defp wrap({:ok, :replay, payload}, id) when is_map(payload), do: wrap({:ok, payload}, id)
-
-  defp wrap({:ok, payload}, id),
-    do: %{"v" => @version, "id" => id, "ok" => true, "payload" => payload}
-
-  defp wrap({:error, {:unauthorized, reason}}, id), do: fail(id, "unauthorized", inspect(reason))
-
-  defp wrap({:error, {:illegal_transition, reason}}, id),
-    do: fail(id, "illegal_transition", inspect(reason))
-
-  defp wrap({:error, {:fenced, attempt_id}}, id), do: fail(id, "fenced", attempt_id)
-  defp wrap({:error, {:not_found, what}}, id), do: fail(id, "not_found", what)
-  defp wrap({:error, {:invalid, reason}}, id), do: fail(id, "invalid", reason)
-
-  defp wrap({:error, %Ecto.Changeset{} = cs}, id) do
-    fail(id, "invalid", inspect(Ecto.Changeset.traverse_errors(cs, fn {m, _} -> m end)))
+  defp wrap({:ok, :replay, envelope}, id) when is_map(envelope) do
+    Map.put(envelope, "id", id)
   end
 
-  defp wrap({:error, other}, id), do: fail(id, "error", inspect(other))
+  defp wrap(result, id) do
+    result
+    |> CommandReceipts.result_envelope()
+    |> Map.put("id", id)
+  end
 
   defp fail(id, code, reason) do
-    %{"v" => @version, "id" => id, "ok" => false, "error" => error(code, reason)}
+    %{
+      "v" => @version,
+      "id" => id,
+      "ok" => false,
+      "error" => error(code, reason)
+    }
   end
 
-  defp error(code, reason), do: %{"code" => code, "reason" => to_string(reason)}
+  defp error(code, reason) do
+    %{
+      "code" => code,
+      "reason" => reason |> to_string() |> String.slice(0, 512)
+    }
+  end
 
   defp encode(map), do: JSON.encode!(map)
 

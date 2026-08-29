@@ -247,6 +247,79 @@ func TestDoctorReportsMalformedOwnerMetadata(t *testing.T) {
 	}
 }
 
+func TestCallRetriesMutatingRequestWithOneGeneratedKey(t *testing.T) {
+	dir := shortDir(t)
+	home := Home{Dir: dir}
+	if err := os.MkdirAll(filepath.Join(dir, "credentials"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(home.CredentialPath(), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ln, err := net.Listen("unix", home.PrivilegedSocket())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	keys := make(chan string, 2)
+	var requests atomic.Int32
+	go func() {
+		for {
+			conn, acceptErr := ln.Accept()
+			if acceptErr != nil {
+				return
+			}
+			line, readErr := bufio.NewReader(conn).ReadBytes('\n')
+			if readErr != nil && len(line) == 0 {
+				_ = conn.Close()
+				continue
+			}
+			var req map[string]any
+			if json.Unmarshal(line, &req) != nil {
+				_ = conn.Close()
+				continue
+			}
+			key, _ := req["idempotency_key"].(string)
+			keys <- key
+			if requests.Add(1) == 1 {
+				_ = conn.Close()
+				continue
+			}
+			response := map[string]any{
+				"v":       1,
+				"id":      req["id"],
+				"ok":      true,
+				"payload": map[string]any{"id": "mission-1"},
+			}
+			body, _ := json.Marshal(response)
+			_, _ = conn.Write(append(body, '\n'))
+			_ = conn.Close()
+		}
+	}()
+
+	d := NewBossDialer(home)
+	d.ReadTimeout = 2 * time.Second
+	resp, err := d.Call("mission.create", map[string]any{
+		"project_id":          "project-1",
+		"objective":           "objective",
+		"scope":               "scope",
+		"acceptance_criteria": "criteria",
+	}, "correlation-1", "")
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if resp == nil || !resp.OK {
+		t.Fatalf("response: %#v", resp)
+	}
+	firstKey := <-keys
+	secondKey := <-keys
+	if firstKey == "" || firstKey != secondKey {
+		t.Fatalf("keys=%q,%q", firstKey, secondKey)
+	}
+}
+
 func TestVersionWithoutDaemon(t *testing.T) {
 	dir := shortDir(t)
 	t.Setenv("CS_HOME", dir)
