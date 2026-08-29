@@ -41,20 +41,27 @@ defmodule Consigliere.RunnerProcess do
     attempt_id = Keyword.fetch!(opts, :attempt_id)
     mission_id = Keyword.get(opts, :mission_id, "none")
     fencing_token = Keyword.get(opts, :fencing_token, "fence-#{attempt_id}")
+    workspace_path = Keyword.get(opts, :workspace_path, "unbound")
+    workspace_generation = Keyword.get(opts, :workspace_generation, "unbound")
     harness_command = harness_command(opts)
 
     runtime = runtime_dir(attempt_id)
     File.mkdir_p!(runtime)
     File.chmod!(runtime, 0o700)
-    control_token = control_token()
+    invocation_id = invocation_id()
+    {invocation_runtime, control_socket_path} = invocation_runtime(runtime, invocation_id)
+    File.mkdir_p!(invocation_runtime)
+    File.chmod!(invocation_runtime, 0o700)
 
     case RunnerLauncher.launch(
            attempt_id: attempt_id,
            mission_id: mission_id,
            fencing_token: fencing_token,
            manifest_path: Path.join(runtime, "manifest.json"),
-           control_socket_path: control_socket_path(runtime, attempt_id),
-           control_token: control_token,
+           control_socket_path: control_socket_path,
+           invocation_id: invocation_id,
+           workspace_path: workspace_path,
+           workspace_generation: workspace_generation,
            harness_command: harness_command,
            env: runner_env(opts)
          ) do
@@ -93,7 +100,7 @@ defmodule Consigliere.RunnerProcess do
   end
 
   def handle_info({port, {:exit_status, 0}}, %{session: %{port: port}} = state) do
-    {:stop, state.stop_reason || :normal, state}
+    {:stop, state.stop_reason || manifest_exit_reason(state), state}
   end
 
   def handle_info({port, {:exit_status, status}}, %{session: %{port: port}} = state) do
@@ -101,12 +108,19 @@ defmodule Consigliere.RunnerProcess do
   end
 
   def handle_info({:tcp, socket, line}, %{session: %{socket: socket}} = state) do
-    :ok = :inet.setopts(socket, active: :once)
-    {:noreply, handle_control(String.trim(line), state)}
+    case RunnerLauncher.verify_frame(state.session, String.trim(line)) do
+      {:ok, message, session} ->
+        :ok = :inet.setopts(socket, active: :once)
+        {:noreply, handle_control(message, %{state | session: session})}
+
+      {:error, _reason} ->
+        :ok = :inet.setopts(socket, active: :once)
+        {:noreply, state}
+    end
   end
 
   def handle_info({:tcp_closed, socket}, %{session: %{socket: socket}} = state) do
-    {:stop, state.stop_reason || :normal, state}
+    {:stop, state.stop_reason || manifest_exit_reason(state), state}
   end
 
   def handle_info(other, state) do
@@ -119,6 +133,7 @@ defmodule Consigliere.RunnerProcess do
     _ = RunnerLauncher.cancel(session)
     _ = :gen_tcp.close(session.socket)
     if Port.info(session.port), do: Port.close(session.port)
+    _ = RunnerLauncher.release(session)
     _ = classify_exit(reason, state)
     :ok
   rescue
@@ -127,16 +142,13 @@ defmodule Consigliere.RunnerProcess do
 
   def terminate(_reason, _), do: :ok
 
-  defp handle_control(line, state) do
-    case JSON.decode(line) do
-      {:ok, %{"fencing_token" => token}} when token != state.fencing_token ->
+  defp handle_control(%{} = message, state) do
+    case message do
+      %{"fencing_token" => token} when token != state.fencing_token ->
         state
 
-      {:ok, msg} ->
+      msg ->
         handle_control_msg(msg, state)
-
-      {:error, _} ->
-        state
     end
   end
 
@@ -271,26 +283,41 @@ defmodule Consigliere.RunnerProcess do
   defp exit_bits(_, %{stop_reason: :normal}), do: {0, :normal}
   defp exit_bits(_, _), do: {nil, :unknown}
 
+  defp manifest_exit_reason(%{session: %{manifest_path: manifest_path}}) do
+    case File.read(manifest_path) do
+      {:ok, body} ->
+        case JSON.decode(body) do
+          {:ok, %{"state" => "dead_verified", "exit_code" => code}}
+          when is_integer(code) and code != 0 ->
+            {:harness_exited, code}
+
+          _ ->
+            :normal
+        end
+
+      _ ->
+        :normal
+    end
+  end
+
+  defp manifest_exit_reason(_), do: :normal
+
   defp runtime_dir(attempt_id) do
     Path.join(Consigliere.Home.runtime_attempts_dir(), to_string(attempt_id))
   end
 
-  defp control_token do
-    Base.encode16(:crypto.strong_rand_bytes(32), case: :lower)
+  defp invocation_id do
+    Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
   end
 
-  # macOS sun_path is ~104 bytes. Prefer the Attempt runtime dir; if that
-  # path is too long, use an unpredictable short name instead of phash2.
-  defp control_socket_path(runtime, _attempt_id) do
-    preferred = Path.join(runtime, "c.sock")
+  defp invocation_runtime(runtime, invocation_id) do
+    preferred = Path.join(runtime, "i-#{invocation_id}")
 
-    if byte_size(preferred) < 104 do
-      preferred
+    if byte_size(Path.join(preferred, "c.sock")) < 104 do
+      {preferred, Path.join(preferred, "c.sock")}
     else
-      Path.join(
-        System.tmp_dir!(),
-        "cs-#{Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)}.sock"
-      )
+      short = Path.join(Consigliere.Home.runtime_attempts_dir(), "i-#{invocation_id}")
+      {short, Path.join(short, "c.sock")}
     end
   end
 

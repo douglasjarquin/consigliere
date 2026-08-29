@@ -129,7 +129,13 @@ defmodule Consigliere.Dispatch do
         GlobalScheduler.release_slot(mission.id)
         %{state | slot: nil, attempt_id: attempt.id, runner_pid: nil}
 
-      {:ok, %{mission: launch_mission, attempt: launch_attempt, workspace: workspace}} ->
+      {:ok,
+       %{
+         mission: launch_mission,
+         attempt: launch_attempt,
+         workspace: workspace,
+         workspace_generation: workspace_generation
+       }} ->
         policy = Codex.policy(project)
 
         extras = %{
@@ -159,6 +165,7 @@ defmodule Consigliere.Dispatch do
               grant,
               launch_attempt,
               workspace,
+              workspace_generation,
               pack,
               policy
             )
@@ -175,13 +182,27 @@ defmodule Consigliere.Dispatch do
 
       trusted_project?(project) ->
         case Projects.verify_workspace_identity(project, mission, workspace) do
-          :ok -> {:ok, %{mission: mission, attempt: attempt, workspace: workspace.path}}
-          {:error, reason} -> {:error, inspect(reason)}
+          :ok ->
+            {:ok,
+             %{
+               mission: mission,
+               attempt: attempt,
+               workspace: workspace.path,
+               workspace_generation: workspace.lease_id
+             }}
+
+          {:error, reason} ->
+            {:error, inspect(reason)}
         end
 
       true ->
         {:ok,
-         %{mission: mission, attempt: attempt, workspace: workspace.path || fallback_workspace}}
+         %{
+           mission: mission,
+           attempt: attempt,
+           workspace: workspace.path || fallback_workspace,
+           workspace_generation: workspace.lease_id
+         }}
     end
   end
 
@@ -191,7 +212,7 @@ defmodule Consigliere.Dispatch do
 
   defp trusted_project?(_), do: false
 
-  defp start_runner(state, mission, grant, attempt, workspace, pack, policy) do
+  defp start_runner(state, mission, grant, attempt, workspace, workspace_generation, pack, policy) do
     {:ok, capability} = Capabilities.mint(attempt)
     runtime = Path.join(Home.runtime_attempts_dir(), attempt.id)
     File.mkdir_p!(runtime)
@@ -206,6 +227,7 @@ defmodule Consigliere.Dispatch do
          fencing_token: attempt.fencing_token,
          heartbeat_file: Path.join(runtime, "heartbeat"),
          workspace_path: workspace,
+         workspace_generation: workspace_generation,
          capability: capability,
          prompt: pack.encoded,
          policy: policy

@@ -19,14 +19,20 @@ const (
 
 type Manifest struct {
 	SchemaVersion           int           `json:"schema_version"`
+	ProtocolVersion         int           `json:"protocol_version"`
+	InvocationID            string        `json:"invocation_id"`
 	AttemptID               string        `json:"attempt_id"`
 	MissionID               string        `json:"mission_id"`
+	WorkspacePath           string        `json:"workspace_path"`
+	WorkspaceGeneration     string        `json:"workspace_generation"`
+	FencingGeneration       string        `json:"fencing_generation"`
 	FencingToken            string        `json:"fencing_token"`
 	RunnerPID               int           `json:"runner_pid"`
 	HarnessPID              int           `json:"harness_pid"`
 	PGID                    int           `json:"pgid"`
 	HarnessExecutablePath   string        `json:"harness_executable_path"`
 	HarnessExecutableSHA256 string        `json:"harness_executable_sha256"`
+	RunnerExecutableSHA256  string        `json:"runner_executable_sha256"`
 	StartedAt               string        `json:"started_at"`
 	ControlSocketPath       string        `json:"control_socket_path"`
 	State                   ManifestState `json:"state"`

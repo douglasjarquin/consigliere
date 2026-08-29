@@ -37,7 +37,7 @@ defmodule Consigliere.RunnerProcessEnvTest do
         harness_command: [
           "sh",
           "-c",
-          "(printenv CS_HOME; printenv GITHUB_TOKEN; printenv LINEAR_API_KEY; printenv CS_CONTROL_TOKEN; true) > '#{out}' 2>/dev/null; sleep 5"
+          "(printenv CS_HOME; printenv GITHUB_TOKEN; printenv LINEAR_API_KEY; true) > '#{out}' 2>/dev/null; sleep 5"
         ]
       )
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,18 +13,24 @@ import (
 
 func testManifest(attemptID string) Manifest {
 	return Manifest{
-		SchemaVersion:         1,
-		AttemptID:             attemptID,
-		MissionID:             "mission-1",
-		FencingToken:          "fence-1",
-		RunnerPID:             1234,
-		HarnessPID:            1235,
-		PGID:                  1234,
-		HarnessExecutablePath: "/bin/true",
-		StartedAt:             time.Now().UTC().Format(time.RFC3339Nano),
-		ControlSocketPath:     "/tmp/control.sock",
-		State:                 StateStarting,
-		LastStateChangeAt:     time.Now().UTC().Format(time.RFC3339Nano),
+		SchemaVersion:          1,
+		ProtocolVersion:        controlProtocolVersion,
+		InvocationID:           "invocation-1",
+		AttemptID:              attemptID,
+		MissionID:              "mission-1",
+		WorkspacePath:          "/tmp/workspace-1",
+		WorkspaceGeneration:    "workspace-generation-1",
+		FencingGeneration:      "fence-1",
+		FencingToken:           "fence-1",
+		RunnerPID:              1234,
+		HarnessPID:             1235,
+		PGID:                   1234,
+		HarnessExecutablePath:  "/bin/true",
+		RunnerExecutableSHA256: strings.Repeat("a", 64),
+		StartedAt:              time.Now().UTC().Format(time.RFC3339Nano),
+		ControlSocketPath:      "/tmp/control.sock",
+		State:                  StateStarting,
+		LastStateChangeAt:      time.Now().UTC().Format(time.RFC3339Nano),
 	}
 }
 
@@ -40,7 +47,7 @@ func TestWriteManifest_RoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadManifest: %v", err)
 	}
-	if got.AttemptID != m.AttemptID || got.State != m.State || got.PGID != m.PGID {
+	if got.AttemptID != m.AttemptID || got.State != m.State || got.PGID != m.PGID || got.InvocationID != m.InvocationID || got.RunnerExecutableSHA256 != m.RunnerExecutableSHA256 {
 		t.Fatalf("round-trip mismatch: got %+v, want %+v", got, m)
 	}
 }

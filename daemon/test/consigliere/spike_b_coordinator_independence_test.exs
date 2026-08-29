@@ -118,8 +118,15 @@ defmodule Consigliere.SpikeBCoordinatorIndependenceTest do
     assert RunnerProcess.os_pid(reattached_runner_pid) == os_pid_before
 
     count_before_check = RunnerProcess.heartbeat_count(reattached_runner_pid)
-    Process.sleep(300)
-    count_after_check = RunnerProcess.heartbeat_count(reattached_runner_pid)
+
+    count_after_check =
+      wait_until(
+        fn ->
+          count = RunnerProcess.heartbeat_count(reattached_runner_pid)
+          if count > count_before_check, do: count
+        end,
+        40
+      )
 
     assert {_output, 0} = System.cmd("kill", ["-0", to_string(os_pid_before)]),
            "the OS harness must still be alive after coordinator reattachment, not merely reporting a cached pid"

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,10 +21,31 @@ func dialControlSocketWithRetry(t *testing.T, path string, timeout time.Duration
 	for {
 		conn, err := net.DialTimeout("unix", path, 200*time.Millisecond)
 		if err == nil {
-			if _, err := conn.Write([]byte(`{"type":"auth","token":"` + testControlToken + `"}` + "\n")); err != nil {
-				conn.Close()
-				t.Fatalf("write auth: %v", err)
+			manifestPath := filepath.Join(filepath.Dir(path), "manifest.json")
+			if _, statErr := os.Stat(manifestPath); statErr != nil {
+				manifestPath = filepath.Join(filepath.Dir(filepath.Dir(path)), "manifest.json")
 			}
+			manifest := waitForManifestState(t, manifestPath, StateRunning, timeout)
+			identity := InvocationIdentity{
+				ProtocolVersion:     manifest.ProtocolVersion,
+				InvocationID:        manifest.InvocationID,
+				AttemptID:           manifest.AttemptID,
+				MissionID:           manifest.MissionID,
+				WorkspacePath:       manifest.WorkspacePath,
+				WorkspaceGeneration: manifest.WorkspaceGeneration,
+				FencingGeneration:   manifest.FencingGeneration,
+			}
+			secret := []byte("01234567890123456789012345678901")
+			bootstrap := Bootstrap{SecretHex: hex.EncodeToString(secret), Identity: identity}
+			runner := RunnerIdentity{
+				InvocationIdentity:      identity,
+				RunnerPID:               manifest.RunnerPID,
+				PGID:                    manifest.PGID,
+				ManifestDigest:          mustManifestDigest(t, manifestPath),
+				RunnerExecutableSHA256:  manifest.RunnerExecutableSHA256,
+				HarnessExecutableSHA256: manifest.HarnessExecutableSHA256,
+			}
+			performSecureTestClient(t, conn, bootstrap, runner)
 			return conn
 		}
 		if time.Now().After(deadline) {
@@ -46,6 +68,15 @@ func waitForManifestState(t *testing.T, manifestPath string, state ManifestState
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func mustManifestDigest(t *testing.T, manifestPath string) string {
+	t.Helper()
+	digest, err := manifestFileDigest(manifestPath)
+	if err != nil {
+		t.Fatalf("manifestFileDigest: %v", err)
+	}
+	return digest
 }
 
 // TestRun_NaturalHarnessExitReapsSurvivingGroupMembers proves that when the

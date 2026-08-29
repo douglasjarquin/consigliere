@@ -119,8 +119,41 @@ Every manifest transition (spawn, each state change, exit) repeats this full seq
 
 ## Control channel wire protocol
 
-One Unix domain socket per Attempt, at the `control_socket_path` recorded in the manifest, created by the runner before it reports readiness.
-Framing: newline-delimited JSON (NDJSON), one JSON object per line, both directions. NDJSON over length-prefixing is chosen for operability (`nc`, `socat`, and a human with `jq` can all read the stream directly during an incident) at a cost of requiring the daemon and runner to reject any line containing an embedded newline in a string field before framing (standard JSON string escaping already forbids raw newlines inside string values, so this is not an extra constraint in practice).
+One Unix domain socket exists for each unique runner invocation, below its owner-only invocation directory and at the `control_socket_path` recorded in the manifest.
+
+The invocation directory is created below the daemon-owned runtime tree with mode `0700`, and the socket is created with mode `0600`.
+
+The runner never removes an existing socket path before binding it, and shutdown unlinks only the socket inode it created.
+
+The daemon sends the bootstrap as one bounded JSON record over the private stdin file descriptor inherited by the runner.
+
+The bootstrap contains a fresh 32-byte channel secret encoded as hex and the immutable invocation identity.
+
+The runner closes that inherited descriptor after the daemon has acknowledged the verified running manifest.
+
+The channel secret never appears in command arguments, the persistent environment, a manifest, a log, a domain event, or a durable database row.
+
+Before any control frame is accepted, the daemon sends a `daemon_challenge` and the runner replies with a `runner_hello`.
+
+The daemon completes the mutual exchange with a `daemon_ack`.
+
+Each handshake record is authenticated with HMAC-SHA-256 over canonical compact JSON with the `mac` field removed.
+
+The canonical handshake identity contains `protocol_version`, `invocation_id`, `attempt_id`, `mission_id`, `workspace_path`, `workspace_generation`, `fencing_generation`, `runner_pid`, `pgid`, `manifest_digest`, `runner_executable_sha256`, `harness_executable_sha256`, `daemon_nonce`, and `runner_nonce`.
+
+The daemon verifies the exact identity, process IDs, executable hashes, manifest digest, owner-only paths, and running manifest before it persists runner identity or accepts control frames.
+
+Every post-handshake frame repeats the invocation identity and `fencing_token`, carries a monotonically increasing `seq`, and carries an HMAC over its canonical JSON representation.
+
+The receiver accepts only the next sequence number and the direction-specific closed message set.
+
+Malformed, oversized, unauthenticated, replayed, out-of-sequence, or identity-mismatched records are rejected without invoking application handlers.
+
+Framing is newline-delimited JSON (NDJSON), one JSON object per line, in both directions.
+
+NDJSON over length-prefixing is chosen for operability (`nc`, `socat`, and a human with `jq` can all read the stream directly during an incident) at a cost of requiring the daemon and runner to reject any line containing an embedded newline in a string field before framing.
+
+Standard JSON string escaping already forbids raw newlines inside JSON string values, so this is not an extra constraint in practice.
 
 Daemon-to-runner message types:
 

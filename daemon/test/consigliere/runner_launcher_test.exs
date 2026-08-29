@@ -24,8 +24,7 @@ defmodule Consigliere.RunnerLauncherTest do
       heartbeat_path: Path.join(dir, "heartbeat"),
       attempt_id: "attempt-#{unique}",
       mission_id: "mission-#{unique}",
-      fencing_token: "fence-#{unique}",
-      control_token: "token-#{unique}"
+      fencing_token: "fence-#{unique}"
     }
   end
 
@@ -35,8 +34,7 @@ defmodule Consigliere.RunnerLauncherTest do
     heartbeat_path: heartbeat_path,
     attempt_id: attempt_id,
     mission_id: mission_id,
-    fencing_token: fencing_token,
-    control_token: control_token
+    fencing_token: fencing_token
   } do
     {:ok, session} =
       RunnerLauncher.launch(
@@ -45,7 +43,6 @@ defmodule Consigliere.RunnerLauncherTest do
         fencing_token: fencing_token,
         manifest_path: manifest_path,
         control_socket_path: control_socket_path,
-        control_token: control_token,
         harness_command: [@fake_harness, heartbeat_path]
       )
 
@@ -76,8 +73,7 @@ defmodule Consigliere.RunnerLauncherTest do
          heartbeat_path: heartbeat_path,
          attempt_id: attempt_id,
          mission_id: mission_id,
-         fencing_token: fencing_token,
-         control_token: control_token
+         fencing_token: fencing_token
        } do
     {:ok, session} =
       RunnerLauncher.launch(
@@ -86,7 +82,6 @@ defmodule Consigliere.RunnerLauncherTest do
         fencing_token: fencing_token,
         manifest_path: manifest_path,
         control_socket_path: control_socket_path,
-        control_token: control_token,
         harness_command: [@fake_harness, heartbeat_path, "3"]
       )
 
@@ -108,8 +103,7 @@ defmodule Consigliere.RunnerLauncherTest do
          heartbeat_path: heartbeat_path,
          attempt_id: attempt_id,
          mission_id: mission_id,
-         fencing_token: fencing_token,
-         control_token: control_token
+         fencing_token: fencing_token
        } do
     {:ok, session} =
       RunnerLauncher.launch(
@@ -118,7 +112,6 @@ defmodule Consigliere.RunnerLauncherTest do
         fencing_token: fencing_token,
         manifest_path: manifest_path,
         control_socket_path: control_socket_path,
-        control_token: control_token,
         harness_command: [@fake_harness, heartbeat_path]
       )
 
@@ -141,8 +134,7 @@ defmodule Consigliere.RunnerLauncherTest do
     heartbeat_path: heartbeat_path,
     attempt_id: attempt_id,
     mission_id: mission_id,
-    fencing_token: fencing_token,
-    control_token: control_token
+    fencing_token: fencing_token
   } do
     parent = self()
 
@@ -157,7 +149,7 @@ defmodule Consigliere.RunnerLauncherTest do
             packet: :line
           ])
 
-        :gen_tcp.send(sock, JSON.encode!(%{"type" => "auth", "token" => "stolen"}) <> "\n")
+        :gen_tcp.send(sock, JSON.encode!(%{"type" => "unsupported"}) <> "\n")
         result = :gen_tcp.recv(sock, 0, 2_000)
         send(parent, {:thief, result})
         :gen_tcp.close(sock)
@@ -170,7 +162,6 @@ defmodule Consigliere.RunnerLauncherTest do
         fencing_token: fencing_token,
         manifest_path: manifest_path,
         control_socket_path: control_socket_path,
-        control_token: control_token,
         harness_command: [@fake_harness, heartbeat_path]
       )
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -153,14 +154,17 @@ func TestControlChannel_RejectsUnauthenticatedFirstClient(t *testing.T) {
 	}
 	defer cc.Close()
 
+	identity := secureTestIdentity()
+	bootstrap := secureTestBootstrap(identity)
+	runner := secureTestRunner(identity)
 	acceptErrCh := make(chan error, 1)
-	go func() { acceptErrCh <- cc.AcceptAuthenticated("secret-token", 3*time.Second) }()
+	go func() { acceptErrCh <- cc.AcceptHandshake(bootstrap, runner, 3*time.Second) }()
 
 	thief, err := net.DialTimeout("unix", socketPath, 2*time.Second)
 	if err != nil {
 		t.Fatalf("thief dial: %v", err)
 	}
-	if _, err := thief.Write([]byte(`{"type":"auth","token":"wrong"}` + "\n")); err != nil {
+	if _, err := thief.Write([]byte(`{"type":"unsupported"}` + "\n")); err != nil {
 		t.Fatalf("thief write: %v", err)
 	}
 
@@ -174,12 +178,10 @@ func TestControlChannel_RejectsUnauthenticatedFirstClient(t *testing.T) {
 		t.Fatalf("daemon dial: %v", err)
 	}
 	defer daemon.Close()
-	if _, err := daemon.Write([]byte(`{"type":"auth","token":"secret-token"}` + "\n")); err != nil {
-		t.Fatalf("daemon auth: %v", err)
-	}
+	performSecureTestClient(t, daemon, bootstrap, runner)
 
 	if err := <-acceptErrCh; err != nil {
-		t.Fatalf("AcceptAuthenticated: %v", err)
+		t.Fatalf("AcceptHandshake: %v", err)
 	}
 
 	if err := cc.Send(map[string]any{"type": "runner_started"}); err != nil {
@@ -202,8 +204,11 @@ func TestControlChannel_AuthPreservesFollowingFrame(t *testing.T) {
 	}
 	defer cc.Close()
 
+	identity := secureTestIdentity()
+	bootstrap := secureTestBootstrap(identity)
+	runner := secureTestRunner(identity)
 	acceptErrCh := make(chan error, 1)
-	go func() { acceptErrCh <- cc.AcceptAuthenticated("secret-token", 3*time.Second) }()
+	go func() { acceptErrCh <- cc.AcceptHandshake(bootstrap, runner, 3*time.Second) }()
 
 	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
 	if err != nil {
@@ -211,13 +216,12 @@ func TestControlChannel_AuthPreservesFollowingFrame(t *testing.T) {
 	}
 	defer conn.Close()
 
-	frames := []byte(`{"type":"auth","token":"secret-token"}` + "\n" + `{"type":"cancel"}` + "\n")
-	if _, err := conn.Write(frames); err != nil {
-		t.Fatalf("write auth and cancel: %v", err)
-	}
+	performSecureTestClient(t, conn, bootstrap, runner)
 	if err := <-acceptErrCh; err != nil {
-		t.Fatalf("AcceptAuthenticated: %v", err)
+		t.Fatalf("AcceptHandshake: %v", err)
 	}
+	secret, _ := hex.DecodeString(bootstrap.SecretHex)
+	writeSecureTestMessage(t, conn, frameMessage(identity, 1, map[string]any{"type": "cancel"}, secret))
 
 	received := make(chan map[string]any, 1)
 	go cc.ReadLoop(func(msg map[string]any) { received <- msg }, func() {})

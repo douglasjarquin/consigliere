@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -25,19 +26,42 @@ const descendantPollInterval = 150 * time.Millisecond
 func main() {
 	attemptID := flag.String("attempt-id", "", "attempt id")
 	missionID := flag.String("mission-id", "", "mission id")
-	fencingToken := flag.String("fencing-token", "", "fencing token")
+	workspacePath := flag.String("workspace-path", "", "trusted workspace path")
+	workspaceGeneration := flag.String("workspace-generation", "", "trusted workspace generation")
+	fencingGeneration := flag.String("fencing-generation", "", "trusted fencing generation")
+	invocationID := flag.String("invocation-id", "", "unique runner invocation id")
 	manifestPath := flag.String("manifest", "", "path to write the runtime manifest")
 	controlSocketPath := flag.String("control-socket", "", "path for the control channel unix socket")
-	controlToken := flag.String("control-token", "", "shared secret authenticating the daemon control client")
 	flag.Parse()
 	harnessCommand := flag.Args()
 
-	if *attemptID == "" || *manifestPath == "" || *controlSocketPath == "" || *controlToken == "" || len(harnessCommand) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: cs-runner --attempt-id ID --manifest PATH --control-socket PATH --control-token TOKEN -- HARNESS_CMD ARGS...")
+	identity := InvocationIdentity{
+		ProtocolVersion:     controlProtocolVersion,
+		InvocationID:        *invocationID,
+		AttemptID:           *attemptID,
+		MissionID:           *missionID,
+		WorkspacePath:       *workspacePath,
+		WorkspaceGeneration: *workspaceGeneration,
+		FencingGeneration:   *fencingGeneration,
+	}
+	if identity.validate() != nil || *manifestPath == "" || *controlSocketPath == "" || len(harnessCommand) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: cs-runner --attempt-id ID --mission-id ID --workspace-path PATH --workspace-generation ID --fencing-generation ID --invocation-id ID --manifest PATH --control-socket PATH -- HARNESS_CMD ARGS...")
 		os.Exit(2)
 	}
 
-	if err := runAuthenticated(*attemptID, *missionID, *fencingToken, *manifestPath, *controlSocketPath, *controlToken, harnessCommand, 30*time.Second); err != nil {
+	bootstrap, err := readBootstrapFromStdin()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "cs-runner:", err)
+		os.Exit(2)
+	}
+	if err := validateBootstrapIdentity(bootstrap, identity); err != nil {
+		fmt.Fprintln(os.Stderr, "cs-runner:", err)
+		os.Exit(2)
+	}
+	bootstrap.CloseStdin = true
+	defer os.Stdin.Close()
+
+	if err := runAuthenticated(identity, *manifestPath, *controlSocketPath, bootstrap, harnessCommand, 30*time.Second); err != nil {
 		fmt.Fprintln(os.Stderr, "cs-runner:", err)
 		os.Exit(1)
 	}
@@ -47,14 +71,38 @@ func nowRFC3339() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
-const testControlToken = "test-control-token"
-
 func run(attemptID, missionID, fencingToken, manifestPath, controlSocketPath string, harnessCommand []string) error {
-	return runAuthenticated(attemptID, missionID, fencingToken, manifestPath, controlSocketPath, testControlToken, harnessCommand, 30*time.Second)
+	identity := InvocationIdentity{
+		ProtocolVersion:     controlProtocolVersion,
+		InvocationID:        "test-invocation-" + attemptID,
+		AttemptID:           attemptID,
+		MissionID:           missionID,
+		WorkspacePath:       "test-workspace",
+		WorkspaceGeneration: "test-workspace-generation",
+		FencingGeneration:   fencingToken,
+	}
+	bootstrap := Bootstrap{
+		SecretHex: hex.EncodeToString([]byte("01234567890123456789012345678901")),
+		Identity:  identity,
+	}
+	return runAuthenticated(identity, manifestPath, controlSocketPath, bootstrap, harnessCommand, 30*time.Second)
 }
 
 func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, controlSocketPath string, harnessCommand []string, acceptTimeout time.Duration) error {
-	return runAuthenticated(attemptID, missionID, fencingToken, manifestPath, controlSocketPath, testControlToken, harnessCommand, acceptTimeout)
+	identity := InvocationIdentity{
+		ProtocolVersion:     controlProtocolVersion,
+		InvocationID:        "test-invocation-" + attemptID,
+		AttemptID:           attemptID,
+		MissionID:           missionID,
+		WorkspacePath:       "test-workspace",
+		WorkspaceGeneration: "test-workspace-generation",
+		FencingGeneration:   fencingToken,
+	}
+	bootstrap := Bootstrap{
+		SecretHex: hex.EncodeToString([]byte("01234567890123456789012345678901")),
+		Identity:  identity,
+	}
+	return runAuthenticated(identity, manifestPath, controlSocketPath, bootstrap, harnessCommand, acceptTimeout)
 }
 
 // terminateAndFinalize runs the termination sequence against base's process
@@ -98,16 +146,21 @@ type harnessExitResult struct {
 	signaled bool
 }
 
-func runAuthenticated(attemptID, missionID, fencingToken, manifestPath, controlSocketPath, controlToken string, harnessCommand []string, acceptTimeout time.Duration) error {
+func runAuthenticated(identity InvocationIdentity, manifestPath, controlSocketPath string, bootstrap Bootstrap, harnessCommand []string, acceptTimeout time.Duration) error {
 	base := Manifest{
-		SchemaVersion:     1,
-		AttemptID:         attemptID,
-		MissionID:         missionID,
-		FencingToken:      fencingToken,
-		ControlSocketPath: controlSocketPath,
-		State:             StateStarting,
-		StartedAt:         nowRFC3339(),
-		LastStateChangeAt: nowRFC3339(),
+		SchemaVersion:       1,
+		ProtocolVersion:     identity.ProtocolVersion,
+		InvocationID:        identity.InvocationID,
+		AttemptID:           identity.AttemptID,
+		MissionID:           identity.MissionID,
+		WorkspacePath:       identity.WorkspacePath,
+		WorkspaceGeneration: identity.WorkspaceGeneration,
+		FencingGeneration:   identity.FencingGeneration,
+		FencingToken:        identity.FencingGeneration,
+		ControlSocketPath:   controlSocketPath,
+		State:               StateStarting,
+		StartedAt:           nowRFC3339(),
+		LastStateChangeAt:   nowRFC3339(),
 	}
 	if err := writeManifestFn(manifestPath, base); err != nil {
 		return fmt.Errorf("write starting manifest: %w", err)
@@ -121,7 +174,7 @@ func runAuthenticated(attemptID, missionID, fencingToken, manifestPath, controlS
 	// Drain stdio immediately so the harness cannot block on a full pipe
 	// while we set up the control channel. Attach happens only after
 	// runner_started, so launch() always sees that message first.
-	forwarder := startStreamForwarder(handle.Stdout, handle.Stderr, attemptID, fencingToken)
+	forwarder := startStreamForwarder(handle.Stdout, handle.Stderr, identity.AttemptID, identity.FencingGeneration)
 
 	// Start reaping the harness the moment it is spawned, not after control-
 	// channel setup: a later Terminate call's own process-group verification
@@ -155,12 +208,15 @@ func runAuthenticated(attemptID, missionID, fencingToken, manifestPath, controlS
 
 	execPath := harnessCommand[0]
 	execHash, _ := sha256File(execPath)
+	runnerPath, _ := os.Executable()
+	runnerHash, _ := sha256File(runnerPath)
 
 	base.RunnerPID = os.Getpid()
 	base.HarnessPID = handle.PID
 	base.PGID = handle.PGID
 	base.HarnessExecutablePath = execPath
 	base.HarnessExecutableSHA256 = execHash
+	base.RunnerExecutableSHA256 = runnerHash
 	base.State = StateRunning
 	base.LastStateChangeAt = nowRFC3339()
 	if err := writeManifestFn(manifestPath, base); err != nil {
@@ -191,12 +247,28 @@ func runAuthenticated(attemptID, missionID, fencingToken, manifestPath, controlS
 	}
 	defer cc.Close()
 
-	if err := cc.AcceptAuthenticated(controlToken, acceptTimeout); err != nil {
+	manifestDigest, err := manifestFileDigest(manifestPath)
+	if err != nil {
+		terminateAndReport(manifestPath, base, descendants, "manifest_digest_failed")
+		return fmt.Errorf("hash running manifest: %w", err)
+	}
+	runnerIdentity := RunnerIdentity{
+		InvocationIdentity:      identity,
+		RunnerPID:               base.RunnerPID,
+		PGID:                    base.PGID,
+		ManifestDigest:          manifestDigest,
+		RunnerExecutableSHA256:  base.RunnerExecutableSHA256,
+		HarnessExecutableSHA256: base.HarnessExecutableSHA256,
+	}
+	if err := cc.AcceptHandshake(bootstrap, runnerIdentity, acceptTimeout); err != nil {
 		terminateAndReport(manifestPath, base, descendants, "daemon_never_connected")
 		return fmt.Errorf("wait for daemon to connect: %w", err)
 	}
+	if bootstrap.CloseStdin {
+		_ = os.Stdin.Close()
+	}
 
-	cc.Send(map[string]any{
+	_ = cc.SendFrame(map[string]any{
 		"type":                      "runner_started",
 		"runner_pid":                base.RunnerPID,
 		"harness_pid":               handle.PID,
@@ -204,9 +276,15 @@ func runAuthenticated(attemptID, missionID, fencingToken, manifestPath, controlS
 		"harness_executable_path":   execPath,
 		"harness_executable_sha256": execHash,
 		"started_at":                base.StartedAt,
-		"attempt_id":                attemptID,
-		"mission_id":                missionID,
-		"fencing_token":             fencingToken,
+		"attempt_id":                identity.AttemptID,
+		"mission_id":                identity.MissionID,
+		"fencing_token":             identity.FencingGeneration,
+		"invocation_id":             identity.InvocationID,
+		"workspace_path":            identity.WorkspacePath,
+		"workspace_generation":      identity.WorkspaceGeneration,
+		"fencing_generation":        identity.FencingGeneration,
+		"manifest_digest":           manifestDigest,
+		"runner_executable_sha256":  base.RunnerExecutableSHA256,
 	})
 	forwarder.Attach(cc)
 
@@ -220,7 +298,7 @@ func runAuthenticated(attemptID, missionID, fencingToken, manifestPath, controlS
 				default:
 				}
 			case "ping":
-				cc.Send(map[string]any{"type": "pong", "attempt_id": attemptID})
+				_ = cc.SendFrame(map[string]any{"type": "pong", "attempt_id": identity.AttemptID})
 			}
 		},
 		func() {
@@ -233,9 +311,9 @@ func runAuthenticated(attemptID, missionID, fencingToken, manifestPath, controlS
 
 	select {
 	case result := <-harnessExited:
-		cc.Send(map[string]any{
+		_ = cc.SendFrame(map[string]any{
 			"type":       "harness_exited",
-			"attempt_id": attemptID,
+			"attempt_id": identity.AttemptID,
 			"exit_code":  result.code,
 			"signaled":   result.signaled,
 		})
@@ -263,9 +341,9 @@ func runAuthenticated(attemptID, missionID, fencingToken, manifestPath, controlS
 			return fmt.Errorf("write final manifest: %w", err)
 		}
 
-		cc.Send(map[string]any{
+		_ = cc.SendFrame(map[string]any{
 			"type":               "termination_complete",
-			"attempt_id":         attemptID,
+			"attempt_id":         identity.AttemptID,
 			"verified_dead":      verified,
 			"termination_reason": reason,
 		})

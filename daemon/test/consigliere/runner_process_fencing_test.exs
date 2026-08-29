@@ -2,6 +2,7 @@ defmodule Consigliere.RunnerProcessFencingTest do
   use ExUnit.Case, async: false
 
   alias Consigliere.RunnerProcess
+  alias Consigliere.RunnerLauncher
 
   test "stdout_chunk with a stale fencing_token is ignored" do
     heartbeat_file =
@@ -28,12 +29,20 @@ defmodule Consigliere.RunnerProcessFencingTest do
     before = RunnerProcess.heartbeat_count(pid)
     %{session: %{socket: socket}} = :sys.get_state(pid)
 
+    session = :sys.get_state(pid).session
+    next_seq = session.recv_seq + 1
+
     stale =
-      JSON.encode!(%{
-        "type" => "stdout_chunk",
-        "fencing_token" => "stale-#{attempt_id}",
-        "data" => String.duplicate("stale\n", 80)
-      })
+      session
+      |> RunnerLauncher.encode_frame(
+        %{
+          "type" => "stdout_chunk",
+          "data" => String.duplicate("stale\n", 80)
+        },
+        next_seq
+      )
+      |> Map.put("fencing_token", "stale-#{attempt_id}")
+      |> JSON.encode!()
 
     send(pid, {:tcp, socket, stale <> "\n"})
     Process.sleep(80)
@@ -42,11 +51,17 @@ defmodule Consigliere.RunnerProcessFencingTest do
            "a stale fencing token must not create heartbeat state"
 
     live =
-      JSON.encode!(%{
-        "type" => "stdout_chunk",
-        "fencing_token" => token,
-        "data" => String.duplicate("live\n", 80)
-      })
+      session
+      |> RunnerLauncher.encode_frame(
+        %{
+          "type" => "stdout_chunk",
+          "data" => String.duplicate("live\n", 80)
+        },
+        next_seq
+      )
+      |> JSON.encode!()
+
+    assert {:ok, _message, _session} = RunnerLauncher.verify_frame(session, live <> "\n")
 
     send(pid, {:tcp, socket, live <> "\n"})
     Process.sleep(80)

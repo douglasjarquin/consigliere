@@ -67,7 +67,7 @@ func (f *streamForwarder) pump(r io.Reader, msgType, attemptID, fencingToken str
 func (f *streamForwarder) Attach(cc *ControlChannel) {
 	go func() {
 		for msg := range f.chunks {
-			if err := cc.Send(msg); err != nil {
+			if err := cc.SendFrame(msg); err != nil {
 				for range f.chunks {
 				}
 				return
