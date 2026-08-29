@@ -182,6 +182,7 @@ defmodule Consigliere.Home do
         "started_at" => DateTime.to_iso8601(DateTime.utc_now()),
         "starttime" => process_starttime(pid),
         "exe" => process_exe(pid),
+        "pgid" => process_pgid(pid),
         "release" => to_string(Application.spec(:consigliere_daemon, :vsn) || "dev"),
         "home" => Path.expand(home),
         "uid" => File.stat!(lock_path(home)).uid,
@@ -257,5 +258,20 @@ defmodule Consigliere.Home do
     end
   rescue
     _ -> ""
+  end
+
+  defp process_pgid(pid) do
+    case System.cmd("ps", ["-o", "pgid=", "-p", Integer.to_string(pid)], stderr_to_stdout: true) do
+      {out, 0} ->
+        case Integer.parse(String.trim(out)) do
+          {pgid, _} -> pgid
+          _ -> 0
+        end
+
+      _ ->
+        0
+    end
+  rescue
+    _ -> 0
   end
 end

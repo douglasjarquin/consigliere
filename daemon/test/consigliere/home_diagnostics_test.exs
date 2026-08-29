@@ -29,6 +29,21 @@ defmodule Consigliere.HomeDiagnosticsTest do
     GenServer.stop(pid)
   end
 
+  test "owner metadata binds the canonical home, process group, and lock", %{home: home} do
+    {:ok, pid} = Consigliere.Home.Lock.start_link(home: home)
+
+    owner = home |> Home.owner_path() |> File.read!() |> JSON.decode!()
+
+    assert owner["home"] == Path.expand(home)
+    assert owner["pid"] > 1
+    assert owner["pgid"] >= 1
+    assert owner["starttime"] != ""
+    assert owner["exe"] != ""
+    assert owner["lock"] == "fcntl"
+
+    GenServer.stop(pid)
+  end
+
   test "lock_status/1 is unowned when no process holds the kernel lock", %{home: home} do
     assert Home.lock_status(home) == :unowned
   end

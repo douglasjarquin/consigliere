@@ -1,6 +1,9 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -66,10 +69,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err.Error())
 			return client.ExitError
 		}
-		fmt.Fprintln(stdout, PlistPath())
+		fmt.Fprintln(stdout, PlistPathFor(home))
 		return client.ExitOK
 	case "uninstall":
-		if err := Uninstall(); err != nil {
+		if err := Uninstall(home); err != nil {
 			fmt.Fprintln(stderr, err.Error())
 			return client.ExitError
 		}
@@ -163,13 +166,35 @@ func Foreground(home client.Home) error {
 }
 
 func Start(home client.Home) error {
+	target, err := normalizeHome(home)
+	if err != nil {
+		return fmt.Errorf("start target: %w", err)
+	}
+	home = target
 	if client.Probe(home.PrivilegedSocket()) == client.SocketLive {
+		if _, err := verifiedOwner(home); err != nil {
+			return fmt.Errorf("refusing unverified live daemon: %w", err)
+		}
 		return nil
 	}
+	lock, holder := client.ProbeLock(home.LockPath())
+	if lock == client.LockHeld {
+		return fmt.Errorf("home is already owned by pid %d", holder)
+	}
+	if lock == client.LockPermission {
+		return errors.New("home lock permission is unknown")
+	}
+	for _, socket := range []string{home.APISocket(), home.BossSocket()} {
+		if client.Probe(socket) == client.SocketLive {
+			return fmt.Errorf("live socket exists without a verified daemon: %s", socket)
+		}
+	}
 	if runtime.GOOS == "darwin" {
-		if _, err := os.Stat(PlistPath()); err == nil && os.Getenv("CS_CSD_FORCE_BACKGROUND") == "" {
-			if err := launchctl("bootstrap", "gui/"+strconv.Itoa(os.Getuid()), PlistPath()); err != nil {
-				_ = launchctl("kickstart", "-k", "gui/"+strconv.Itoa(os.Getuid())+"/"+Label)
+		plistPath := PlistPathFor(home)
+		label := labelForHome(home)
+		if _, err := os.Stat(plistPath); err == nil && os.Getenv("CS_CSD_FORCE_BACKGROUND") == "" {
+			if err := launchctl("bootstrap", "gui/"+strconv.Itoa(os.Getuid()), plistPath); err != nil {
+				_ = launchctl("kickstart", "-k", "gui/"+strconv.Itoa(os.Getuid())+"/"+label)
 			}
 			return waitLive(home, 30*time.Second)
 		}
@@ -215,7 +240,9 @@ func waitLive(home client.Home, d time.Duration) error {
 	for time.Now().Before(deadline) {
 		if client.Probe(home.PrivilegedSocket()) == client.SocketLive &&
 			client.Probe(home.APISocket()) == client.SocketLive {
-			return nil
+			if _, err := verifiedOwner(home); err == nil {
+				return nil
+			}
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
@@ -307,7 +334,26 @@ func PlistPath() string {
 	return filepath.Join(AgentsDir(), Label+".plist")
 }
 
+func PlistPathFor(home client.Home) string {
+	return filepath.Join(AgentsDir(), labelForHome(home)+".plist")
+}
+
+func labelForHome(home client.Home) string {
+	target, err := normalizeHome(home)
+	directory := home.Dir
+	if err == nil {
+		directory = target.Dir
+	}
+	sum := sha256.Sum256([]byte(directory))
+	return Label + "-" + hex.EncodeToString(sum[:6])
+}
+
 func Install(home client.Home, prefix string, noLoad bool) error {
+	target, err := normalizeHome(home)
+	if err != nil {
+		return fmt.Errorf("install target: %w", err)
+	}
+	home = target
 	if err := os.MkdirAll(home.Dir, 0o700); err != nil {
 		return err
 	}
@@ -336,27 +382,32 @@ func Install(home client.Home, prefix string, noLoad bool) error {
 		}
 	}
 	rel, _ := ReleaseRoot()
-	body := Plist(Label, csdPath, home.Dir, rel)
-	if err := os.MkdirAll(filepath.Dir(PlistPath()), 0o755); err != nil {
+	body := Plist(labelForHome(home), csdPath, home.Dir, rel)
+	if err := os.MkdirAll(filepath.Dir(PlistPathFor(home)), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(PlistPath(), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(PlistPathFor(home), []byte(body), 0o644); err != nil {
 		return err
 	}
 	if runtime.GOOS == "darwin" && !noLoad {
-		_ = launchctl("bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+Label)
-		if err := launchctl("bootstrap", "gui/"+strconv.Itoa(os.Getuid()), PlistPath()); err != nil {
+		_ = launchctl("bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+labelForHome(home))
+		if err := launchctl("bootstrap", "gui/"+strconv.Itoa(os.Getuid()), PlistPathFor(home)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func Uninstall() error {
-	if runtime.GOOS == "darwin" {
-		_ = launchctl("bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+Label)
+func Uninstall(home client.Home) error {
+	target, err := normalizeHome(home)
+	if err != nil {
+		return fmt.Errorf("uninstall target: %w", err)
 	}
-	return os.Remove(PlistPath())
+	home = target
+	if runtime.GOOS == "darwin" {
+		_ = launchctl("bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+labelForHome(home))
+	}
+	return os.Remove(PlistPathFor(home))
 }
 
 func Plist(label, bin, home, release string) string {

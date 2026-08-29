@@ -74,7 +74,7 @@ csd uninstall
 
 `csd foreground` execs the OTP release `start` and is what launchd runs.
 `csd start` backgrounds that process with a new session (or `launchctl bootstrap` when a LaunchAgent plist is present on macOS).
-`csd install` writes `~/Library/LaunchAgents/ai.consigliere.csd.plist` with `CS_HOME`, home-relative logs, `ThrottleInterval` 10, and `KeepAlive` only on unsuccessful exit.
+`csd install` writes a home-specific plist under `~/Library/LaunchAgents/` with `CS_HOME`, home-relative logs, `ThrottleInterval` 10, and `KeepAlive` only on unsuccessful exit.
 It refuses to run as root.
 
 Database identity is `CS_HOME/consigliere.db`, not the working directory.

@@ -30,8 +30,34 @@ defmodule Consigliere.Termination do
   @impl true
   def init(_opts) do
     _ = OutboxDispatcher.put_handler("runner_cancel", &deliver/1)
-    {:ok, %{}}
+    {:ok, %{stopping: false}}
   end
+
+  def begin_shutdown do
+    if Application.get_env(:consigliere_daemon, :halt_on_shutdown, true) do
+      GenServer.call(__MODULE__, :begin_shutdown)
+    else
+      :ok
+    end
+  end
+
+  def stopping? do
+    Application.get_env(:consigliere_daemon, :halt_on_shutdown, true) and
+      case Process.whereis(__MODULE__) do
+        nil -> false
+        _pid -> GenServer.call(__MODULE__, :stopping?, 1_000)
+      end
+  catch
+    :exit, _ -> false
+  end
+
+  @impl true
+  def handle_call(:begin_shutdown, _from, state) do
+    {:reply, :ok, %{state | stopping: true}}
+  end
+
+  @impl true
+  def handle_call(:stopping?, _from, state), do: {:reply, state.stopping, state}
 
   def request_live_attempts!(mission, cause) do
     live = AttemptStates.process_may_exist()

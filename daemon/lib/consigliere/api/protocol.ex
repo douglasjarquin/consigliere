@@ -69,6 +69,15 @@ defmodule Consigliere.API.Protocol do
   defp dispatch(_, _bound), do: fail(nil, "invalid", "missing id")
 
   defp run_maybe_once(op, payload, actor, req, id) do
+    if op != "daemon.shutdown" and Consigliere.Termination.stopping?() do
+      {:error, {:transient, "daemon_shutting_down"}}
+      |> wrap(id)
+    else
+      run_maybe_once_allowed(op, payload, actor, req, id)
+    end
+  end
+
+  defp run_maybe_once_allowed(op, payload, actor, req, id) do
     if Consigliere.Operations.mutating?(op) do
       key = req["idempotency_key"] || id
 
@@ -660,6 +669,8 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp request_stop do
+    :ok = Consigliere.Termination.begin_shutdown()
+
     if Application.get_env(:consigliere_daemon, :halt_on_shutdown, true) do
       spawn(fn ->
         Process.sleep(50)

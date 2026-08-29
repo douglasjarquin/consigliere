@@ -214,9 +214,9 @@ jobs:
           "$CS" ping
           test -f "$CS_HOME/consigliere.db"
           mkdir -p "$CS_HOME/LaunchAgents"
-          CS_LAUNCH_AGENTS_DIR="$CS_HOME/LaunchAgents" "$CSD" install --no-load
-          grep foreground "$CS_HOME/LaunchAgents/ai.consigliere.csd.plist"
-          grep ThrottleInterval "$CS_HOME/LaunchAgents/ai.consigliere.csd.plist"
+          PLIST=$(CS_LAUNCH_AGENTS_DIR="$CS_HOME/LaunchAgents" "$CSD" install --no-load)
+          grep foreground "$PLIST"
+          grep ThrottleInterval "$PLIST"
           stop_daemon
 
   # UNCONDITIONAL ON PURPOSE: any commit can track a boss-private path or
