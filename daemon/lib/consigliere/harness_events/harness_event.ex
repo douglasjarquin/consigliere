@@ -9,13 +9,17 @@ defmodule Consigliere.HarnessEvents.HarnessEvent do
     field(:attempt_id, :binary_id)
     field(:type, :string)
     field(:native_sequence, :integer)
+    field(:protocol_version, :integer, default: 1)
+    field(:correlation_id, :string)
+    field(:logical_key, :string)
+    field(:outcome, :string, default: "accepted")
     field(:payload, :map, default: %{})
 
     timestamps(type: :utc_datetime_usec)
   end
 
   @required [:event_id, :attempt_id, :type, :native_sequence]
-  @optional [:payload]
+  @optional [:protocol_version, :correlation_id, :logical_key, :outcome, :payload]
 
   def changeset(event, attrs) do
     event

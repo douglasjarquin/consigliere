@@ -5,6 +5,7 @@ defmodule Consigliere.API.SocketTest do
   alias Consigliere.API.Listener
   alias Consigliere.Fixtures
   alias Consigliere.Home
+  alias Consigliere.V0.Limits
 
   setup do
     Fixtures.reset_phase1_tables!()
@@ -53,5 +54,19 @@ defmodule Consigliere.API.SocketTest do
     got = Client.request("mission.get", %{"mission_id" => id})
     assert got["payload"]["objective"] == "from-socket"
     assert got["payload"]["phase"] == "draft"
+  end
+
+  test "the live socket rejects a frame above the V0 bound" do
+    path = Listener.socket_path()
+
+    {:ok, sock} =
+      :gen_tcp.connect({:local, path}, 0, [:binary, packet: :line, active: false], 2_000)
+
+    on_exit(fn -> :gen_tcp.close(sock) end)
+    :ok = :gen_tcp.send(sock, String.duplicate("x", Limits.frame_bytes() + 1) <> "\n")
+    {:ok, line} = :gen_tcp.recv(sock, 0, 2_000)
+    response = JSON.decode!(String.trim(line))
+    assert response["error"]["code"] == "frame_too_large"
+    assert response["outcome"] == "rejected"
   end
 end

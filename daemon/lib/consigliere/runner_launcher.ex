@@ -1,8 +1,10 @@
 defmodule Consigliere.RunnerLauncher do
   import Bitwise
 
+  alias Consigliere.V0.Limits
+
   @protocol_version 1
-  @max_frame_bytes 64 * 1024
+  @max_frame_bytes Limits.frame_bytes()
 
   defstruct [
     :port,
@@ -456,14 +458,20 @@ defmodule Consigliere.RunnerLauncher do
 
   defp recv_message(socket, timeout) do
     case :gen_tcp.recv(socket, 0, timeout) do
-      {:ok, line} when byte_size(line) <= @max_frame_bytes ->
-        case JSON.decode(String.trim(line)) do
-          {:ok, message} when is_map(message) -> {:ok, message}
-          _ -> {:error, :invalid_json_frame}
-        end
+      {:ok, line} ->
+        case Limits.validate_json_frame(line) do
+          {:ok, trimmed} ->
+            case JSON.decode(trimmed) do
+              {:ok, message} when is_map(message) -> {:ok, message}
+              _ -> {:error, :invalid_json_frame}
+            end
 
-      {:ok, _line} ->
-        {:error, :frame_too_large}
+          {:error, :frame_too_large} ->
+            {:error, :frame_too_large}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
 
       {:error, reason} ->
         {:error, reason}
@@ -471,13 +479,15 @@ defmodule Consigliere.RunnerLauncher do
   end
 
   defp decode_frame(line) do
-    if byte_size(line) > @max_frame_bytes do
-      {:error, :frame_too_large}
-    else
-      case JSON.decode(String.trim(line)) do
-        {:ok, message} when is_map(message) -> {:ok, message}
-        _ -> {:error, :invalid_json_frame}
-      end
+    case Limits.validate_json_frame(line) do
+      {:ok, trimmed} ->
+        case JSON.decode(trimmed) do
+          {:ok, message} when is_map(message) -> {:ok, message}
+          _ -> {:error, :invalid_json_frame}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

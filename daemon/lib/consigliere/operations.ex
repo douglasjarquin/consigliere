@@ -65,14 +65,14 @@ defmodule Consigliere.Operations do
         {:error, "unknown_operation"}
 
       %{required: required} ->
-        with :ok <- validate_json_value(payload, 0),
+        with :ok <- validate_value(payload),
              :ok <- require_map(payload),
              :ok <- require_fields(payload, required) do
           :ok
         end
 
       _ ->
-        validate_json_value(payload, 0)
+        validate_value(payload)
     end
   end
 
@@ -93,57 +93,28 @@ defmodule Consigliere.Operations do
     end)
   end
 
-  defp validate_json_value(_value, depth) when depth > 8, do: {:error, "payload too deep"}
+  defp validate_value(value) do
+    case Consigliere.V0.Limits.validate_value(value) do
+      :ok ->
+        :ok
 
-  defp validate_json_value(value, depth) when is_map(value) do
-    if map_size(value) > 128 do
-      {:error, "payload has too many fields"}
-    else
-      Enum.reduce_while(value, :ok, fn {key, nested}, :ok ->
-        with :ok <- validate_key(key),
-             :ok <- validate_json_value(nested, depth + 1) do
-          {:cont, :ok}
-        else
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
-      end)
+      {:error, :json_depth_exceeded} ->
+        {:error, "payload too deep"}
+
+      {:error, :collection_too_large} ->
+        {:error, "payload collection is too large"}
+
+      {:error, :string_too_large} ->
+        {:error, "payload string is too long"}
+
+      {:error, :invalid_utf8} ->
+        {:error, "payload must be UTF-8"}
+
+      {:error, :unsafe_control_sequence} ->
+        {:error, "payload contains an unsafe control sequence"}
+
+      {:error, _reason} ->
+        {:error, "payload contains an unsupported value"}
     end
   end
-
-  defp validate_json_value(value, depth) when is_list(value) do
-    if length(value) > 128 do
-      {:error, "payload list is too long"}
-    else
-      Enum.reduce_while(value, :ok, fn nested, :ok ->
-        case validate_json_value(nested, depth + 1) do
-          :ok -> {:cont, :ok}
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
-      end)
-    end
-  end
-
-  defp validate_json_value(value, _depth) when is_binary(value) do
-    cond do
-      not String.valid?(value) -> {:error, "payload must be UTF-8"}
-      byte_size(value) > 8_192 -> {:error, "payload string is too long"}
-      true -> :ok
-    end
-  end
-
-  defp validate_json_value(value, _depth) when is_integer(value), do: :ok
-  defp validate_json_value(value, _depth) when is_boolean(value), do: :ok
-  defp validate_json_value(nil, _depth), do: :ok
-  defp validate_json_value(_value, _depth), do: {:error, "payload contains an unsupported value"}
-
-  defp validate_key(key) when is_binary(key) do
-    if String.valid?(key) and byte_size(key) <= 256 do
-      :ok
-    else
-      {:error, "payload key is invalid"}
-    end
-  end
-
-  defp validate_key(key) when is_atom(key), do: validate_key(Atom.to_string(key))
-  defp validate_key(_key), do: {:error, "payload key is invalid"}
 end

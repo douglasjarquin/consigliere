@@ -148,6 +148,11 @@ defmodule Consigliere.CLI do
     end
 
     IO.puts("codex auth: #{Home.codex_auth_status(home)}")
+
+    case Home.storage_diagnostic(home) do
+      :ok -> IO.puts("storage: ok")
+      {:error, reason} -> IO.puts("storage: error code=#{reason}")
+    end
   end
 
   defp lock_word(home) do

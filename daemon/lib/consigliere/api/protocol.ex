@@ -15,16 +15,34 @@ defmodule Consigliere.API.Protocol do
   alias Consigliere.Questions
   alias Consigliere.Questions.Question
   alias Consigliere.Repo
+  alias Consigliere.Harness.Capture
+  alias Consigliere.Harness.Redaction
+  alias Consigliere.V0.Limits
 
   @version 1
+  @request_keys MapSet.new(
+                  ~w(v id op actor payload capability secret idempotency_key operation_version canonical_hash)
+                )
   @attempt_ops Consigliere.Capabilities.worker_operations()
   @review_phases ~w(awaiting_authorization ready_for_review
                     awaiting_integration_authorization failed)
 
   def handle(line, bound \\ :unbound) when is_binary(line) do
-    case JSON.decode(String.trim(line)) do
-      {:ok, req} when is_map(req) -> encode(dispatch(req, bound))
-      _ -> encode(%{"v" => @version, "ok" => false, "error" => error("invalid", "not json")})
+    case Limits.validate_json_frame(line) do
+      {:ok, trimmed} ->
+        case JSON.decode(trimmed) do
+          {:ok, req} when is_map(req) ->
+            case validate_request_shape(req) do
+              :ok -> encode(dispatch(req, bound))
+              {:error, reason} -> encode(fail(req["id"], "invalid", reason))
+            end
+
+          _ ->
+            encode(fail(nil, "invalid", "not json"))
+        end
+
+      {:error, reason} ->
+        encode(protocol_error(reason))
     end
   end
 
@@ -568,7 +586,10 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp wrap({:ok, :replay, envelope}, id) when is_map(envelope) do
-    Map.put(envelope, "id", id)
+    envelope
+    |> Map.put("id", id)
+    |> Map.put("outcome", "duplicate")
+    |> Map.put("stored_envelope", envelope)
   end
 
   defp wrap(result, id) do
@@ -582,6 +603,7 @@ defmodule Consigliere.API.Protocol do
       "v" => @version,
       "id" => id,
       "ok" => false,
+      "outcome" => "rejected",
       "error" => error(code, reason)
     }
   end
@@ -593,7 +615,49 @@ defmodule Consigliere.API.Protocol do
     }
   end
 
-  defp encode(map), do: JSON.encode!(map)
+  defp encode(map) do
+    case Limits.encoded_size(map) do
+      {:ok, size} ->
+        if size <= Limits.frame_bytes() do
+          JSON.encode!(map)
+        else
+          JSON.encode!(fail(map["id"], "transient", "response_too_large"))
+        end
+
+      _ ->
+        JSON.encode!(fail(map["id"], "transient", "response_invalid"))
+    end
+  end
+
+  defp protocol_error(:malformed_json), do: fail(nil, "invalid", "not json")
+
+  defp protocol_error(:frame_too_large),
+    do: fail(nil, "frame_too_large", "frame exceeds V0 limit")
+
+  defp protocol_error(:json_depth_exceeded),
+    do: fail(nil, "json_depth_exceeded", "JSON nesting exceeds V0 limit")
+
+  defp protocol_error(:collection_too_large),
+    do: fail(nil, "collection_too_large", "JSON collection exceeds V0 limit")
+
+  defp protocol_error(:string_too_large),
+    do: fail(nil, "string_too_large", "JSON string exceeds V0 limit")
+
+  defp protocol_error(:unsafe_control_sequence),
+    do: fail(nil, "unsafe_control_sequence", "unsafe ANSI or OSC sequence")
+
+  defp protocol_error(:invalid_utf8), do: fail(nil, "invalid_utf8", "frame must be UTF-8")
+  defp protocol_error(_reason), do: fail(nil, "invalid", "invalid frame")
+
+  defp validate_request_shape(request) do
+    unknown = Enum.find(Map.keys(request), &(&1 not in @request_keys))
+
+    if unknown do
+      {:error, "unknown request field #{unknown}"}
+    else
+      :ok
+    end
+  end
 
   defp request_stop do
     if Application.get_env(:consigliere_daemon, :halt_on_shutdown, true) do
@@ -828,9 +892,12 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp log_lines(path) do
-    case File.read(path) do
+    case Capture.read(path) do
       {:ok, contents} ->
-        contents |> String.split("\n", trim: true) |> Enum.take(-200)
+        contents
+        |> Redaction.text()
+        |> String.split("\n", trim: true)
+        |> Enum.take(-200)
 
       {:error, _} ->
         []

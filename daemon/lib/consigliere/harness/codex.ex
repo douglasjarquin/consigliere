@@ -6,7 +6,7 @@ defmodule Consigliere.Harness.Codex do
   """
   @behaviour Consigliere.Harness.Adapter
 
-  @max_text 4_096
+  @max_text Consigliere.V0.Limits.final_text_bytes()
   @max_version_output 1_024
   @version_timeout_ms 2_000
 

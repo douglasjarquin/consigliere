@@ -10,10 +10,16 @@ defmodule Consigliere.Harness.Events do
   alias Consigliere.Capabilities
   alias Consigliere.DatabaseWriter
   alias Consigliere.HarnessEvents.HarnessEvent
+  alias Consigliere.Harness.Redaction
   alias Consigliere.Repo
   alias Consigliere.Txn
+  alias Consigliere.V0.Limits
 
   @live ~w(starting running checkpoint_requested)
+  @version 1
+  @event_keys MapSet.new(
+                ~w(v version event_id attempt_id type native_sequence timestamp payload correlation_id logical_key outcome)
+              )
   @types ~w(session.started turn.started progress.reported artifact.created
             question.requested checkpoint.created usage.updated turn.completed
             session.completed session.failed)
@@ -23,6 +29,7 @@ defmodule Consigliere.Harness.Events do
   end
 
   def ingest_txn(event, actor) when is_map(event) do
+    event = normalize_event!(event)
     attempt_id = Map.get(event, "attempt_id")
     event_id = Map.get(event, "event_id")
     type = Map.get(event, "type")
@@ -37,9 +44,7 @@ defmodule Consigliere.Harness.Events do
       Repo.rollback(:unknown_event_type)
     end
 
-    if payload_too_large?(payload) do
-      Repo.rollback(:payload_too_large)
-    end
+    payload = validate_payload!(payload)
 
     attempt = fetch_attempt!(attempt_id)
     require_fence!(actor, attempt)
@@ -57,6 +62,10 @@ defmodule Consigliere.Harness.Events do
             attempt_id: attempt.id,
             type: type,
             native_sequence: seq,
+            protocol_version: event["v"],
+            correlation_id: event["correlation_id"],
+            logical_key: event["logical_key"],
+            outcome: event["outcome"],
             payload: payload
           })
         )
@@ -157,8 +166,78 @@ defmodule Consigliere.Harness.Events do
     end
   end
 
-  defp payload_too_large?(payload) do
-    byte_size(inspect(payload, limit: :infinity)) > 16_384
+  defp validate_payload!(payload) do
+    with :ok <- Limits.validate_value(payload),
+         {:ok, size} <- Limits.encoded_size(payload),
+         true <- size <= Limits.semantic_payload_bytes(),
+         sanitized <- Redaction.value(payload),
+         {:ok, sanitized_size} <- Limits.encoded_size(sanitized),
+         true <- sanitized_size <= Limits.semantic_payload_bytes() do
+      sanitized
+    else
+      {:error, :unsafe_control_sequence} -> Repo.rollback(:unsafe_control_sequence)
+      {:error, _reason} -> Repo.rollback(:payload_too_large)
+      false -> Repo.rollback(:payload_too_large)
+    end
+  end
+
+  defp normalize_event!(event) do
+    unknown = Enum.find(Map.keys(event), &(&1 not in @event_keys))
+
+    if unknown do
+      Repo.rollback(:malformed)
+    end
+
+    version = event["v"] || event["version"] || @version
+    event_id = event["event_id"]
+    attempt_id = event["attempt_id"]
+    type = event["type"]
+    sequence = event["native_sequence"]
+    correlation_id = event["correlation_id"] || event_id
+    logical_key = event["logical_key"] || event_id
+    outcome = event["outcome"] || "accepted"
+
+    cond do
+      version != @version ->
+        Repo.rollback(:protocol_version)
+
+      not is_binary(event_id) or event_id == "" ->
+        Repo.rollback(:malformed)
+
+      not is_binary(attempt_id) or attempt_id == "" ->
+        Repo.rollback(:malformed)
+
+      not is_binary(type) or type == "" ->
+        Repo.rollback(:malformed)
+
+      not is_integer(sequence) or sequence < 1 ->
+        Repo.rollback(:malformed)
+
+      not is_binary(correlation_id) or correlation_id == "" ->
+        Repo.rollback(:malformed)
+
+      not is_binary(logical_key) or logical_key == "" ->
+        Repo.rollback(:malformed)
+
+      outcome not in ~w(accepted duplicate rejected transient) ->
+        Repo.rollback(:malformed)
+
+      true ->
+        with :ok <- Limits.validate_value(event),
+             {:ok, size} <- Limits.encoded_size(Map.get(event, "payload", %{})),
+             true <- size <= Limits.semantic_payload_bytes() do
+          Map.merge(event, %{
+            "v" => @version,
+            "correlation_id" => correlation_id,
+            "logical_key" => logical_key,
+            "outcome" => outcome
+          })
+        else
+          {:error, :unsafe_control_sequence} -> Repo.rollback(:unsafe_control_sequence)
+          {:error, _reason} -> Repo.rollback(:payload_too_large)
+          false -> Repo.rollback(:payload_too_large)
+        end
+    end
   end
 
   defp reject_stale_sequence!(attempt, seq) do

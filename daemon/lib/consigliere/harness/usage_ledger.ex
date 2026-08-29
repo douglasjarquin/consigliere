@@ -8,13 +8,14 @@ defmodule Consigliere.Harness.UsageLedger do
   """
 
   alias Consigliere.Home
+  alias Consigliere.V0.Limits
 
-  @max_rows 4_096
-  @max_bytes 1_048_576
+  @max_rows Limits.usage_rows()
+  @max_bytes Limits.usage_bytes()
   @max_row_bytes 4_096
   @max_field_bytes 256
   @counter_keys ~w(input_tokens output_tokens cached_input_tokens total_tokens)
-  @identity_keys ~w(system project_id mission_id attempt_id session_id model effort cli_version context_hash)
+  @identity_keys ~w(system project_id mission_id attempt_id session_id model effort cli_version context_hash correlation_id logical_key outcome)
 
   def path(home, attempt_id),
     do: Path.join([Home.runtime_attempts_dir(home), attempt_id, "usage.jsonl"])
@@ -40,8 +41,16 @@ defmodule Consigliere.Harness.UsageLedger do
 
   defp build_row(identity, usage) do
     row =
-      identity
-      |> stringify_identity()
+      %{
+        "v" => 1,
+        "sequence" => sequence_value(identity),
+        "correlation_id" =>
+          identity_value(identity, "correlation_id") || identity_value(identity, "attempt_id"),
+        "logical_key" =>
+          identity_value(identity, "logical_key") || identity_value(identity, "attempt_id"),
+        "outcome" => identity_value(identity, "outcome") || "accepted"
+      }
+      |> Map.merge(stringify_identity(identity))
       |> Map.put(
         "recorded_at",
         DateTime.utc_now() |> DateTime.truncate(:microsecond) |> DateTime.to_iso8601()
@@ -75,6 +84,13 @@ defmodule Consigliere.Harness.UsageLedger do
     case Map.get(usage, key) || Map.get(usage, String.to_atom(key)) do
       value when is_integer(value) and value >= 0 and value <= 2_147_483_647 -> value
       _ -> nil
+    end
+  end
+
+  defp sequence_value(identity) do
+    case identity_value(identity, "sequence") do
+      value when is_integer(value) and value >= 0 and value <= 4_294_967_295 -> value
+      _ -> 0
     end
   end
 

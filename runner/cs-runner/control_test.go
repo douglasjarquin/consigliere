@@ -320,7 +320,7 @@ func TestControlChannel_ReadLoopHandlesOversizedSingleLineMessage(t *testing.T) 
 		func() { close(eofDetected) },
 	)
 
-	bigPayload := strings.Repeat("x", 70000)
+	bigPayload := strings.Repeat("x", 60000)
 	msg := map[string]any{"type": "stdout_chunk", "attempt_id": "a1", "data": bigPayload}
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -459,6 +459,48 @@ func TestControlChannel_ReadLoopStillDetectsRealDisconnectAfterATooLongLine(t *t
 	case <-eofDetected:
 	case <-time.After(2 * time.Second):
 		t.Fatalf("real disconnect after a too-long line was never detected -- the read loop is permanently deaf")
+	}
+}
+
+func TestDecodeMessageRejectsV0UnsafeAndUnboundedValues(t *testing.T) {
+	if _, err := decodeMessage(`{"type":"stdout_chunk","data":"bad\u001b[2J"}`); err == nil {
+		t.Fatal("unsafe ANSI sequence was accepted")
+	}
+
+	deep := strings.Repeat("[", v0JSONDepth+1) + "0" + strings.Repeat("]", v0JSONDepth+1)
+	if _, err := decodeMessage(deep); err == nil {
+		t.Fatal("deep JSON was accepted")
+	}
+
+	broad := "[" + strings.Repeat("0,", v0CollectionItems) + "0]"
+	if _, err := decodeMessage(broad); err == nil {
+		t.Fatal("broad JSON was accepted")
+	}
+
+	long := `{"type":"stdout_chunk","data":"` + strings.Repeat("x", v0StringBytes+1) + `"}`
+	if _, err := decodeMessage(long); err == nil {
+		t.Fatal("long JSON string was accepted")
+	}
+}
+
+func TestDecodeMessageAcceptsAuthenticatedHandshakeShape(t *testing.T) {
+	identity := secureTestIdentity()
+	bootstrap := secureTestBootstrap(identity)
+	secret, err := hex.DecodeString(bootstrap.SecretHex)
+	if err != nil {
+		t.Fatalf("decode secret: %v", err)
+	}
+
+	challenge := handshakeMessage("daemon_challenge", identity, RunnerIdentity{
+		InvocationIdentity:     identity,
+		RunnerExecutableSHA256: bootstrap.ExpectedRunnerExecutableSHA256,
+	}, strings.Repeat("d", 64), "", secret)
+	data, err := json.Marshal(challenge)
+	if err != nil {
+		t.Fatalf("marshal challenge: %v", err)
+	}
+	if _, err := decodeMessage(string(data)); err != nil {
+		t.Fatalf("valid handshake rejected: %v; frame=%s", err, data)
 	}
 }
 

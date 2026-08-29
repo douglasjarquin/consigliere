@@ -4,7 +4,7 @@ defmodule Consigliere.Harness.ContextPack do
   the pack itself is not a transcript replay.
   """
 
-  @max_bytes 65_536
+  @max_bytes Consigliere.V0.Limits.string_bytes()
   @max_input_tokens 8_192
 
   @instructions [

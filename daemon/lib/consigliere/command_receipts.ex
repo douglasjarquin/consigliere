@@ -115,6 +115,9 @@ defmodule Consigliere.CommandReceipts do
   def result_envelope({:error, {:invalid, reason}}),
     do: error_envelope("invalid", bounded_reason(reason))
 
+  def result_envelope({:error, {:transient, reason}}),
+    do: transient_envelope("transient", bounded_reason(reason))
+
   def result_envelope({:error, %Ecto.Changeset{}}),
     do: error_envelope("invalid", "validation_failed")
 
@@ -122,6 +125,7 @@ defmodule Consigliere.CommandReceipts do
     %{
       "v" => @result_version,
       "ok" => false,
+      "outcome" => "rejected",
       "error" => %{
         "code" => "operation_recovery_required",
         "reason" => "operation_recovery_required",
@@ -176,7 +180,7 @@ defmodule Consigliere.CommandReceipts do
 
         case finalize(receipt_id, result_envelope(result)) do
           {:ok, _} -> result
-          {:error, _} -> {:error, {:invalid, "receipt_finalize_failed"}}
+          {:error, _} -> {:error, {:transient, "receipt_finalize_failed"}}
         end
 
       other ->
@@ -329,6 +333,7 @@ defmodule Consigliere.CommandReceipts do
     %{
       "v" => @result_version,
       "ok" => true,
+      "outcome" => "accepted",
       "payload" => bounded_value(payload, 0)
     }
   end
@@ -337,6 +342,16 @@ defmodule Consigliere.CommandReceipts do
     %{
       "v" => @result_version,
       "ok" => false,
+      "outcome" => "rejected",
+      "error" => %{"code" => code, "reason" => bounded_reason(reason)}
+    }
+  end
+
+  defp transient_envelope(code, reason) do
+    %{
+      "v" => @result_version,
+      "ok" => false,
+      "outcome" => "transient",
       "error" => %{"code" => code, "reason" => bounded_reason(reason)}
     }
   end

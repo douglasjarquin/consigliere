@@ -68,6 +68,7 @@ defmodule Consigliere.API.Listener do
         :gen_tcp.listen(0, [
           :binary,
           packet: :line,
+          packet_size: Consigliere.V0.Limits.frame_bytes(),
           active: false,
           ifaddr: {:local, socket_path},
           backlog: 128

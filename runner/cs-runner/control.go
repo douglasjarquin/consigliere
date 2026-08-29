@@ -14,10 +14,7 @@ import (
 	"time"
 )
 
-// maxControlLineBytes bounds a single NDJSON line: generous enough for any
-// real stdout/stderr chunk or control message, small enough that a
-// malformed or hostile peer cannot grow the runner's memory without limit.
-const maxControlLineBytes = 16 * 1024 * 1024
+const maxControlLineBytes = v0FrameBytes
 
 // ControlChannel is the runner's side of the per-Attempt Unix domain socket
 // control channel: the runner is the server, the daemon connects as the one
@@ -203,6 +200,9 @@ func (c *ControlChannel) Send(msg map[string]any) error {
 }
 
 func (c *ControlChannel) SendFrame(msg map[string]any) error {
+	if err := validateRunnerFrameSchema(msg); err != nil {
+		return err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.authenticated || c.conn == nil {
@@ -292,6 +292,9 @@ func (c *ControlChannel) verifyFrame(message map[string]any) error {
 	}
 	if !allowedDaemonFrame(stringField(message, "type")) {
 		return errors.New("unsupported daemon control frame")
+	}
+	if err := validateDaemonFrameSchema(message); err != nil {
+		return err
 	}
 	seq, err := sequenceField(message)
 	if err != nil || seq != c.recvSeq+1 {
@@ -408,6 +411,9 @@ func validateSocketPath(socketPath string) error {
 }
 
 func decodeMessage(line string) (map[string]any, error) {
+	if err := validateV0JSONFrame([]byte(line)); err != nil {
+		return nil, err
+	}
 	var message map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &message); err != nil {
 		return nil, err
@@ -415,13 +421,22 @@ func decodeMessage(line string) (map[string]any, error) {
 	if message == nil {
 		return nil, errors.New("message must be an object")
 	}
+	if err := validateV0MessageValue(message, 0); err != nil {
+		return nil, err
+	}
 	return message, nil
 }
 
 func writeMessage(conn net.Conn, message map[string]any) error {
+	if err := validateV0MessageValue(message, 0); err != nil {
+		return err
+	}
 	data, err := json.Marshal(message)
 	if err != nil {
 		return err
+	}
+	if len(data) > v0FrameBytes {
+		return errFrameTooLarge
 	}
 	data = append(data, '\n')
 	_, err = conn.Write(data)

@@ -14,8 +14,8 @@ import (
 
 const (
 	controlProtocolVersion = 1
-	maxBootstrapBytes      = 64 * 1024
-	maxHandshakeFrameBytes = 64 * 1024
+	maxBootstrapBytes      = v0FrameBytes
+	maxHandshakeFrameBytes = v0FrameBytes
 )
 
 type InvocationIdentity struct {

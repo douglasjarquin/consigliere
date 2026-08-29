@@ -117,6 +117,43 @@ defmodule Consigliere.Home do
   def privileged_socket_path(home \\ dir()), do: Path.join(home, "priv.sock")
   def last_error_path(home \\ dir()), do: Path.join(home, "last_error.log")
 
+  def storage_diagnostic(home \\ dir()) do
+    attempts = runtime_attempts_dir(home)
+
+    case File.ls(attempts) do
+      {:error, :enoent} ->
+        :ok
+
+      {:error, _reason} ->
+        {:error, :storage_unavailable}
+
+      {:ok, entries} ->
+        Enum.reduce_while(entries, :ok, fn entry, :ok ->
+          attempt_dir = Path.join(attempts, entry)
+
+          if File.dir?(attempt_dir) do
+            case bounded_storage_file(
+                   Path.join(attempt_dir, "usage.jsonl"),
+                   Consigliere.V0.Limits.usage_bytes(),
+                   :usage_ledger_full
+                 ) do
+              :ok ->
+                bounded_storage_file(
+                  Path.join(logs_dir(home), "attempts/#{entry}.log"),
+                  Consigliere.V0.Limits.capture_bytes(),
+                  :capture_too_large
+                )
+
+              {:error, _reason} = error ->
+                {:halt, error}
+            end
+          else
+            {:cont, :ok}
+          end
+        end)
+    end
+  end
+
   def socket_status(home \\ dir()) do
     probe(boss_socket_path(home))
   end
@@ -177,6 +214,15 @@ defmodule Consigliere.Home do
   def record_error!(home \\ dir(), reason) do
     prepare_dir!(home)
     File.write!(last_error_path(home), reason)
+  end
+
+  defp bounded_storage_file(path, limit, reason) do
+    case File.stat(path) do
+      {:ok, %{size: size}} when size > limit -> {:error, reason}
+      {:ok, _stat} -> :ok
+      {:error, :enoent} -> :ok
+      {:error, _reason} -> {:error, :storage_unavailable}
+    end
   end
 
   def clear_error!(home \\ dir()) do

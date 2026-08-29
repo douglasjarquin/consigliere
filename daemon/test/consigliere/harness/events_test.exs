@@ -144,6 +144,31 @@ defmodule Consigliere.Harness.EventsTest do
              Events.ingest(envelope(attempt, %{"type" => "evil.dump"}), actor)
   end
 
+  test "oversized and unsafe event payloads are rejected before persistence" do
+    attempt = running_attempt!()
+    actor = Actor.attempt(attempt.id, attempt.fencing_token)
+
+    assert {:error, :payload_too_large} =
+             Events.ingest(
+               envelope(attempt, %{
+                 "event_id" => "event-large",
+                 "payload" => %{"text" => String.duplicate("x", 65_537)}
+               }),
+               actor
+             )
+
+    assert {:error, :unsafe_control_sequence} =
+             Events.ingest(
+               envelope(attempt, %{
+                 "event_id" => "event-unsafe",
+                 "payload" => %{"text" => "bad\u001b[2J"}
+               }),
+               actor
+             )
+
+    assert Repo.get!(Attempt, attempt.id).last_native_sequence == nil
+  end
+
   test "late session.completed from a superseded Attempt is fenced" do
     attempt = running_attempt!()
     old_token = attempt.fencing_token

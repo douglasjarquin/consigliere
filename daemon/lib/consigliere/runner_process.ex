@@ -15,7 +15,7 @@ defmodule Consigliere.RunnerProcess do
   alias Consigliere.Repo
   alias Consigliere.RunnerLauncher
   alias Consigliere.Harness.UsageLedger
-  alias Consigliere.Harness.Redaction
+  alias Consigliere.Harness.Capture
 
   def child_spec(opts) do
     %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}, restart: :temporary}
@@ -254,10 +254,24 @@ defmodule Consigliere.RunnerProcess do
 
   defp append_attempt_log(attempt_id, data) do
     path = Path.join(Consigliere.Home.logs_dir(), "attempts/#{attempt_id}.log")
-    File.mkdir_p!(Path.dirname(path))
-    File.write!(path, Redaction.text(data), [:append])
+
+    case Capture.append(path, data) do
+      :ok -> :ok
+      {:error, reason} -> quarantine_capture(attempt_id, reason)
+    end
   rescue
     _ -> :ok
+  end
+
+  defp quarantine_capture(attempt_id, reason) do
+    with {:ok, id} <- Ecto.UUID.cast(attempt_id),
+         %{workspace_id: workspace_id} <- Repo.get(Attempt, id),
+         %{status: status} = workspace <- Repo.get(Consigliere.Workspaces.Workspace, workspace_id),
+         true <- status not in ["quarantined", "released"] do
+      _ = Consigliere.Workspaces.quarantine(workspace.id, Actor.system(), "capture_#{reason}")
+    else
+      _ -> :ok
+    end
   end
 
   defp maybe_record_session(%{"native_session_id" => session_id}, state)
@@ -270,6 +284,7 @@ defmodule Consigliere.RunnerProcess do
   defp maybe_record_usage(type, payload, state)
        when type in ["usage.updated", "session.completed"] do
     usage = Map.get(payload, "usage", payload)
+    sequence = Map.get(state, :native_seq, 0) + 1
 
     identity = %{
       system: "consigliere",
@@ -277,6 +292,10 @@ defmodule Consigliere.RunnerProcess do
       mission_id: state.mission_id,
       attempt_id: state.attempt_id,
       session_id: Map.get(state, :native_session_id),
+      sequence: sequence,
+      correlation_id: "#{state.invocation_id}:#{sequence}",
+      logical_key: "#{state.attempt_id}:#{type}",
+      outcome: "accepted",
       model: state.policy["model"],
       effort: state.policy["effort"],
       cli_version: state.policy["cli_version"],

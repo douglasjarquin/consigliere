@@ -26,6 +26,7 @@ defmodule Consigliere.CLITest do
     assert output =~ "lock:"
     refute output =~ "last startup failure"
     assert output =~ "codex auth:"
+    assert output =~ "storage: ok"
   end
 
   test "doctor/0 reports a stale socket plus the recorded failure cause", %{home: home} do
