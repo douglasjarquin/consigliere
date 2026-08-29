@@ -9,13 +9,17 @@ defmodule Consigliere.MissionBootstrap do
   import Ecto.Query
 
   alias Consigliere.DatabaseWriter
+  alias Consigliere.DispatchOperations.DispatchOperation
   alias Consigliere.Incidents.Incident
+  alias Consigliere.Attempts.Attempt
   alias Consigliere.Missions.Mission
   alias Consigliere.MissionDynamicSupervisor
   alias Consigliere.Repo
   alias Consigliere.Txn
 
   @phases ~w(authorized active ready_for_review awaiting_integration_authorization integrating)
+  @dispatch_terminal ~w(failed completed)
+  @recoverable_attempts ~w(planned starting)
   @ensure_events ~w(mission.authorized mission.started mission.resumed)
 
   def start_link(opts \\ []) do
@@ -76,8 +80,27 @@ defmodule Consigliere.MissionBootstrap do
   def handle_info(_other, state), do: {:noreply, state}
 
   defp run do
-    Repo.all(from(m in Mission, where: m.phase in ^@phases))
-    |> Enum.each(&start_one/1)
+    mission_ids =
+      Repo.all(from(m in Mission, where: m.phase in ^@phases, select: m.id))
+      |> Kernel.++(
+        Repo.all(
+          from(o in DispatchOperation,
+            where: o.status not in ^@dispatch_terminal,
+            select: o.mission_id
+          )
+        )
+      )
+      |> Kernel.++(
+        Repo.all(
+          from(a in Attempt,
+            where: a.status in ^@recoverable_attempts,
+            select: a.mission_id
+          )
+        )
+      )
+      |> Enum.uniq()
+
+    Enum.each(mission_ids, &start_one_id/1)
   end
 
   defp start_one_id(mission_id) do

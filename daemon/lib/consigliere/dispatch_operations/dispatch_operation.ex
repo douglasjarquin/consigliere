@@ -3,9 +3,9 @@ defmodule Consigliere.DispatchOperations.DispatchOperation do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @statuses ~w(pending spawn_requested child_started failed completed)
-  @slot_states ~w(granted held released)
-  @child_states ~w(not_started started failed)
+  @statuses ~w(pending workspace_ready spawn_requested child_started unknown failed completed)
+  @slot_states ~w(pending granted held released unknown)
+  @child_states ~w(not_started started unknown failed)
 
   def statuses, do: @statuses
 
@@ -14,6 +14,13 @@ defmodule Consigliere.DispatchOperations.DispatchOperation do
     field(:mission_id, :binary_id)
     field(:attempt_id, :binary_id)
     field(:workspace_id, :binary_id)
+    field(:correlation_id, :string)
+    field(:idempotency_key, :string)
+    field(:authorization_id, :binary_id)
+    field(:project_id, :binary_id)
+    field(:workspace_generation, :string)
+    field(:base_sha, :string)
+    field(:parent_checkpoint_sha, :string)
     field(:fencing_token, :string)
     field(:status, :string, default: "pending")
     field(:slot_state, :string)
@@ -24,9 +31,21 @@ defmodule Consigliere.DispatchOperations.DispatchOperation do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @required [:mission_id, :attempt_id, :fencing_token, :status]
+  @required [
+    :mission_id,
+    :attempt_id,
+    :correlation_id,
+    :idempotency_key,
+    :authorization_id,
+    :project_id,
+    :workspace_generation,
+    :fencing_token,
+    :status
+  ]
   @optional [
     :workspace_id,
+    :base_sha,
+    :parent_checkpoint_sha,
     :slot_state,
     :child_start_state,
     :spawn_attempts,

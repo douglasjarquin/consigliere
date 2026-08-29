@@ -10,6 +10,7 @@ defmodule Consigliere.Missions do
     do: Transitions.request_changes(mission_id, actor, reason)
 
   defdelegate start(mission_id, actor, opts), to: Transitions
+  defdelegate activate_dispatch(mission_id, actor, attempt_id, workspace_id), to: Transitions
   defdelegate mark_ready_for_review(mission_id, actor), to: Transitions
   defdelegate return_to_active(mission_id, actor, reason), to: Transitions
   defdelegate await_integration_authorization(mission_id, actor, attrs), to: Transitions
@@ -65,7 +66,15 @@ defmodule Consigliere.Missions do
   end
 
   def grant_work_authorization_command(mission_id, actor, attrs \\ %{}) do
-    Transitions.grant_work_authorization(mission_id, actor, attrs)
+    attrs = Map.put_new_lazy(attrs, :base_sha, fn -> peek_base_sha(mission_id) end)
+
+    with {:ok, mission} <-
+           Consigliere.DatabaseWriter.transaction(fn ->
+             Transitions.grant_work_authorization_with_dispatch_txn(mission_id, actor, attrs)
+           end) do
+      _ = Consigliere.MissionBootstrap.ensure_mission(mission.id)
+      {:ok, mission}
+    end
   end
 
   defp peek_base_sha(mission_id) do

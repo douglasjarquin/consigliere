@@ -389,6 +389,17 @@ func printHuman(w io.Writer, cmd string, pos []string, resp *Response) {
 		if pr, ok := payload["phase_reason"].(string); ok && pr != "" {
 			fmt.Fprintf(w, "  %s\n", pr)
 		}
+		if dispatch, ok := payload["dispatch"].(map[string]any); ok && dispatch != nil {
+			fmt.Fprintf(w, "  dispatch id=%v status=%v slot=%v child=%v attempt=%v workspace=%v runner=%v\n",
+				dispatch["id"],
+				dispatch["status"],
+				dispatch["slot_state"],
+				dispatch["child_start_state"],
+				dispatch["attempt_id"],
+				dispatch["workspace_path"],
+				dispatch["runner_pid"],
+			)
+		}
 		if blockers, ok := payload["blockers"].([]any); ok {
 			for _, raw := range blockers {
 				b, _ := raw.(map[string]any)

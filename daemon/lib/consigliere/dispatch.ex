@@ -25,8 +25,7 @@ defmodule Consigliere.Dispatch do
   alias Consigliere.RunnerProcess
   alias Consigliere.Txn
   alias Consigliere.Workspaces.Workspace
-
-  @max_spawn_attempts 3
+  alias Consigliere.Runtime.Inventory
 
   def maybe_schedule(state, mission, true, []) when mission.phase == "authorized" do
     case GlobalScheduler.request_slot(mission.id) do
@@ -48,7 +47,10 @@ defmodule Consigliere.Dispatch do
     case Missions.start(mission.id, Actor.system(), %{workspace_path: path}) do
       {:ok, %{attempt: attempt}} ->
         {:ok, _} =
-          DispatchOperations.ensure(attempt, %{status: "pending", slot_state: slot_name(grant)})
+          DispatchOperations.ensure(attempt, %{
+            status: "workspace_ready",
+            slot_state: slot_name(grant)
+          })
 
         continue(state, mission, grant, attempt)
 
@@ -73,22 +75,36 @@ defmodule Consigliere.Dispatch do
   end
 
   defp resume(state, mission, %Attempt{status: "planned"} = attempt) do
-    {:ok, _} = DispatchOperations.ensure(attempt, %{status: "pending", slot_state: "held"})
-    grant = slot_or_request(mission.id)
-    continue(state, mission, grant, attempt)
+    with {:ok, operation} <-
+           DispatchOperations.ensure(attempt, %{status: "pending", slot_state: "pending"}),
+         :ok <- prepare_workspace(mission, attempt),
+         {:ok, grant} <- request_slot(mission.id),
+         {:ok, _mission} <-
+           Missions.activate_dispatch(
+             mission.id,
+             Actor.system(),
+             attempt.id,
+             attempt.workspace_id
+           ),
+         {:ok, _} <-
+           DispatchOperations.update(operation, %{
+             status: "workspace_ready",
+             slot_state: slot_name(grant)
+           }) do
+      continue(state, mission, grant, attempt)
+    else
+      {:error, :busy} -> %{state | view: Map.put(state.view, :reason, :capacity)}
+      {:error, reason} -> fail_planned_dispatch(state, mission, attempt, reason)
+    end
   end
 
-  defp resume(state, mission, %Attempt{status: "starting"} = attempt) do
+  defp resume(state, _mission, %Attempt{status: "starting"} = attempt) do
     case Registry.lookup(Consigliere.Registry, {:runner, attempt.id}) do
       [{pid, _}] ->
         attach(state, attempt, pid)
 
       [] ->
-        if File.exists?(inventory_path(attempt.id)) do
-          state
-        else
-          retry_child(state, mission, attempt)
-        end
+        mark_unknown_dispatch(state, attempt, inventory_state(attempt.id))
     end
   end
 
@@ -102,21 +118,6 @@ defmodule Consigliere.Dispatch do
 
   defp continue(state, mission, grant, attempt), do: launch(state, mission, grant, attempt)
 
-  defp retry_child(state, mission, attempt) do
-    op = DispatchOperations.get_by_attempt(attempt.id)
-    attempts = (op && op.spawn_attempts) || 0
-
-    if attempts >= @max_spawn_attempts do
-      _ = Attempts.mark_spawn_failed(attempt.id, Actor.system(), "child start retries exhausted")
-      if op, do: DispatchOperations.update(op, %{status: "failed", child_start_state: "failed"})
-      GlobalScheduler.release_slot(mission.id)
-      %{state | slot: nil}
-    else
-      if op, do: DispatchOperations.update(op, %{spawn_attempts: attempts + 1})
-      launch(state, mission, slot_or_request(mission.id), attempt)
-    end
-  end
-
   defp launch(state, mission, grant, attempt) do
     project = mission.project_id && Repo.get(Project, mission.project_id)
     fallback_workspace = Path.join(Home.workspaces_dir(), to_string(mission.id))
@@ -125,6 +126,8 @@ defmodule Consigliere.Dispatch do
       {:error, reason} ->
         _ =
           Attempts.mark_spawn_failed(attempt.id, Actor.system(), "workspace identity: #{reason}")
+
+        mark_dispatch_failed(attempt, reason)
 
         GlobalScheduler.release_slot(mission.id)
         %{state | slot: nil, attempt_id: attempt.id, runner_pid: nil}
@@ -152,6 +155,8 @@ defmodule Consigliere.Dispatch do
                 Actor.system(),
                 "context pack too large"
               )
+
+            mark_dispatch_failed(launch_attempt, :context_pack_too_large)
 
             GlobalScheduler.release_slot(launch_mission.id)
             %{state | slot: nil, attempt_id: launch_attempt.id, runner_pid: nil}
@@ -243,6 +248,7 @@ defmodule Consigliere.Dispatch do
 
       {:error, reason} ->
         _ = Attempts.mark_spawn_failed(attempt.id, Actor.system(), inspect(reason))
+        mark_dispatch_failed(attempt, reason)
         GlobalScheduler.release_slot(mission.id)
         %{state | slot: nil, attempt_id: attempt.id, runner_pid: nil}
     end
@@ -258,10 +264,10 @@ defmodule Consigliere.Dispatch do
     }
   end
 
-  defp slot_or_request(mission_id) do
+  defp request_slot(mission_id) do
     case GlobalScheduler.request_slot(mission_id) do
-      {:ok, grant} -> grant
-      {:error, :busy} -> :held
+      {:ok, grant} -> {:ok, grant}
+      {:error, :busy} -> {:error, :busy}
     end
   end
 
@@ -322,5 +328,125 @@ defmodule Consigliere.Dispatch do
           spawn_attempts: op.spawn_attempts + 1
         })
     end
+  end
+
+  defp prepare_workspace(mission, attempt) do
+    workspace = Repo.get(Workspace, attempt.workspace_id)
+    project = mission.project_id && Repo.get(Project, mission.project_id)
+
+    cond do
+      not match?(%Workspace{}, workspace) ->
+        {:error, :workspace_not_found}
+
+      trusted_project?(project) and File.dir?(workspace.path) ->
+        case Projects.verify_workspace_identity(project, mission, workspace) do
+          :ok -> mark_workspace_ready(attempt)
+          {:error, reason} -> {:error, reason}
+        end
+
+      trusted_project?(project) ->
+        sha = workspace.parent_checkpoint_sha || workspace.base_sha || mission.base_sha
+
+        if is_binary(sha) and sha != "" do
+          try do
+            _ = Projects.provision_workspace(project, Path.basename(workspace.path), sha)
+
+            case Projects.verify_workspace_identity(project, mission, workspace) do
+              :ok -> mark_workspace_ready(attempt)
+              {:error, reason} -> {:error, reason}
+            end
+          rescue
+            exception -> {:error, Exception.message(exception)}
+          end
+        else
+          {:error, :workspace_base_missing}
+        end
+
+      true ->
+        mark_workspace_ready(attempt)
+    end
+  end
+
+  defp mark_workspace_ready(attempt) do
+    case DispatchOperations.get_by_attempt(attempt.id) do
+      nil -> :ok
+      operation -> DispatchOperations.update(operation, %{status: "workspace_ready"})
+    end
+
+    :ok
+  end
+
+  defp fail_planned_dispatch(state, mission, attempt, reason) do
+    _ =
+      Attempts.mark_spawn_failed(
+        attempt.id,
+        Actor.system(),
+        "workspace preparation: #{inspect(reason)}"
+      )
+
+    mark_dispatch_failed(attempt, reason)
+    GlobalScheduler.release_slot(mission.id)
+
+    %{
+      state
+      | slot: nil,
+        attempt_id: attempt.id,
+        runner_pid: nil,
+        view: Map.put(state.view, :reason, :dispatch_failed)
+    }
+  end
+
+  defp mark_dispatch_failed(attempt, reason) do
+    case DispatchOperations.get_by_attempt(attempt.id) do
+      nil ->
+        :ok
+
+      operation ->
+        DispatchOperations.update(operation, %{
+          status: "failed",
+          child_start_state: "failed",
+          last_error: bounded_error(reason)
+        })
+    end
+  end
+
+  defp bounded_error(reason), do: reason |> inspect() |> String.slice(0, 512)
+
+  defp mark_unknown_dispatch(state, attempt, inventory) do
+    case DispatchOperations.get_by_attempt(attempt.id) do
+      nil ->
+        :ok
+
+      operation ->
+        _ =
+          DispatchOperations.update(operation, %{
+            status: "unknown",
+            child_start_state: "unknown",
+            slot_state: "unknown",
+            last_error: "runner identity reconciliation required: #{inventory}"
+          })
+    end
+
+    %{
+      state
+      | attempt_id: attempt.id,
+        runner_pid: nil,
+        view: Map.put(state.view, :reason, :unknown)
+    }
+  end
+
+  defp inventory_state(attempt_id) do
+    case Inventory.verify(inventory_path(attempt_id), Home.dir()) do
+      :missing -> "manifest_missing"
+      {:valid_live, _manifest, _attempt} -> "manifest_live"
+      {:valid_terminal, _manifest, _attempt} -> "manifest_terminal"
+      :identity_mismatch -> "manifest_identity_mismatch"
+      :stale_generation -> "manifest_stale_generation"
+      :unsafe_pgid -> "manifest_unsafe_pgid"
+      :corrupt -> "manifest_corrupt"
+      other -> inspect(other)
+    end
+  rescue
+    _ -> "manifest_unavailable"
   end
 end

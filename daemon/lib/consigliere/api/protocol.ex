@@ -7,6 +7,7 @@ defmodule Consigliere.API.Protocol do
   alias Consigliere.Actor
   alias Consigliere.CommandReceipts
   alias Consigliere.Attempts
+  alias Consigliere.DispatchOperations.DispatchOperation
   alias Consigliere.Missions
   alias Consigliere.Missions.Mission
   alias Consigliere.MissionBlockers.MissionBlocker
@@ -54,7 +55,7 @@ defmodule Consigliere.API.Protocol do
       key = req["idempotency_key"] || id
 
       CommandReceipts.remember(actor, op, key, payload, fn ->
-        run(op, payload, actor)
+        run(op, execution_payload(op, payload, key, id), actor)
       end)
       |> wrap(id)
     else
@@ -221,7 +222,15 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp run_allowed("mission.grant_work", payload, actor) do
-    Missions.grant_work_authorization_command(payload["mission_id"], actor) |> ok_mission()
+    Missions.grant_work_authorization_command(
+      payload["mission_id"],
+      actor,
+      %{
+        idempotency_key: payload["_idempotency_key"],
+        correlation_id: payload["_correlation_id"]
+      }
+    )
+    |> ok_mission()
   end
 
   defp run_allowed("mission.cancel", payload, actor) do
@@ -504,6 +513,15 @@ defmodule Consigliere.API.Protocol do
 
   defp run_allowed(_op, _payload, _actor), do: {:error, {:invalid, "unknown op"}}
 
+  defp execution_payload("mission.grant_work", payload, key, correlation_id) do
+    Map.merge(payload, %{
+      "_idempotency_key" => key,
+      "_correlation_id" => correlation_id
+    })
+  end
+
+  defp execution_payload(_op, payload, _key, _correlation_id), do: payload
+
   defp own_mission?(%Actor{attempt_id: nil}, _), do: false
 
   defp own_mission?(%Actor{attempt_id: attempt_id}, mission) do
@@ -670,6 +688,8 @@ defmodule Consigliere.API.Protocol do
             )
 
           {runnable, reason} = why_runnability(mission, blockers, occupying)
+          dispatch = dispatch_summary(mission.id)
+          reason = durable_dispatch_reason(dispatch, reason)
 
           {:ok,
            %{
@@ -680,6 +700,7 @@ defmodule Consigliere.API.Protocol do
              "reason" => Atom.to_string(reason),
              "next_step" => Atom.to_string(reason),
              "phase_reason" => phase_reason(mission.phase),
+             "dispatch" => dispatch,
              "blockers" =>
                Enum.map(blockers, fn b ->
                  %{
@@ -715,6 +736,65 @@ defmodule Consigliere.API.Protocol do
         end
     end
   end
+
+  defp dispatch_summary(mission_id) do
+    operation =
+      Repo.one(
+        from(o in DispatchOperation,
+          where: o.mission_id == ^mission_id,
+          order_by: [desc: o.inserted_at],
+          limit: 1
+        )
+      )
+
+    case operation do
+      nil ->
+        nil
+
+      operation ->
+        attempt = Repo.get(Consigliere.Attempts.Attempt, operation.attempt_id)
+
+        workspace =
+          operation.workspace_id &&
+            Repo.get(Consigliere.Workspaces.Workspace, operation.workspace_id)
+
+        %{
+          "id" => operation.id,
+          "correlation_id" => operation.correlation_id,
+          "idempotency_key" => operation.idempotency_key,
+          "status" => operation.status,
+          "slot_state" => operation.slot_state,
+          "child_start_state" => operation.child_start_state,
+          "attempt_id" => operation.attempt_id,
+          "attempt_status" => attempt && attempt.status,
+          "workspace_id" => operation.workspace_id,
+          "workspace_path" => workspace && workspace.path,
+          "workspace_generation" => operation.workspace_generation,
+          "base_sha" => operation.base_sha,
+          "parent_checkpoint_sha" => operation.parent_checkpoint_sha,
+          "runner_pid" => attempt && attempt.runner_pid,
+          "harness_pid" => attempt && attempt.harness_pid,
+          "process_group" => attempt && attempt.pgid,
+          "last_error" => bounded_detail(operation.last_error)
+        }
+    end
+  end
+
+  defp durable_dispatch_reason(%{"status" => "unknown"}, _reason), do: :unknown
+  defp durable_dispatch_reason(%{"status" => "failed"}, _reason), do: :dispatch_failed
+  defp durable_dispatch_reason(%{"status" => "completed"}, _reason), do: :dispatch_completed
+
+  defp durable_dispatch_reason(
+         %{"attempt_status" => status},
+         _reason
+       )
+       when status in ["completed", "failed", "lost", "canceled", "superseded"],
+       do: :dispatch_terminal
+
+  defp durable_dispatch_reason(_dispatch, reason), do: reason
+
+  defp bounded_detail(nil), do: nil
+  defp bounded_detail(value), do: value |> to_string() |> String.slice(0, 512)
 
   defp phase_reason("draft"), do: "not submitted for authorization"
   defp phase_reason("awaiting_authorization"), do: "no work authorization yet"

@@ -107,7 +107,11 @@ defmodule Consigliere.Attempts.Transitions do
   def mark_spawn_failed_txn(attempt_id, actor, reason) do
     Txn.require_principal(actor, ["daemon"])
     attempt = fetch!(attempt_id)
-    require_status!(attempt, "starting", "failed")
+
+    unless attempt.status in ["planned", "starting"] do
+      Txn.illegal(attempt.status, "failed", :wrong_status)
+    end
+
     Capabilities.revoke_for_attempt_txn(attempt.id)
 
     attempt =

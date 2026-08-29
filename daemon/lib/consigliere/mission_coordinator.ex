@@ -16,6 +16,7 @@ defmodule Consigliere.MissionCoordinator do
 
   alias Consigliere.AttemptStates
   alias Consigliere.Dispatch
+  alias Consigliere.DispatchOperations
   alias Consigliere.EventBus
   alias Consigliere.Missions.Mission
   alias Consigliere.MissionBlockers.MissionBlocker
@@ -118,7 +119,8 @@ defmodule Consigliere.MissionCoordinator do
       mission ->
         blockers = open_blockers(mission.id)
         occupying = occupying_attempts(mission.id)
-        {runnable, reason} = runnability(mission, blockers, occupying)
+        dispatch = DispatchOperations.get_by_mission(mission.id)
+        {runnable, reason} = runnability(mission, blockers, occupying, dispatch)
 
         %{
           state
@@ -155,7 +157,8 @@ defmodule Consigliere.MissionCoordinator do
 
       mission ->
         occupying = occupying_attempts(mission.id)
-        {runnable, reason} = runnability(mission, open_blockers(mission.id), occupying)
+        dispatch = DispatchOperations.get_by_mission(mission.id)
+        {runnable, reason} = runnability(mission, open_blockers(mission.id), occupying, dispatch)
 
         if reason in [:import, :validate] do
           _ = Consigliere.Progression.maybe_progress(mission.id)
@@ -165,11 +168,23 @@ defmodule Consigliere.MissionCoordinator do
     end
   end
 
-  defp runnability(mission, blockers, occupying) do
+  defp runnability(mission, blockers, occupying, dispatch) do
     recoverable = Enum.filter(occupying, &AttemptStates.recoverable?(&1.status))
     blocking = occupying -- recoverable
 
     cond do
+      dispatch && dispatch.status == "unknown" ->
+        {false, :unknown}
+
+      dispatch && dispatch.status == "failed" ->
+        {false, :dispatch_failed}
+
+      dispatch && dispatch.status == "completed" ->
+        {false, :dispatch_completed}
+
+      dispatch && terminal_attempt?(dispatch.attempt_id) ->
+        {false, :dispatch_terminal}
+
       mission.phase not in ["authorized", "active"] ->
         {false, :phase}
 
@@ -212,6 +227,13 @@ defmodule Consigliere.MissionCoordinator do
         where: a.mission_id == ^mission_id and a.status in ^occupying
       )
     )
+  end
+
+  defp terminal_attempt?(attempt_id) do
+    case Repo.get(Attempt, attempt_id) do
+      %Attempt{status: status} -> AttemptStates.terminal?(status)
+      _ -> false
+    end
   end
 
   defp attach_runner(nil), do: {:not_found, nil}

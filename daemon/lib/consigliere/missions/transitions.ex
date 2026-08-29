@@ -14,6 +14,7 @@ defmodule Consigliere.Missions.Transitions do
   alias Consigliere.MissionBlockers.MissionBlocker
   alias Consigliere.Decisions.Decision
   alias Consigliere.Incidents.Incident
+  alias Consigliere.DispatchOperations
   alias Consigliere.Projects.Project
   alias Consigliere.Workspaces.Workspace
 
@@ -105,8 +106,121 @@ defmodule Consigliere.Missions.Transitions do
     mission
   end
 
+  def grant_work_authorization_with_dispatch_txn(mission_id, actor, attrs) do
+    existing_mission = fetch_mission!(mission_id)
+
+    if project_has_active_mission?(existing_mission) do
+      Txn.illegal(existing_mission.phase, "authorized", :project_busy)
+    end
+
+    mission = grant_work_authorization_txn(mission_id, actor, attrs)
+
+    workspace =
+      Txn.insert!(
+        Workspace.changeset(%Workspace{}, %{
+          mission_id: mission.id,
+          path: Path.join(Consigliere.Home.workspaces_dir(), mission.id),
+          lease_id: Txn.mint_fencing_token(),
+          fencing_token: Txn.mint_fencing_token(),
+          status: "active",
+          project_id: mission.project_id,
+          base_sha: mission.base_sha,
+          parent_checkpoint_sha: mission.current_checkpoint_sha
+        })
+      )
+
+    attempt =
+      Txn.insert!(
+        Attempt.changeset(%Attempt{}, %{
+          mission_id: mission.id,
+          workspace_id: workspace.id,
+          role: "soldier",
+          harness: Consigliere.Adapters.harness().capabilities()["harness_name"],
+          status: "planned",
+          fencing_token: Txn.mint_fencing_token()
+        })
+      )
+
+    operation =
+      DispatchOperations.ensure_txn(attempt, %{
+        status: "pending",
+        slot_state: "pending",
+        correlation_id: Map.get(attrs, :correlation_id),
+        idempotency_key: Map.get(attrs, :idempotency_key),
+        authorization_id: mission.authorization_id,
+        project_id: mission.project_id,
+        workspace_generation: workspace.lease_id,
+        base_sha: mission.base_sha,
+        parent_checkpoint_sha: mission.current_checkpoint_sha
+      })
+
+    Txn.append_event!("mission.dispatch_requested", "mission", mission.id, %{
+      authorization_id: mission.authorization_id,
+      dispatch_operation_id: operation.id,
+      attempt_id: attempt.id,
+      workspace_id: workspace.id
+    })
+
+    mission
+  end
+
+  defp project_has_active_mission?(%Mission{project_id: nil}), do: false
+
+  defp project_has_active_mission?(%Mission{project_id: project_id, id: mission_id}) do
+    active_phases =
+      ~w(authorized active paused ready_for_review awaiting_integration_authorization integrating)
+
+    Repo.exists?(
+      from(m in Mission,
+        where:
+          m.project_id == ^project_id and m.id != ^mission_id and
+            m.phase in ^active_phases
+      )
+    )
+  end
+
   def start(mission_id, actor, opts) do
     DatabaseWriter.transaction(fn -> start_txn(mission_id, actor, opts) end)
+  end
+
+  def activate_dispatch(mission_id, actor, attempt_id, workspace_id) do
+    DatabaseWriter.transaction(fn ->
+      activate_dispatch_txn(mission_id, actor, attempt_id, workspace_id)
+    end)
+  end
+
+  def activate_dispatch_txn(mission_id, actor, attempt_id, workspace_id) do
+    Txn.require_principal(actor, @start_principals)
+    mission = fetch_mission!(mission_id)
+    attempt = Repo.get(Attempt, attempt_id)
+    workspace = Repo.get(Workspace, workspace_id)
+
+    unless match?(%Attempt{mission_id: ^mission_id, workspace_id: ^workspace_id}, attempt) do
+      Txn.illegal(mission.phase, "active", :attempt_identity_mismatch)
+    end
+
+    unless match?(%Workspace{mission_id: ^mission_id, status: "active"}, workspace) do
+      Txn.illegal(mission.phase, "active", :workspace_identity_mismatch)
+    end
+
+    case mission.phase do
+      "authorized" ->
+        mission =
+          Txn.update!(Mission.changeset(mission, %{phase: "active", started_at: Txn.now()}))
+
+        Txn.append_event!("mission.started", "mission", mission.id, %{
+          attempt_id: attempt.id,
+          workspace_id: workspace.id
+        })
+
+        mission
+
+      "active" ->
+        mission
+
+      phase ->
+        Txn.illegal(phase, "active", :mission_not_authorized)
+    end
   end
 
   def start_txn(mission_id, actor, opts) do
