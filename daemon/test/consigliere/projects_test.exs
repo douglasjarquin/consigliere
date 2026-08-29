@@ -34,6 +34,82 @@ defmodule Consigliere.ProjectsTest do
     assert File.dir?(project.trusted_mirror_path)
     assert Git.mirror_has_commit?(project.trusted_mirror_path, sha)
     assert Repo.get!(Project, project.id).repository_url == "file://#{source}"
+    assert Fixtures.event_types(project.id) == ["project.registered"]
+  end
+
+  test "register stores the canonical source path when given a symlink", %{source: source} do
+    link = Path.join(System.tmp_dir!(), "cs-proj-link-#{System.unique_integer([:positive])}")
+    File.ln_s!(source, link)
+    on_exit(fn -> File.rm(link) end)
+
+    assert {:ok, project} =
+             Projects.register(
+               %{name: "demo", repository_path: link, repository_url: "file://#{link}"},
+               Actor.boss()
+             )
+
+    assert project.repository_path == source
+    assert project.repository_url == "file://#{source}"
+  end
+
+  test "refresh_base advances only the Project base and records an audit event", %{
+    source: source,
+    sha: sha
+  } do
+    assert {:ok, project} =
+             Projects.register(
+               %{name: "demo", repository_path: source, repository_url: "file://#{source}"},
+               Actor.boss()
+             )
+
+    {:ok, mission} =
+      Consigliere.Missions.create(
+        Fixtures.mission_attrs(%{project_id: project.id}),
+        Actor.boss()
+      )
+
+    {:ok, mission} = Consigliere.Missions.submit_for_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Consigliere.Missions.grant_work_authorization(mission.id, Actor.boss())
+    assert mission.base_sha == sha
+
+    File.write!(Path.join(source, "later.txt"), "later\n")
+    later = Git.commit_all(source, "later")
+
+    assert {:ok, refreshed} = Projects.refresh_base(project.id, Actor.boss())
+    assert refreshed.base_sha == later
+    assert Repo.get!(Project, project.id).base_sha == later
+    assert Repo.get!(Consigliere.Missions.Mission, mission.id).base_sha == sha
+    assert "project.base_refreshed" in Fixtures.event_types(project.id)
+  end
+
+  test "workspace identity verification fails closed for changed durable identities", %{
+    source: source
+  } do
+    assert {:ok, project} =
+             Projects.register(
+               %{name: "demo", repository_path: source, repository_url: "file://#{source}"},
+               Actor.boss()
+             )
+
+    {:ok, mission} =
+      Consigliere.Missions.create(
+        Fixtures.mission_attrs(%{project_id: project.id}),
+        Actor.boss()
+      )
+
+    {:ok, mission} = Consigliere.Missions.submit_for_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Consigliere.Missions.grant_work_authorization(mission.id, Actor.boss())
+    dest = Path.join(Home.workspaces_dir(), mission.id)
+
+    {:ok, %{workspace: workspace}} =
+      Consigliere.Missions.start(mission.id, Actor.system(), %{workspace_path: dest})
+
+    assert :ok = Projects.verify_workspace_identity(project, mission, workspace)
+
+    changed = %{workspace | base_sha: "not-the-authorized-base"}
+
+    assert {:error, :workspace_base_mismatch} =
+             Projects.verify_workspace_identity(project, mission, changed)
   end
 
   test "provision_workspace clones source at the SHA with no origin remote", %{

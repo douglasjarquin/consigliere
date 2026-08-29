@@ -7,11 +7,36 @@ defmodule Consigliere.Git do
   transaction.
   """
 
+  import Bitwise
+
   def empty_hooks_dir do
     dir = Path.join(System.tmp_dir!(), "cs-empty-git-hooks")
     File.mkdir_p!(dir)
+    File.chmod!(dir, 0o700)
     dir
   end
+
+  def canonical_repository_path(path) when is_binary(path) do
+    expanded = Path.expand(path)
+
+    case System.cmd("realpath", [expanded], stderr_to_stdout: true) do
+      {output, 0} ->
+        canonical = String.trim(output)
+
+        if File.dir?(canonical) and File.exists?(Path.join(canonical, ".git")) do
+          {:ok, canonical}
+        else
+          {:error, :not_a_repository}
+        end
+
+      {output, status} ->
+        {:error, {:invalid_repository, status, String.trim(output)}}
+    end
+  rescue
+    _ -> {:error, :invalid_repository}
+  end
+
+  def canonical_repository_path(_), do: {:error, :invalid_repository}
 
   def init_workspace(path) do
     File.mkdir_p!(path)
@@ -23,7 +48,8 @@ defmodule Consigliere.Git do
 
   def init_mirror(path) do
     File.mkdir_p!(Path.dirname(path))
-    git!(["init", "--bare", "-b", "main", path])
+    privileged(["init", "--bare", "-b", "main", path])
+    tighten_permissions!(path)
     :ok
   end
 
@@ -78,14 +104,14 @@ defmodule Consigliere.Git do
 
   def materialize(mirror, dest, sha) do
     File.mkdir_p!(Path.dirname(dest))
-    if File.dir?(dest), do: raise("workspace already exists: #{dest}")
+    if path_exists?(dest), do: raise("workspace already exists: #{dest}")
 
     # file:// disables Git's local hardlink/alternate optimizations. Fetch
     # the exact SHA rather than cloning HEAD, because the trusted mirror
     # stores checkpoints on refs/consigliere/* rather than a branch.
-    git!(["init", "-b", "main", dest])
+    privileged(["init", "-b", "main", dest])
 
-    git!(
+    privileged(
       [
         "fetch",
         "--",
@@ -95,8 +121,12 @@ defmodule Consigliere.Git do
       cd: dest
     )
 
-    git!(["checkout", "--detach", sha], cd: dest)
-    _ = git_cmd(["remote", "remove", "origin"], cd: dest)
+    privileged(["checkout", "--detach", sha], cd: dest)
+    _ = privileged(["remote", "remove", "origin"], cd: dest)
+    _ = privileged(["config", "--local", "--unset-regexp", "^remote\\..*"], cd: dest)
+    _ = privileged(["config", "--local", "--unset-all", "credential.helper"], cd: dest)
+    privileged(["config", "--local", "core.hooksPath", empty_hooks_dir()], cd: dest)
+    tighten_permissions!(dest)
 
     case verify_workspace(dest, sha, mirror) do
       :ok -> :ok
@@ -107,7 +137,7 @@ defmodule Consigliere.Git do
   def branch_tip(source, branch) do
     ref = "refs/heads/#{branch}"
 
-    case git_cmd(["rev-parse", "--verify", ref], cd: source) do
+    case privileged(["rev-parse", "--verify", ref], cd: source) do
       {:ok, out} -> {:ok, String.trim(out)}
       {:error, _} -> {:error, {:missing_branch, branch}}
     end
@@ -130,10 +160,13 @@ defmodule Consigliere.Git do
   def project_base_ref(project_id), do: "refs/consigliere/projects/#{project_id}/base"
 
   def verify_workspace(workspace, sha, mirror \\ nil) do
-    with {:ok, head} <- git_cmd(["rev-parse", "HEAD"], cd: workspace),
+    with {:ok, head} <- privileged(["rev-parse", "HEAD"], cd: workspace),
          true <- String.trim(head) == sha,
          :ok <- reject_alternates(workspace),
          :ok <- reject_privileged_remotes(workspace),
+         :ok <- reject_credential_helpers(workspace),
+         :ok <- verify_hooks_path(workspace),
+         :ok <- verify_git_permissions(workspace),
          :ok <- reject_shared_objects(mirror, workspace) do
       :ok
     else
@@ -184,7 +217,7 @@ defmodule Consigliere.Git do
   end
 
   defp reject_privileged_remotes(workspace) do
-    case git_cmd(["remote"], cd: workspace) do
+    case privileged(["remote"], cd: workspace) do
       {:ok, out} ->
         if String.trim(out) == "" do
           :ok
@@ -194,6 +227,72 @@ defmodule Consigliere.Git do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp reject_credential_helpers(workspace) do
+    case privileged(["config", "--local", "--get-all", "credential.helper"], cd: workspace) do
+      {:ok, output} when output == "" -> :ok
+      {:ok, _output} -> {:error, :credential_helper_present}
+      {:error, _} -> :ok
+    end
+  end
+
+  defp verify_hooks_path(workspace) do
+    case privileged(["config", "--local", "--get", "core.hooksPath"], cd: workspace) do
+      {:ok, output} ->
+        if Path.expand(String.trim(output)) == Path.expand(empty_hooks_dir()) do
+          :ok
+        else
+          {:error, :hooks_path_present}
+        end
+
+      {:error, _} ->
+        {:error, :hooks_path_missing}
+    end
+  end
+
+  defp verify_git_permissions(workspace) do
+    paths = [Path.join(workspace, ".git") | Path.wildcard(Path.join(workspace, ".git/**/*"))]
+
+    Enum.reduce_while(paths, :ok, fn path, :ok ->
+      case File.lstat(path) do
+        {:ok, %File.Stat{type: :symlink}} ->
+          {:halt, {:error, :git_symlink}}
+
+        {:ok, %File.Stat{mode: mode}} when band(mode, 0o077) != 0 ->
+          {:halt, {:error, :unsafe_permissions}}
+
+        {:ok, _} ->
+          {:cont, :ok}
+
+        {:error, reason} ->
+          {:halt, {:error, {:git_stat_failed, reason}}}
+      end
+    end)
+  end
+
+  defp tighten_permissions!(root) do
+    paths =
+      [root, Path.join(root, ".git")] ++
+        Path.wildcard(Path.join(root, "**/*")) ++
+        Path.wildcard(Path.join(root, ".git/**/*"))
+
+    Enum.each(paths, fn path ->
+      case File.lstat(path) do
+        {:ok, %File.Stat{type: :directory}} -> File.chmod!(path, 0o700)
+        {:ok, %File.Stat{type: :regular, mode: mode}} -> File.chmod!(path, band(mode, 0o700))
+        {:ok, %File.Stat{type: :symlink}} -> :ok
+        _ -> :ok
+      end
+    end)
+  end
+
+  defp path_exists?(path) do
+    case File.lstat(path) do
+      {:ok, _} -> true
+      {:error, :enoent} -> false
+      {:error, _} -> true
     end
   end
 
@@ -211,14 +310,14 @@ defmodule Consigliere.Git do
     if File.dir?(path), do: :ok, else: init_mirror(path)
   end
 
-  defp git!(args, opts \\ []) do
+  defp git!(args, opts) do
     case git_cmd(args, opts) do
       {:ok, out} -> out
       {:error, reason} -> raise "git #{inspect(args)} failed: #{inspect(reason)}"
     end
   end
 
-  defp privileged([cmd | rest], opts) do
+  defp privileged([cmd | rest], opts \\ []) do
     flags = neutralizing_flags(cmd)
     git_dir_args = git_dir_args(opts)
     git_cmd(git_dir_args ++ flags ++ [cmd | rest], Keyword.put(opts, :env, privileged_env()))

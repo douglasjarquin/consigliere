@@ -14,6 +14,7 @@ defmodule Consigliere.Missions.Transitions do
   alias Consigliere.MissionBlockers.MissionBlocker
   alias Consigliere.Decisions.Decision
   alias Consigliere.Incidents.Incident
+  alias Consigliere.Projects.Project
   alias Consigliere.Workspaces.Workspace
 
   @hard_terminal ~w(completed canceled superseded)
@@ -111,12 +112,19 @@ defmodule Consigliere.Missions.Transitions do
     Txn.require_principal(actor, @start_principals)
     mission = fetch_mission!(mission_id)
     require_phase!(mission, "authorized", "active")
+    project = mission.project_id && Repo.get(Project, mission.project_id)
+    workspace_path = Map.fetch!(opts, :workspace_path)
+
+    if Consigliere.Projects.trusted_identity?(project) and
+         not Consigliere.Projects.workspace_path_shape?(workspace_path, mission.id) do
+      Txn.illegal(mission.phase, "active", :workspace_path_invalid)
+    end
 
     workspace =
       Txn.insert!(
         Workspace.changeset(%Workspace{}, %{
           mission_id: mission.id,
-          path: Map.fetch!(opts, :workspace_path),
+          path: workspace_path,
           lease_id: Map.get(opts, :lease_id, "lease-#{Txn.mint_fencing_token()}"),
           fencing_token: Map.get(opts, :workspace_fencing_token, Txn.mint_fencing_token()),
           status: "active",

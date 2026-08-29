@@ -18,11 +18,13 @@ defmodule Consigliere.Dispatch do
   alias Consigliere.Harness.ContextPack
   alias Consigliere.Home
   alias Consigliere.Missions
+  alias Consigliere.Projects
   alias Consigliere.Projects.Project
   alias Consigliere.Repo
   alias Consigliere.RunnerDynamicSupervisor
   alias Consigliere.RunnerProcess
   alias Consigliere.Txn
+  alias Consigliere.Workspaces.Workspace
 
   @max_spawn_attempts 3
 
@@ -116,27 +118,78 @@ defmodule Consigliere.Dispatch do
   end
 
   defp launch(state, mission, grant, attempt) do
-    workspace = Path.join(Home.workspaces_dir(), to_string(mission.id))
     project = mission.project_id && Repo.get(Project, mission.project_id)
-    policy = Codex.policy(project)
+    fallback_workspace = Path.join(Home.workspaces_dir(), to_string(mission.id))
 
-    extras = %{
-      workspace_path: workspace,
-      base_sha: mission.base_sha,
-      role: attempt.role
-    }
+    case resolve_launch_identity(mission, attempt, project, fallback_workspace) do
+      {:error, reason} ->
+        _ =
+          Attempts.mark_spawn_failed(attempt.id, Actor.system(), "workspace identity: #{reason}")
 
-    case ContextPack.compose(mission, extras) do
-      {:error, :too_large} ->
-        _ = Attempts.mark_spawn_failed(attempt.id, Actor.system(), "context pack too large")
         GlobalScheduler.release_slot(mission.id)
         %{state | slot: nil, attempt_id: attempt.id, runner_pid: nil}
 
-      {:ok, pack} ->
-        {:ok, attempt} = persist_pack(attempt, pack, policy)
-        start_runner(state, mission, grant, attempt, workspace, pack, policy)
+      {:ok, %{mission: launch_mission, attempt: launch_attempt, workspace: workspace}} ->
+        policy = Codex.policy(project)
+
+        extras = %{
+          workspace_path: workspace,
+          base_sha: launch_mission.base_sha,
+          role: launch_attempt.role
+        }
+
+        case ContextPack.compose(launch_mission, extras) do
+          {:error, :too_large} ->
+            _ =
+              Attempts.mark_spawn_failed(
+                launch_attempt.id,
+                Actor.system(),
+                "context pack too large"
+              )
+
+            GlobalScheduler.release_slot(launch_mission.id)
+            %{state | slot: nil, attempt_id: launch_attempt.id, runner_pid: nil}
+
+          {:ok, pack} ->
+            {:ok, launch_attempt} = persist_pack(launch_attempt, pack, policy)
+
+            start_runner(
+              state,
+              launch_mission,
+              grant,
+              launch_attempt,
+              workspace,
+              pack,
+              policy
+            )
+        end
     end
   end
+
+  defp resolve_launch_identity(mission, attempt, project, fallback_workspace) do
+    workspace = attempt.workspace_id && Repo.get(Workspace, attempt.workspace_id)
+
+    cond do
+      not match?(%Workspace{}, workspace) ->
+        {:error, "workspace_not_found"}
+
+      trusted_project?(project) ->
+        case Projects.verify_workspace_identity(project, mission, workspace) do
+          :ok -> {:ok, %{mission: mission, attempt: attempt, workspace: workspace.path}}
+          {:error, reason} -> {:error, inspect(reason)}
+        end
+
+      true ->
+        {:ok,
+         %{mission: mission, attempt: attempt, workspace: workspace.path || fallback_workspace}}
+    end
+  end
+
+  defp trusted_project?(%Project{} = project) do
+    Projects.trusted_identity?(project)
+  end
+
+  defp trusted_project?(_), do: false
 
   defp start_runner(state, mission, grant, attempt, workspace, pack, policy) do
     {:ok, capability} = Capabilities.mint(attempt)
