@@ -22,9 +22,27 @@ defmodule Consigliere.Harness.ContextPack do
         "may_grant_integration" => false,
         "may_answer_boss_questions" => false
       },
+      "capability" => %{
+        "operations" => Consigliere.Capabilities.worker_operations(),
+        "binding" => [
+          "capability_id",
+          "capability_generation",
+          "attempt_id",
+          "mission_id",
+          "workspace_generation",
+          "fencing_generation"
+        ],
+        "rule" =>
+          "The daemon authenticates every request against this Attempt, Mission, workspace, and fence. Caller-declared identity is not authority."
+      },
       "protocol" => %{
-        "questions" => "question.open via Attempt capability",
-        "checkpoint" => "emit checkpoint.created with the git SHA; never infer SHA from prose"
+        "questions" => "question.open via the matching Attempt capability",
+        "progress" => "attempt.progress is bounded and belongs only to this Attempt",
+        "checkpoint" => "attempt.checkpoint with the Git SHA; never infer SHA from prose",
+        "completion" =>
+          "attempt.complete reports completion; the daemon verifies runner death before terminal state",
+        "failure" =>
+          "attempt.fail reports failure; the daemon verifies runner death before terminal state"
       },
       "completion" => %{
         "require_checkpoint" => true,
@@ -32,7 +50,8 @@ defmodule Consigliere.Harness.ContextPack do
       }
     }
 
-    pack = pack |> Map.merge(stringify(extras)) |> stringify_keys()
+    extras = extras |> stringify() |> Map.take(["workspace_path", "base_sha", "role"])
+    pack = pack |> Map.merge(extras) |> stringify_keys()
     encoded = encode_sorted(pack)
 
     if byte_size(encoded) > @max_bytes do

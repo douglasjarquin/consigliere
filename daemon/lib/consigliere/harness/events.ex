@@ -7,6 +7,7 @@ defmodule Consigliere.Harness.Events do
   """
 
   alias Consigliere.Attempts.Attempt
+  alias Consigliere.Capabilities
   alias Consigliere.DatabaseWriter
   alias Consigliere.HarnessEvents.HarnessEvent
   alias Consigliere.Repo
@@ -136,11 +137,23 @@ defmodule Consigliere.Harness.Events do
 
   defp require_fence!(actor, attempt) do
     cond do
-      actor.principal != "attempt" -> Txn.unauthorized(:principal)
-      actor.attempt_id != attempt.id -> Txn.fenced(attempt.id)
-      actor.fencing_token != attempt.fencing_token -> Txn.fenced(attempt.id)
-      attempt.status not in @live -> Txn.fenced(attempt.id)
-      true -> :ok
+      actor.principal != "attempt" ->
+        Txn.unauthorized(:principal)
+
+      actor.attempt_id != attempt.id ->
+        Txn.fenced(attempt.id)
+
+      actor.fencing_token != attempt.fencing_token ->
+        Txn.fenced(attempt.id)
+
+      attempt.status not in @live ->
+        Txn.fenced(attempt.id)
+
+      true ->
+        case Capabilities.revalidate_actor(actor, attempt) do
+          :ok -> :ok
+          {:error, reason} -> Txn.unauthorized(reason)
+        end
     end
   end
 

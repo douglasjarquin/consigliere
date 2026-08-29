@@ -17,6 +17,7 @@ defmodule Consigliere.Operations do
       required: ~w(project_id objective scope acceptance_criteria)
     },
     "mission.submit" => %{version: @version, mode: :database, required: ~w(mission_id)},
+    "mission.get_own" => %{version: @version, mode: :database, required: ~w(mission_id)},
     "mission.request_changes" => %{
       version: @version,
       mode: :database,
@@ -32,10 +33,10 @@ defmodule Consigliere.Operations do
     "question.answer" => %{version: @version, mode: :database, required: ~w(question_id answer)},
     "away.mark" => %{version: @version, mode: :database},
     "away.return" => %{version: @version, mode: :database},
-    "attempt.progress" => %{version: @version, mode: :external, required: ~w(attempt_id)},
-    "attempt.checkpoint" => %{version: @version, mode: :external, required: ~w(attempt_id)},
-    "attempt.completion" => %{version: @version, mode: :external, required: ~w(attempt_id)},
-    "attempt.failure" => %{version: @version, mode: :external, required: ~w(attempt_id)},
+    "attempt.progress" => %{version: @version, mode: :database, required: ~w(attempt_id)},
+    "attempt.checkpoint" => %{version: @version, mode: :database, required: ~w(attempt_id)},
+    "attempt.complete" => %{version: @version, mode: :database, required: ~w(attempt_id)},
+    "attempt.fail" => %{version: @version, mode: :database, required: ~w(attempt_id)},
     "internal.dispatch" => %{version: @version, mode: :external, required: ~w(attempt_id)},
     "post_attempt.progress" => %{version: @version, mode: :external, required: ~w(attempt_id)}
   }

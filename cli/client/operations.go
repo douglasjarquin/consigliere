@@ -17,6 +17,7 @@ var v0Operations = map[string]int{
 	"project.add":               1,
 	"mission.create":            1,
 	"mission.submit":            1,
+	"mission.get_own":           1,
 	"mission.request_changes":   1,
 	"mission.grant_work":        1,
 	"mission.continue":          1,
@@ -30,8 +31,8 @@ var v0Operations = map[string]int{
 	"away.return":               1,
 	"attempt.progress":          1,
 	"attempt.checkpoint":        1,
-	"attempt.completion":        1,
-	"attempt.failure":           1,
+	"attempt.complete":          1,
+	"attempt.fail":              1,
 	"internal.dispatch":         1,
 	"post_attempt.progress":     1,
 }

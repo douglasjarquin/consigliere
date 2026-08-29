@@ -542,7 +542,7 @@ defmodule Consigliere.Missions.Transitions do
     from(a in Attempt, where: a.mission_id == ^mission.id and a.status in ^live)
     |> Repo.all()
     |> Enum.each(fn attempt ->
-      _ = Consigliere.Capabilities.revoke_for_attempt(attempt.id)
+      Consigliere.Capabilities.revoke_for_attempt_txn(attempt.id)
       Txn.update!(Attempt.changeset(attempt, %{fencing_token: Txn.mint_fencing_token()}))
     end)
   end

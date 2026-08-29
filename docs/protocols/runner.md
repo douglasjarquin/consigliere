@@ -44,6 +44,38 @@ On launch it must, in order:
 
 The runner never interprets Mission policy: it does not decide whether to retry, whether a finding is acceptable, or what "done" means. It only starts, frames, and stops a process group, and reports facts about it.
 
+## V0 Attempt capability contract
+
+The worker receives one server-issued capability for one Attempt invocation.
+
+The capability is stored by durable ID and hash, and is bound to its generation, exact Attempt ID, exact Mission ID, Workspace ID and lease generation, Attempt fencing generation, issuance time, expiry, and revocation state.
+
+The closed V0 worker operation set is exactly:
+
+```text
+ping
+mission.get_own
+attempt.progress
+question.open
+attempt.checkpoint
+attempt.complete
+attempt.fail
+```
+
+The effective authority is the intersection of this server maximum, the capability's durable allowlist, the current Attempt and Mission state, the current Workspace lease, the current fencing generation, and the request's scope.
+
+Every scoped request may be implicitly bound by the authenticated capability, and any declared capability ID, capability generation, Attempt ID, Mission ID, Workspace ID, Workspace generation, or fencing generation must match the durable record exactly.
+
+The worker cannot use this capability to grant work or integration, answer a Boss question, access a source repository or trusted mirror, control the daemon owner, use GitHub, create a pull request, push, or merge.
+
+Progress, Question, checkpoint, completion, and failure reports are reports for the bound Attempt rather than authority to mutate another Mission or to claim a verified Git result.
+
+The daemon revokes the capability before cancellation, supersession, checkpoint termination, fencing replacement, and terminal Attempt state mutation.
+
+Expiry, revocation, stale generations, malformed scopes, and mismatched request identities fail closed before the operation writer runs, and the writer revalidates the capability before an Attempt mutation.
+
+The context pack exposes this operation set and these reporting rules without carrying a reusable capability secret, Boss credential, GitHub credential, or daemon-owner credential.
+
 ## Runtime manifest protocol
 
 The runtime manifest is the durable, crash-safe record of "this runner is running this harness for this Attempt," independent of both the daemon's database and the runner's own liveness.

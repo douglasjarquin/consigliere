@@ -9,7 +9,11 @@ defmodule Consigliere.Capabilities.AttemptCapability do
     field(:attempt_id, :binary_id)
     field(:mission_id, :binary_id)
     field(:ops, :map, default: %{})
+    field(:generation, :integer)
+    field(:workspace_id, :binary_id)
+    field(:workspace_generation, :string)
     field(:fencing_token, :string)
+    field(:issued_at, :utc_datetime_usec)
     field(:expires_at, :utc_datetime_usec)
     field(:revoked_at, :utc_datetime_usec)
 
@@ -23,11 +27,27 @@ defmodule Consigliere.Capabilities.AttemptCapability do
       :attempt_id,
       :mission_id,
       :ops,
+      :generation,
+      :workspace_id,
+      :workspace_generation,
       :fencing_token,
+      :issued_at,
       :expires_at,
       :revoked_at
     ])
-    |> validate_required([:secret_hash, :attempt_id, :mission_id, :fencing_token, :expires_at])
+    |> validate_required([
+      :secret_hash,
+      :attempt_id,
+      :mission_id,
+      :generation,
+      :workspace_id,
+      :workspace_generation,
+      :fencing_token,
+      :issued_at,
+      :expires_at
+    ])
+    |> validate_number(:generation, greater_than: 0)
     |> unique_constraint(:secret_hash)
+    |> unique_constraint([:attempt_id, :generation])
   end
 end

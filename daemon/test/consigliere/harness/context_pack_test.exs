@@ -37,8 +37,22 @@ defmodule Consigliere.Harness.ContextPackTest do
     assert result.pack["workspace_path"] == "/tmp/ws"
     assert result.pack["base_sha"] == "abc123"
     assert result.pack["authority"]["may_grant_work"] == false
+
+    assert result.pack["capability"]["operations"] ==
+             Consigliere.Capabilities.worker_operations()
+
     refute result.encoded =~ "boss.secret"
     refute result.encoded =~ "complete the authorized mission"
+
+    {:ok, protected} =
+      ContextPack.compose(mission, %{
+        capability: "reusable-secret",
+        authority: %{"may_grant_work" => true},
+        protocol: "caller-controlled"
+      })
+
+    refute protected.encoded =~ "reusable-secret"
+    assert protected.pack["authority"]["may_grant_work"] == false
     assert result.hash == ContextPack.hash(result.encoded)
 
     assert {:ok, again} =

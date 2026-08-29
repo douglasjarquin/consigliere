@@ -9,6 +9,9 @@ defmodule Consigliere.Attempts do
   defdelegate mark_running(attempt_id, actor, attrs), to: Transitions
   defdelegate mark_spawn_failed(attempt_id, actor, reason), to: Transitions
   defdelegate touch_last_event(attempt_id, actor, at), to: Transitions
+  defdelegate report_progress(attempt_id, actor, attrs \\ %{}), to: Transitions
+  defdelegate report_completion(attempt_id, actor), to: Transitions
+  defdelegate report_failure(attempt_id, actor, attrs \\ %{}), to: Transitions
   defdelegate record_checkpointed(attempt_id, actor, attrs), to: Transitions
   defdelegate complete(attempt_id, actor, attrs), to: Transitions
   defdelegate fail(attempt_id, actor, attrs), to: Transitions

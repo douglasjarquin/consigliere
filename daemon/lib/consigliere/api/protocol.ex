@@ -6,6 +6,7 @@ defmodule Consigliere.API.Protocol do
   alias Consigliere.API.Auth
   alias Consigliere.Actor
   alias Consigliere.CommandReceipts
+  alias Consigliere.Attempts
   alias Consigliere.Missions
   alias Consigliere.Missions.Mission
   alias Consigliere.MissionBlockers.MissionBlocker
@@ -15,7 +16,7 @@ defmodule Consigliere.API.Protocol do
   alias Consigliere.Repo
 
   @version 1
-  @attempt_ops ~w(ping mission.get question.open)
+  @attempt_ops Consigliere.Capabilities.worker_operations()
   @review_phases ~w(awaiting_authorization ready_for_review
                     awaiting_integration_authorization failed)
 
@@ -63,7 +64,7 @@ defmodule Consigliere.API.Protocol do
 
   defp run(op, payload, %Actor{principal: "attempt", allowed_ops: ops} = actor)
        when is_list(ops) do
-    if op in ops do
+    if op in @attempt_ops and op in ops do
       run_allowed(op, payload, actor)
     else
       {:error, {:unauthorized, :capability}}
@@ -71,6 +72,10 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp run(op, _payload, %Actor{principal: "attempt"}) when op not in @attempt_ops do
+    {:error, {:unauthorized, :capability}}
+  end
+
+  defp run(_op, _payload, %Actor{principal: "attempt", allowed_ops: nil}) do
     {:error, {:unauthorized, :capability}}
   end
 
@@ -399,6 +404,37 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
+  defp run_allowed("mission.get_own", payload, %Actor{principal: "attempt"} = actor) do
+    run_allowed("mission.get", payload, actor)
+  end
+
+  defp run_allowed("mission.get_own", _payload, _actor),
+    do: {:error, {:unauthorized, :capability}}
+
+  defp run_allowed("attempt.progress", payload, actor) do
+    Attempts.report_progress(payload["attempt_id"], actor, payload)
+    |> ok_attempt()
+  end
+
+  defp run_allowed("attempt.checkpoint", payload, actor) do
+    Attempts.request_checkpoint(payload["attempt_id"], actor, %{
+      reported_checkpoint_sha: payload["reported_checkpoint_sha"] || payload["checkpoint_sha"]
+    })
+    |> ok_attempt()
+  end
+
+  defp run_allowed("attempt.complete", payload, actor) do
+    Attempts.report_completion(payload["attempt_id"], actor)
+    |> ok_attempt()
+  end
+
+  defp run_allowed("attempt.fail", payload, actor) do
+    Attempts.report_failure(payload["attempt_id"], actor, %{
+      classification: payload["classification"]
+    })
+    |> ok_attempt()
+  end
+
   defp run_allowed("question.open", payload, actor) do
     Questions.open(
       %{
@@ -494,6 +530,11 @@ defmodule Consigliere.API.Protocol do
 
   defp ok_question({:ok, %{id: id, status: status}}), do: {:ok, %{"id" => id, "status" => status}}
   defp ok_question(other), do: other
+
+  defp ok_attempt({:ok, %{id: id, status: status}}),
+    do: {:ok, %{"id" => id, "status" => status}}
+
+  defp ok_attempt(other), do: other
 
   defp mission_payload(mission) do
     %{

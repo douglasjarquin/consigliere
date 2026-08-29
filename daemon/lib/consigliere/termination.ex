@@ -45,6 +45,7 @@ defmodule Consigliere.Termination do
     from(a in Attempt, where: a.mission_id == ^mission.id and a.status == "planned")
     |> Repo.all()
     |> Enum.each(fn attempt ->
+      Capabilities.revoke_for_attempt_txn(attempt.id)
       Txn.update!(Attempt.changeset(attempt, %{status: "canceled", finished_at: Txn.now()}))
       Txn.append_event!("attempt.canceled", "attempt", attempt.id, %{cause: to_string(cause)})
     end)
@@ -52,6 +53,7 @@ defmodule Consigliere.Termination do
 
   def request_attempt!(attempt, cause) do
     token = Txn.mint_fencing_token()
+    Capabilities.revoke_for_attempt_txn(attempt.id)
 
     attempt =
       Txn.update!(Attempt.changeset(attempt, %{status: "terminating", fencing_token: token}))
@@ -76,7 +78,6 @@ defmodule Consigliere.Termination do
       })
     )
 
-    _ = Capabilities.revoke_for_attempt(attempt.id)
     attempt
   end
 

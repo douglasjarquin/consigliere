@@ -22,8 +22,20 @@ defmodule Consigliere.API.Auth do
         if declared_mismatch?(req, cap) do
           {:error, "capability actor mismatch"}
         else
-          allow = get_in(cap.ops, ["allow"]) || []
-          Actor.attempt(cap.attempt_id, cap.fencing_token, allow)
+          case Consigliere.Capabilities.authorize(cap, req["op"], req) do
+            :ok ->
+              allow = get_in(cap.ops, ["allow"]) || []
+
+              Actor.attempt(
+                cap.attempt_id,
+                cap.fencing_token,
+                allow,
+                Consigliere.Capabilities.actor_metadata(cap)
+              )
+
+            {:error, reason} ->
+              {:error, reason}
+          end
         end
 
       {:error, _} ->

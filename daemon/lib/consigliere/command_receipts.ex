@@ -19,6 +19,18 @@ defmodule Consigliere.CommandReceipts do
   @max_key_bytes 256
   @max_detail_bytes 512
 
+  def scope(%Actor{
+        principal: "attempt",
+        attempt_id: id,
+        fencing_token: fence,
+        capability_id: capability_id,
+        capability_generation: generation
+      })
+      when is_binary(id) and id != "" and is_binary(fence) and fence != "" and
+             is_binary(capability_id) and capability_id != "" and is_integer(generation) do
+    "attempt:#{id}:#{fence}:capability:#{capability_id}:#{generation}"
+  end
+
   def scope(%Actor{principal: "attempt", attempt_id: id, fencing_token: fence})
       when is_binary(id) and id != "" and is_binary(fence) and fence != "" do
     "attempt:#{id}:#{fence}"
@@ -274,6 +286,18 @@ defmodule Consigliere.CommandReceipts do
         status: "committed"
       })
     )
+  end
+
+  defp authority_scope(%Actor{
+         principal: "attempt",
+         attempt_id: id,
+         fencing_token: fence,
+         capability_id: capability_id,
+         capability_generation: generation
+       })
+       when is_binary(id) and id != "" and is_binary(fence) and fence != "" and
+              is_binary(capability_id) and capability_id != "" and is_integer(generation) do
+    {:ok, "attempt:#{id}:#{fence}:capability:#{capability_id}:#{generation}"}
   end
 
   defp authority_scope(%Actor{principal: "attempt", attempt_id: id, fencing_token: fence})

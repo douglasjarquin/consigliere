@@ -11,6 +11,7 @@ defmodule Consigliere.Questions.Transitions do
   alias Consigliere.MissionBlockers.MissionBlocker
   alias Consigliere.Incidents.Incident
   alias Consigliere.OutboxItems.OutboxItem
+  alias Consigliere.Capabilities
 
   @openish ~w(open routed)
   @attempt_terminal ~w(completed failed lost canceled superseded)
@@ -222,10 +223,20 @@ defmodule Consigliere.Questions.Transitions do
 
       "attempt" ->
         cond do
-          actor.attempt_id != attempt.id -> Txn.fenced(attempt.id)
-          actor.fencing_token != attempt.fencing_token -> Txn.fenced(attempt.id)
-          attempt.status in @attempt_terminal -> Txn.fenced(attempt.id)
-          true -> :ok
+          actor.attempt_id != attempt.id ->
+            Txn.fenced(attempt.id)
+
+          actor.fencing_token != attempt.fencing_token ->
+            Txn.fenced(attempt.id)
+
+          attempt.status in @attempt_terminal ->
+            Txn.fenced(attempt.id)
+
+          true ->
+            case Capabilities.revalidate_actor(actor, attempt) do
+              :ok -> :ok
+              {:error, reason} -> Txn.unauthorized(reason)
+            end
         end
 
       _ ->

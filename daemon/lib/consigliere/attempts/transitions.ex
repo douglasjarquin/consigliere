@@ -7,6 +7,7 @@ defmodule Consigliere.Attempts.Transitions do
   alias Consigliere.Repo
   alias Consigliere.Txn
   alias Consigliere.Attempts.Attempt
+  alias Consigliere.Capabilities
   alias Consigliere.Missions.Mission
   alias Consigliere.Questions.Question
   alias Consigliere.MissionBlockers.MissionBlocker
@@ -107,6 +108,7 @@ defmodule Consigliere.Attempts.Transitions do
     Txn.require_principal(actor, ["daemon"])
     attempt = fetch!(attempt_id)
     require_status!(attempt, "starting", "failed")
+    Capabilities.revoke_for_attempt_txn(attempt.id)
 
     attempt =
       Txn.update!(
@@ -130,6 +132,53 @@ defmodule Consigliere.Attempts.Transitions do
     require_fence!(actor, attempt)
     require_status!(attempt, "running", "running")
     Txn.update!(Attempt.changeset(attempt, %{last_event_at: at}))
+  end
+
+  def report_progress(attempt_id, actor, attrs \\ %{}) do
+    DatabaseWriter.transaction(fn -> report_progress_txn(attempt_id, actor, attrs) end)
+  end
+
+  def report_progress_txn(attempt_id, actor, _attrs) do
+    attempt = fetch!(attempt_id)
+    require_fence!(actor, attempt)
+    require_live_report!(attempt, "progress")
+    attempt = Txn.update!(Attempt.changeset(attempt, %{last_event_at: Txn.now()}))
+    Txn.append_event!("attempt.progress", "attempt", attempt.id, %{"accepted" => true})
+    attempt
+  end
+
+  def report_completion(attempt_id, actor) do
+    DatabaseWriter.transaction(fn -> report_completion_txn(attempt_id, actor) end)
+  end
+
+  def report_completion_txn(attempt_id, actor) do
+    attempt = fetch!(attempt_id)
+    require_fence!(actor, attempt)
+    require_live_report!(attempt, "completion")
+
+    attempt =
+      Txn.update!(Attempt.changeset(attempt, %{exit_classification: "completion_reported"}))
+
+    Txn.append_event!("attempt.completion_reported", "attempt", attempt.id)
+    attempt
+  end
+
+  def report_failure(attempt_id, actor, attrs \\ %{}) do
+    DatabaseWriter.transaction(fn -> report_failure_txn(attempt_id, actor, attrs) end)
+  end
+
+  def report_failure_txn(attempt_id, actor, attrs) do
+    attempt = fetch!(attempt_id)
+    require_fence!(actor, attempt)
+    require_live_report!(attempt, "failure")
+    classification = failure_classification(attrs)
+    attempt = Txn.update!(Attempt.changeset(attempt, %{exit_classification: classification}))
+
+    Txn.append_event!("attempt.failure_reported", "attempt", attempt.id, %{
+      "class" => classification
+    })
+
+    attempt
   end
 
   def request_checkpoint(attempt_id, actor, attrs \\ %{}) do
@@ -165,6 +214,8 @@ defmodule Consigliere.Attempts.Transitions do
     if Map.get(attrs, :process_group) != :dead_verified do
       Txn.illegal(attempt.status, "checkpointed", :death_not_verified)
     end
+
+    Capabilities.revoke_for_attempt_txn(attempt.id)
 
     sha = Map.fetch!(attrs, :imported_sha)
 
@@ -252,6 +303,7 @@ defmodule Consigliere.Attempts.Transitions do
     end
 
     require_dead!(attempt, attrs, "completed")
+    Capabilities.revoke_for_attempt_txn(attempt.id)
 
     attempt =
       Txn.update!(Attempt.changeset(attempt, %{status: "completed", finished_at: Txn.now()}))
@@ -289,6 +341,8 @@ defmodule Consigliere.Attempts.Transitions do
       require_dead!(attempt, attrs, "failed")
     end
 
+    Capabilities.revoke_for_attempt_txn(attempt.id)
+
     attempt =
       Txn.update!(
         Attempt.changeset(attempt, %{
@@ -311,6 +365,7 @@ defmodule Consigliere.Attempts.Transitions do
     attempt = fetch!(attempt_id)
     refuse_terminal!(attempt, "canceled")
     require_dead!(attempt, attrs, "canceled")
+    Capabilities.revoke_for_attempt_txn(attempt.id)
 
     attempt =
       Txn.update!(
@@ -338,6 +393,7 @@ defmodule Consigliere.Attempts.Transitions do
     end
 
     inventory = Map.fetch!(attrs, :inventory)
+    Capabilities.revoke_for_attempt_txn(attempt.id)
 
     if attempt.workspace_id && inventory == :unconfirmed do
       workspace = Repo.get!(Workspace, attempt.workspace_id)
@@ -375,6 +431,7 @@ defmodule Consigliere.Attempts.Transitions do
     Txn.require_principal(actor, ["daemon", "boss"])
     attempt = fetch!(attempt_id)
     refuse_terminal!(attempt, "superseded")
+    Capabilities.revoke_for_attempt_txn(attempt.id)
 
     replacement =
       schedule_txn(
@@ -435,13 +492,37 @@ defmodule Consigliere.Attempts.Transitions do
 
   defp require_fence!(actor, attempt) do
     cond do
-      actor.principal != "attempt" -> Txn.unauthorized(:principal)
-      actor.attempt_id != attempt.id -> Txn.fenced(attempt.id)
-      actor.fencing_token != attempt.fencing_token -> Txn.fenced(attempt.id)
-      attempt.status in @terminal -> Txn.fenced(attempt.id)
-      true -> :ok
+      actor.principal != "attempt" ->
+        Txn.unauthorized(:principal)
+
+      actor.attempt_id != attempt.id ->
+        Txn.fenced(attempt.id)
+
+      actor.fencing_token != attempt.fencing_token ->
+        Txn.fenced(attempt.id)
+
+      attempt.status in @terminal ->
+        Txn.fenced(attempt.id)
+
+      true ->
+        case Capabilities.revalidate_actor(actor, attempt) do
+          :ok -> :ok
+          {:error, reason} -> Txn.unauthorized(reason)
+        end
     end
   end
+
+  defp require_live_report!(attempt, report) do
+    unless attempt.status in ~w(running checkpoint_requested) do
+      Txn.illegal(attempt.status, report, :attempt_not_live)
+    end
+  end
+
+  defp failure_classification(%{classification: classification})
+       when classification in ["failed", "protocol_failure", "harness_failed", "canceled"],
+       do: classification
+
+  defp failure_classification(_), do: "failed"
 
   defp require_request_checkpoint_actor!(actor, attempt) do
     case actor.principal do
