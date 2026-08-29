@@ -28,13 +28,41 @@ defmodule Consigliere.Home.Lock do
     Path.join(:code.priv_dir(:consigliere_daemon), "cs_lock_probe")
   end
 
+  def with_lock(home \\ Home.dir(), fun) when is_function(fun, 0) do
+    home = Path.expand(home)
+
+    case :global.whereis_name({__MODULE__, home}) do
+      pid when is_pid(pid) ->
+        {:ok, fun.()}
+
+      :undefined ->
+        Home.prepare_root!(home)
+
+        case NIF.acquire(Home.lock_path(home)) do
+          {:ok, lock} ->
+            try do
+              {:ok, fun.()}
+            after
+              NIF.release(lock)
+            end
+
+          {:error, :busy} ->
+            {:error, :already_running}
+
+          {:error, reason} ->
+            {:error, {:lock_failed, reason}}
+        end
+    end
+  end
+
   @impl true
   def init(opts) do
     home = opts[:home] || Home.dir()
-    Home.prepare_dir!(home)
+    Home.prepare_root!(home)
 
     case NIF.acquire(Home.lock_path(home)) do
       {:ok, lock} ->
+        Home.ensure_dir!(home)
         Home.write_owner!(home)
         Home.ensure_secrets!(home)
         bind_probe_socket(home, lock)

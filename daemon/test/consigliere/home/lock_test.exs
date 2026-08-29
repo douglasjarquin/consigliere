@@ -1,6 +1,8 @@
 defmodule Consigliere.Home.LockTest do
   use ExUnit.Case, async: true
 
+  import Bitwise
+
   alias Consigliere.Home
   alias Consigliere.Home.Lock
 
@@ -47,6 +49,29 @@ defmodule Consigliere.Home.LockTest do
     Port.close(port)
   end
 
+  test "an external fcntl holder blocks a migration callback", %{home: home} do
+    Process.flag(:trap_exit, true)
+    File.mkdir_p!(home)
+    lock_path = Home.lock_path(home)
+    probe = Lock.probe_binary()
+
+    port =
+      Port.open({:spawn_executable, probe}, [:binary, :exit_status, args: ["hold", lock_path]])
+
+    assert_receive {^port, {:data, "held\n"}}, 2_000
+
+    marker = Path.join(home, "callback-ran")
+
+    assert {:error, :already_running} =
+             Lock.with_lock(home, fn -> File.write!(marker, "ran") end)
+
+    refute File.exists?(marker)
+    refute File.exists?(Home.boss_credential_path(home))
+    refute File.exists?(Home.owner_path(home))
+
+    Port.close(port)
+  end
+
   test "a stale lock file without a holder does not block startup", %{home: home} do
     File.mkdir_p!(home)
     File.write!(Home.lock_path(home), "leftover")
@@ -83,6 +108,30 @@ defmodule Consigliere.Home.LockTest do
 
     assert {:ok, pid2} = Lock.start_link(home: home)
     GenServer.stop(pid2)
+  end
+
+  test "lock-owned home trees and metadata are owner-only", %{home: home} do
+    assert {:ok, pid} = Lock.start_link(home: home)
+
+    for path <- [
+          home,
+          Home.credentials_dir(home),
+          Path.dirname(Home.trusted_projects_dir(home)),
+          Home.trusted_projects_dir(home),
+          Home.workspaces_dir(home),
+          Path.dirname(Home.runtime_attempts_dir(home)),
+          Home.runtime_attempts_dir(home),
+          Home.evidence_dir(home),
+          Home.logs_dir(home)
+        ] do
+      assert (File.stat!(path).mode &&& 0o777) == 0o700, "#{path} is not owner-only"
+    end
+
+    for path <- [Home.lock_path(home), Home.owner_path(home), Home.boss_socket_path(home)] do
+      assert (File.stat!(path).mode &&& 0o777) == 0o600, "#{path} is not private"
+    end
+
+    GenServer.stop(pid)
   end
 
   test "the socket file is removed when the lock holder stops cleanly", %{home: home} do

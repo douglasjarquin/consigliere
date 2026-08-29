@@ -363,6 +363,11 @@ func runDoctor(home Home, jsonOut bool, stdout, stderr io.Writer) int {
 		"priv_socket": string(priv),
 		"api_socket":  string(api),
 	}
+	ownerState, ownerReason := ProbeOwner(home.OwnerPath())
+	doc["owner"] = string(ownerState)
+	if ownerReason != "" {
+		doc["owner_error"] = ownerReason
+	}
 	if err := home.LastError(); err != "" {
 		doc["last_error"] = err
 	}

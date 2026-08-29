@@ -82,6 +82,20 @@ func TestStatusAbsent(t *testing.T) {
 	}
 }
 
+func TestStatusReportsMalformedOwnerMetadata(t *testing.T) {
+	dir := t.TempDir()
+	home := client.Home{Dir: dir}
+	if err := os.WriteFile(home.OwnerPath(), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	_ = Status(home, &out)
+	if !strings.Contains(out.String(), "owner=malformed") {
+		t.Fatalf("out=%q", out.String())
+	}
+}
+
 func TestStop_ForeignPIDIsNeverSignaled(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CS_LAUNCH_AGENTS_DIR", filepath.Join(dir, "LaunchAgents"))

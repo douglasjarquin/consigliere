@@ -11,16 +11,29 @@ defmodule Consigliere.Home do
     home
   end
 
-  def prepare_dir!(home \\ dir()) do
+  def prepare_root!(home \\ dir()) do
     File.mkdir_p!(home)
     File.chmod!(home, 0o700)
-    File.mkdir_p!(credentials_dir(home))
-    File.mkdir_p!(trusted_projects_dir(home))
-    File.mkdir_p!(workspaces_dir(home))
-    File.mkdir_p!(runtime_attempts_dir(home))
-    File.mkdir_p!(evidence_dir(home))
-    File.mkdir_p!(logs_dir(home))
-    File.chmod!(credentials_dir(home), 0o700)
+    home
+  end
+
+  def prepare_dir!(home \\ dir()) do
+    [
+      home,
+      credentials_dir(home),
+      Path.dirname(trusted_projects_dir(home)),
+      trusted_projects_dir(home),
+      workspaces_dir(home),
+      Path.dirname(runtime_attempts_dir(home)),
+      runtime_attempts_dir(home),
+      evidence_dir(home),
+      logs_dir(home)
+    ]
+    |> Enum.each(fn path ->
+      File.mkdir_p!(path)
+      File.chmod!(path, 0o700)
+    end)
+
     home
   end
 

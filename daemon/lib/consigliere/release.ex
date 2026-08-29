@@ -8,23 +8,39 @@ defmodule Consigliere.Release do
   def migrate do
     load()
 
-    {:ok, _, _} =
-      Ecto.Migrator.with_repo(Consigliere.Repo, &Ecto.Migrator.run(&1, :up, all: true))
+    with_home_lock(fn ->
+      {:ok, _, _} =
+        Ecto.Migrator.with_repo(Consigliere.Repo, &Ecto.Migrator.run(&1, :up, all: true))
 
-    :ok
+      :ok
+    end)
   end
 
   def rollback(version) do
     load()
 
-    {:ok, _, _} =
-      Ecto.Migrator.with_repo(Consigliere.Repo, &Ecto.Migrator.run(&1, :down, to: version))
+    with_home_lock(fn ->
+      {:ok, _, _} =
+        Ecto.Migrator.with_repo(Consigliere.Repo, &Ecto.Migrator.run(&1, :down, to: version))
 
-    :ok
+      :ok
+    end)
   end
 
   defp load do
     Application.load(@app)
-    Consigliere.Home.ensure_dir!()
+  end
+
+  defp with_home_lock(fun) do
+    case Consigliere.Home.Lock.with_lock(Consigliere.Home.dir(), fun) do
+      {:ok, result} ->
+        result
+
+      {:error, :already_running} ->
+        raise "CS_HOME already owned by another daemon"
+
+      {:error, reason} ->
+        raise "unable to lock CS_HOME: #{inspect(reason)}"
+    end
   end
 end

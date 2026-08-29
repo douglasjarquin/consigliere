@@ -66,14 +66,18 @@ const (
 type LockState string
 
 const (
-	LockHeld    LockState = "held"
-	LockUnowned LockState = "unowned"
-	LockStale   LockState = "stale"
+	LockHeld       LockState = "held"
+	LockUnowned    LockState = "unowned"
+	LockStale      LockState = "stale"
+	LockPermission LockState = "permission"
 )
 
 func ProbeLock(path string) (LockState, int) {
 	fd, err := unixOpen(path)
 	if err != nil {
+		if os.IsPermission(err) {
+			return LockPermission, 0
+		}
 		if os.IsNotExist(err) {
 			return LockUnowned, 0
 		}

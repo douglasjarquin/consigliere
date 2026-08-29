@@ -233,6 +233,20 @@ func TestDoctorAbsentJSON(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsMalformedOwnerMetadata(t *testing.T) {
+	dir := shortDir(t)
+	t.Setenv("CS_HOME", dir)
+	if err := os.WriteFile(filepath.Join(dir, "owner.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb strings.Builder
+	_ = Run([]string{"--json", "doctor"}, &out, &errb)
+	if !strings.Contains(out.String(), `"owner":"malformed"`) {
+		t.Fatalf("out=%q stderr=%q", out.String(), errb.String())
+	}
+}
+
 func TestVersionWithoutDaemon(t *testing.T) {
 	dir := shortDir(t)
 	t.Setenv("CS_HOME", dir)

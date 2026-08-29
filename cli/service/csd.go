@@ -228,14 +228,7 @@ func waitLive(home client.Home, d time.Duration) error {
 func Status(home client.Home, stdout io.Writer) int {
 	priv := client.Probe(home.PrivilegedSocket())
 	lock, holder := client.ProbeLock(home.LockPath())
-	ownerState := "absent"
-	if owner, err := readOwner(home); err == nil {
-		if identityMatches(home, owner) != nil {
-			ownerState = "stale"
-		} else {
-			ownerState = "verified"
-		}
-	}
+	ownerState := ownerDiagnostic(home)
 	fmt.Fprintf(stdout, "home=%s priv=%s api=%s boss=%s lock=%s holder=%d owner=%s\n",
 		home.Dir, priv, client.Probe(home.APISocket()), client.Probe(home.BossSocket()),
 		lock, holder, ownerState)
@@ -249,6 +242,23 @@ func Status(home client.Home, stdout io.Writer) int {
 		return client.ExitStale
 	}
 	return client.ExitAbsent
+}
+
+func ownerDiagnostic(home client.Home) string {
+	owner, err := readOwner(home)
+	if err != nil {
+		if os.IsPermission(err) {
+			return "permission"
+		}
+		if os.IsNotExist(err) {
+			return "absent"
+		}
+		return "malformed"
+	}
+	if err := identityMatches(home, owner); err != nil {
+		return "stale"
+	}
+	return "verified"
 }
 
 func Logs(home client.Home, stdout, stderr io.Writer) int {
