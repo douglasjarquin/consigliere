@@ -7,6 +7,8 @@ defmodule Consigliere.Harness.Codex do
   @behaviour Consigliere.Harness.Adapter
 
   @max_text 4_096
+  @max_version_output 1_024
+  @version_timeout_ms 2_000
 
   @impl true
   def capabilities do
@@ -33,9 +35,10 @@ defmodule Consigliere.Harness.Codex do
     workspace = Keyword.get(opts, :workspace_path, ".")
     prompt = Keyword.fetch!(opts, :prompt)
     policy = Keyword.get(opts, :policy, %{})
+    binary = Keyword.get(opts, :codex_binary) || binary!()
 
     [
-      binary!(),
+      binary,
       "exec",
       "--json",
       "--skip-git-repo-check",
@@ -57,6 +60,25 @@ defmodule Consigliere.Harness.Codex do
     System.get_env("CS_CODEX_BIN") || System.find_executable("codex") ||
       raise("production harness missing: set CS_CODEX_BIN or install codex")
   end
+
+  def fresh_invocation_id do
+    Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+  end
+
+  def version(binary) when is_binary(binary) do
+    port =
+      Port.open({:spawn_executable, binary}, [
+        :binary,
+        :exit_status,
+        args: ["--version"]
+      ])
+
+    collect_version(port, "", System.monotonic_time(:millisecond) + @version_timeout_ms)
+  rescue
+    _ -> {:error, :version_unavailable}
+  end
+
+  def version(_binary), do: {:error, :version_unavailable}
 
   @impl true
   def start(_spec), do: {:error, :runner_owned}
@@ -122,25 +144,29 @@ defmodule Consigliere.Harness.Codex do
         {:event, "question.requested", Map.get(map, "payload", map)}
 
       "turn.completed" ->
-        {:event, "session.completed", %{"usage" => map["usage"] || %{}}}
+        {:event, "session.completed", %{"usage" => usage_payload(map["usage"] || %{})}}
 
       "turn.failed" ->
-        {:event, "session.failed", %{"reason" => failed_reason(map), "class" => "turn_failed"}}
+        reason = failed_reason(map)
+        {:event, "session.failed", %{"reason" => reason, "class" => turn_failure_class(reason)}}
 
       "thread.completed" ->
-        {:event, "session.completed", %{}}
+        :ignore
 
       "session.completed" ->
-        {:event, "session.completed", %{}}
+        {:event, "session.completed", %{"usage" => usage_payload(map["usage"] || %{})}}
 
       "session.failed" ->
-        {:event, "session.failed", %{"reason" => map["reason"] || map["class"] || "failed"}}
+        reason = map["reason"] || map["class"] || "failed"
+        {:event, "session.failed", %{"reason" => reason, "class" => failure_class(reason)}}
 
       "error" ->
-        {:event, "session.failed", %{"reason" => map["message"] || "error", "class" => "fatal"}}
+        reason = map["message"] || nested_error_message(map) || "error"
+        class = failure_class(map["code"] || reason)
+        {:event, "session.failed", %{"reason" => reason, "class" => class}}
 
       "usage.updated" ->
-        {:event, "usage.updated", Map.get(map, "payload", map)}
+        {:event, "usage.updated", usage_payload(Map.get(map, "payload", map))}
 
       _ ->
         :ignore
@@ -169,6 +195,98 @@ defmodule Consigliere.Harness.Codex do
       %{"message" => msg} when is_binary(msg) -> msg
       _ -> "turn_failed"
     end
+  end
+
+  defp nested_error_message(%{"error" => %{"message" => message}})
+       when is_binary(message),
+       do: message
+
+  defp nested_error_message(_), do: nil
+
+  defp failure_class(reason) when is_binary(reason) do
+    normalized = String.downcase(reason)
+
+    cond do
+      normalized =~ ~r/auth|credential|unauthori[sz]ed|login/ -> "authentication_error"
+      normalized =~ ~r/budget|token limit|usage limit|quota/ -> "budget_error"
+      true -> "infrastructure_error"
+    end
+  end
+
+  defp failure_class(_), do: "infrastructure_error"
+
+  defp turn_failure_class(reason) do
+    case failure_class(reason) do
+      "authentication_error" -> "authentication_error"
+      "budget_error" -> "budget_error"
+      _ -> "semantic_failure"
+    end
+  end
+
+  defp usage_payload(payload) when is_map(payload) do
+    source = Map.get(payload, "usage", payload)
+
+    if is_map(source) do
+      %{}
+      |> put_counter("input_tokens", source)
+      |> put_counter("output_tokens", source)
+      |> put_counter("cached_input_tokens", source)
+      |> put_counter("total_tokens", source)
+    else
+      %{}
+    end
+  end
+
+  defp usage_payload(_), do: %{}
+
+  defp put_counter(result, key, source) do
+    case Map.get(source, key) do
+      value when is_integer(value) and value >= 0 and value <= 2_147_483_647 ->
+        Map.put(result, key, value)
+
+      _ ->
+        result
+    end
+  end
+
+  defp collect_version(port, output, deadline) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      close_port(port)
+      {:error, :version_timeout}
+    else
+      receive do
+        {^port, {:data, data}} ->
+          next = output <> data
+
+          if byte_size(next) > @max_version_output do
+            close_port(port)
+            {:error, :version_output_too_large}
+          else
+            collect_version(port, next, deadline)
+          end
+
+        {^port, {:exit_status, 0}} ->
+          case String.trim(output) do
+            "" -> {:error, :version_empty}
+            version -> {:ok, version}
+          end
+
+        {^port, {:exit_status, status}} ->
+          {:error, {:version_exit, status}}
+      after
+        remaining ->
+          close_port(port)
+          {:error, :version_timeout}
+      end
+    end
+  end
+
+  defp close_port(port) do
+    Port.close(port)
+  rescue
+    _ -> :ok
   end
 
   defp bound_text(text) when is_binary(text) do

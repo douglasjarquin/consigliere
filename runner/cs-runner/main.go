@@ -311,6 +311,7 @@ func runAuthenticated(identity InvocationIdentity, manifestPath, controlSocketPa
 
 	select {
 	case result := <-harnessExited:
+		forwarder.Wait(time.Second)
 		_ = cc.SendFrame(map[string]any{
 			"type":       "harness_exited",
 			"attempt_id": identity.AttemptID,

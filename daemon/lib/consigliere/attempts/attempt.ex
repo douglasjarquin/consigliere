@@ -24,6 +24,14 @@ defmodule Consigliere.Attempts.Attempt do
     field(:reported_checkpoint_sha, :string)
     field(:native_session_id, :string)
     field(:input_context_hash, :string)
+    field(:invocation_id, :string)
+    field(:model, :string)
+    field(:reasoning_effort, :string)
+    field(:sandbox, :string)
+    field(:approval, :string)
+    field(:cli_version, :string)
+    field(:context_bytes, :integer)
+    field(:context_input_tokens, :integer)
     field(:last_native_sequence, :integer)
     field(:last_event_at, :utc_datetime_usec)
     field(:started_at, :utc_datetime_usec)
@@ -43,6 +51,14 @@ defmodule Consigliere.Attempts.Attempt do
     :reported_checkpoint_sha,
     :native_session_id,
     :input_context_hash,
+    :invocation_id,
+    :model,
+    :reasoning_effort,
+    :sandbox,
+    :approval,
+    :cli_version,
+    :context_bytes,
+    :context_input_tokens,
     :last_native_sequence,
     :last_event_at,
     :started_at,

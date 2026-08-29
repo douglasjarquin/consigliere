@@ -5,6 +5,7 @@ defmodule Consigliere.MissionGrantDispatchTest do
   alias Consigliere.Attempts.Attempt
   alias Consigliere.Fixtures
   alias Consigliere.GlobalScheduler
+  alias Consigliere.Harness.ContextPack
   alias Consigliere.MissionCoordinator
   alias Consigliere.MissionDynamicSupervisor
   alias Consigliere.Missions
@@ -31,6 +32,21 @@ defmodule Consigliere.MissionGrantDispatchTest do
     assert attempt.status in ~w(starting running)
     assert is_binary(attempt.input_context_hash)
     assert byte_size(attempt.input_context_hash) == 64
+    assert is_binary(attempt.invocation_id)
+    assert attempt.model == "gpt-5"
+    assert attempt.reasoning_effort == "high"
+    assert attempt.sandbox == "workspace-write"
+    assert attempt.approval == "never"
+    assert attempt.cli_version == "fake-adapter"
+    assert is_integer(attempt.context_bytes)
+    assert attempt.context_input_tokens <= 8_192
+
+    context_path =
+      Path.join(Consigliere.Home.runtime_attempts_dir(), "#{attempt.id}/context_pack.json")
+
+    assert {:ok, context_stat} = File.stat(context_path)
+    assert context_stat.mode == 0o100600
+    assert ContextPack.hash(File.read!(context_path)) == attempt.input_context_hash
 
     assert {:ok, _} = MissionDynamicSupervisor.start_mission(mission_id: mission.id)
     assert length(Repo.all(from_attempts(mission.id))) == 1

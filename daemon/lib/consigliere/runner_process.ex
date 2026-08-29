@@ -14,6 +14,8 @@ defmodule Consigliere.RunnerProcess do
   alias Consigliere.ProcessGroup
   alias Consigliere.Repo
   alias Consigliere.RunnerLauncher
+  alias Consigliere.Harness.UsageLedger
+  alias Consigliere.Harness.Redaction
 
   def child_spec(opts) do
     %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}, restart: :temporary}
@@ -48,7 +50,7 @@ defmodule Consigliere.RunnerProcess do
     runtime = runtime_dir(attempt_id)
     File.mkdir_p!(runtime)
     File.chmod!(runtime, 0o700)
-    invocation_id = invocation_id()
+    invocation_id = Keyword.get(opts, :invocation_id) || invocation_id()
     {invocation_runtime, control_socket_path} = invocation_runtime(runtime, invocation_id)
     File.mkdir_p!(invocation_runtime)
     File.chmod!(invocation_runtime, 0o700)
@@ -67,13 +69,18 @@ defmodule Consigliere.RunnerProcess do
          ) do
       {:ok, session} ->
         :ok = :inet.setopts(session.socket, active: :once)
-        maybe_persist_started(attempt_id, session, fencing_token)
+        maybe_persist_started(attempt_id, session, fencing_token, invocation_id)
 
         {:ok,
          %{
            attempt_id: attempt_id,
+           mission_id: mission_id,
            fencing_token: fencing_token,
            session: session,
+           invocation_id: invocation_id,
+           project_id: Keyword.get(opts, :project_id),
+           context_hash: Keyword.get(opts, :context_hash),
+           policy: Keyword.get(opts, :policy, %{}),
            heartbeat_count: 0,
            stop_reason: nil
          }}
@@ -204,7 +211,7 @@ defmodule Consigliere.RunnerProcess do
     append_attempt_log(state.attempt_id, data)
     adapter = Adapters.harness()
 
-    if function_exported?(adapter, :decode_line, 1) do
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :decode_line, 1) do
       data
       |> to_string()
       |> String.split("\n", trim: true)
@@ -217,7 +224,7 @@ defmodule Consigliere.RunnerProcess do
   defp ingest_decoded({:event, type, payload}, state) do
     seq = Map.get(state, :native_seq, 0) + 1
 
-    _ =
+    result =
       Consigliere.Harness.Events.ingest(
         %{
           "event_id" => "#{type}-#{state.attempt_id}-#{seq}",
@@ -229,7 +236,16 @@ defmodule Consigliere.RunnerProcess do
         Actor.attempt(state.attempt_id, state.fencing_token)
       )
 
-    Map.put(state, :native_seq, seq)
+    case result do
+      {:ok, outcome} when outcome in [:accepted, :duplicate] ->
+        state = maybe_record_session(payload, state)
+
+        maybe_record_usage(type, payload, state)
+        |> Map.put(:native_seq, seq)
+
+      _ ->
+        state
+    end
   rescue
     _ -> state
   end
@@ -239,10 +255,39 @@ defmodule Consigliere.RunnerProcess do
   defp append_attempt_log(attempt_id, data) do
     path = Path.join(Consigliere.Home.logs_dir(), "attempts/#{attempt_id}.log")
     File.mkdir_p!(Path.dirname(path))
-    File.write!(path, to_string(data), [:append])
+    File.write!(path, Redaction.text(data), [:append])
   rescue
     _ -> :ok
   end
+
+  defp maybe_record_session(%{"native_session_id" => session_id}, state)
+       when is_binary(session_id) and session_id != "" do
+    Map.put(state, :native_session_id, String.slice(session_id, 0, 256))
+  end
+
+  defp maybe_record_session(_payload, state), do: state
+
+  defp maybe_record_usage(type, payload, state)
+       when type in ["usage.updated", "session.completed"] do
+    usage = Map.get(payload, "usage", payload)
+
+    identity = %{
+      system: "consigliere",
+      project_id: state.project_id,
+      mission_id: state.mission_id,
+      attempt_id: state.attempt_id,
+      session_id: Map.get(state, :native_session_id),
+      model: state.policy["model"],
+      effort: state.policy["effort"],
+      cli_version: state.policy["cli_version"],
+      context_hash: state.context_hash
+    }
+
+    _ = UsageLedger.record(identity, usage, Consigliere.Home.dir())
+    state
+  end
+
+  defp maybe_record_usage(_type, _payload, state), do: state
 
   defp classify_exit(reason, state) do
     with {:ok, id} <- Ecto.UUID.cast(state.attempt_id),
@@ -321,14 +366,15 @@ defmodule Consigliere.RunnerProcess do
     end
   end
 
-  defp maybe_persist_started(attempt_id, session, fencing_token) do
+  defp maybe_persist_started(attempt_id, session, fencing_token, invocation_id) do
     with {:ok, id} <- Ecto.UUID.cast(attempt_id),
          %Attempt{status: "starting"} <- Repo.get(Attempt, id) do
       Attempts.mark_running(id, Actor.system(), %{
         fencing_token: fencing_token,
         runner_pid: session.runner_os_pid,
         harness_pid: session.harness_pid,
-        pgid: session.pgid
+        pgid: session.pgid,
+        invocation_id: invocation_id
       })
     else
       _ -> :ok

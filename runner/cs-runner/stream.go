@@ -4,6 +4,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const streamChunkBuf = 32 * 1024
@@ -19,10 +20,11 @@ const streamQueueSize = 256
 type streamForwarder struct {
 	chunks chan map[string]any
 	wg     sync.WaitGroup
+	done   chan struct{}
 }
 
 func startStreamForwarder(stdout, stderr io.Reader, attemptID, fencingToken string) *streamForwarder {
-	f := &streamForwarder{chunks: make(chan map[string]any, streamQueueSize)}
+	f := &streamForwarder{chunks: make(chan map[string]any, streamQueueSize), done: make(chan struct{})}
 	var stdoutSeq, stderrSeq atomic.Int64
 	f.wg.Add(2)
 	go f.pump(stdout, "stdout_chunk", attemptID, fencingToken, &stdoutSeq)
@@ -66,6 +68,7 @@ func (f *streamForwarder) pump(r io.Reader, msgType, attemptID, fencingToken str
 // stdout_chunk as its first message and treat it as a protocol error.
 func (f *streamForwarder) Attach(cc *ControlChannel) {
 	go func() {
+		defer close(f.done)
 		for msg := range f.chunks {
 			if err := cc.SendFrame(msg); err != nil {
 				for range f.chunks {
@@ -74,4 +77,11 @@ func (f *streamForwarder) Attach(cc *ControlChannel) {
 			}
 		}
 	}()
+}
+
+func (f *streamForwarder) Wait(timeout time.Duration) {
+	select {
+	case <-f.done:
+	case <-time.After(timeout):
+	}
 }

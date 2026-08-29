@@ -96,6 +96,34 @@ defmodule Consigliere.Harness.CodexTest do
     assert Enum.any?(fatal, &match?({:event, "session.failed", _}, &1))
   end
 
+  test "decode_line keeps semantic, authentication, and budget failures distinct" do
+    assert {:event, "session.failed", %{"class" => "semantic_failure"}} =
+             Codex.decode_line(~s({"type":"turn.failed","message":"invalid task result"}))
+
+    assert {:event, "session.failed", %{"class" => "authentication_error"}} =
+             Codex.decode_line(~s({"type":"turn.failed","message":"authentication failed"}))
+
+    assert {:event, "session.failed", %{"class" => "authentication_error"}} =
+             Codex.decode_line(~s({"type":"error","message":"authentication failed"}))
+
+    assert {:event, "session.failed", %{"class" => "budget_error"}} =
+             Codex.decode_line(~s({"type":"error","message":"token budget exceeded"}))
+  end
+
+  test "thread completion is not a second semantic terminal event" do
+    assert Codex.decode_line(~s({"type":"thread.completed"})) == :ignore
+  end
+
+  test "version reports a bounded configured CLI version" do
+    script = Path.join(System.tmp_dir!(), "codex-version-#{System.unique_integer([:positive])}")
+    File.write!(script, "#!/bin/sh\necho 'codex 1.2.3'\n")
+    File.chmod!(script, 0o700)
+
+    on_exit(fn -> File.rm(script) end)
+
+    assert {:ok, "codex 1.2.3"} = Codex.version(script)
+  end
+
   test "item-level warnings do not prevent a later successful turn.completed" do
     types = Enum.map(decode_fixture("item_warning_then_success.jsonl"), &elem(&1, 1))
     assert "session.completed" in types

@@ -139,41 +139,50 @@ defmodule Consigliere.Dispatch do
          workspace: workspace,
          workspace_generation: workspace_generation
        }} ->
-        policy = Codex.policy(project)
+        case execution_policy(project) do
+          {:error, reason} ->
+            fail_launch(state, launch_mission, launch_attempt, reason)
 
-        extras = %{
-          workspace_path: workspace,
-          base_sha: launch_mission.base_sha,
-          role: launch_attempt.role
-        }
+          {:ok, policy, harness_binary} ->
+            invocation_id = launch_attempt.invocation_id || Codex.fresh_invocation_id()
 
-        case ContextPack.compose(launch_mission, extras) do
-          {:error, :too_large} ->
-            _ =
-              Attempts.mark_spawn_failed(
-                launch_attempt.id,
-                Actor.system(),
-                "context pack too large"
-              )
+            extras = %{
+              attempt_id: launch_attempt.id,
+              workspace_id: launch_attempt.workspace_id,
+              workspace_path: workspace,
+              workspace_generation: workspace_generation,
+              fencing_generation: launch_attempt.fencing_token,
+              invocation_id: invocation_id,
+              base_sha: launch_mission.base_sha,
+              role: launch_attempt.role,
+              model: policy["model"],
+              effort: policy["effort"],
+              sandbox: policy["sandbox"],
+              approval: policy["approval"],
+              cli_version: policy["cli_version"]
+            }
 
-            mark_dispatch_failed(launch_attempt, :context_pack_too_large)
+            case ContextPack.compose(launch_mission, extras) do
+              {:error, :too_large} ->
+                fail_launch(state, launch_mission, launch_attempt, :context_pack_too_large)
 
-            GlobalScheduler.release_slot(launch_mission.id)
-            %{state | slot: nil, attempt_id: launch_attempt.id, runner_pid: nil}
+              {:ok, pack} ->
+                {:ok, launch_attempt} =
+                  persist_pack(launch_attempt, pack, policy, invocation_id)
 
-          {:ok, pack} ->
-            {:ok, launch_attempt} = persist_pack(launch_attempt, pack, policy)
-
-            start_runner(
-              state,
-              launch_mission,
-              grant,
-              launch_attempt,
-              workspace,
-              workspace_generation,
-              pack,
-              policy
-            )
+                start_runner(
+                  state,
+                  launch_mission,
+                  grant,
+                  launch_attempt,
+                  workspace,
+                  workspace_generation,
+                  pack,
+                  policy,
+                  harness_binary,
+                  invocation_id
+                )
+            end
         end
     end
   end
@@ -217,12 +226,27 @@ defmodule Consigliere.Dispatch do
 
   defp trusted_project?(_), do: false
 
-  defp start_runner(state, mission, grant, attempt, workspace, workspace_generation, pack, policy) do
+  defp start_runner(
+         state,
+         mission,
+         grant,
+         attempt,
+         workspace,
+         workspace_generation,
+         pack,
+         policy,
+         harness_binary,
+         invocation_id
+       ) do
     {:ok, capability} = Capabilities.mint(attempt)
     runtime = Path.join(Home.runtime_attempts_dir(), attempt.id)
     File.mkdir_p!(runtime)
-    File.write!(Path.join(runtime, "context_pack.json"), pack.encoded)
-    File.write!(Path.join(runtime, "dispatch.json"), JSON.encode!(policy))
+    context_path = Path.join(runtime, "context_pack.json")
+    dispatch_path = Path.join(runtime, "dispatch.json")
+    File.write!(context_path, pack.encoded)
+    File.write!(dispatch_path, JSON.encode!(policy))
+    File.chmod!(context_path, 0o600)
+    File.chmod!(dispatch_path, 0o600)
 
     spec =
       {RunnerProcess,
@@ -235,7 +259,11 @@ defmodule Consigliere.Dispatch do
          workspace_generation: workspace_generation,
          capability: capability,
          prompt: pack.encoded,
-         policy: policy
+         policy: policy,
+         project_id: mission.project_id,
+         context_hash: pack.hash,
+         invocation_id: invocation_id,
+         codex_binary: harness_binary
        ]}
 
     case DynamicSupervisor.start_child(RunnerDynamicSupervisor, spec) do
@@ -295,15 +323,57 @@ defmodule Consigliere.Dispatch do
     _ -> :ok
   end
 
-  defp persist_pack(attempt, pack, _policy) do
+  defp persist_pack(attempt, pack, policy, invocation_id) do
     DatabaseWriter.transaction(fn ->
       Txn.update!(
         Attempt.changeset(attempt, %{
           input_context_hash: pack.hash,
-          harness: Adapters.harness().capabilities()["harness_name"]
+          harness: Adapters.harness().capabilities()["harness_name"],
+          invocation_id: invocation_id,
+          model: policy["model"],
+          reasoning_effort: policy["effort"],
+          sandbox: policy["sandbox"],
+          approval: policy["approval"],
+          cli_version: policy["cli_version"],
+          context_bytes: pack.bytes,
+          context_input_tokens: pack.input_tokens
         })
       )
     end)
+  end
+
+  defp execution_policy(project) do
+    policy = Codex.policy(project)
+
+    case Adapters.harness() do
+      Codex ->
+        binary = Codex.binary!()
+
+        case Codex.version(binary) do
+          {:ok, version} -> {:ok, Map.put(policy, "cli_version", version), binary}
+          {:error, reason} -> {:error, {:codex_version_unavailable, reason}}
+        end
+
+      adapter ->
+        name = adapter.capabilities()["harness_name"] || "unknown"
+        {:ok, Map.put(policy, "cli_version", "#{name}-adapter"), nil}
+    end
+  rescue
+    exception -> {:error, {:codex_version_unavailable, Exception.message(exception)}}
+  end
+
+  defp fail_launch(state, mission, attempt, reason) do
+    _ = Attempts.mark_spawn_failed(attempt.id, Actor.system(), bounded_error(reason))
+    mark_dispatch_failed(attempt, reason)
+    GlobalScheduler.release_slot(mission.id)
+
+    %{
+      state
+      | slot: nil,
+        attempt_id: attempt.id,
+        runner_pid: nil,
+        view: Map.put(state.view, :reason, :dispatch_failed)
+    }
   end
 
   defp inventory_path(attempt_id),

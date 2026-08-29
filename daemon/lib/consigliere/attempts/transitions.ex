@@ -84,16 +84,37 @@ defmodule Consigliere.Attempts.Transitions do
       Txn.fenced(attempt.id)
     end
 
+    runner_attrs =
+      attrs
+      |> Map.take([
+        :invocation_id,
+        :model,
+        :reasoning_effort,
+        :sandbox,
+        :approval,
+        :cli_version,
+        :context_bytes,
+        :context_input_tokens
+      ])
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+      |> Map.new()
+
     attempt =
       Txn.update!(
-        Attempt.changeset(attempt, %{
-          status: "running",
-          runner_pid: Map.get(attrs, :runner_pid),
-          harness_pid: Map.get(attrs, :harness_pid),
-          pgid: Map.get(attrs, :pgid),
-          started_at: Txn.now(),
-          last_event_at: Txn.now()
-        })
+        Attempt.changeset(
+          attempt,
+          Map.merge(
+            %{
+              status: "running",
+              runner_pid: Map.get(attrs, :runner_pid),
+              harness_pid: Map.get(attrs, :harness_pid),
+              pgid: Map.get(attrs, :pgid),
+              started_at: Txn.now(),
+              last_event_at: Txn.now()
+            },
+            runner_attrs
+          )
+        )
       )
 
     Txn.append_event!("attempt.started", "attempt", attempt.id)

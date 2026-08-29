@@ -4,19 +4,38 @@ defmodule Consigliere.Harness.ContextPack do
   the pack itself is not a transcript replay.
   """
 
-  @max_bytes 64_000
+  @max_bytes 65_536
+  @max_input_tokens 8_192
+
+  @instructions [
+    "Follow only the bounded Mission contract in this context pack.",
+    "Work only in the exact workspace identity and trusted base named here.",
+    "Use only the listed Attempt operations; do not grant work or integration.",
+    "Report progress, checkpoints, completion, or failure through the Attempt protocol.",
+    "A checkpoint or completion is valid only when the daemon verifies its exact Git SHA."
+  ]
 
   def compose(mission, extras \\ %{}) do
     pack = %{
-      "objective" => mission.objective,
-      "scope" => mission.scope,
-      "acceptance_criteria" => mission.acceptance_criteria,
+      "objective" => safe_text(mission.objective),
+      "scope" => safe_text(mission.scope),
+      "acceptance_criteria" => safe_text(mission.acceptance_criteria),
       "project_id" => mission.project_id,
       "mission_id" => mission.id,
       "checkpoint_sha" => mission.current_checkpoint_sha,
       "base_sha" => Map.get(extras, :base_sha) || Map.get(extras, "base_sha") || mission.base_sha,
+      "attempt_id" => value(extras, :attempt_id),
+      "workspace_id" => value(extras, :workspace_id),
       "workspace_path" => Map.get(extras, :workspace_path) || Map.get(extras, "workspace_path"),
+      "workspace_generation" => value(extras, :workspace_generation),
+      "fencing_generation" => value(extras, :fencing_generation),
+      "invocation_id" => value(extras, :invocation_id),
       "role" => Map.get(extras, :role) || Map.get(extras, "role") || "soldier",
+      "checkpoint" => %{
+        "sha" => mission.current_checkpoint_sha,
+        "summary" => checkpoint_summary(mission.current_checkpoint_sha)
+      },
+      "instructions" => @instructions,
       "authority" => %{
         "may_grant_work" => false,
         "may_grant_integration" => false,
@@ -50,14 +69,29 @@ defmodule Consigliere.Harness.ContextPack do
       }
     }
 
-    extras = extras |> stringify() |> Map.take(["workspace_path", "base_sha", "role"])
-    pack = pack |> Map.merge(extras) |> stringify_keys()
-    encoded = encode_sorted(pack)
+    execution =
+      extras
+      |> stringify()
+      |> Map.take(["model", "effort", "sandbox", "approval", "cli_version"])
+      |> Map.new(fn {key, value} -> {key, safe_text(value)} end)
+      |> stringify_keys()
 
-    if byte_size(encoded) > @max_bytes do
+    pack = pack |> Map.put("execution", execution) |> stringify_keys()
+    encoded = encode_sorted(pack)
+    bytes = byte_size(encoded)
+    input_tokens = div(bytes + 3, 4)
+
+    if bytes > @max_bytes or input_tokens > @max_input_tokens do
       {:error, :too_large}
     else
-      {:ok, %{pack: pack, encoded: encoded, hash: hash(encoded)}}
+      {:ok,
+       %{
+         pack: pack,
+         encoded: encoded,
+         hash: hash(encoded),
+         bytes: bytes,
+         input_tokens: input_tokens
+       }}
     end
   end
 
@@ -71,6 +105,18 @@ defmodule Consigliere.Harness.ContextPack do
       {k, v} -> {k, v}
     end)
   end
+
+  defp value(map, key) do
+    Map.get(map, key) || Map.get(map, Atom.to_string(key))
+  end
+
+  defp checkpoint_summary(sha) when is_binary(sha) and sha != "" do
+    "The latest durable checkpoint is #{sha}."
+  end
+
+  defp checkpoint_summary(_), do: "No durable checkpoint has been recorded."
+
+  defp safe_text(value), do: Consigliere.Harness.Redaction.text(value)
 
   defp stringify_keys(map) when is_map(map) do
     Map.new(map, fn {k, v} -> {to_string(k), stringify_keys(v)} end)

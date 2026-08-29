@@ -15,6 +15,26 @@ import (
 	"time"
 )
 
+func sendAuthenticatedCancel(t *testing.T, conn net.Conn, manifestPath string) {
+	t.Helper()
+	manifest, err := ReadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest for cancel: %v", err)
+	}
+
+	identity := InvocationIdentity{
+		ProtocolVersion:     manifest.ProtocolVersion,
+		InvocationID:        manifest.InvocationID,
+		AttemptID:           manifest.AttemptID,
+		MissionID:           manifest.MissionID,
+		WorkspacePath:       manifest.WorkspacePath,
+		WorkspaceGeneration: manifest.WorkspaceGeneration,
+		FencingGeneration:   manifest.FencingGeneration,
+	}
+	secret := []byte("01234567890123456789012345678901")
+	writeSecureTestMessage(t, conn, frameMessage(identity, 1, map[string]any{"type": "cancel"}, secret))
+}
+
 func dialControlSocketWithRetry(t *testing.T, path string, timeout time.Duration) net.Conn {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -167,9 +187,7 @@ func TestRun_UnverifiableTerminationWritesDeadUnverified(t *testing.T) {
 	sendSignal = func(pid int, sig syscall.Signal) error { return nil }
 	checkProcessGroupFn = func(pgid int) processGroupState { return groupUnknown }
 
-	if _, err := conn.Write([]byte(`{"type":"cancel"}` + "\n")); err != nil {
-		t.Fatalf("send cancel: %v", err)
-	}
+	sendAuthenticatedCancel(t, conn, manifestPath)
 
 	select {
 	case err := <-runErrCh:
@@ -334,9 +352,7 @@ func TestRun_ManifestWriteFailureOnTheCancelPathStillTerminatesTheHarness(t *tes
 			go io.Copy(io.Discard, conn)
 
 			waitForManifestState(t, manifestPath, StateRunning, 3*time.Second)
-			if _, err := conn.Write([]byte(`{"type":"cancel"}` + "\n")); err != nil {
-				t.Fatalf("send cancel: %v", err)
-			}
+			sendAuthenticatedCancel(t, conn, manifestPath)
 
 			select {
 			case err := <-runErrCh:
@@ -510,9 +526,7 @@ func TestRun_MidGracefulWindowEscapeIsStillCaught(t *testing.T) {
 
 	waitForFile(t, readyFile, 3*time.Second)
 
-	if _, err := conn.Write([]byte(`{"type":"cancel"}` + "\n")); err != nil {
-		t.Fatalf("send cancel: %v", err)
-	}
+	sendAuthenticatedCancel(t, conn, manifestPath)
 
 	grandchildPID := waitForPIDFile(t, grandchildPidFile, 3*time.Second)
 	t.Cleanup(func() { syscall.Kill(grandchildPID, syscall.SIGKILL) })
