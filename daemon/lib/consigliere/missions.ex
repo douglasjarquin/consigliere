@@ -5,7 +5,10 @@ defmodule Consigliere.Missions do
 
   defdelegate create(attrs, actor), to: Transitions
   defdelegate submit_for_authorization(mission_id, actor), to: Transitions
-  defdelegate request_changes(mission_id, actor), to: Transitions
+
+  def request_changes(mission_id, actor, reason \\ nil),
+    do: Transitions.request_changes(mission_id, actor, reason)
+
   defdelegate start(mission_id, actor, opts), to: Transitions
   defdelegate mark_ready_for_review(mission_id, actor), to: Transitions
   defdelegate return_to_active(mission_id, actor, reason), to: Transitions

@@ -85,6 +85,9 @@ defmodule Consigliere.CommandReceipts do
   def result_envelope({:error, {:invalid, "idempotency_conflict"}}),
     do: error_envelope("idempotency_conflict", "idempotency_conflict")
 
+  def result_envelope({:error, {:conflict, reason}}),
+    do: error_envelope("conflict", bounded_reason(reason))
+
   def result_envelope({:error, {:unauthorized, reason}}),
     do: error_envelope("unauthorized", bounded_reason(reason))
 

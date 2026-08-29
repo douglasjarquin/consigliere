@@ -58,16 +58,17 @@ defmodule Consigliere.Missions.Transitions do
     mission
   end
 
-  def request_changes(mission_id, actor) do
-    DatabaseWriter.transaction(fn -> request_changes_txn(mission_id, actor) end)
+  def request_changes(mission_id, actor, reason \\ nil) do
+    DatabaseWriter.transaction(fn -> request_changes_txn(mission_id, actor, reason) end)
   end
 
-  def request_changes_txn(mission_id, actor) do
+  def request_changes_txn(mission_id, actor, reason \\ nil) do
     Txn.require_principal(actor, @edit_principals)
     mission = fetch_mission!(mission_id)
     require_phase!(mission, "awaiting_authorization", "draft")
     mission = Txn.update!(Mission.changeset(mission, %{phase: "draft"}))
-    Txn.append_event!("mission.returned_to_draft", "mission", mission.id)
+    payload = if is_binary(reason) and reason != "", do: %{reason: reason}, else: %{}
+    Txn.append_event!("mission.returned_to_draft", "mission", mission.id, payload)
     mission
   end
 

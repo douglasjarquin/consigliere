@@ -32,55 +32,61 @@ defmodule Consigliere.Projects do
          {:ok, source} <- canonical_source(attrs),
          {:ok, branch} <- valid_branch(attr(attrs, :default_branch, "main")),
          {:ok, url} <- canonical_url(attr(attrs, :repository_url), source) do
-      id = Ecto.UUID.generate()
-      Home.ensure_dir!()
-      mirror = Path.join(Home.trusted_projects_dir(), "#{id}.git")
-      base_ref = Git.project_base_ref(id)
+      case Repo.get_by(Project, repository_path: source) do
+        %Project{} ->
+          {:error, {:conflict, :project_exists}}
 
-      Git.init_mirror(mirror)
+        nil ->
+          id = Ecto.UUID.generate()
+          Home.ensure_dir!()
+          mirror = Path.join(Home.trusted_projects_dir(), "#{id}.git")
+          base_ref = Git.project_base_ref(id)
 
-      with {:ok, sha} <- Git.branch_tip(source, branch),
-           {:ok, _} <- Git.import_sha(source, mirror, sha),
-           :ok <- Git.update_ref(mirror, base_ref, sha) do
-        result =
-          DatabaseWriter.transaction(fn ->
-            project =
-              Txn.insert!(
-                Project.changeset(%Project{id: id}, %{
-                  name: name,
-                  repository_path: source,
-                  repository_url: url,
-                  default_branch: branch,
-                  trusted_mirror_path: mirror,
-                  base_sha: sha,
-                  base_ref: base_ref,
-                  dispatch_policy: attr(attrs, :dispatch_policy, %{}),
-                  validation_policy: attr(attrs, :validation_policy, %{}),
-                  integration_policy: attr(attrs, :integration_policy, %{})
+          Git.init_mirror(mirror)
+
+          with {:ok, sha} <- Git.branch_tip(source, branch),
+               {:ok, _} <- Git.import_sha(source, mirror, sha),
+               :ok <- Git.update_ref(mirror, base_ref, sha) do
+            result =
+              DatabaseWriter.transaction(fn ->
+                project =
+                  Txn.insert!(
+                    Project.changeset(%Project{id: id}, %{
+                      name: name,
+                      repository_path: source,
+                      repository_url: url,
+                      default_branch: branch,
+                      trusted_mirror_path: mirror,
+                      base_sha: sha,
+                      base_ref: base_ref,
+                      dispatch_policy: attr(attrs, :dispatch_policy, %{}),
+                      validation_policy: attr(attrs, :validation_policy, %{}),
+                      integration_policy: attr(attrs, :integration_policy, %{})
+                    })
+                  )
+
+                Txn.append_event!("project.registered", "project", project.id, %{
+                  default_branch: project.default_branch,
+                  base_ref: project.base_ref,
+                  base_sha: project.base_sha
                 })
-              )
 
-            Txn.append_event!("project.registered", "project", project.id, %{
-              default_branch: project.default_branch,
-              base_ref: project.base_ref,
-              base_sha: project.base_sha
-            })
+                project
+              end)
 
-            project
-          end)
+            case result do
+              {:ok, _project} ->
+                result
 
-        case result do
-          {:ok, _project} ->
-            result
-
-          other ->
-            _ = quarantine_mirror(mirror, id)
-            other
-        end
-      else
-        {:error, reason} ->
-          quarantine_mirror(mirror, id)
-          {:error, reason}
+              other ->
+                _ = quarantine_mirror(mirror, id)
+                other
+            end
+          else
+            {:error, reason} ->
+              quarantine_mirror(mirror, id)
+              {:error, reason}
+          end
       end
     end
   end

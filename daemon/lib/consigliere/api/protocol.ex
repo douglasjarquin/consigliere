@@ -162,7 +162,10 @@ defmodule Consigliere.API.Protocol do
          %{
            "id" => project.id,
            "name" => project.name,
-           "repository_url" => project.repository_url
+           "repository_url" => project.repository_url,
+           "default_branch" => project.default_branch,
+           "base_ref" => project.base_ref,
+           "base_sha" => project.base_sha
          }}
 
       other ->
@@ -196,7 +199,9 @@ defmodule Consigliere.API.Protocol do
              "id" => project.id,
              "name" => project.name,
              "repository_url" => project.repository_url,
-             "default_branch" => project.default_branch
+             "default_branch" => project.default_branch,
+             "base_ref" => project.base_ref,
+             "base_sha" => project.base_sha
            }}
       end
     end
@@ -207,7 +212,7 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp run_allowed("mission.request_changes", payload, actor) do
-    Missions.request_changes(payload["mission_id"], actor) |> ok_mission()
+    Missions.request_changes(payload["mission_id"], actor, payload["reason"]) |> ok_mission()
   end
 
   defp run_allowed("mission.grant_work", payload, actor) do
@@ -380,6 +385,11 @@ defmodule Consigliere.API.Protocol do
              "id" => mission.id,
              "phase" => mission.phase,
              "objective" => mission.objective,
+             "scope" => mission.scope,
+             "acceptance_criteria" => mission.acceptance_criteria,
+             "project_id" => mission.project_id,
+             "base_sha" => mission.base_sha,
+             "authorization_id" => mission.authorization_id,
              "blockers" =>
                Enum.map(blockers, fn b ->
                  %{"kind" => b.kind, "reason" => b.reason, "subject_id" => b.subject_id}
@@ -467,25 +477,36 @@ defmodule Consigliere.API.Protocol do
     end
   end
 
-  defp ok_mission({:ok, %{mission: %{id: id, phase: phase}, status: status} = result}) do
+  defp ok_mission({:ok, %{mission: mission, status: status} = result}) do
     {:ok,
-     %{
-       "id" => id,
-       "phase" => phase,
+     mission_payload(mission)
+     |> Map.merge(%{
        "pause_status" => to_string(status),
        "checkpoint_sha" => Map.get(result, :checkpoint_sha)
-     }}
+     })}
   end
 
-  defp ok_mission({:ok, %{id: id, phase: phase}}), do: {:ok, %{"id" => id, "phase" => phase}}
+  defp ok_mission({:ok, %{id: _id} = mission}), do: {:ok, mission_payload(mission)}
 
-  defp ok_mission({:ok, %{mission: %{id: id, phase: phase}}}),
-    do: {:ok, %{"id" => id, "phase" => phase}}
+  defp ok_mission({:ok, %{mission: mission}}), do: {:ok, mission_payload(mission)}
 
   defp ok_mission(other), do: other
 
   defp ok_question({:ok, %{id: id, status: status}}), do: {:ok, %{"id" => id, "status" => status}}
   defp ok_question(other), do: other
+
+  defp mission_payload(mission) do
+    %{
+      "id" => mission.id,
+      "phase" => mission.phase,
+      "project_id" => mission.project_id,
+      "objective" => mission.objective,
+      "scope" => mission.scope,
+      "acceptance_criteria" => mission.acceptance_criteria,
+      "base_sha" => mission.base_sha,
+      "authorization_id" => mission.authorization_id
+    }
+  end
 
   defp wrap({:ok, :replay, envelope}, id) when is_map(envelope) do
     Map.put(envelope, "id", id)

@@ -10,14 +10,18 @@ defmodule Consigliere.Operations do
 
   @registry %{
     "ping" => %{version: @version, mode: :database},
-    "project.add" => %{version: @version, mode: :external},
+    "project.add" => %{version: @version, mode: :external, required: ~w(name repository_path)},
     "mission.create" => %{
       version: @version,
       mode: :database,
       required: ~w(project_id objective scope acceptance_criteria)
     },
     "mission.submit" => %{version: @version, mode: :database, required: ~w(mission_id)},
-    "mission.request_changes" => %{version: @version, mode: :database, required: ~w(mission_id)},
+    "mission.request_changes" => %{
+      version: @version,
+      mode: :database,
+      required: ~w(mission_id reason)
+    },
     "mission.grant_work" => %{version: @version, mode: :database, required: ~w(mission_id)},
     "mission.continue" => %{version: @version, mode: :external, required: ~w(mission_id)},
     "mission.cancel" => %{version: @version, mode: :external, required: ~w(mission_id)},

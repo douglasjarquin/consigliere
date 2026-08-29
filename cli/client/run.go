@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,7 +10,13 @@ import (
 	"strings"
 )
 
+var errConfirmationRequired = fmt.Errorf("explicit confirmation required")
+
 func Run(args []string, stdout, stderr io.Writer) int {
+	return runWithInput(args, stdout, stderr, os.Stdin)
+}
+
+func runWithInput(args []string, stdout, stderr io.Writer, input io.Reader) int {
 	jsonOut := false
 	filtered := make([]string, 0, len(args))
 	for _, a := range args {
@@ -54,6 +61,19 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		opts, pos = parseFlags(rest)
 	}
 
+	op, payload, err := mapCommand(cmd, pos, opts)
+	if err != nil {
+		fmt.Fprintln(stderr, err.Error())
+		if strings.Contains(err.Error(), "usage") || strings.Contains(err.Error(), "unknown") {
+			fmt.Fprint(stderr, usage())
+			return ExitUsage
+		}
+		return ExitUsage
+	}
+	if task5BossOperation(op) {
+		boss = true
+	}
+
 	d := NewDialer(home)
 	if boss {
 		d = NewBossDialer(home)
@@ -65,14 +85,23 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		d.Socket = p
 	}
 
-	op, payload, err := mapCommand(cmd, pos, opts)
-	if err != nil {
-		fmt.Fprintln(stderr, err.Error())
-		if strings.Contains(err.Error(), "usage") || strings.Contains(err.Error(), "unknown") {
-			fmt.Fprint(stderr, usage())
+	if workflowMutation(op) {
+		confirmed, preview, previewErr := confirmWorkflow(cmd, op, payload, opts, d, stdout, input)
+		if previewErr != nil {
+			if jsonOut {
+				return printJSON(stdout, stderr, preview, previewErr)
+			}
+			PrintError(stderr, previewErr, preview)
+			return ExitFor(previewErr, preview)
+		}
+		if !confirmed {
+			confirmation := localResponse("confirmation_required", "explicit confirmation is required")
+			if jsonOut {
+				return printJSON(stdout, stderr, confirmation, nil)
+			}
+			PrintError(stderr, nil, confirmation)
 			return ExitUsage
 		}
-		return ExitUsage
 	}
 
 	idem := opts["idempotency_key"]
@@ -100,10 +129,14 @@ cs version
 cs doctor
 cs ping
 cs projects
+cs project add --name NAME --path PATH [--url URL] [--default-branch BRANCH]
 cs project <id>
 cs missions
 cs mission <id>
-cs mission create --project-id ID --objective TEXT --scope TEXT --acceptance TEXT
+cs mission create --project PROJECT --objective TEXT --scope TEXT --acceptance TEXT
+cs mission submit MISSION
+cs mission request-changes MISSION --reason TEXT
+cs mission authorize MISSION
 cs why <mission-id>
 cs inbox
 cs review
@@ -166,6 +199,27 @@ func mapCommand(cmd string, pos []string, opts map[string]string) (string, map[s
 		if len(pos) == 0 {
 			return "", nil, fmt.Errorf("usage: cs project <id>")
 		}
+		if pos[0] == "add" {
+			if opts["name"] == "" || opts["path"] == "" {
+				return "", nil, fmt.Errorf("usage: cs project add --name NAME --path PATH")
+			}
+			branch := opts["default_branch"]
+			if branch == "" {
+				branch = opts["branch"]
+			}
+			if branch == "" {
+				branch = "main"
+			}
+			payload := map[string]any{
+				"name":            opts["name"],
+				"repository_path": opts["path"],
+				"default_branch":  branch,
+			}
+			if opts["url"] != "" {
+				payload["repository_url"] = opts["url"]
+			}
+			return "project.add", payload, nil
+		}
 		return "project.get", map[string]any{"project_id": pos[0]}, nil
 	case "missions":
 		return "mission.list", map[string]any{}, nil
@@ -173,15 +227,42 @@ func mapCommand(cmd string, pos []string, opts map[string]string) (string, map[s
 		if len(pos) == 0 {
 			return "", nil, fmt.Errorf("usage: cs mission <id>")
 		}
-		if pos[0] == "create" {
+		switch pos[0] {
+		case "create":
+			projectID := opts["project"]
+			if projectID == "" {
+				projectID = opts["project_id"]
+			}
+			if projectID == "" || opts["objective"] == "" || opts["scope"] == "" || opts["acceptance"] == "" {
+				return "", nil, fmt.Errorf("usage: cs mission create --project PROJECT --objective TEXT --scope TEXT --acceptance TEXT")
+			}
 			return "mission.create", map[string]any{
-				"project_id":          opts["project_id"],
+				"project_id":          projectID,
 				"objective":           opts["objective"],
 				"scope":               opts["scope"],
 				"acceptance_criteria": opts["acceptance"],
 			}, nil
+		case "submit":
+			if len(pos) < 2 || pos[1] == "" {
+				return "", nil, fmt.Errorf("usage: cs mission submit MISSION")
+			}
+			return "mission.submit", map[string]any{"mission_id": pos[1]}, nil
+		case "request-changes", "request_changes":
+			if len(pos) < 2 || pos[1] == "" || opts["reason"] == "" {
+				return "", nil, fmt.Errorf("usage: cs mission request-changes MISSION --reason TEXT")
+			}
+			return "mission.request_changes", map[string]any{
+				"mission_id": pos[1],
+				"reason":     opts["reason"],
+			}, nil
+		case "authorize":
+			if len(pos) < 2 || pos[1] == "" {
+				return "", nil, fmt.Errorf("usage: cs mission authorize MISSION")
+			}
+			return "mission.grant_work", map[string]any{"mission_id": pos[1]}, nil
+		default:
+			return "mission.get", map[string]any{"mission_id": pos[0]}, nil
 		}
-		return "mission.get", map[string]any{"mission_id": pos[0]}, nil
 	case "why":
 		if len(pos) == 0 {
 			return "", nil, fmt.Errorf("usage: cs why <mission-id>")
@@ -274,6 +355,31 @@ func printHuman(w io.Writer, cmd string, pos []string, resp *Response) {
 	switch cmd {
 	case "ping":
 		fmt.Fprintln(w, "pong")
+	case "project":
+		if id := firstString(payload, "id"); id != "" {
+			fmt.Fprintf(w, "project %s name=%s default_branch=%s base_sha=%s base_ref=%s\n",
+				id,
+				firstString(payload, "name"),
+				firstString(payload, "default_branch"),
+				firstString(payload, "base_sha"),
+				firstString(payload, "base_ref"),
+			)
+			return
+		}
+		printRows(w, payload)
+	case "mission":
+		if id := firstString(payload, "id"); id != "" {
+			fmt.Fprintf(w, "mission %s phase=%s base_sha=%s\n",
+				id,
+				firstString(payload, "phase"),
+				firstString(payload, "base_sha"),
+			)
+			if auth := firstString(payload, "authorization_id"); auth != "" {
+				fmt.Fprintf(w, "authorization: %s\n", auth)
+			}
+			return
+		}
+		printRows(w, payload)
 	case "health":
 		fmt.Fprintf(w, "status=%v protocol=%v release=%v schema=%v harness=%v\n",
 			payload["status"], payload["protocol"], payload["release"], payload["schema"], payload["harness"])
@@ -338,6 +444,142 @@ func firstString(m map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func task5BossOperation(op string) bool {
+	switch op {
+	case "project.add", "mission.create", "mission.submit", "mission.request_changes", "mission.grant_work":
+		return true
+	default:
+		return false
+	}
+}
+
+func workflowMutation(op string) bool {
+	return task5BossOperation(op)
+}
+
+func localResponse(code, reason string) *Response {
+	return &Response{
+		V:     ProtocolVersion,
+		OK:    false,
+		Error: &ErrorBody{Code: code, Reason: reason},
+	}
+}
+
+func confirmWorkflow(cmd, op string, payload map[string]any, opts map[string]string, d Dialer, stdout io.Writer, input io.Reader) (bool, *Response, error) {
+	preview, response, err := workflowPreview(op, payload, d)
+	if err != nil {
+		if response == nil {
+			response = localResponse("daemon", err.Error())
+		}
+		return false, response, err
+	}
+
+	yes := opts["yes"] == "true"
+	if yes {
+		if opts["idempotency_key"] == "" && !terminalInput(input) {
+			return false, localResponse("confirmation_required", "--yes automation requires --idempotency-key"), errConfirmationRequired
+		}
+		return true, nil, nil
+	}
+
+	if !terminalInput(input) && input == os.Stdin {
+		return false, localResponse("confirmation_required", "run in a foreground terminal or pass --yes with --idempotency-key"), errConfirmationRequired
+	}
+
+	fmt.Fprintln(stdout, confirmationText(cmd, op, payload, preview))
+	fmt.Fprint(stdout, "Confirm [y/N]: ")
+	line, readErr := bufio.NewReader(input).ReadString('\n')
+	if readErr != nil && len(line) == 0 {
+		return false, localResponse("confirmation_declined", "confirmation was not provided"), errConfirmationRequired
+	}
+	if strings.EqualFold(strings.TrimSpace(line), "y") || strings.EqualFold(strings.TrimSpace(line), "yes") {
+		return true, nil, nil
+	}
+	return false, localResponse("confirmation_declined", "operation was not confirmed"), errConfirmationRequired
+}
+
+func workflowPreview(op string, payload map[string]any, d Dialer) (map[string]any, *Response, error) {
+	var previewOp string
+	var previewPayload map[string]any
+	switch op {
+	case "mission.create":
+		previewOp = "project.get"
+		previewPayload = map[string]any{"project_id": payload["project_id"]}
+	case "mission.submit", "mission.request_changes", "mission.grant_work":
+		previewOp = "mission.get"
+		previewPayload = map[string]any{"mission_id": payload["mission_id"]}
+	default:
+		return payload, nil, nil
+	}
+
+	response, err := d.Call(previewOp, previewPayload, "preview", "")
+	if err != nil {
+		return nil, response, err
+	}
+	if response == nil || !response.OK {
+		return nil, response, fmt.Errorf("preview request failed")
+	}
+	var preview map[string]any
+	if err := json.Unmarshal(response.Payload, &preview); err != nil {
+		return nil, response, fmt.Errorf("preview response malformed")
+	}
+	return preview, response, nil
+}
+
+func confirmationText(cmd, op string, payload, preview map[string]any) string {
+	projectID := firstString(preview, "project_id")
+	projectName := firstString(preview, "name")
+	if projectID == "" {
+		projectID = firstString(payload, "project_id")
+	}
+	if projectName == "" {
+		projectName = firstString(payload, "name")
+	}
+	missionID := firstString(preview, "id")
+	if missionID == "" {
+		missionID = "<new>"
+	}
+	baseSHA := firstString(preview, "base_sha")
+	if baseSHA == "" {
+		baseSHA = "<daemon-assigned>"
+	}
+
+	objective := firstString(preview, "objective")
+	if objective == "" {
+		objective = firstString(payload, "objective")
+	}
+	scope := firstString(preview, "scope")
+	if scope == "" {
+		scope = firstString(payload, "scope")
+	}
+	acceptance := firstString(preview, "acceptance_criteria")
+	if acceptance == "" {
+		acceptance = firstString(payload, "acceptance_criteria")
+	}
+
+	return fmt.Sprintf(
+		"Confirm %s (%s)\nProject: %s %s\nMission ID: %s\nObjective: %s\nScope: %s\nAcceptance criteria: %s\nImmutable base SHA: %s",
+		cmd,
+		op,
+		projectID,
+		projectName,
+		missionID,
+		objective,
+		scope,
+		acceptance,
+		baseSHA,
+	)
+}
+
+func terminalInput(input io.Reader) bool {
+	file, ok := input.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func runDoctor(home Home, jsonOut bool, stdout, stderr io.Writer) int {

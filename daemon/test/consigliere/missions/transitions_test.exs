@@ -88,6 +88,15 @@ defmodule Consigliere.Missions.TransitionsTest do
     assert "mission.returned_to_draft" in Fixtures.event_types(mission.id)
   end
 
+  test "request_changes records the bounded reason" do
+    mission = draft!(Actor.boss())
+    {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Missions.request_changes(mission.id, Actor.boss(), "needs detail")
+    event = List.last(Fixtures.events(mission.id))
+    assert event.type == "mission.returned_to_draft"
+    assert event.payload["reason"] == "needs detail"
+  end
+
   test "start creates a workspace and a planned Attempt" do
     %{mission: mission, workspace: workspace, attempt: attempt} = started!()
     assert mission.phase == "active"

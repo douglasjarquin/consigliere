@@ -52,6 +52,20 @@ defmodule Consigliere.ProjectsTest do
     assert project.repository_url == "file://#{source}"
   end
 
+  test "register rejects a duplicate canonical source", %{source: source} do
+    assert {:ok, _project} =
+             Projects.register(
+               %{name: "first", repository_path: source, repository_url: "file://first"},
+               Actor.boss()
+             )
+
+    assert {:error, {:conflict, :project_exists}} =
+             Projects.register(
+               %{name: "second", repository_path: source, repository_url: "file://second"},
+               Actor.boss()
+             )
+  end
+
   test "refresh_base advances only the Project base and records an audit event", %{
     source: source,
     sha: sha

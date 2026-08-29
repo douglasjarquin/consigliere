@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"net"
@@ -214,6 +215,184 @@ func TestMapCommandAuthorizeMerge(t *testing.T) {
 	}
 	if payload["target_sha"] != "abc" || payload["target_pull_request"] != "12" {
 		t.Fatalf("%v", payload)
+	}
+}
+
+func TestMapCommandLocalV0Workflow(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		pos     []string
+		opts    map[string]string
+		wantOp  string
+		want    map[string]any
+	}{
+		{
+			name:    "project add",
+			command: "project",
+			pos:     []string{"add"},
+			opts: map[string]string{
+				"name":           "demo",
+				"path":           "/tmp/demo",
+				"url":            "file:///tmp/demo",
+				"default_branch": "main",
+			},
+			wantOp: "project.add",
+			want: map[string]any{
+				"name":            "demo",
+				"repository_path": "/tmp/demo",
+				"repository_url":  "file:///tmp/demo",
+				"default_branch":  "main",
+			},
+		},
+		{
+			name:    "mission create",
+			command: "mission",
+			pos:     []string{"create"},
+			opts: map[string]string{
+				"project":    "project-1",
+				"objective":  "objective",
+				"scope":      "scope",
+				"acceptance": "criteria",
+			},
+			wantOp: "mission.create",
+			want: map[string]any{
+				"project_id":          "project-1",
+				"objective":           "objective",
+				"scope":               "scope",
+				"acceptance_criteria": "criteria",
+			},
+		},
+		{
+			name:    "mission submit",
+			command: "mission",
+			pos:     []string{"submit", "mission-1"},
+			wantOp:  "mission.submit",
+			want:    map[string]any{"mission_id": "mission-1"},
+		},
+		{
+			name:    "mission request changes",
+			command: "mission",
+			pos:     []string{"request-changes", "mission-1"},
+			opts:    map[string]string{"reason": "needs detail"},
+			wantOp:  "mission.request_changes",
+			want:    map[string]any{"mission_id": "mission-1", "reason": "needs detail"},
+		},
+		{
+			name:    "mission authorize",
+			command: "mission",
+			pos:     []string{"authorize", "mission-1"},
+			wantOp:  "mission.grant_work",
+			want:    map[string]any{"mission_id": "mission-1"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotOp, got, err := mapCommand(test.command, test.pos, test.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if gotOp != test.wantOp {
+				t.Fatalf("op=%q want %q", gotOp, test.wantOp)
+			}
+			for key, want := range test.want {
+				if got[key] != want {
+					t.Fatalf("payload[%q]=%v want %v", key, got[key], want)
+				}
+			}
+		})
+	}
+}
+
+func TestWorkflowAuthorizationUsesBossSocketAndStableConfirmation(t *testing.T) {
+	var seen []map[string]any
+	home, _ := serve(t, func(req map[string]any) map[string]any {
+		seen = append(seen, req)
+		switch req["op"] {
+		case "mission.get":
+			return map[string]any{
+				"v": req["v"], "id": req["id"], "ok": true,
+				"payload": map[string]any{
+					"id": "mission-1", "project_id": "project-1", "objective": "objective",
+					"scope": "scope", "acceptance_criteria": "criteria", "base_sha": "sha-1",
+					"phase": "awaiting_authorization",
+				},
+			}
+		case "mission.grant_work":
+			return map[string]any{
+				"v": req["v"], "id": req["id"], "ok": true,
+				"payload": map[string]any{
+					"id": "mission-1", "phase": "authorized", "authorization_id": "auth-1",
+				},
+			}
+		default:
+			return map[string]any{"v": req["v"], "id": req["id"], "ok": true, "payload": map[string]any{}}
+		}
+	})
+	t.Setenv("CS_HOME", home.Dir)
+
+	var out, errb bytes.Buffer
+	code := Run([]string{
+		"mission", "authorize", "mission-1", "--yes", "--idempotency-key", "auth-key", "--json",
+	}, &out, &errb)
+	if code != ExitOK {
+		t.Fatalf("exit %d stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), `"authorization_id":"auth-1"`) {
+		t.Fatalf("out=%q", out.String())
+	}
+	if len(seen) != 2 {
+		t.Fatalf("requests=%d", len(seen))
+	}
+	for _, req := range seen {
+		if req["secret"] != "secret" {
+			t.Fatalf("request did not use boss credential: %#v", req)
+		}
+	}
+	if seen[1]["idempotency_key"] != "auth-key" {
+		t.Fatalf("key=%v", seen[1]["idempotency_key"])
+	}
+}
+
+func TestWorkflowConfirmationDisplaysMissionIdentityBeforeMutation(t *testing.T) {
+	home, _ := serve(t, func(req map[string]any) map[string]any {
+		if req["op"] == "mission.get" {
+			return map[string]any{
+				"v": req["v"], "id": req["id"], "ok": true,
+				"payload": map[string]any{
+					"id": "mission-1", "project_id": "project-1", "objective": "objective",
+					"scope": "scope", "acceptance_criteria": "criteria", "base_sha": "sha-1",
+					"phase": "awaiting_authorization",
+				},
+			}
+		}
+		return map[string]any{
+			"v": req["v"], "id": req["id"], "ok": true,
+			"payload": map[string]any{
+				"id": "mission-1", "phase": "authorized", "authorization_id": "auth-1",
+			},
+		}
+	})
+	t.Setenv("CS_HOME", home.Dir)
+
+	var out, errb bytes.Buffer
+	code := runWithInput([]string{"mission", "authorize", "mission-1", "--idempotency-key", "auth-key"}, &out, &errb, bytes.NewBufferString("yes\n"))
+	if code != ExitOK {
+		t.Fatalf("exit %d stderr=%s", code, errb.String())
+	}
+	for _, want := range []string{
+		"Project: project-1",
+		"Mission ID: mission-1",
+		"Objective: objective",
+		"Scope: scope",
+		"Acceptance criteria: criteria",
+		"Immutable base SHA: sha-1",
+		"Confirm [y/N]:",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("confirmation missing %q in %q", want, out.String())
+		}
 	}
 }
 
