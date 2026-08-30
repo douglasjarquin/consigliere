@@ -5,5 +5,5 @@ format_exit: 0
 compile_exit: 0
 result: 467/476 passed (1 doctest, 466/475 tests)
 host_only_observations: stale probe-socket timing, macOS short Unix-socket paths, /var versus /private/var spelling, and process-group fixture or cleanup timing
-release_gate: not authoritative; Linux CI-shaped daemon gate passed 476/476 three times
+release_gate: not authoritative; Linux CI-shaped daemon gate passed 479/479 three times
 redaction: test UUIDs, debug SQL, and local process details omitted from this bounded record

@@ -1,6 +1,7 @@
 surface: CLI Go gate
-source_runtime_commit: 95ea4e5e38c6350f6560339708bbc33b985010b8
-invocation: cd cli && test -z "$(gofmt -l .)" && go vet ./... && go test ./... && go test -race -shuffle=on -count=1 ./... && go build ./cmd/cs ./cmd/csd
+source_runtime_commit: bc7e980c90aa54e165d5aed3dae060f3a2c9e584
+invocation: cd cli && GOTOOLCHAIN=go1.26.6+auto test -z "$(gofmt -l .)" && go vet ./... && go test ./... && go test -race -shuffle=on -count=1 ./... && go build ./cmd/cs ./cmd/csd
+go_version: go1.26.6
 gofmt_exit: 0
 go_vet_exit: 0
 go_test_exit: 0
