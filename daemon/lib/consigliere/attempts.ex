@@ -30,16 +30,63 @@ defmodule Consigliere.Attempts do
     with {:ok, attempt} <- Transitions.classify_exit(attempt_id, attrs) do
       Consigliere.Progression.after_classify(attempt, process_group: attrs[:process_group])
 
-      if AttemptStates.terminal?(attempt.status) do
-        if attrs[:process_group] == :dead_verified do
-          _ = DispatchOperations.release_held_slot(attempt.id)
-          GlobalScheduler.release_slot(attempt.mission_id)
-        else
-          _ = DispatchOperations.hold_slot(attempt.id)
-        end
+      case reconcile_terminal_slot(attempt_id, attrs[:process_group]) do
+        :ok -> {:ok, Consigliere.Repo.get!(Attempt, attempt_id)}
+        {:error, reason} -> {:error, reason}
       end
+    end
+  end
 
-      {:ok, Consigliere.Repo.get!(Attempt, attempt_id)}
+  def release_scheduler_slot(attempt_id) do
+    case Consigliere.Repo.get(Attempt, attempt_id) do
+      %Attempt{mission_id: mission_id, status: status} = attempt ->
+        if AttemptStates.terminal?(status) do
+          case DispatchOperations.get_by_attempt(attempt.id) do
+            nil ->
+              GlobalScheduler.release_slot(mission_id)
+
+            %{slot_state: "released"} ->
+              GlobalScheduler.release_slot(mission_id)
+
+            %{slot_state: slot_state} ->
+              {:error, {:dispatch_slot_not_released, slot_state}}
+          end
+        else
+          :ok
+        end
+
+      nil ->
+        :ok
+    end
+  end
+
+  defp reconcile_terminal_slot(attempt_id, process_group) do
+    case Consigliere.Repo.get(Attempt, attempt_id) do
+      %Attempt{status: status} when not is_nil(status) ->
+        if AttemptStates.terminal?(status) do
+          persist_result =
+            if process_group == :dead_verified do
+              DispatchOperations.release_slot(attempt_id)
+            else
+              DispatchOperations.hold_slot(attempt_id)
+            end
+
+          case persist_result do
+            {:ok, _} when process_group == :dead_verified ->
+              release_scheduler_slot(attempt_id)
+
+            {:ok, _} ->
+              :ok
+
+            {:error, reason} ->
+              {:error, reason}
+          end
+        else
+          :ok
+        end
+
+      nil ->
+        :ok
     end
   end
 end

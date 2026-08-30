@@ -137,7 +137,7 @@ defmodule Consigliere.Dispatch do
 
         mark_dispatch_failed(attempt, reason)
 
-        GlobalScheduler.release_slot(mission.id)
+        _ = Attempts.release_scheduler_slot(attempt.id)
         %{state | slot: nil, attempt_id: attempt.id, runner_pid: nil}
 
       {:ok,
@@ -292,7 +292,7 @@ defmodule Consigliere.Dispatch do
       {:error, reason} ->
         _ = Attempts.mark_spawn_failed(attempt.id, Actor.system(), inspect(reason))
         mark_dispatch_failed(attempt, reason)
-        GlobalScheduler.release_slot(mission.id)
+        _ = Attempts.release_scheduler_slot(attempt.id)
         %{state | slot: nil, attempt_id: attempt.id, runner_pid: nil}
     end
   end
@@ -320,7 +320,7 @@ defmodule Consigliere.Dispatch do
 
       %Attempt{status: status} = attempt ->
         if AttemptStates.terminal?(status) do
-          GlobalScheduler.release_slot(mission.id)
+          _ = release_terminal_dispatch_slot(attempt)
 
           %{
             state
@@ -409,10 +409,10 @@ defmodule Consigliere.Dispatch do
     exception -> {:error, {:codex_version_unavailable, Exception.message(exception)}}
   end
 
-  defp fail_launch(state, mission, attempt, reason) do
+  defp fail_launch(state, _mission, attempt, reason) do
     _ = Attempts.mark_spawn_failed(attempt.id, Actor.system(), bounded_error(reason))
     mark_dispatch_failed(attempt, reason)
-    GlobalScheduler.release_slot(mission.id)
+    _ = Attempts.release_scheduler_slot(attempt.id)
 
     %{
       state
@@ -493,7 +493,7 @@ defmodule Consigliere.Dispatch do
     :ok
   end
 
-  defp fail_planned_dispatch(state, mission, attempt, reason) do
+  defp fail_planned_dispatch(state, _mission, attempt, reason) do
     _ =
       Attempts.mark_spawn_failed(
         attempt.id,
@@ -502,7 +502,7 @@ defmodule Consigliere.Dispatch do
       )
 
     mark_dispatch_failed(attempt, reason)
-    GlobalScheduler.release_slot(mission.id)
+    _ = Attempts.release_scheduler_slot(attempt.id)
 
     %{
       state
@@ -524,6 +524,13 @@ defmodule Consigliere.Dispatch do
           child_start_state: "failed",
           last_error: bounded_error(reason)
         })
+    end
+  end
+
+  defp release_terminal_dispatch_slot(attempt) do
+    with {:ok, _} <- DispatchOperations.release_slot(attempt.id),
+         :ok <- Attempts.release_scheduler_slot(attempt.id) do
+      :ok
     end
   end
 

@@ -26,7 +26,7 @@ The package `cs`, `csd`, `cs-runner`, and `cs-attempt` files were all native `Ma
 
 The package hashes were `cs` `4b977c4361239244630749d331837c58d5aad99e1d197103d4847c628a433815`, `csd` `49074f20047840f485d110190da0fd20fbd52646969dc5f1d920f778cb584bed`, `cs-runner` `a188c50b3c0fa578dc7606a38bec41eeafa1889cd2ca41b553f9ec016481c5a8`, and `cs-attempt` `c6c0a480facfafdb45c7b37e36d41fd6fc17605da576c6b0e7633cb5776702a9`.
 
-The installed package returned `{"cs":"0.1.0","protocol":1}` from `cs version --json` and exit `0` from `cs-runner --help` and `cs-attempt --help`.
+The installed package returned `{"cs":"0.1.0","protocol":1}` from `cs version --json`; `cs-runner --help` exited `0`, and `cs-attempt --help` exited `2` with its usage text, as expected because the helper parser treats `--help` as invalid without an operation.
 
 The installed lifecycle ran from `/tmp` with `env -i`, package-only `PATH`, fresh `CS_HOME=/tmp/cs-final-95ea4e5-home.crzsf5`, `CS_RELEASE` set to the package release, and `CS_CSD_FORCE_BACKGROUND=1`.
 

@@ -9,7 +9,6 @@ defmodule Consigliere.Reconciler.Pass do
   alias Consigliere.Attempts
   alias Consigliere.DatabaseWriter
   alias Consigliere.DispatchOperations
-  alias Consigliere.GlobalScheduler
   alias Consigliere.HarnessEvents.HarnessEvent
   alias Consigliere.Incidents.Incident
   alias Consigliere.ProcessGroup
@@ -48,11 +47,10 @@ defmodule Consigliere.Reconciler.Pass do
   def apply_terminal_manifest(manifest, attempt, runner_live?) do
     cond do
       AttemptStates.terminal?(attempt.status) ->
-        if manifest["state"] == "dead_verified" do
-          release_held_slot(attempt)
+        case release_dispatch_slot_result(attempt, manifest["state"]) do
+          :ok -> {:skipped, attempt.id}
+          {:error, reason} -> {:error, {attempt.id, reason}}
         end
-
-        {:skipped, attempt.id}
 
       runner_live? ->
         {:skipped, attempt.id}
@@ -112,8 +110,10 @@ defmodule Consigliere.Reconciler.Pass do
     result =
       cond do
         inventory != :dead_verified ->
-          Attempts.mark_lost(attempt.id, Actor.system(), %{inventory: inventory})
-          {:quarantined, attempt.id}
+          case Attempts.mark_lost(attempt.id, Actor.system(), %{inventory: inventory}) do
+            {:ok, _} -> {:ok, {:quarantined, attempt.id}}
+            {:error, reason} -> {:error, reason}
+          end
 
         imported_result?(attempt) ->
           complete_or_lost(attempt)
@@ -122,33 +122,47 @@ defmodule Consigliere.Reconciler.Pass do
           complete_or_lost(attempt)
 
         failed_intent?(attempt) ->
-          _ =
-            Attempts.fail(attempt.id, Actor.system(), %{
-              process_group: :dead_verified,
-              exit_classification: attempt.exit_classification || "failed"
-            })
-
-          {:failed, attempt.id}
+          case Attempts.fail(attempt.id, Actor.system(), %{
+                 process_group: :dead_verified,
+                 exit_classification: attempt.exit_classification || "failed"
+               }) do
+            {:ok, _} -> {:ok, {:failed, attempt.id}}
+            {:error, reason} -> {:error, reason}
+          end
 
         true ->
-          Attempts.mark_lost(attempt.id, Actor.system(), %{inventory: inventory})
-          {:lost, attempt.id}
+          case Attempts.mark_lost(attempt.id, Actor.system(), %{inventory: inventory}) do
+            {:ok, _} -> {:ok, {:lost, attempt.id}}
+            {:error, reason} -> {:error, reason}
+          end
       end
 
-    if inventory == :dead_verified do
-      _ = DispatchOperations.release_held_slot(attempt.id)
-      _ = GlobalScheduler.release_slot(attempt.mission_id)
-    else
-      _ = DispatchOperations.hold_slot(attempt.id)
+    case result do
+      {:error, reason} ->
+        {:error, reason}
+
+      {:ok, value} when inventory == :dead_verified ->
+        case Attempts.release_scheduler_slot(attempt.id) do
+          :ok -> value
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:ok, value} ->
+        value
     end
-
-    result
   end
 
-  defp release_held_slot(attempt) do
-    _ = DispatchOperations.release_held_slot(attempt.id)
-    _ = GlobalScheduler.release_slot(attempt.mission_id)
+  defp release_dispatch_slot(attempt) do
+    with {:ok, _} <- DispatchOperations.release_slot(attempt.id),
+         :ok <- Attempts.release_scheduler_slot(attempt.id) do
+      :ok
+    end
   end
+
+  defp release_dispatch_slot_result(attempt, "dead_verified"),
+    do: release_dispatch_slot(attempt)
+
+  defp release_dispatch_slot_result(_attempt, _state), do: :ok
 
   defp complete_or_lost(attempt) do
     case Consigliere.Progression.after_classify(attempt, process_group: :dead_verified) do
@@ -172,6 +186,9 @@ defmodule Consigliere.Reconciler.Pass do
 
       {:error, {:progression_failed, _reason}} ->
         {:failed, attempt.id}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

@@ -14,7 +14,6 @@ defmodule Consigliere.Progression do
   alias Consigliere.DatabaseWriter
   alias Consigliere.Git
   alias Consigliere.Gates.Gate
-  alias Consigliere.GlobalScheduler
   alias Consigliere.Incidents.Incident
   alias Consigliere.Missions
   alias Consigliere.Missions.Mission
@@ -125,9 +124,8 @@ defmodule Consigliere.Progression do
          :ok <- mark_commit_verified(result),
          {:ok, sha} <- import_result(attempt, mission, result),
          {:ok, imported} <- mark_imported(result, sha),
-         {:ok, _} <- finalize_attempt(attempt, imported) do
-      GlobalScheduler.release_slot(mission.id)
-
+         {:ok, _} <- finalize_attempt(attempt, imported),
+         :ok <- Attempts.release_scheduler_slot(attempt.id) do
       case imported.result_kind do
         "checkpoint" ->
           {:ok, :checkpointed}
@@ -142,20 +140,27 @@ defmodule Consigliere.Progression do
     else
       {:error, :death_not_verified} = error -> error
       {:error, :terminal_event_missing} = error -> error
+      {:error, {:dispatch_slot_not_released, _}} = error -> error
       {:error, reason} -> progression_fail(attempt, result, reason)
     end
   end
 
   defp protocol_fail(attempt, reason) do
-    _ =
-      Attempts.fail(attempt.id, Actor.system(), %{
-        process_group: :dead_verified,
-        exit_classification: "protocol_failure"
-      })
+    case Attempts.fail(attempt.id, Actor.system(), %{
+           process_group: :dead_verified,
+           exit_classification: "protocol_failure"
+         }) do
+      {:ok, _} ->
+        note_protocol_failure(attempt, reason)
 
-    note_protocol_failure(attempt, reason)
-    GlobalScheduler.release_slot(attempt.mission_id)
-    {:error, :protocol_failure}
+        case Attempts.release_scheduler_slot(attempt.id) do
+          :ok -> {:error, :protocol_failure}
+          {:error, slot_reason} -> {:error, slot_reason}
+        end
+
+      {:error, failure_reason} ->
+        {:error, failure_reason}
+    end
   end
 
   defp require_death(%AttemptResult{status: status}, _opts)
@@ -295,16 +300,26 @@ defmodule Consigliere.Progression do
     _ = AttemptResults.fail(result.id, code, bounded_reason(reason))
     _ = note_progression_failure(attempt, code)
 
-    if attempt.status in ["running", "checkpoint_requested"] do
-      _ =
+    failure_result =
+      if attempt.status in ["running", "checkpoint_requested"] do
         Attempts.fail(attempt.id, Actor.system(), %{
           process_group: :dead_verified,
           exit_classification: code
         })
-    end
+      else
+        {:ok, attempt}
+      end
 
-    GlobalScheduler.release_slot(attempt.mission_id)
-    {:error, {:progression_failed, code}}
+    case failure_result do
+      {:ok, _} ->
+        case Attempts.release_scheduler_slot(attempt.id) do
+          :ok -> {:error, {:progression_failed, code}}
+          {:error, slot_reason} -> {:error, slot_reason}
+        end
+
+      {:error, failure_reason} ->
+        {:error, failure_reason}
+    end
   end
 
   defp note_progression_failure(attempt, code) do

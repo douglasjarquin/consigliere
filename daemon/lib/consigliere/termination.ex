@@ -13,7 +13,6 @@ defmodule Consigliere.Termination do
   alias Consigliere.Attempts
   alias Consigliere.Attempts.Attempt
   alias Consigliere.Capabilities
-  alias Consigliere.GlobalScheduler
   alias Consigliere.Home
   alias Consigliere.OutboxItems.OutboxItem
   alias Consigliere.ProcessGroup
@@ -129,20 +128,22 @@ defmodule Consigliere.Termination do
 
       AttemptStates.terminal?(attempt.status) ->
         release_if_idle(attempt)
-        :ok
 
       true ->
         death = verify_death(attempt)
 
         cond do
           death == :dead_verified ->
-            _ = apply_cause(attempt, cause, death)
-            release_if_idle(attempt)
-            :ok
+            case apply_cause(attempt, cause, death) do
+              {:ok, _} -> release_if_idle(attempt)
+              {:error, reason} -> {:error, reason}
+            end
 
           true ->
-            quarantine(attempt)
-            {:error, :death_unverified}
+            case quarantine(attempt) do
+              :ok -> {:error, :death_unverified}
+              {:error, reason} -> {:error, {:death_unverified, reason}}
+            end
         end
     end
   end
@@ -215,16 +216,19 @@ defmodule Consigliere.Termination do
   end
 
   defp quarantine(attempt) do
-    if attempt.workspace_id do
-      _ = Workspaces.quarantine(attempt.workspace_id, Actor.system(), "death_unverified")
+    with :ok <- quarantine_workspace(attempt),
+         {:ok, _} <- Attempts.mark_lost(attempt.id, Actor.system(), %{inventory: :unconfirmed}) do
+      :ok
     end
+  end
 
-    _ =
-      Attempts.mark_lost(attempt.id, Actor.system(), %{
-        inventory: :unconfirmed
-      })
+  defp quarantine_workspace(%Attempt{workspace_id: nil}), do: :ok
 
-    :ok
+  defp quarantine_workspace(attempt) do
+    case Workspaces.quarantine(attempt.workspace_id, Actor.system(), "death_unverified") do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp release_if_idle(attempt) do
@@ -238,7 +242,9 @@ defmodule Consigliere.Termination do
       )
 
     if still == [] do
-      GlobalScheduler.release_slot(attempt.mission_id)
+      Attempts.release_scheduler_slot(attempt.id)
+    else
+      :ok
     end
   end
 end

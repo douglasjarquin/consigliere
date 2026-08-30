@@ -13,6 +13,7 @@ cs_runner_sha256: a188c50b3c0fa578dc7606a38bec41eeafa1889cd2ca41b553f9ec016481c5
 cs_attempt_sha256: c6c0a480facfafdb45c7b37e36d41fd6fc17605da576c6b0e7633cb5776702a9
 package_only_version: {"cs":"0.1.0","protocol":1}
 package_only_runner_help_exit: 0
-package_only_attempt_help_exit: 0
+package_only_attempt_help_exit: 2
+package_only_attempt_help: usage text emitted
 forbidden_source_scan: zero source-like files outside shipped Ecto migrations
 redaction: no credentials, prompts, transcripts, or private canary records included

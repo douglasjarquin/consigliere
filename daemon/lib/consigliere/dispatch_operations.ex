@@ -1,6 +1,8 @@
 defmodule Consigliere.DispatchOperations do
   @moduledoc false
 
+  @unreleased_slot_states ~w(pending granted held unknown)
+
   import Ecto.Query
 
   alias Consigliere.DatabaseWriter
@@ -71,27 +73,52 @@ defmodule Consigliere.DispatchOperations do
   end
 
   def hold_slot(attempt_id) do
-    DatabaseWriter.transaction(fn ->
-      case Repo.get_by(DispatchOperation, attempt_id: attempt_id) do
-        %DispatchOperation{slot_state: slot_state} = operation
-        when slot_state in ["pending", "granted", "held"] ->
-          Txn.update!(DispatchOperation.changeset(operation, %{slot_state: "unknown"}))
-
-        _ ->
-          :ok
-      end
-    end)
+    DatabaseWriter.transaction(fn -> hold_slot_txn(attempt_id) end)
   end
 
-  def release_held_slot(attempt_id) do
-    DatabaseWriter.transaction(fn ->
-      case Repo.get_by(DispatchOperation, attempt_id: attempt_id) do
-        %DispatchOperation{slot_state: "unknown"} = operation ->
-          Txn.update!(DispatchOperation.changeset(operation, %{slot_state: "released"}))
+  def hold_slot_txn(attempt_id) do
+    case Repo.get_by(DispatchOperation, attempt_id: attempt_id) do
+      nil ->
+        :ok
 
-        _ ->
-          :ok
-      end
-    end)
+      %DispatchOperation{slot_state: slot_state} = operation
+      when slot_state in ["unknown", "released"] ->
+        operation
+
+      %DispatchOperation{slot_state: slot_state} = operation
+      when slot_state in @unreleased_slot_states ->
+        update_slot_txn(operation, "unknown")
+
+      %DispatchOperation{slot_state: slot_state} ->
+        Repo.rollback({:dispatch_slot_persistence_failed, {:invalid_slot_state, slot_state}})
+    end
+  end
+
+  def release_slot(attempt_id) do
+    DatabaseWriter.transaction(fn -> release_slot_txn(attempt_id) end)
+  end
+
+  def release_slot_txn(attempt_id) do
+    case Repo.get_by(DispatchOperation, attempt_id: attempt_id) do
+      nil ->
+        :ok
+
+      %DispatchOperation{slot_state: "released"} = operation ->
+        operation
+
+      %DispatchOperation{slot_state: slot_state} = operation
+      when slot_state in @unreleased_slot_states ->
+        update_slot_txn(operation, "released")
+
+      %DispatchOperation{slot_state: slot_state} ->
+        Repo.rollback({:dispatch_slot_persistence_failed, {:invalid_slot_state, slot_state}})
+    end
+  end
+
+  defp update_slot_txn(operation, slot_state) do
+    case Repo.update(DispatchOperation.changeset(operation, %{slot_state: slot_state})) do
+      {:ok, updated} -> updated
+      {:error, changeset} -> Repo.rollback({:dispatch_slot_persistence_failed, changeset})
+    end
   end
 end

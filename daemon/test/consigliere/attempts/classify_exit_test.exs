@@ -101,4 +101,41 @@ defmodule Consigliere.Attempts.ClassifyExitTest do
     assert DispatchOperations.get_by_attempt(attempt.id).slot_state == "released"
     assert {:ok, :granted} = GlobalScheduler.request_slot("after-verified-death")
   end
+
+  test "verified terminal exit releases every durable slot state" do
+    attempt = running_attempt!()
+    {:ok, _operation} = DispatchOperations.ensure(attempt, %{slot_state: "granted"})
+    assert {:ok, :granted} = GlobalScheduler.request_slot(attempt.mission_id)
+
+    assert {:ok, terminal} =
+             Attempts.classify_exit(attempt.id, %{
+               process_group: :dead_verified,
+               exit_status: 1,
+               session_failed: true,
+               exit_classification: "tool_error"
+             })
+
+    assert terminal.status == "failed"
+    assert DispatchOperations.get_by_attempt(attempt.id).slot_state == "released"
+    assert {:ok, :granted} = GlobalScheduler.request_slot("after-durable-release")
+  end
+
+  test "a durable slot persistence failure does not release scheduler capacity" do
+    attempt = running_attempt!()
+    {:ok, _operation} = DispatchOperations.ensure(attempt, %{slot_state: "granted"})
+    assert {:ok, :granted} = GlobalScheduler.request_slot(attempt.mission_id)
+
+    Repo.update_all(DispatchOperations.DispatchOperation, set: [slot_state: "corrupt"])
+
+    assert {:error, {:dispatch_slot_persistence_failed, _reason}} =
+             Attempts.classify_exit(attempt.id, %{
+               process_group: :dead_verified,
+               exit_status: 1,
+               session_failed: true,
+               exit_classification: "tool_error"
+             })
+
+    assert Repo.get!(Attempt, attempt.id).status == "running"
+    assert {:error, :busy} = GlobalScheduler.request_slot("after-persistence-failure")
+  end
 end

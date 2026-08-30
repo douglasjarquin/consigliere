@@ -5,6 +5,7 @@ defmodule Consigliere.Attempts.Transitions do
 
   alias Consigliere.DatabaseWriter
   alias Consigliere.AttemptResults
+  alias Consigliere.DispatchOperations
   alias Consigliere.Repo
   alias Consigliere.Txn
   alias Consigliere.Attempts.Attempt
@@ -144,6 +145,8 @@ defmodule Consigliere.Attempts.Transitions do
           finished_at: Txn.now()
         })
       )
+
+    DispatchOperations.release_slot_txn(attempt.id)
 
     Txn.append_event!("attempt.failed", "attempt", attempt.id, %{reason: reason})
     attempt
@@ -382,6 +385,8 @@ defmodule Consigliere.Attempts.Transitions do
         })
       )
 
+    DispatchOperations.release_slot_txn(attempt.id)
+
     if sha do
       mission = Repo.get!(Mission, attempt.mission_id)
       Txn.update!(Mission.changeset(mission, %{current_checkpoint_sha: sha}))
@@ -426,6 +431,8 @@ defmodule Consigliere.Attempts.Transitions do
         })
       )
 
+    DispatchOperations.release_slot_txn(attempt.id)
+
     Txn.append_event!("attempt.failed", "attempt", attempt.id)
     attempt
   end
@@ -449,6 +456,8 @@ defmodule Consigliere.Attempts.Transitions do
           exit_classification: Map.get(attrs, :exit_classification, "canceled")
         })
       )
+
+    DispatchOperations.release_slot_txn(attempt.id)
 
     Txn.append_event!("attempt.canceled", "attempt", attempt.id)
     attempt
@@ -492,6 +501,12 @@ defmodule Consigliere.Attempts.Transitions do
 
     attempt =
       Txn.update!(Attempt.changeset(attempt, %{status: "lost", finished_at: Txn.now()}))
+
+    if inventory == :dead_verified do
+      DispatchOperations.release_slot_txn(attempt.id)
+    else
+      DispatchOperations.hold_slot_txn(attempt.id)
+    end
 
     Txn.append_event!("attempt.lost", "attempt", attempt.id, %{inventory: to_string(inventory)})
     attempt

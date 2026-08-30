@@ -6,7 +6,7 @@ defmodule Consigliere.GlobalScheduler do
 
   Planned is included alongside running/starting/checkpoint_requested so a
   restart cannot double-grant a slot that was already given to a Mission
-  whose Attempt has not spawned yet. An unknown dispatch slot is also held
+  whose Attempt has not spawned yet. An unreleased dispatch slot is also held
   across restart until runner death is independently verified.
   """
   use GenServer
@@ -79,7 +79,7 @@ defmodule Consigliere.GlobalScheduler do
     unresolved =
       Repo.all(
         from(o in DispatchOperation,
-          where: o.slot_state == "unknown",
+          where: not is_nil(o.slot_state) and o.slot_state != "released",
           select: o.mission_id
         )
       )
