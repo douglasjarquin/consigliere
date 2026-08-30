@@ -138,6 +138,7 @@ defmodule Consigliere.AdvisoryTest do
              "target_pull_request" => "1"
            }},
           {"question.answer", %{"question_id" => "missing", "answer" => "injected"}},
+          {"attempt.logs", %{"attempt_id" => "missing"}},
           {"away.mark", %{}},
           {"reconcile", %{}},
           {"daemon.shutdown", %{}},

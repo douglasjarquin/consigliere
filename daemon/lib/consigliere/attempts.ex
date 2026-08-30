@@ -1,6 +1,8 @@
 defmodule Consigliere.Attempts do
   @moduledoc false
 
+  import Ecto.Query
+
   alias Consigliere.Attempts.Attempt
   alias Consigliere.AttemptStates
   alias Consigliere.GlobalScheduler
@@ -57,6 +59,32 @@ defmodule Consigliere.Attempts do
 
       nil ->
         :ok
+    end
+  end
+
+  def release_scheduler_slot_if_idle(mission_id) do
+    occupying = AttemptStates.occupying()
+
+    has_occupying_attempt =
+      Consigliere.Repo.exists?(
+        from(a in Attempt,
+          where: a.mission_id == ^mission_id and a.status in ^occupying
+        )
+      )
+
+    has_unreleased_dispatch =
+      Consigliere.Repo.exists?(
+        from(o in DispatchOperations.DispatchOperation,
+          where:
+            o.mission_id == ^mission_id and not is_nil(o.slot_state) and
+              o.slot_state != "released"
+        )
+      )
+
+    if has_occupying_attempt or has_unreleased_dispatch do
+      :ok
+    else
+      GlobalScheduler.release_slot(mission_id)
     end
   end
 

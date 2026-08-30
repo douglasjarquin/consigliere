@@ -8,10 +8,13 @@ defmodule Consigliere.RunnerProcessRecoveryTest do
   alias Consigliere.DomainEvents.DomainEvent
   alias Consigliere.Fixtures
   alias Consigliere.GlobalScheduler
+  alias Consigliere.Home
   alias Consigliere.Missions
   alias Consigliere.Repo
+  alias Consigliere.Attempts.Attempt
   alias Consigliere.RunnerLauncher
   alias Consigliere.RunnerProcess
+  alias Consigliere.Runtime.Inventory
 
   setup do
     Fixtures.reset_phase1_tables!()
@@ -55,6 +58,42 @@ defmodule Consigliere.RunnerProcessRecoveryTest do
 
     assert :sys.get_state(pid).stop_reason ==
              {:protocol_failure, "bridge_failure:failure_persist_failed"}
+  end
+
+  test "a failed running persistence transition tears down the handshaken runner" do
+    previous_trap_exit = Process.flag(:trap_exit, true)
+    on_exit(fn -> Process.flag(:trap_exit, previous_trap_exit) end)
+
+    {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
+
+    {:ok, attempt} =
+      Repo.insert(
+        Attempt.changeset(%Attempt{}, %{
+          mission_id: mission.id,
+          role: "soldier",
+          harness: "fake",
+          status: "starting",
+          fencing_token: "durable-fence"
+        })
+      )
+
+    attempt_id = attempt.id
+
+    result =
+      RunnerProcess.start_link(
+        attempt_id: attempt_id,
+        mission_id: mission.id,
+        fencing_token: "stale-fence",
+        harness_command: ["sleep", "30"]
+      )
+
+    assert {:error, {:runner_identity_persist_failed, {:fenced, ^attempt_id}}} = result
+    assert Repo.get!(Attempt, attempt.id).status == "failed"
+    assert Registry.lookup(Consigliere.Registry, {:runner, attempt.id}) == []
+
+    manifest_path = Inventory.path_for(Home.dir(), attempt.id)
+
+    assert eventually(fn -> terminal_manifest?(manifest_path) end)
   end
 
   test "repeated native sequence gaps record only one protocol failure" do
@@ -130,6 +169,32 @@ defmodule Consigliere.RunnerProcessRecoveryTest do
         Process.sleep(50)
         wait_until(fun, remaining - 1)
       end
+    end
+  end
+
+  defp eventually(fun, remaining \\ 100)
+
+  defp eventually(fun, remaining) when remaining > 0 do
+    if fun.() do
+      true
+    else
+      Process.sleep(50)
+      eventually(fun, remaining - 1)
+    end
+  end
+
+  defp eventually(_fun, 0), do: false
+
+  defp terminal_manifest?(path) do
+    case File.read(path) do
+      {:ok, body} ->
+        case JSON.decode(body) do
+          {:ok, %{"state" => state}} when state in ["dead_verified", "dead_unverified"] -> true
+          _ -> false
+        end
+
+      _ ->
+        false
     end
   end
 

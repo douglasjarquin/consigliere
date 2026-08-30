@@ -72,35 +72,52 @@ defmodule Consigliere.RunnerProcess do
            env: runner_env(opts)
          ) do
       {:ok, session} ->
-        :ok = :inet.setopts(session.socket, active: :once)
-        maybe_persist_started(attempt_id, session, fencing_token, invocation_id)
+        case maybe_persist_started(attempt_id, session, fencing_token, invocation_id) do
+          :ok ->
+            :ok = :inet.setopts(session.socket, active: :once)
 
-        {:ok,
-         %{
-           attempt_id: attempt_id,
-           mission_id: mission_id,
-           fencing_token: fencing_token,
-           session: session,
-           invocation_id: invocation_id,
-           capability: capability,
-           capability_id: Keyword.get(opts, :capability_id),
-           capability_generation: Keyword.get(opts, :capability_generation),
-           workspace_id: workspace_id,
-           workspace_generation: workspace_generation,
-           base_sha: base_sha,
-           parent_checkpoint_sha: parent_checkpoint_sha,
-           project_id: Keyword.get(opts, :project_id),
-           context_hash: Keyword.get(opts, :context_hash),
-           policy: Keyword.get(opts, :policy, %{}),
-           heartbeat_count: 0,
-           stdout_buffer: "",
-           stdout_discarding: false,
-           stdout_native_sequence: 0,
-           stderr_native_sequence: 0,
-           stop_reason: nil,
-           harness_exit_received: false,
-           port_exit_status: nil
-         }}
+            {:ok,
+             %{
+               attempt_id: attempt_id,
+               mission_id: mission_id,
+               fencing_token: fencing_token,
+               session: session,
+               invocation_id: invocation_id,
+               capability: capability,
+               capability_id: Keyword.get(opts, :capability_id),
+               capability_generation: Keyword.get(opts, :capability_generation),
+               workspace_id: workspace_id,
+               workspace_generation: workspace_generation,
+               base_sha: base_sha,
+               parent_checkpoint_sha: parent_checkpoint_sha,
+               project_id: Keyword.get(opts, :project_id),
+               context_hash: Keyword.get(opts, :context_hash),
+               policy: Keyword.get(opts, :policy, %{}),
+               heartbeat_count: 0,
+               stdout_buffer: "",
+               stdout_discarding: false,
+               stdout_native_sequence: 0,
+               stderr_native_sequence: 0,
+               stop_reason: nil,
+               harness_exit_received: false,
+               port_exit_status: nil
+             }}
+
+          {:error, reason} ->
+            cleanup_unpersisted_session(session)
+
+            case mark_start_persist_failed(attempt_id, reason) do
+              :ok ->
+                :ok
+
+              {:error, mark_reason} ->
+                Logger.error(
+                  "runner identity persistence failure could not be recorded for #{attempt_id}: #{inspect(mark_reason)}"
+                )
+            end
+
+            {:stop, {:runner_identity_persist_failed, reason}}
+        end
 
       {:error, reason} ->
         {:stop, {:spawn_failed, reason}}
@@ -621,15 +638,53 @@ defmodule Consigliere.RunnerProcess do
   defp maybe_persist_started(attempt_id, session, fencing_token, invocation_id) do
     with {:ok, id} <- Ecto.UUID.cast(attempt_id),
          %Attempt{status: "starting"} <- Repo.get(Attempt, id) do
-      Attempts.mark_running(id, Actor.system(), %{
-        fencing_token: fencing_token,
-        runner_pid: session.runner_os_pid,
-        harness_pid: session.harness_pid,
-        pgid: session.pgid,
-        invocation_id: invocation_id
-      })
+      case Attempts.mark_running(id, Actor.system(), %{
+             fencing_token: fencing_token,
+             runner_pid: session.runner_os_pid,
+             harness_pid: session.harness_pid,
+             pgid: session.pgid,
+             invocation_id: invocation_id
+           }) do
+        {:ok, _attempt} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
     else
       _ -> :ok
+    end
+  end
+
+  defp cleanup_unpersisted_session(session) do
+    try do
+      _ = RunnerLauncher.cancel(session)
+      _ = RunnerLauncher.recv_until(session, "termination_complete", 15_000)
+    after
+      _ = :gen_tcp.close(session.socket)
+      close_port(session.port)
+      _ = RunnerLauncher.release(session)
+    end
+  end
+
+  defp close_port(port) do
+    if Port.info(port), do: Port.close(port)
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp mark_start_persist_failed(attempt_id, reason) do
+    case Ecto.UUID.cast(attempt_id) do
+      {:ok, id} ->
+        case Attempts.mark_spawn_failed(
+               id,
+               Actor.system(),
+               "runner identity persistence failed: #{inspect(reason) |> String.slice(0, 256)}"
+             ) do
+          {:ok, _attempt} -> :ok
+          {:error, mark_reason} -> {:error, mark_reason}
+        end
+
+      :error ->
+        {:error, :invalid_attempt_id}
     end
   end
 end

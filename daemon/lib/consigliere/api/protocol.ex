@@ -27,7 +27,7 @@ defmodule Consigliere.API.Protocol do
   @attempt_ops Consigliere.Capabilities.worker_operations()
   @advisory_ops ~w(advisory.orient ping version health project.list project.get mission.list
                    mission.get mission.why mission.review questions.inbox attempt.list
-                   incident.list event.list attempt.logs mission.create)
+                   incident.list event.list mission.create)
   @review_phases ~w(awaiting_authorization ready_for_review
                     awaiting_integration_authorization failed)
 

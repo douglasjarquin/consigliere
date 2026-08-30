@@ -113,6 +113,7 @@ defmodule Consigliere.GlobalSchedulerTest do
     assert Repo.get!(Consigliere.Attempts.Attempt, attempt.id).status == "canceled"
     assert DispatchOperations.get_by_attempt(attempt.id).slot_state == "released"
 
+    assert {:ok, :granted} = GlobalScheduler.request_slot(Ecto.UUID.generate())
     assert :ok = GlobalScheduler.reset()
     assert {:ok, :granted} = GlobalScheduler.request_slot(Ecto.UUID.generate())
   end

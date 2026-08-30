@@ -21,6 +21,7 @@ defmodule Consigliere.Missions do
   def fail(mission_id, actor, attrs) do
     with {:ok, mission} <- Transitions.fail(mission_id, actor, attrs) do
       terminate_runners(mission.id)
+      _ = Consigliere.Attempts.release_scheduler_slot_if_idle(mission.id)
       {:ok, mission}
     end
   end
@@ -28,6 +29,7 @@ defmodule Consigliere.Missions do
   def cancel(mission_id, actor, reason) do
     with {:ok, mission} <- Transitions.cancel(mission_id, actor, reason) do
       terminate_runners(mission.id)
+      _ = Consigliere.Attempts.release_scheduler_slot_if_idle(mission.id)
       {:ok, mission}
     end
   end
@@ -35,6 +37,7 @@ defmodule Consigliere.Missions do
   def supersede(mission_id, actor, replacement_attrs) do
     with {:ok, result} <- Transitions.supersede(mission_id, actor, replacement_attrs) do
       terminate_runners(mission_id)
+      _ = Consigliere.Attempts.release_scheduler_slot_if_idle(mission_id)
       {:ok, result}
     end
   end
@@ -51,6 +54,7 @@ defmodule Consigliere.Missions do
 
   def pause(mission_id, actor, reason \\ "boss pause") do
     with {:ok, mission} <- Transitions.pause(mission_id, actor, reason) do
+      _ = Consigliere.Attempts.release_scheduler_slot_if_idle(mission.id)
       Consigliere.Pause.settle(mission.id)
     end
   end
