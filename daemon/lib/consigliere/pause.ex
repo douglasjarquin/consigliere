@@ -25,8 +25,8 @@ defmodule Consigliere.Pause do
     if mission.phase == "paused" do
       {:ok, %{mission: mission, status: :paused, checkpoint_sha: mission.current_checkpoint_sha}}
     else
-      Enum.each(live_attempts(mission_id), &stop_one/1)
-      finalize(mission_id)
+      outcomes = Enum.map(live_attempts(mission_id), &stop_one/1)
+      finalize(mission_id, outcomes)
     end
   end
 
@@ -35,12 +35,14 @@ defmodule Consigliere.Pause do
     death = Termination.verify_death(attempt)
 
     if death == :dead_verified do
-      maybe_import(attempt)
+      case maybe_import(attempt) do
+        :ok -> :ok
+        {:error, reason} -> {:error, {:checkpoint_import_failed, reason}}
+      end
     else
       maybe_quarantine(attempt)
+      {:error, :death_unverified}
     end
-
-    death
   end
 
   defp maybe_import(attempt) do
@@ -50,14 +52,23 @@ defmodule Consigliere.Pause do
     project = mission.project_id && Repo.get(Project, mission.project_id)
 
     if importable?(sha, workspace, project) do
-      _ =
-        Checkpoints.import_after_death(attempt.id,
-          process_group: :dead_verified,
-          workspace_path: workspace.path,
-          mirror_path: project.trusted_mirror_path,
-          sha: sha,
-          base_sha: workspace.base_sha || mission.base_sha
-        )
+      case Checkpoints.import_after_death(
+             attempt.id,
+             process_group: :dead_verified,
+             workspace_path: workspace.path,
+             mirror_path: project.trusted_mirror_path,
+             sha: sha,
+             base_sha: workspace.base_sha || mission.base_sha
+           ) do
+        {:ok, _result} ->
+          :ok
+
+        {:error, reason} ->
+          record_checkpoint_import_failure(attempt, reason)
+          {:error, reason}
+      end
+    else
+      :ok
     end
   end
 
@@ -74,13 +85,13 @@ defmodule Consigliere.Pause do
 
   defp maybe_quarantine(_), do: :ok
 
-  defp finalize(mission_id) do
+  defp finalize(mission_id, outcomes) do
     leftover = Enum.filter(live_attempts(mission_id), &Termination.process_alive?/1)
 
     DatabaseWriter.transaction(fn ->
       mission = Repo.get!(Mission, mission_id)
 
-      if leftover == [] do
+      if leftover == [] and Enum.all?(outcomes, &(&1 == :ok)) do
         close_blockers!(mission, "pausing")
         open_paused!(mission)
         mission = Txn.update!(Mission.changeset(mission, %{phase: "paused"}))
@@ -96,6 +107,35 @@ defmodule Consigliere.Pause do
       {:ok, result} -> result
       other -> other
     end
+  end
+
+  defp record_checkpoint_import_failure(attempt, reason) do
+    detail = "pause checkpoint import failed: #{inspect(reason) |> String.slice(0, 256)}"
+
+    DatabaseWriter.transaction(fn ->
+      exists? =
+        Repo.exists?(
+          from(i in Consigliere.Incidents.Incident,
+            where:
+              i.mission_id == ^attempt.mission_id and i.subject_id == ^attempt.id and
+                i.reason == ^detail
+          )
+        )
+
+      unless exists? do
+        Txn.insert!(
+          Consigliere.Incidents.Incident.changeset(%Consigliere.Incidents.Incident{}, %{
+            mission_id: attempt.mission_id,
+            subject_type: "attempt",
+            subject_id: attempt.id,
+            severity: "error",
+            reason: detail
+          })
+        )
+      end
+    end)
+
+    :ok
   end
 
   defp live_attempts(mission_id) do

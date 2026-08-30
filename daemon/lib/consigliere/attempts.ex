@@ -2,6 +2,8 @@ defmodule Consigliere.Attempts do
   @moduledoc false
 
   alias Consigliere.Attempts.Attempt
+  alias Consigliere.AttemptStates
+  alias Consigliere.GlobalScheduler
   alias Consigliere.Attempts.Transitions
 
   defdelegate schedule(mission_id, actor, attrs), to: Transitions
@@ -26,6 +28,10 @@ defmodule Consigliere.Attempts do
   def classify_exit(attempt_id, attrs) do
     with {:ok, attempt} <- Transitions.classify_exit(attempt_id, attrs) do
       Consigliere.Progression.after_classify(attempt, process_group: attrs[:process_group])
+
+      if AttemptStates.terminal?(attempt.status),
+        do: GlobalScheduler.release_slot(attempt.mission_id)
+
       {:ok, Consigliere.Repo.get!(Attempt, attempt_id)}
     end
   end

@@ -6,6 +6,7 @@ defmodule Consigliere.ProgressionTest do
   alias Consigliere.Attempts.Attempt
   alias Consigliere.Fixtures
   alias Consigliere.Gates.Gate
+  alias Consigliere.GlobalScheduler
   alias Consigliere.Git
   alias Consigliere.Harness.Events
   alias Consigliere.Home
@@ -63,6 +64,26 @@ defmodule Consigliere.ProgressionTest do
     assert Repo.get!(Mission, mission.id).phase == "active"
     assert Repo.get!(Mission, mission.id).current_checkpoint_sha == nil
     assert Repo.aggregate(Incident, :count) >= 1
+  end
+
+  test "protocol failure classification releases the scheduler slot", %{root: root} do
+    %{attempt: attempt, mission: mission} = running_in_workspace!(root)
+
+    assert GlobalScheduler.request_slot(mission.id) in [{:ok, :granted}, {:ok, :held}]
+
+    {:ok, attempt} =
+      Repo.update(Attempt.changeset(attempt, %{exit_classification: "protocol_failure"}))
+
+    {:ok, failed} =
+      Attempts.classify_exit(attempt.id, %{
+        process_group: :dead_verified,
+        exit_status: 1,
+        session_failed: true,
+        exit_classification: "protocol_failure"
+      })
+
+    assert failed.status == "failed"
+    assert {:ok, :granted} = GlobalScheduler.request_slot("next-mission")
   end
 
   test "duplicate progression of the same Attempt imports once", %{root: root} do

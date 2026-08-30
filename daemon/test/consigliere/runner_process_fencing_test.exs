@@ -50,14 +50,16 @@ defmodule Consigliere.RunnerProcessFencingTest do
     assert RunnerProcess.heartbeat_count(pid) < before + 20,
            "a stale fencing token must not create heartbeat state"
 
-    live_session = :sys.get_state(pid).session
+    live_state = :sys.get_state(pid)
+    live_session = live_state.session
 
     live =
       live_session
       |> RunnerLauncher.encode_frame(
         %{
           "type" => "stdout_chunk",
-          "data" => String.duplicate("live\n", 80)
+          "data" => String.duplicate("live\n", 80),
+          "native_sequence" => live_state.stdout_native_sequence + 1
         },
         live_session.recv_seq + 1
       )
@@ -70,5 +72,46 @@ defmodule Consigliere.RunnerProcessFencingTest do
     Process.sleep(80)
 
     assert RunnerProcess.heartbeat_count(pid) >= before + 80
+  end
+
+  test "a gapped native stream sequence records a protocol failure" do
+    attempt_id = "stream-sequence-#{System.unique_integer([:positive])}"
+    heartbeat_file = Path.join(System.tmp_dir!(), "#{attempt_id}.hb")
+    token = "live-#{attempt_id}"
+
+    {:ok, pid} =
+      RunnerProcess.start_link(
+        attempt_id: attempt_id,
+        heartbeat_file: heartbeat_file,
+        fencing_token: token,
+        harness_command: ["sleep", "5"]
+      )
+
+    os_pid = RunnerProcess.os_pid(pid)
+
+    on_exit(fn ->
+      Consigliere.ProcessHelpers.kill_and_verify_dead(os_pid)
+      File.rm(heartbeat_file)
+    end)
+
+    %{session: %{socket: socket} = session} = :sys.get_state(pid)
+
+    frame =
+      RunnerLauncher.encode_frame(
+        session,
+        %{
+          "type" => "stdout_chunk",
+          "data" => "out-of-order\n",
+          "native_sequence" => 2
+        },
+        session.recv_seq + 1
+      )
+
+    send(pid, {:tcp, socket, JSON.encode!(frame) <> "\n"})
+    Process.sleep(80)
+
+    assert {:protocol_failure, reason} = :sys.get_state(pid).stop_reason
+    assert String.starts_with?(reason, "stream_sequence_gap")
+    assert RunnerProcess.heartbeat_count(pid) == 0
   end
 end

@@ -7,6 +7,7 @@ defmodule Consigliere.PauseTest do
   alias Consigliere.Capabilities
   alias Consigliere.Fixtures
   alias Consigliere.Home
+  alias Consigliere.Incidents.Incident
   alias Consigliere.Missions
   alias Consigliere.Missions.Mission
   alias Consigliere.ProcessGroup
@@ -87,6 +88,50 @@ defmodule Consigliere.PauseTest do
     wait_for_runner_exit(attempt.id)
 
     assert_eventually(fn -> Repo.get!(Mission, mission.id).phase == "paused" end)
+  end
+
+  test "pause records a checkpoint import failure and remains pausing" do
+    {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
+    {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Fixtures.grant_work_quietly(mission.id, Actor.boss())
+
+    workspace_path = Path.join(Home.workspaces_dir(), "#{mission.id}-pause-import")
+
+    {:ok, %{attempt: attempt, workspace: workspace}} =
+      Missions.start(mission.id, Actor.system(), %{workspace_path: workspace_path})
+
+    File.mkdir_p!(workspace.path)
+    {:ok, attempt} = Attempts.request_spawn(attempt.id, Actor.system())
+
+    {:ok, attempt} =
+      Attempts.mark_running(attempt.id, Actor.system(), %{fencing_token: attempt.fencing_token})
+
+    checkpoint_sha = String.duplicate("a", 40)
+
+    {:ok, attempt} =
+      Repo.update(Attempt.changeset(attempt, %{reported_checkpoint_sha: checkpoint_sha}))
+
+    manifest_path = Inventory.path_for(Home.dir(), attempt.id)
+    File.mkdir_p!(Path.dirname(manifest_path))
+
+    File.write!(
+      manifest_path,
+      JSON.encode!(%{
+        "schema_version" => 1,
+        "attempt_id" => attempt.id,
+        "state" => "dead_verified",
+        "pgid" => 424_242
+      })
+    )
+
+    on_exit(fn -> File.rm_rf(Path.dirname(manifest_path)) end)
+
+    assert {:ok, %{status: :pausing}} = Missions.pause(mission.id, Actor.boss())
+
+    assert Repo.get!(Mission, mission.id).phase == "active"
+
+    incident = Repo.get_by!(Incident, mission_id: mission.id, subject_id: attempt.id)
+    assert incident.reason =~ "pause checkpoint import failed"
   end
 
   test "pause does not signal a persisted pgid without verified inventory" do

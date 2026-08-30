@@ -15,8 +15,8 @@ const streamQueueSize = 256
 // and, once Attach is called, writes each read as a stdout_chunk /
 // stderr_chunk control message. Chunks produced before Attach sit in a
 // bounded queue so a short-lived harness that prints and exits before
-// the daemon connects does not lose its output. A full queue drops
-// rather than blocking the harness indefinitely.
+// the daemon connects does not lose its output. A full queue applies
+// backpressure until the daemon can receive the pending output.
 type streamForwarder struct {
 	chunks chan map[string]any
 	wg     sync.WaitGroup
@@ -52,10 +52,7 @@ func (f *streamForwarder) pump(r io.Reader, msgType, attemptID, fencingToken str
 				"native_sequence": seq.Add(1),
 				"data":            string(buf[:n]),
 			}
-			select {
-			case f.chunks <- msg:
-			default:
-			}
+			f.chunks <- msg
 		}
 		if err != nil {
 			return

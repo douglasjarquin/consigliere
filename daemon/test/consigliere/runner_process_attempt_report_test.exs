@@ -135,6 +135,100 @@ defmodule Consigliere.RunnerProcessAttemptReportTest do
     refute Process.alive?(runner)
   end
 
+  test "records a protocol failure when a completion report is rejected" do
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "cs-attempt-report-rejected-#{System.unique_integer([:positive])}"
+      )
+
+    source = Path.join(root, "source")
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf(root) end)
+    Git.init_workspace(source)
+    File.write!(Path.join(source, "README"), "base\n")
+    base_sha = Git.commit_all(source, "base")
+
+    {:ok, project} =
+      Consigliere.Projects.register(
+        %{name: "rejected-report", repository_path: source, repository_url: "file://#{source}"},
+        Actor.boss()
+      )
+
+    {:ok, mission} =
+      Consigliere.Missions.create(
+        Fixtures.mission_attrs(%{project_id: project.id, base_sha: base_sha}),
+        Actor.boss()
+      )
+
+    {:ok, mission} = Consigliere.Missions.submit_for_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Consigliere.Missions.grant_work_authorization(mission.id, Actor.boss())
+
+    workspace_path = Path.join(Consigliere.Home.workspaces_dir(), mission.id)
+
+    {:ok, %{attempt: attempt, workspace: workspace}} =
+      Consigliere.Missions.start(mission.id, Actor.system(), %{workspace_path: workspace_path})
+
+    File.mkdir_p!(workspace.path)
+    {:ok, attempt} = Attempts.request_spawn(attempt.id, Actor.system())
+
+    {:ok, attempt} =
+      Attempts.mark_running(attempt.id, Actor.system(), %{fencing_token: attempt.fencing_token})
+
+    {:ok, capability} = Consigliere.Capabilities.mint(attempt)
+    {:ok, capability_record} = Consigliere.Capabilities.authenticate(capability)
+
+    marker =
+      "CS_ATTEMPT_REPORT_V1:" <>
+        (JSON.encode!(%{
+           "operation" => "complete",
+           "payload" => %{"result_sha" => "not-a-full-sha"}
+         })
+         |> Base.encode16(case: :lower))
+
+    script = Path.join(root, "codex-rejected-marker")
+
+    File.write!(
+      script,
+      "#!/bin/sh\n" <>
+        "printf '%s\\n' '" <>
+        JSON.encode!(%{
+          "type" => "item.completed",
+          "item" => %{"type" => "command_execution", "aggregated_output" => marker <> "\n"}
+        }) <>
+        "'\n"
+    )
+
+    File.chmod!(script, 0o700)
+
+    {:ok, runner} =
+      RunnerProcess.start_link(
+        attempt_id: attempt.id,
+        mission_id: mission.id,
+        project_id: project.id,
+        workspace_id: workspace.id,
+        workspace_path: workspace.path,
+        workspace_generation: workspace.lease_id,
+        base_sha: base_sha,
+        parent_checkpoint_sha: workspace.parent_checkpoint_sha,
+        fencing_token: attempt.fencing_token,
+        capability: capability,
+        capability_id: capability_record.id,
+        capability_generation: capability_record.generation,
+        invocation_id:
+          "bridge-rejected-#{Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)}",
+        harness_command: [script]
+      )
+
+    wait_until(fn -> Repo.get!(Attempt, attempt.id).status in ~w(failed lost) end)
+
+    rejected = Repo.get!(Attempt, attempt.id)
+    assert rejected.status == "failed"
+    assert rejected.exit_classification == "protocol_failure"
+    assert Repo.get!(Consigliere.Missions.Mission, mission.id).phase == "active"
+    refute Process.alive?(runner)
+  end
+
   defp wait_until(fun, remaining \\ 120) do
     if fun.() do
       :ok

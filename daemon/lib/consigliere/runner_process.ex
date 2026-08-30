@@ -83,6 +83,8 @@ defmodule Consigliere.RunnerProcess do
            session: session,
            invocation_id: invocation_id,
            capability: capability,
+           capability_id: Keyword.get(opts, :capability_id),
+           capability_generation: Keyword.get(opts, :capability_generation),
            workspace_id: workspace_id,
            workspace_generation: workspace_generation,
            base_sha: base_sha,
@@ -93,6 +95,8 @@ defmodule Consigliere.RunnerProcess do
            heartbeat_count: 0,
            stdout_buffer: "",
            stdout_discarding: false,
+           stdout_native_sequence: 0,
+           stderr_native_sequence: 0,
            stop_reason: nil,
            harness_exit_received: false,
            port_exit_status: nil
@@ -187,15 +191,33 @@ defmodule Consigliere.RunnerProcess do
   end
 
   defp handle_control_msg(%{"type" => "stdout_chunk"} = msg, state) do
-    data = Map.get(msg, "data", "")
-    state = ingest_stdout(data, state)
-    bump_heartbeat(state, data)
+    case accept_stream_sequence(msg, :stdout_native_sequence, state) do
+      {:ok, state} ->
+        data = Map.get(msg, "data", "")
+        state = ingest_stdout(data, state)
+        bump_heartbeat(state, data)
+
+      {:duplicate, state} ->
+        state
+
+      {:error, state} ->
+        state
+    end
   end
 
   defp handle_control_msg(%{"type" => "stderr_chunk"} = msg, state) do
-    data = Map.get(msg, "data", "")
-    append_attempt_log(state.attempt_id, data)
-    bump_heartbeat(state, data)
+    case accept_stream_sequence(msg, :stderr_native_sequence, state) do
+      {:ok, state} ->
+        data = Map.get(msg, "data", "")
+        append_attempt_log(state.attempt_id, data)
+        bump_heartbeat(state, data)
+
+      {:duplicate, state} ->
+        state
+
+      {:error, state} ->
+        state
+    end
   end
 
   defp handle_control_msg(%{"type" => "harness_exited", "exit_code" => 0}, state) do
@@ -213,6 +235,28 @@ defmodule Consigliere.RunnerProcess do
     inc = if lines > 0, do: lines, else: 1
     %{state | heartbeat_count: state.heartbeat_count + inc}
   end
+
+  defp accept_stream_sequence(msg, key, state) do
+    last = Map.get(state, key, 0)
+    sequence = Map.get(msg, "native_sequence")
+
+    cond do
+      is_integer(sequence) and sequence == last + 1 ->
+        {:ok, Map.put(state, key, sequence)}
+
+      is_integer(sequence) and sequence >= 1 and sequence <= last ->
+        {:duplicate, state}
+
+      true ->
+        {:error, mark_protocol_failure(state, stream_sequence_error(sequence, last))}
+    end
+  end
+
+  defp stream_sequence_error(sequence, last)
+       when is_integer(sequence) and sequence > last + 1,
+       do: "stream_sequence_gap"
+
+  defp stream_sequence_error(_sequence, _last), do: "stream_sequence_invalid"
 
   defp harness_command(opts) do
     case Keyword.get(opts, :harness_command) do
@@ -282,10 +326,47 @@ defmodule Consigliere.RunnerProcess do
       "payload" => report
     }
 
-    _ = Consigliere.API.Protocol.handle(JSON.encode!(request), :capability)
-    state
+    response = Consigliere.API.Protocol.handle(JSON.encode!(request), :capability)
+
+    case JSON.decode(response) do
+      {:ok, %{"ok" => true}} ->
+        state
+
+      {:ok, %{"ok" => false, "error" => %{"code" => code}}} ->
+        mark_protocol_failure(state, code)
+
+      {:ok, _response} ->
+        mark_protocol_failure(state, "invalid_bridge_response")
+
+      {:error, _reason} ->
+        mark_protocol_failure(state, "invalid_bridge_response")
+    end
   rescue
-    _ -> state
+    _exception -> mark_protocol_failure(state, "bridge_exception")
+  end
+
+  defp mark_protocol_failure(state, code) do
+    actor =
+      Actor.attempt(
+        state.attempt_id,
+        state.fencing_token,
+        ["attempt.fail"],
+        %{
+          capability_id: state.capability_id,
+          capability_generation: state.capability_generation,
+          mission_id: state.mission_id,
+          workspace_id: state.workspace_id,
+          workspace_generation: state.workspace_generation
+        }
+      )
+
+    failure_code =
+      case Attempts.report_failure(state.attempt_id, actor, %{classification: "protocol_failure"}) do
+        {:ok, _attempt} -> code
+        {:error, reason} -> "#{code}:failure_persist_failed:#{inspect(reason)}"
+      end
+
+    %{state | stop_reason: {:protocol_failure, to_string(failure_code) |> String.slice(0, 128)}}
   end
 
   defp maybe_put_report_parent(report, nil), do: report
@@ -441,14 +522,14 @@ defmodule Consigliere.RunnerProcess do
       {code, _} = exit_bits(reason, state)
       death = death_of(state)
       completed? = attempt.exit_classification == "completed"
-      failed? = failed_class?(attempt)
+      failed? = failed_class?(attempt) or protocol_failure?(state)
 
       Attempts.classify_exit(id, %{
         process_group: death,
         exit_status: code,
         session_completed: completed?,
         session_failed: failed?,
-        exit_classification: attempt.exit_classification
+        exit_classification: attempt.exit_classification || protocol_failure_classification(state)
       })
     else
       _ -> :ok
@@ -461,6 +542,13 @@ defmodule Consigliere.RunnerProcess do
   end
 
   defp failed_class?(_), do: false
+
+  defp protocol_failure?(%{stop_reason: {:protocol_failure, _}}), do: true
+  defp protocol_failure?(_), do: false
+
+  defp protocol_failure_classification(state) do
+    if protocol_failure?(state), do: "protocol_failure"
+  end
 
   defp death_of(%{session: %{pgid: pgid}}) when is_integer(pgid) and pgid > 1 do
     ProcessGroup.terminate(pgid)
