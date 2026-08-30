@@ -104,9 +104,9 @@ defmodule Consigliere.RunnerProcess do
              }}
 
           {:error, reason} ->
-            cleanup_unpersisted_session(session)
+            termination_cleanup = cleanup_unpersisted_session(session)
 
-            case mark_start_persist_failed(attempt_id, reason) do
+            case mark_start_persist_failed(attempt_id, reason, termination_cleanup) do
               :ok ->
                 :ok
 
@@ -664,15 +664,42 @@ defmodule Consigliere.RunnerProcess do
   end
 
   defp cleanup_unpersisted_session(session) do
+    termination_cleanup =
+      case RunnerLauncher.cancel(session) do
+        :ok ->
+          cleanup_result(:ok, RunnerLauncher.recv_until(session, "termination_complete", 15_000))
+
+        cancel_result ->
+          cleanup_result(cancel_result, nil)
+      end
+
     try do
-      _ = RunnerLauncher.cancel(session)
-      _ = RunnerLauncher.recv_until(session, "termination_complete", 15_000)
+      termination_cleanup
     after
       _ = :gen_tcp.close(session.socket)
       close_port(session.port)
       _ = RunnerLauncher.release(session)
     end
   end
+
+  @doc false
+  def cleanup_result(:ok, {:ok, %{"type" => "termination_complete", "verified_dead" => true}}),
+    do: :ok
+
+  def cleanup_result(:ok, {:ok, %{"type" => "termination_complete", "verified_dead" => false}}),
+    do: {:error, :termination_unverified}
+
+  def cleanup_result(:ok, {:ok, %{"type" => type}}),
+    do: {:error, {:unexpected_termination_response, type}}
+
+  def cleanup_result(:ok, {:error, reason}),
+    do: {:error, {:termination_failed, reason}}
+
+  def cleanup_result({:error, reason}, _termination_result),
+    do: {:error, {:cancel_failed, reason}}
+
+  def cleanup_result(other, _termination_result),
+    do: {:error, {:cancel_failed, other}}
 
   defp close_port(port) do
     if Port.info(port), do: Port.close(port)
@@ -681,7 +708,7 @@ defmodule Consigliere.RunnerProcess do
     _ -> :ok
   end
 
-  defp mark_start_persist_failed(attempt_id, reason) do
+  defp mark_start_persist_failed(attempt_id, reason, :ok) do
     case Ecto.UUID.cast(attempt_id) do
       {:ok, id} ->
         case Attempts.mark_spawn_failed(
@@ -689,6 +716,19 @@ defmodule Consigliere.RunnerProcess do
                Actor.system(),
                "runner identity persistence failed: #{inspect(reason) |> String.slice(0, 256)}"
              ) do
+          {:ok, _attempt} -> :ok
+          {:error, mark_reason} -> {:error, mark_reason}
+        end
+
+      :error ->
+        {:error, :invalid_attempt_id}
+    end
+  end
+
+  defp mark_start_persist_failed(attempt_id, _reason, {:error, _cleanup_reason}) do
+    case Ecto.UUID.cast(attempt_id) do
+      {:ok, id} ->
+        case Attempts.mark_lost(id, Actor.system(), %{inventory: :unconfirmed}) do
           {:ok, _attempt} -> :ok
           {:error, mark_reason} -> {:error, mark_reason}
         end

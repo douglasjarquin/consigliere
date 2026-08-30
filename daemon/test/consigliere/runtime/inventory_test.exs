@@ -144,6 +144,27 @@ defmodule Consigliere.Runtime.InventoryTest do
            }) == :identity_mismatch
   end
 
+  test "liveness identifies a missing runner with a verified harness as orphaned_runner" do
+    {runner_port, dead_runner_pid} = Consigliere.ProcessHelpers.spawn_session_leader()
+    ProcessGroup.terminate(dead_runner_pid, term_timeout_ms: 100, kill_timeout_ms: 100)
+    if Port.info(runner_port), do: Port.close(runner_port)
+
+    {harness_port, harness_pid} = Consigliere.ProcessHelpers.spawn_session_leader()
+
+    on_exit(fn ->
+      _ = ProcessGroup.terminate(harness_pid, term_timeout_ms: 100, kill_timeout_ms: 100)
+      if Port.info(harness_port), do: Port.close(harness_port)
+    end)
+
+    manifest = %{
+      "pgid" => harness_pid,
+      "runner_pid" => dead_runner_pid,
+      "harness_pid" => harness_pid
+    }
+
+    assert Inventory.liveness(manifest) == :orphaned_runner
+  end
+
   defp running_attempt! do
     {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())

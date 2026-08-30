@@ -6,6 +6,7 @@ defmodule Consigliere.RunnerProcessRecoveryTest do
   alias Consigliere.Actor
   alias Consigliere.Attempts
   alias Consigliere.DomainEvents.DomainEvent
+  alias Consigliere.DispatchOperations
   alias Consigliere.Fixtures
   alias Consigliere.GlobalScheduler
   alias Consigliere.Home
@@ -63,6 +64,16 @@ defmodule Consigliere.RunnerProcessRecoveryTest do
              {:protocol_failure, "bridge_failure:failure_persist_failed"}
   end
 
+  test "unverified startup cleanup is not treated as successful" do
+    assert RunnerProcess.cleanup_result(
+             :ok,
+             {:ok, %{"type" => "termination_complete", "verified_dead" => false}}
+           ) == {:error, :termination_unverified}
+
+    assert RunnerProcess.cleanup_result(:ok, {:error, :timeout}) ==
+             {:error, {:termination_failed, :timeout}}
+  end
+
   test "a failed running persistence transition tears down the handshaken runner" do
     previous_trap_exit = Process.flag(:trap_exit, true)
     on_exit(fn -> Process.flag(:trap_exit, previous_trap_exit) end)
@@ -97,6 +108,48 @@ defmodule Consigliere.RunnerProcessRecoveryTest do
     manifest_path = Inventory.path_for(Home.dir(), attempt.id)
 
     assert eventually(fn -> terminal_manifest?(manifest_path) end)
+  end
+
+  test "failed startup cleanup holds capacity when runner death is unverified" do
+    previous_trap_exit = Process.flag(:trap_exit, true)
+    previous_path = System.get_env("PATH")
+
+    on_exit(fn ->
+      Process.flag(:trap_exit, previous_trap_exit)
+      if previous_path, do: System.put_env("PATH", previous_path), else: System.delete_env("PATH")
+    end)
+
+    {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
+    {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
+    {:ok, _mission} = Fixtures.grant_work_quietly(mission.id, Actor.boss())
+
+    {:ok, %{mission: mission, attempt: attempt}} =
+      Missions.start(mission.id, Actor.system(), %{
+        workspace_path: "/tmp/cs-recovery-#{System.unique_integer([:positive])}"
+      })
+
+    {:ok, attempt} = Attempts.request_spawn(attempt.id, Actor.system())
+    attempt_id = attempt.id
+    {:ok, _operation} = DispatchOperations.ensure(attempt, %{slot_state: "granted"})
+    assert {:ok, :granted} = GlobalScheduler.request_slot(mission.id)
+
+    sleep = System.find_executable("sleep") || "/bin/sleep"
+    System.put_env("PATH", "/definitely-not-a-command-path")
+
+    result =
+      RunnerProcess.start_link(
+        attempt_id: attempt.id,
+        mission_id: mission.id,
+        fencing_token: "stale-fence",
+        harness_command: [sleep, "30"]
+      )
+
+    assert {:error, {:runner_identity_persist_failed, {:fenced, ^attempt_id}}} =
+             result
+
+    assert Repo.get!(Attempt, attempt.id).status == "lost"
+    assert DispatchOperations.get_by_attempt(attempt.id).slot_state == "unknown"
+    assert {:error, :busy} = GlobalScheduler.request_slot("unverified-startup-replacement")
   end
 
   test "a missing Attempt cannot accept a handshaken runner" do

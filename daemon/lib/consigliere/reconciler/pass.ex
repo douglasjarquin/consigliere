@@ -23,6 +23,10 @@ defmodule Consigliere.Reconciler.Pass do
       runner_live? ->
         {:skipped, attempt.id}
 
+      liveness == :orphaned_runner ->
+        incident(attempt, "runner identity absent with a verified harness; adopt-and-kill")
+        finalize_dead(attempt, adopt_kill(manifest))
+
       liveness in [:identity_mismatch, :permission_unknown, :observation_failed] ->
         incident(attempt, "runner inventory liveness #{liveness}")
 
@@ -224,7 +228,7 @@ defmodule Consigliere.Reconciler.Pass do
   defp valid_pgid?(_), do: false
 
   defp adopt_kill(%{"pgid" => pgid} = manifest) do
-    if Inventory.liveness(manifest) == :verified and
+    if Inventory.liveness(manifest) in [:verified, :orphaned_runner] and
          ProcessGroup.terminate(pgid) == :dead_verified do
       :dead_verified
     else

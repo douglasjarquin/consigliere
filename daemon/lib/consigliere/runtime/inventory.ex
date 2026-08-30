@@ -52,6 +52,7 @@ defmodule Consigliere.Runtime.Inventory do
         {_, _, :permission_unknown} -> :permission_unknown
         {:absent, :absent, _} -> :absent
         {:absent, :missing, _} -> :absent
+        {:verified, :absent, :verified} -> :orphaned_runner
         {:verified, :verified, :verified} -> :verified
         _ -> :identity_mismatch
       end

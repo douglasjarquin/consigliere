@@ -9,6 +9,7 @@ defmodule Consigliere.ReconcilerPersistTest do
   alias Consigliere.GlobalScheduler
   alias Consigliere.Incidents.Incident
   alias Consigliere.Missions
+  alias Consigliere.ProcessGroup
   alias Consigliere.Reconciler
   alias Consigliere.Repo
   alias Consigliere.Workspaces.Workspace
@@ -328,6 +329,41 @@ defmodule Consigliere.ReconcilerPersistTest do
     assert id == attempt.id
     assert Repo.get!(Attempt, attempt.id).status == "lost"
     Consigliere.ProcessHelpers.wait_group_gone(pgid)
+  end
+
+  test "a missing runner with a verified harness adopts and kills the recorded group",
+       %{home: home} do
+    %{attempt: attempt} = running_attempt!()
+    {runner_port, dead_runner_pid} = Consigliere.ProcessHelpers.spawn_session_leader()
+    ProcessGroup.terminate(dead_runner_pid, term_timeout_ms: 100, kill_timeout_ms: 100)
+    if Port.info(runner_port), do: Port.close(runner_port)
+
+    {harness_port, harness_pid} = Consigliere.ProcessHelpers.spawn_session_leader()
+
+    on_exit(fn ->
+      _ = System.cmd("kill", ["-9", "--", "-#{harness_pid}"], stderr_to_stdout: true)
+      if Port.info(harness_port), do: Port.close(harness_port)
+    end)
+
+    {:ok, _} = Repo.update(Attempt.changeset(attempt, %{pgid: harness_pid}))
+
+    write_manifest!(
+      home,
+      attempt.id,
+      %{
+        "state" => "running",
+        "pgid" => harness_pid,
+        "runner_pid" => dead_runner_pid,
+        "harness_pid" => harness_pid
+      }
+    )
+
+    results = Reconciler.run(home: home)
+
+    assert {:lost, id} = Enum.find(results, &match?({:lost, _}, &1))
+    assert id == attempt.id
+    assert Repo.get!(Attempt, attempt.id).status == "lost"
+    Consigliere.ProcessHelpers.wait_group_gone(harness_pid)
   end
 
   test "an Attempt without a manifest never signals an unverified live process group", %{
