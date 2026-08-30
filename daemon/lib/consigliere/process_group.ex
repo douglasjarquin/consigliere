@@ -8,6 +8,9 @@ defmodule Consigliere.ProcessGroup do
   zombie. Zombies cannot run, so they count as gone.
   """
 
+  @kill_paths ["/bin/kill", "/usr/bin/kill"]
+  @ps_paths ["/bin/ps", "/usr/bin/ps"]
+
   def terminate(pgid, opts \\ [])
 
   def terminate(pgid, _opts) when not is_integer(pgid) or pgid <= 1 do
@@ -70,7 +73,13 @@ defmodule Consigliere.ProcessGroup do
   def gone?(pgid), do: not alive?(pgid)
 
   defp signal(pgid, sig) do
-    System.cmd("kill", [sig, "--", "-#{pgid}"], stderr_to_stdout: true)
+    case tool_path(@kill_paths) do
+      nil ->
+        {"", 1}
+
+      kill ->
+        System.cmd(kill, [sig, "--", "-#{pgid}"], stderr_to_stdout: true)
+    end
   rescue
     _ -> {"", 1}
   end
@@ -132,16 +141,22 @@ defmodule Consigliere.ProcessGroup do
   end
 
   defp ps_runnable(pgid) do
-    case System.cmd("ps", ["-axo", "pgid=,stat="], stderr_to_stdout: true) do
-      {out, 0} ->
-        {:ok,
-         out
-         |> String.split("\n", trim: true)
-         |> Enum.flat_map(&parse_ps_line(&1, pgid))
-         |> Enum.reject(&zombie?/1)}
-
-      _ ->
+    case tool_path(@ps_paths) do
+      nil ->
         :error
+
+      ps ->
+        case System.cmd(ps, ["-axo", "pgid=,stat="], stderr_to_stdout: true) do
+          {out, 0} ->
+            {:ok,
+             out
+             |> String.split("\n", trim: true)
+             |> Enum.flat_map(&parse_ps_line(&1, pgid))
+             |> Enum.reject(&zombie?/1)}
+
+          _ ->
+            :error
+        end
     end
   rescue
     _ -> :error
@@ -162,4 +177,6 @@ defmodule Consigliere.ProcessGroup do
 
   defp zombie?(stat) when is_binary(stat), do: String.starts_with?(stat, "Z")
   defp zombie?(_), do: false
+
+  defp tool_path(paths), do: Enum.find(paths, &File.regular?/1)
 end

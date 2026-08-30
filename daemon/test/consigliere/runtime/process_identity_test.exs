@@ -7,36 +7,26 @@ defmodule Consigliere.Runtime.ProcessIdentityTest do
     directory =
       Path.join(System.tmp_dir!(), "process-identity-#{System.unique_integer([:positive])}")
 
-    impostor = Path.join(directory, "sleep")
-    executable = System.find_executable("sleep") || "/bin/sleep"
+    {process_name, 0} = System.cmd("/bin/ps", ["-o", "comm=", "-p", to_string(System.pid())])
+    impostor = Path.join(directory, Path.basename(String.trim(process_name)))
 
     File.mkdir_p!(directory)
-    File.cp!(System.find_executable("sh") || "/bin/sh", impostor)
+    File.write!(impostor, "not the live executable")
     File.chmod!(impostor, 0o700)
-
-    port =
-      Port.open(
-        {:spawn_executable, executable},
-        [:binary, :exit_status, args: [~c"30"]]
-      )
-
-    {:os_pid, pid} = Port.info(port, :os_pid)
 
     expected_hash =
       impostor |> File.read!() |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
 
     on_exit(fn ->
-      System.cmd("kill", ["-9", to_string(pid)], stderr_to_stdout: true)
-      if Port.info(port), do: Port.close(port)
       File.rm_rf(directory)
     end)
 
-    assert ProcessIdentity.verify(pid, impostor, expected_hash) == :identity_mismatch
+    assert ProcessIdentity.verify(System.pid(), impostor, expected_hash) == :identity_mismatch
   end
 
   test "verifies the live executable path and hash" do
-    executable = System.find_executable("sleep") || "/bin/sleep"
-    {hash_output, 0} = System.cmd("shasum", ["-a", "256", executable])
+    executable = "/bin/sleep"
+    {hash_output, 0} = System.cmd("/usr/bin/shasum", ["-a", "256", executable])
     [expected_hash | _] = String.split(String.trim(hash_output))
 
     port =
@@ -46,9 +36,10 @@ defmodule Consigliere.Runtime.ProcessIdentityTest do
       )
 
     {:os_pid, pid} = Port.info(port, :os_pid)
+    Process.sleep(50)
 
     on_exit(fn ->
-      System.cmd("kill", ["-9", to_string(pid)], stderr_to_stdout: true)
+      System.cmd("/bin/kill", ["-9", to_string(pid)], stderr_to_stdout: true)
       if Port.info(port), do: Port.close(port)
     end)
 

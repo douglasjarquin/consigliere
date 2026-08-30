@@ -1,6 +1,13 @@
 defmodule Consigliere.Runtime.ProcessIdentity do
   @moduledoc false
 
+  @tool_paths %{
+    ps: ["/bin/ps", "/usr/bin/ps"],
+    lsof: ["/usr/sbin/lsof", "/usr/bin/lsof"],
+    realpath: ["/bin/realpath", "/usr/bin/realpath"],
+    shasum: ["/usr/bin/shasum", "/bin/shasum"]
+  }
+
   def verify(pid, expected_executable \\ nil, expected_hash \\ nil)
 
   def verify(pid, expected_executable, expected_hash)
@@ -46,7 +53,7 @@ defmodule Consigliere.Runtime.ProcessIdentity do
   end
 
   defp darwin_executable(pid) do
-    case System.find_executable("lsof") do
+    case tool_path(:lsof) do
       nil ->
         {:error, :observation_failed}
 
@@ -61,18 +68,24 @@ defmodule Consigliere.Runtime.ProcessIdentity do
   end
 
   defp ps_executable(pid) do
-    case System.cmd("ps", ["-o", "pid=,comm=", "-p", Integer.to_string(pid)],
-           stderr_to_stdout: true
-         ) do
-      {output, 0} ->
-        case parse_ps(output, pid) do
-          {:ok, executable} -> {:ok, executable}
-          :absent -> :absent
-          :invalid -> {:error, :observation_failed}
-        end
+    case tool_path(:ps) do
+      nil ->
+        {:error, :observation_failed}
 
-      {output, _status} ->
-        classify_command_output(output)
+      ps ->
+        case System.cmd(ps, ["-o", "pid=,comm=", "-p", Integer.to_string(pid)],
+               stderr_to_stdout: true
+             ) do
+          {output, 0} ->
+            case parse_ps(output, pid) do
+              {:ok, executable} -> {:ok, executable}
+              :absent -> :absent
+              :invalid -> {:error, :observation_failed}
+            end
+
+          {output, _status} ->
+            classify_command_output(output)
+        end
     end
   end
 
@@ -136,7 +149,7 @@ defmodule Consigliere.Runtime.ProcessIdentity do
   defp canonical_path(path) do
     expanded = Path.expand(path)
 
-    case System.find_executable("realpath") do
+    case tool_path(:realpath) do
       nil ->
         expanded
 
@@ -151,17 +164,29 @@ defmodule Consigliere.Runtime.ProcessIdentity do
   end
 
   defp verify_hash(path, expected) when is_binary(path) do
-    case System.cmd("shasum", ["-a", "256", path], stderr_to_stdout: true) do
-      {output, 0} ->
-        [actual | _] = String.split(String.trim(output))
-        if actual == expected, do: :verified, else: :identity_mismatch
+    case tool_path(:shasum) do
+      nil ->
+        :observation_failed
 
-      {output, _status} ->
-        if String.contains?(String.downcase(output), "operation not permitted"),
-          do: :permission_unknown,
-          else: :observation_failed
+      shasum ->
+        case System.cmd(shasum, ["-a", "256", path], stderr_to_stdout: true) do
+          {output, 0} ->
+            [actual | _] = String.split(String.trim(output))
+            if actual == expected, do: :verified, else: :identity_mismatch
+
+          {output, _status} ->
+            if String.contains?(String.downcase(output), "operation not permitted"),
+              do: :permission_unknown,
+              else: :observation_failed
+        end
     end
   rescue
     _ -> :observation_failed
+  end
+
+  defp tool_path(tool) do
+    @tool_paths
+    |> Map.fetch!(tool)
+    |> Enum.find(&File.regular?/1)
   end
 end

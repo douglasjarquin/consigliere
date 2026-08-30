@@ -35,4 +35,20 @@ defmodule Consigliere.ProcessGroupTest do
     assert ProcessGroup.probe(0) == :unsafe
     assert ProcessGroup.probe(1) == :unsafe
   end
+
+  test "termination does not depend on the caller PATH" do
+    {port, pgid} = ProcessHelpers.spawn_session_leader()
+    previous_path = System.get_env("PATH")
+
+    on_exit(fn ->
+      System.cmd("/bin/kill", ["-9", "--", "-#{pgid}"], stderr_to_stdout: true)
+      if Port.info(port), do: Port.close(port)
+      if previous_path, do: System.put_env("PATH", previous_path), else: System.delete_env("PATH")
+    end)
+
+    System.put_env("PATH", "/nonexistent")
+
+    assert ProcessGroup.terminate(pgid, term_timeout_ms: 100, kill_timeout_ms: 100) ==
+             :dead_verified
+  end
 end
