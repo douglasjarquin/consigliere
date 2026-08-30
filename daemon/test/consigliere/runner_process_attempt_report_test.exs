@@ -71,17 +71,31 @@ defmodule Consigliere.RunnerProcessAttemptReportTest do
 
     script = Path.join(root, "codex-marker")
 
+    thread_started =
+      JSON.encode!(%{"type" => "thread.started", "thread_id" => "session-bridge"})
+
+    item_completed =
+      JSON.encode!(%{
+        "type" => "item.completed",
+        "item" => %{"type" => "command_execution", "aggregated_output" => marker <> "\n"}
+      })
+
+    split_at = div(byte_size(item_completed), 2)
+    item_prefix = binary_part(item_completed, 0, split_at)
+    item_suffix = binary_part(item_completed, split_at, byte_size(item_completed) - split_at)
+
     File.write!(
       script,
       "#!/bin/sh\n" <>
         "printf '%s\\n' '" <>
-        JSON.encode!(%{"type" => "thread.started", "thread_id" => "session-bridge"}) <>
+        thread_started <>
         "'\n" <>
+        "printf '%s' '" <>
+        item_prefix <>
+        "'\n" <>
+        "sleep 0.05\n" <>
         "printf '%s\\n' '" <>
-        JSON.encode!(%{
-          "type" => "item.completed",
-          "item" => %{"type" => "command_execution", "aggregated_output" => marker <> "\n"}
-        }) <>
+        item_suffix <>
         "'\n" <>
         "printf '%s\\n' '" <>
         JSON.encode!(%{

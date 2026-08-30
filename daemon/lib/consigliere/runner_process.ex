@@ -91,6 +91,8 @@ defmodule Consigliere.RunnerProcess do
            context_hash: Keyword.get(opts, :context_hash),
            policy: Keyword.get(opts, :policy, %{}),
            heartbeat_count: 0,
+           stdout_buffer: "",
+           stdout_discarding: false,
            stop_reason: nil,
            harness_exit_received: false,
            port_exit_status: nil
@@ -296,12 +298,48 @@ defmodule Consigliere.RunnerProcess do
     adapter = Adapters.harness()
 
     if Code.ensure_loaded?(adapter) and function_exported?(adapter, :decode_line, 1) do
-      data
-      |> to_string()
-      |> String.split("\n", trim: true)
-      |> Enum.reduce(state, fn line, st -> ingest_decoded(adapter.decode_line(line), st) end)
+      input = stdout_input(state.stdout_buffer, state.stdout_discarding, to_string(data))
+      {lines, remainder} = split_stdout_lines(input)
+      {remainder, discarding} = bounded_stdout_remainder(remainder)
+      state = %{state | stdout_buffer: remainder, stdout_discarding: discarding}
+
+      Enum.reduce(lines, state, fn line, st ->
+        if byte_size(line) <= Consigliere.V0.Limits.frame_bytes() do
+          ingest_decoded(adapter.decode_line(line), st)
+        else
+          st
+        end
+      end)
     else
       state
+    end
+  end
+
+  defp stdout_input(_buffer, true, data) do
+    case :binary.match(data, "\n") do
+      {index, 1} -> binary_part(data, index + 1, byte_size(data) - index - 1)
+      :nomatch -> ""
+    end
+  end
+
+  defp stdout_input(buffer, false, data), do: buffer <> data
+
+  defp split_stdout_lines(input) do
+    case :binary.split(input, "\n", [:global]) do
+      [remainder] ->
+        {[], remainder}
+
+      parts ->
+        {remainder, lines} = List.pop_at(parts, -1)
+        {lines, remainder}
+    end
+  end
+
+  defp bounded_stdout_remainder(remainder) do
+    if byte_size(remainder) > Consigliere.V0.Limits.frame_bytes() do
+      {"", true}
+    else
+      {remainder, false}
     end
   end
 
