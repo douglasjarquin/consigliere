@@ -107,7 +107,7 @@ defmodule Consigliere.API.Protocol do
   defp advisory_authorization(op, _actor) when op in @advisory_ops, do: :ok
   defp advisory_authorization(_op, _actor), do: {:error, :advisory_operation_forbidden}
 
-  defp run_for_actor("attempt.logs", payload, %Actor{principal: "model_advisory"} = actor) do
+  defp run_for_actor("attempt.logs", payload, actor) do
     run("attempt.logs", payload, actor) |> Advisory.sanitize_logs_result()
   end
 
