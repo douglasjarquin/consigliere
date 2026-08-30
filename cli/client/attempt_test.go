@@ -141,8 +141,6 @@ func TestRunAttemptRejectsMissingBoundIdentity(t *testing.T) {
 func TestRunAttemptBridgeEmitsBoundReportWithoutSocketAccess(t *testing.T) {
 	const resultSHA = "fedcba9876543210fedcba9876543210fedcba98"
 	for key, value := range map[string]string{
-		"CS_API_SOCKET":            "/private/daemon/api.sock",
-		"CS_CAPABILITY":            "capability-secret",
 		"CS_ATTEMPT_ID":            "attempt-1",
 		"CS_MISSION_ID":            "mission-1",
 		"CS_PROJECT_ID":            "project-1",

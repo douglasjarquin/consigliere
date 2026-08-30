@@ -104,6 +104,36 @@ defmodule Consigliere.RunnerProcessEnvTest do
     refute home in lines
   end
 
+  test "the harness cannot see the daemon API socket or Attempt capability" do
+    out = Path.join(System.tmp_dir!(), "transport-env-#{System.unique_integer([:positive])}.out")
+
+    heartbeat_file =
+      Path.join(System.tmp_dir!(), "transport-env-#{System.unique_integer([:positive])}.hb")
+
+    {:ok, pid} =
+      RunnerProcess.start_link(
+        attempt_id: "env-#{System.unique_integer([:positive])}",
+        capability: "capability-secret",
+        heartbeat_file: heartbeat_file,
+        harness_command: [
+          "sh",
+          "-c",
+          "(printenv CS_API_SOCKET; printenv CS_CAPABILITY; true) > '#{out}' 2>/dev/null; sleep 5"
+        ]
+      )
+
+    os_pid = RunnerProcess.os_pid(pid)
+
+    on_exit(fn ->
+      Consigliere.ProcessHelpers.kill_and_verify_dead(os_pid)
+      File.rm(out)
+      File.rm(heartbeat_file)
+    end)
+
+    wait_for_file(out)
+    assert String.trim(File.read!(out)) == ""
+  end
+
   defp wait_for_file(path, attempts \\ 50) do
     cond do
       File.exists?(path) ->

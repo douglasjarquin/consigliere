@@ -18,7 +18,13 @@ func RunAttempt(args []string, stdout, stderr io.Writer) int {
 		return ExitUsage
 	}
 
-	identity, err := attemptIdentityFromEnv()
+	bridge := os.Getenv("CS_ATTEMPT_BRIDGE") == "1"
+	var identity attemptIdentity
+	if bridge {
+		identity, err = attemptIdentityFromBridgeEnv()
+	} else {
+		identity, err = attemptIdentityFromEnv()
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return ExitUsage
@@ -43,7 +49,7 @@ func RunAttempt(args []string, stdout, stderr io.Writer) int {
 	if identity.parentCheckpointSHA != "" {
 		payload["parent_checkpoint_sha"] = identity.parentCheckpointSHA
 	}
-	if os.Getenv("CS_ATTEMPT_BRIDGE") == "1" {
+	if bridge {
 		return writeAttemptMarker(operation, payload, stdout, stderr)
 	}
 
@@ -110,6 +116,14 @@ func parseAttemptArgs(args []string) (string, string, error) {
 }
 
 func attemptIdentityFromEnv() (attemptIdentity, error) {
+	return attemptIdentityFromEnvMode(true)
+}
+
+func attemptIdentityFromBridgeEnv() (attemptIdentity, error) {
+	return attemptIdentityFromEnvMode(false)
+}
+
+func attemptIdentityFromEnvMode(requireTransport bool) (attemptIdentity, error) {
 	get := func(name string) (string, error) {
 		value := strings.TrimSpace(os.Getenv(name))
 		if value == "" {
@@ -120,11 +134,13 @@ func attemptIdentityFromEnv() (attemptIdentity, error) {
 
 	var identity attemptIdentity
 	var err error
-	if identity.socket, err = get("CS_API_SOCKET"); err != nil {
-		return attemptIdentity{}, err
-	}
-	if identity.capability, err = get("CS_CAPABILITY"); err != nil {
-		return attemptIdentity{}, err
+	if requireTransport {
+		if identity.socket, err = get("CS_API_SOCKET"); err != nil {
+			return attemptIdentity{}, err
+		}
+		if identity.capability, err = get("CS_CAPABILITY"); err != nil {
+			return attemptIdentity{}, err
+		}
 	}
 	if identity.attemptID, err = get("CS_ATTEMPT_ID"); err != nil {
 		return attemptIdentity{}, err

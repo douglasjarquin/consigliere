@@ -80,12 +80,6 @@ func scrubbedHarnessEnv() []string {
 		"HOME=/var/empty",
 		"TMPDIR=" + os.TempDir(),
 	}
-	if v := os.Getenv("CS_CAPABILITY"); v != "" {
-		env = append(env, "CS_CAPABILITY="+v)
-	}
-	if v := os.Getenv("CS_API_SOCKET"); v != "" {
-		env = append(env, "CS_API_SOCKET="+v)
-	}
 	if v := os.Getenv("CODEX_HOME"); v != "" {
 		env = append(env, "CODEX_HOME="+v)
 	}

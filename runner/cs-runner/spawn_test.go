@@ -45,8 +45,8 @@ func TestScrubbedHarnessEnv_ForwardsCodexHomeNotSecrets(t *testing.T) {
 	if !strings.Contains(env, "CODEX_HOME=/safe/codex-home") {
 		t.Fatalf("missing CODEX_HOME: %s", env)
 	}
-	if !strings.Contains(env, "CS_CAPABILITY=cap-token") {
-		t.Fatalf("missing capability: %s", env)
+	if strings.Contains(env, "CS_CAPABILITY=") || strings.Contains(env, "CS_API_SOCKET=") {
+		t.Fatalf("daemon transport reached the harness environment: %s", env)
 	}
 	if !strings.Contains(env, "CS_ATTEMPT_BIN=/private/consigliere/priv/cs-attempt") {
 		t.Fatalf("missing attempt reporter: %s", env)

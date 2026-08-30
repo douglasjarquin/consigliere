@@ -219,7 +219,6 @@ defmodule Consigliere.RunnerProcess do
   defp runner_env(opts) do
     env = [
       {~c"CS_HOME", ~c""},
-      {~c"CS_API_SOCKET", String.to_charlist(Consigliere.Home.api_socket_path())},
       {~c"CODEX_HOME", String.to_charlist(Consigliere.Home.ensure_codex_home!())},
       {~c"CS_ATTEMPT_BRIDGE", ~c"1"},
       {~c"CS_ATTEMPT_BIN",
@@ -237,13 +236,7 @@ defmodule Consigliere.RunnerProcess do
     env = add_env(env, ~c"CS_CAPABILITY_ID", Keyword.get(opts, :capability_id))
     env = add_env(env, ~c"CS_CAPABILITY_GENERATION", Keyword.get(opts, :capability_generation))
 
-    case Keyword.get(opts, :capability) do
-      secret when is_binary(secret) ->
-        [{~c"CS_CAPABILITY", String.to_charlist(secret)} | env]
-
-      _ ->
-        env
-    end
+    env
   end
 
   defp add_env(env, _key, nil), do: env
