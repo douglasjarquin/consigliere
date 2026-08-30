@@ -86,7 +86,6 @@ defmodule Consigliere.MissionCoordinator do
 
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{runner_ref: ref} = state) do
     state = %{state | runner_pid: :not_found, runner_ref: nil}
-    settle_pause(state)
     {:noreply, refresh_and_request_schedule(state)}
   end
 
@@ -123,6 +122,7 @@ defmodule Consigliere.MissionCoordinator do
   end
 
   defp refresh_and_request_schedule(state) do
+    settle_pause(state)
     state = refresh_view(state)
     request_schedule(state)
   end
