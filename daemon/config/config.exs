@@ -8,7 +8,7 @@ config :consigliere_daemon,
 
 config :consigliere_daemon, Consigliere.Repo,
   adapter: Ecto.Adapters.SQLite3,
-  database: Path.expand("priv/consigliere_#{config_env()}.db", File.cwd!()),
+  database: "consigliere.db",
   journal_mode: :wal,
   busy_timeout: 5_000,
   pool_size: 5
