@@ -5,7 +5,7 @@ defmodule Consigliere.RunnerProcessEnvTest do
   alias Consigliere.RunnerProcess
 
   test "the harness environment does not include CS_HOME or adapter credentials" do
-    secret_home = Path.join(System.tmp_dir!(), "cs-secret-#{System.unique_integer([:positive])}")
+    secret_home = "/tmp/cs-secret-#{System.unique_integer([:positive])}"
     File.mkdir_p!(secret_home)
     File.write!(Path.join(secret_home, "sqlite.db"), "not for agents\n")
 
@@ -62,7 +62,7 @@ defmodule Consigliere.RunnerProcessEnvTest do
   end
 
   test "CODEX_HOME is forwarded and does not contain boss or sqlite files" do
-    home = Path.join(System.tmp_dir!(), "cs-home-#{System.unique_integer([:positive])}")
+    home = "/tmp/cs-home-#{System.unique_integer([:positive])}"
     File.mkdir_p!(Path.join(home, "credentials"))
     File.write!(Path.join(home, "credentials/boss"), "boss-secret\n")
     File.write!(Path.join(home, "consigliere.db"), "sqlite\n")

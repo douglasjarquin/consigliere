@@ -23,6 +23,8 @@ defmodule Consigliere.ProjectsTest do
     source: source,
     sha: sha
   } do
+    {:ok, canonical_source} = Git.canonical_repository_path(source)
+
     assert {:ok, project} =
              Projects.register(
                %{name: "demo", repository_path: source, repository_url: "file://#{source}"},
@@ -33,7 +35,7 @@ defmodule Consigliere.ProjectsTest do
     assert String.starts_with?(project.trusted_mirror_path, Home.trusted_projects_dir())
     assert File.dir?(project.trusted_mirror_path)
     assert Git.mirror_has_commit?(project.trusted_mirror_path, sha)
-    assert Repo.get!(Project, project.id).repository_url == "file://#{source}"
+    assert Repo.get!(Project, project.id).repository_url == "file://#{canonical_source}"
     assert Fixtures.event_types(project.id) == ["project.registered"]
   end
 
@@ -41,6 +43,7 @@ defmodule Consigliere.ProjectsTest do
     link = Path.join(System.tmp_dir!(), "cs-proj-link-#{System.unique_integer([:positive])}")
     File.ln_s!(source, link)
     on_exit(fn -> File.rm(link) end)
+    {:ok, canonical_source} = Git.canonical_repository_path(source)
 
     assert {:ok, project} =
              Projects.register(
@@ -48,8 +51,8 @@ defmodule Consigliere.ProjectsTest do
                Actor.boss()
              )
 
-    assert project.repository_path == source
-    assert project.repository_url == "file://#{source}"
+    assert project.repository_path == canonical_source
+    assert project.repository_url == "file://#{canonical_source}"
   end
 
   test "register rejects a duplicate canonical source", %{source: source} do
