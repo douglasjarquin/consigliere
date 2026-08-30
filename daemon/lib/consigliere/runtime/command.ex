@@ -33,13 +33,23 @@ defmodule Consigliere.Runtime.Command do
     else
       receive do
         {^port, {:data, data}} ->
-          next = [acc, data]
+          accumulated_bytes = IO.iodata_length(acc)
 
-          if IO.iodata_length(next) > max_output do
+          if accumulated_bytes + byte_size(data) > max_output do
             close_port(port)
-            {:error, :output_too_large, IO.iodata_to_binary(next)}
+
+            remaining = max_output - accumulated_bytes
+
+            bounded =
+              if remaining > 0 do
+                [acc, binary_part(data, 0, remaining)]
+              else
+                acc
+              end
+
+            {:error, :output_too_large, IO.iodata_to_binary(bounded)}
           else
-            collect(port, deadline, max_output, next)
+            collect(port, deadline, max_output, [acc, data])
           end
 
         {^port, {:exit_status, exit_status}} ->
