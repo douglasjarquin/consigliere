@@ -31,4 +31,40 @@ defmodule Consigliere.RunnerProcessTest do
 
     assert RunnerProcess.heartbeat_count(pid) > 0
   end
+
+  test "captures authenticated harness stderr frames", %{heartbeat_file: heartbeat_file} do
+    attempt_id = "attempt-stderr-#{System.unique_integer([:positive])}"
+    log_path = Path.join(Consigliere.Home.logs_dir(), "attempts/#{attempt_id}.log")
+
+    {:ok, pid} =
+      RunnerProcess.start_link(
+        attempt_id: attempt_id,
+        heartbeat_file: heartbeat_file,
+        harness_command: ["sh", "-c", "printf 'stderr-from-harness\\n' >&2; sleep 5"]
+      )
+
+    os_pid = RunnerProcess.os_pid(pid)
+
+    on_exit(fn ->
+      Consigliere.ProcessHelpers.kill_and_verify_dead(os_pid)
+      File.rm(log_path)
+    end)
+
+    wait_for_file(log_path)
+    assert File.read!(log_path) =~ "stderr-from-harness"
+  end
+
+  defp wait_for_file(path, attempts \\ 100) do
+    cond do
+      File.exists?(path) ->
+        :ok
+
+      attempts > 0 ->
+        Process.sleep(50)
+        wait_for_file(path, attempts - 1)
+
+      true ->
+        flunk("capture file missing: #{path}")
+    end
+  end
 end

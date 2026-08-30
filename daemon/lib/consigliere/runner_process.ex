@@ -190,6 +190,12 @@ defmodule Consigliere.RunnerProcess do
     bump_heartbeat(state, data)
   end
 
+  defp handle_control_msg(%{"type" => "stderr_chunk"} = msg, state) do
+    data = Map.get(msg, "data", "")
+    append_attempt_log(state.attempt_id, data)
+    bump_heartbeat(state, data)
+  end
+
   defp handle_control_msg(%{"type" => "harness_exited", "exit_code" => 0}, state) do
     %{state | stop_reason: :normal, harness_exit_received: true}
   end
