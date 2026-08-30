@@ -10,7 +10,8 @@ defmodule Consigliere.Harness.Redaction do
 
   @sensitive_path_pattern ~r{(?i)(?:/Users|/home|/private/tmp|/tmp)/[^\s"']*(?:\.codex|\.ssh|credentials?|auth\.json)[^\s"']*}
 
-  @sensitive_assignment_pattern ~r/(?i)(["']?(?:[a-z0-9_-]*(?:token|password|secret|api[_-]?key|credential)[a-z0-9_-]*|CS_CAPABILITY)["']?\s*[:=]\s*)["']?[^\s,"'}]+/
+  @quoted_sensitive_assignment_pattern ~r/(?i)(["'](?:access_token|refresh_token|id_token|oauth_token|token|password|secret|api[_-]?key|credential|CS_CAPABILITY)["']\s*[:=]\s*)["']?[^\s,"'}]+/
+  @bare_sensitive_assignment_pattern ~r/(?i)(\b(?:CS_CAPABILITY|token|password|secret|api[_-]?key|credential)\b\s*[:=]\s*)["']?[^\s,"'}]+/
 
   def text(value) when is_binary(value) do
     value
@@ -29,7 +30,8 @@ defmodule Consigliere.Harness.Redaction do
   def value(value), do: value
 
   defp redact_assignments(value) do
-    Regex.replace(@sensitive_assignment_pattern, value, "\\1[REDACTED]")
+    value = Regex.replace(@quoted_sensitive_assignment_pattern, value, "\\1[REDACTED]")
+    Regex.replace(@bare_sensitive_assignment_pattern, value, "\\1[REDACTED]")
   end
 
   defp redact_known_tokens(value) do
