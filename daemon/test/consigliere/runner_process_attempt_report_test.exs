@@ -56,9 +56,6 @@ defmodule Consigliere.RunnerProcessAttemptReportTest do
     result_sha = Git.commit_all(workspace.path, "result")
     {:ok, attempt} = Attempts.request_spawn(attempt.id, Actor.system())
 
-    {:ok, attempt} =
-      Attempts.mark_running(attempt.id, Actor.system(), %{fencing_token: attempt.fencing_token})
-
     {:ok, capability} = Consigliere.Capabilities.mint(attempt)
     {:ok, capability_record} = Consigliere.Capabilities.authenticate(capability)
 
@@ -174,9 +171,6 @@ defmodule Consigliere.RunnerProcessAttemptReportTest do
 
     File.mkdir_p!(workspace.path)
     {:ok, attempt} = Attempts.request_spawn(attempt.id, Actor.system())
-
-    {:ok, attempt} =
-      Attempts.mark_running(attempt.id, Actor.system(), %{fencing_token: attempt.fencing_token})
 
     {:ok, capability} = Consigliere.Capabilities.mint(attempt)
     {:ok, capability_record} = Consigliere.Capabilities.authenticate(capability)

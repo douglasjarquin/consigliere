@@ -45,6 +45,20 @@ defmodule Consigliere.ReconcilerPersistTest do
     %{mission: mission, attempt: attempt, workspace: workspace}
   end
 
+  defp starting_attempt! do
+    {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
+    {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Fixtures.grant_work_quietly(mission.id, Actor.boss())
+
+    {:ok, %{mission: mission, attempt: attempt, workspace: workspace}} =
+      Missions.start(mission.id, Actor.system(), %{
+        workspace_path: "/tmp/cs-#{System.unique_integer([:positive])}"
+      })
+
+    {:ok, attempt} = Attempts.request_spawn(attempt.id, Actor.system())
+    %{mission: mission, attempt: attempt, workspace: workspace}
+  end
+
   defp write_manifest!(home, attempt_id, attrs) do
     dir = Path.join([home, "runtime", "attempts", attempt_id])
     File.mkdir_p!(dir)
@@ -212,7 +226,7 @@ defmodule Consigliere.ReconcilerPersistTest do
   end
 
   test "a live RunnerProcess skips the Attempt", %{home: home} do
-    %{attempt: attempt} = running_attempt!()
+    %{attempt: attempt} = starting_attempt!()
     write_manifest!(home, attempt.id, %{"state" => "dead_verified"})
 
     heartbeat = Path.join(System.tmp_dir!(), "hb-#{System.unique_integer([:positive])}")
@@ -220,7 +234,11 @@ defmodule Consigliere.ReconcilerPersistTest do
     {:ok, runner} =
       DynamicSupervisor.start_child(
         Consigliere.RunnerDynamicSupervisor,
-        {Consigliere.RunnerProcess, attempt_id: attempt.id, heartbeat_file: heartbeat}
+        {Consigliere.RunnerProcess,
+         attempt_id: attempt.id,
+         mission_id: attempt.mission_id,
+         fencing_token: attempt.fencing_token,
+         heartbeat_file: heartbeat}
       )
 
     on_exit(fn ->
