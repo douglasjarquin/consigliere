@@ -9,6 +9,7 @@ defmodule Consigliere.Missions.Transitions do
   alias Consigliere.Missions.Mission
   alias Consigliere.Authorizations.Authorization
   alias Consigliere.Attempts.Attempt
+  alias Consigliere.AttemptStates
   alias Consigliere.Questions.Question
   alias Consigliere.Gates.Gate
   alias Consigliere.MissionBlockers.MissionBlocker
@@ -109,6 +110,7 @@ defmodule Consigliere.Missions.Transitions do
   def grant_work_authorization_with_dispatch_txn(mission_id, actor, attrs) do
     Txn.require_principal(actor, ["boss"])
     existing_mission = fetch_mission!(mission_id)
+    ensure_no_recoverable_attempt!(existing_mission, "authorized")
 
     if project_has_active_mission?(existing_mission) do
       Txn.illegal(existing_mission.phase, "authorized", :project_busy)
@@ -174,6 +176,8 @@ defmodule Consigliere.Missions.Transitions do
              Consigliere.Git.valid_full_sha?(checkpoint_sha) do
       Txn.illegal(mission.phase, "active", :checkpoint_mismatch)
     end
+
+    ensure_no_recoverable_attempt!(mission, "active")
 
     previous =
       Repo.one(
@@ -253,6 +257,16 @@ defmodule Consigliere.Missions.Transitions do
     )
   end
 
+  defp ensure_no_recoverable_attempt!(mission, to) do
+    recoverable = AttemptStates.recoverable()
+
+    if Repo.exists?(
+         from(a in Attempt, where: a.mission_id == ^mission.id and a.status in ^recoverable)
+       ) do
+      Txn.illegal(mission.phase, to, :recoverable_attempt_exists)
+    end
+  end
+
   def start(mission_id, actor, opts) do
     DatabaseWriter.transaction(fn -> start_txn(mission_id, actor, opts) end)
   end
@@ -301,6 +315,7 @@ defmodule Consigliere.Missions.Transitions do
     Txn.require_principal(actor, @start_principals)
     mission = fetch_mission!(mission_id)
     require_phase!(mission, "authorized", "active")
+    ensure_no_recoverable_attempt!(mission, "active")
     project = mission.project_id && Repo.get(Project, mission.project_id)
     workspace_path = Map.fetch!(opts, :workspace_path)
 

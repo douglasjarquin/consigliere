@@ -1,6 +1,8 @@
 defmodule Consigliere.Attempts.TransitionsTest do
   use ExUnit.Case, async: false
 
+  import Ecto.Query
+
   alias Consigliere.Actor
   alias Consigliere.Fixtures
   alias Consigliere.Missions
@@ -155,5 +157,23 @@ defmodule Consigliere.Attempts.TransitionsTest do
                },
                Actor.attempt(old.id, old.fencing_token)
              )
+  end
+
+  test "superseding a planned Attempt leaves only the replacement recoverable" do
+    %{attempt: old} = started_attempt!()
+
+    assert {:ok, %{attempt: superseded, replacement: replacement}} =
+             Attempts.supersede(old.id, Actor.system(), %{role: "soldier", harness: "claude"})
+
+    assert superseded.status == "superseded"
+    assert replacement.retry_of_attempt_id == old.id
+    assert replacement.status == "planned"
+
+    assert Repo.aggregate(
+             from(a in Consigliere.Attempts.Attempt,
+               where: a.mission_id == ^old.mission_id and a.status in ["planned", "starting"]
+             ),
+             :count
+           ) == 1
   end
 end

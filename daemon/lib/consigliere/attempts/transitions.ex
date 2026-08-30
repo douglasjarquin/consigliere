@@ -5,6 +5,7 @@ defmodule Consigliere.Attempts.Transitions do
 
   alias Consigliere.DatabaseWriter
   alias Consigliere.AttemptResults
+  alias Consigliere.AttemptStates
   alias Consigliere.DispatchOperations
   alias Consigliere.Repo
   alias Consigliere.Txn
@@ -26,6 +27,14 @@ defmodule Consigliere.Attempts.Transitions do
   def schedule_txn(mission_id, actor, attrs) do
     Txn.require_principal(actor, ["boss", "daemon"])
     mission = fetch_mission!(mission_id)
+
+    recoverable = AttemptStates.recoverable()
+
+    if Repo.exists?(
+         from(a in Attempt, where: a.mission_id == ^mission.id and a.status in ^recoverable)
+       ) do
+      Txn.illegal(mission.phase, "planned", :recoverable_attempt_exists)
+    end
 
     unless mission.phase == "active" do
       Txn.illegal(mission.phase, "planned", :mission_not_active)
@@ -522,6 +531,12 @@ defmodule Consigliere.Attempts.Transitions do
     refuse_terminal!(attempt, "superseded")
     Capabilities.revoke_for_attempt_txn(attempt.id)
 
+    if attempt.status == "planned" do
+      DispatchOperations.release_slot_txn(attempt.id)
+    end
+
+    attempt = Txn.update!(Attempt.changeset(attempt, %{status: "superseded"}))
+
     replacement =
       schedule_txn(
         attempt.mission_id,
@@ -530,7 +545,6 @@ defmodule Consigliere.Attempts.Transitions do
       )
 
     apply_question_rule!(attempt)
-    attempt = Txn.update!(Attempt.changeset(attempt, %{status: "superseded"}))
 
     Txn.append_event!("attempt.superseded", "attempt", attempt.id, %{
       replacement_id: replacement.id

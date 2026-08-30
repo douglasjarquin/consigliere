@@ -13,6 +13,7 @@ defmodule Consigliere.Termination do
   alias Consigliere.Attempts
   alias Consigliere.Attempts.Attempt
   alias Consigliere.Capabilities
+  alias Consigliere.DispatchOperations
   alias Consigliere.Home
   alias Consigliere.OutboxItems.OutboxItem
   alias Consigliere.ProcessGroup
@@ -72,6 +73,7 @@ defmodule Consigliere.Termination do
     |> Enum.each(fn attempt ->
       Capabilities.revoke_for_attempt_txn(attempt.id)
       Txn.update!(Attempt.changeset(attempt, %{status: "canceled", finished_at: Txn.now()}))
+      DispatchOperations.release_slot_txn(attempt.id)
       Txn.append_event!("attempt.canceled", "attempt", attempt.id, %{cause: to_string(cause)})
     end)
   end

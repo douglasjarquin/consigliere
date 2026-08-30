@@ -74,6 +74,10 @@ defmodule Consigliere.Attempts.Attempt do
     |> cast(attrs, @required ++ @optional)
     |> validate_required(@required)
     |> validate_inclusion(:status, @statuses)
+    |> unique_constraint(:mission_id,
+      name: :attempts_one_recoverable_per_mission,
+      message: "already has a recoverable Attempt"
+    )
     |> Consigliere.SqliteConstraints.foreign_key_constraint(:mission_id)
     |> Consigliere.SqliteConstraints.foreign_key_constraint(:workspace_id)
     |> Consigliere.SqliteConstraints.foreign_key_constraint(:retry_of_attempt_id)

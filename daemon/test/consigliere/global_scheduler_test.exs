@@ -2,10 +2,14 @@ defmodule Consigliere.GlobalSchedulerTest do
   use ExUnit.Case, async: false
 
   alias Consigliere.Actor
+  alias Consigliere.DatabaseWriter
   alias Consigliere.DispatchOperations
+  alias Consigliere.DispatchOperations.DispatchOperation
   alias Consigliere.Fixtures
   alias Consigliere.GlobalScheduler
   alias Consigliere.Missions
+  alias Consigliere.Missions.Transitions
+  alias Consigliere.Repo
   alias Consigliere.Attempts
 
   setup do
@@ -78,5 +82,38 @@ defmodule Consigliere.GlobalSchedulerTest do
     assert :ok = GlobalScheduler.reset()
     assert mission.id in GlobalScheduler.occupants()
     assert {:error, :busy} = GlobalScheduler.request_slot(Ecto.UUID.generate())
+  end
+
+  test "canceling a planned dispatch releases its durable slot before rebuild" do
+    {:ok, mission} =
+      Missions.create(Fixtures.mission_attrs(), Actor.boss())
+
+    {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
+
+    {:ok, mission} =
+      DatabaseWriter.transaction(fn ->
+        Transitions.grant_work_authorization_with_dispatch_txn(
+          mission.id,
+          Actor.boss(),
+          %{correlation_id: "corr-planned-cancel", idempotency_key: "planned-cancel"}
+        )
+      end)
+
+    attempt = Repo.get_by!(Consigliere.Attempts.Attempt, mission_id: mission.id)
+
+    assert %DispatchOperation{slot_state: "pending"} =
+             DispatchOperations.get_by_attempt(attempt.id)
+
+    assert :ok = GlobalScheduler.reset()
+    assert mission.id in GlobalScheduler.occupants()
+
+    assert {:ok, %{phase: "canceled"}} =
+             Missions.cancel(mission.id, Actor.boss(), "operator stop")
+
+    assert Repo.get!(Consigliere.Attempts.Attempt, attempt.id).status == "canceled"
+    assert DispatchOperations.get_by_attempt(attempt.id).slot_state == "released"
+
+    assert :ok = GlobalScheduler.reset()
+    assert {:ok, :granted} = GlobalScheduler.request_slot(Ecto.UUID.generate())
   end
 end

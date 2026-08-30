@@ -253,6 +253,11 @@ defmodule Consigliere.ExactSHAProgressionTest do
     assert fresh_workspace.parent_checkpoint_sha == checkpoint_sha
     assert fresh_workspace.lease_id != workspace.lease_id
     assert Repo.aggregate(Attempt, :count) == 2
+
+    assert {:error, {:illegal_transition, %{reason: :recoverable_attempt_exists}}} =
+             Missions.continue_from_checkpoint(mission.id, Actor.boss(), checkpoint_sha)
+
+    assert Repo.aggregate(Attempt, :count) == 2
   end
 
   defp running_project_attempt!(source, base_sha) do
