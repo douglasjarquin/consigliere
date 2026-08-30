@@ -76,9 +76,13 @@ defmodule Consigliere.Harness.Redaction do
 
   defp sensitive_key?(key) when is_binary(key) or is_atom(key) do
     normalized = key |> to_string() |> String.downcase()
+    compact = normalized |> String.replace("_", "") |> String.replace("-", "")
 
     normalized in @sensitive_key_names or
-      Enum.any?(@sensitive_key_fragments, &String.contains?(normalized, &1))
+      Enum.any?(@sensitive_key_fragments, fn fragment ->
+        String.contains?(normalized, fragment) or
+          String.contains?(compact, String.replace(fragment, "_", "") |> String.replace("-", ""))
+      end)
   end
 
   defp sensitive_key?(_key), do: false

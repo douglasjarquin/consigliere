@@ -48,4 +48,16 @@ defmodule Consigliere.Harness.RedactionTest do
              "private_key" => "[REDACTED]"
            }
   end
+
+  test "redacts camel-case sensitive keys" do
+    redacted =
+      Redaction.value(%{
+        "apiKey" => "api-secret",
+        "privateKey" => "private-secret"
+      })
+
+    refute redacted["apiKey"] == "api-secret"
+    refute redacted["privateKey"] == "private-secret"
+    assert redacted == %{"apiKey" => "[REDACTED]", "privateKey" => "[REDACTED]"}
+  end
 end
