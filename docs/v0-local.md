@@ -44,7 +44,7 @@ The following commands describe the operator path from a fresh packaged installa
 scripts/package.sh PREFIX
 export PATH=PREFIX/bin:$PATH
 export CS_RELEASE=PREFIX/libexec/consigliere_daemon
-export CS_HOME=HOME/.consigliere
+export CS_HOME="$HOME/.consigliere"
 csd migrate
 csd start
 cs project add --name NAME --path PATH --url URL --default-branch BRANCH

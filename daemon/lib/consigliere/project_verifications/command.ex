@@ -30,18 +30,29 @@ defmodule Consigliere.ProjectVerifications.Command do
   end
 
   defp open_port(executable, args, workspace, opts) do
-    port =
-      Port.open(
-        {:spawn_executable, executable},
-        [:binary, :exit_status, args: args, cd: workspace, env: scrubbed_env()]
-      )
+    case resolve("env") do
+      nil ->
+        %{outcome: "infrastructure_error", error_code: "command_missing"}
 
-    collect(
-      port,
-      "",
-      System.monotonic_time(:millisecond) + Keyword.get(opts, :timeout_ms, 900_000),
-      opts
-    )
+      env_executable ->
+        port =
+          Port.open(
+            {:spawn_executable, env_executable},
+            [
+              :binary,
+              :exit_status,
+              args: ["-i" | environment_args() ++ [executable | args]],
+              cd: workspace
+            ]
+          )
+
+        collect(
+          port,
+          "",
+          System.monotonic_time(:millisecond) + Keyword.get(opts, :timeout_ms, 900_000),
+          opts
+        )
+    end
   rescue
     _ -> %{outcome: "infrastructure_error", error_code: "command_spawn_failed"}
   end
@@ -128,6 +139,12 @@ defmodule Consigliere.ProjectVerifications.Command do
       {~c"GIT_TERMINAL_PROMPT", ~c"0"},
       {~c"GIT_ASKPASS", ~c""}
     ]
+  end
+
+  defp environment_args do
+    Enum.map(scrubbed_env(), fn {key, value} ->
+      to_string(key) <> "=" <> to_string(value)
+    end)
   end
 
   defp close_port(port) do

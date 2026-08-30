@@ -43,4 +43,13 @@ defmodule Consigliere.ProjectVerificationsCommandTest do
 
     assert output_bytes <= 65_536
   end
+
+  test "does not inherit unlisted environment variables", %{workspace: workspace} do
+    System.put_env("CS_SYNTHETIC_SECRET", "must-not-cross")
+
+    on_exit(fn -> System.delete_env("CS_SYNTHETIC_SECRET") end)
+
+    assert %{outcome: "passed", output_bytes: 0} =
+             Command.run(["sh", "-c", "printf %s \"$CS_SYNTHETIC_SECRET\""], workspace)
+  end
 end

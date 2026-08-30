@@ -48,6 +48,10 @@ Result: 6 passed.
 
 The direct command tests proved shell interpolation is not executed, timeout results are typed and bounded, and output is capped at 65,536 bytes.
 
+The final security regression added to this command boundary proved that a synthetic parent environment value is absent from the verification child while the sanitized PATH and Git configuration variables remain available.
+
+The verification child now starts through `env -i` with only the bounded allowlisted environment, so unlisted daemon or operator variables cannot cross into Project-configured commands.
+
 Command:
 
     test -z "$(gofmt -l cli)" && (cd cli && go vet ./... && go test -race -shuffle=on -count=1 ./...)
