@@ -132,3 +132,25 @@ Command:
 Result: 7 passed.
 
 No credentials, raw logs, or transcripts were written to this regression record.
+
+## Exact-head checkpoint workspace hygiene follow-up
+
+The exact-head security review found that checkpoint import called `Git.import_sha/4` without first applying the full trusted-workspace verifier used by final result progression.
+
+Commit `cbdf6f7f2cbc2b1718ac73e2aa47c0ad2519dfad` verifies the exact workspace HEAD, alternates, remotes, credential helpers, hooks path, Git permissions, and shared-object identity before any checkpoint import work.
+
+Tests-first RED proof:
+
+    docker run --rm -v "$PWD":/workspace -w /workspace/daemon elixir:1.20-otp-29 sh -lc 'set -o pipefail; apt-get update -qq >/dev/null && apt-get install -y -qq golang-go >/dev/null && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && MIX_ENV=test mix test test/consigliere/checkpoints_test.exs --no-color 2>&1 | tail -n 120'
+
+The new test created a real checkpoint workspace with `.git/objects/info/alternates`; the prior implementation imported the checkpoint instead of returning `{:error, :alternates_present}`.
+
+Tests-first GREEN proof:
+
+    docker run --rm -v "$PWD":/workspace -w /workspace/daemon elixir:1.20-otp-29 sh -lc 'set -o pipefail; apt-get update -qq >/dev/null && apt-get install -y -qq golang-go >/dev/null && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && mix format --check-formatted && MIX_ENV=test mix test test/consigliere/process_group_test.exs test/consigliere/runtime/inventory_test.exs test/consigliere/checkpoints_test.exs test/consigliere/reconciler_persist_test.exs --no-color 2>&1 | tail -n 140'
+
+Result: 30 tests passed.
+
+The rejected checkpoint left the Mission checkpoint SHA unset and the Attempt in `checkpoint_requested`, proving that no external import or durable progression occurred after the hygiene failure.
+
+The test helper explicitly hardened Git permissions and configured the empty hooks directory so the positive checkpoint-import cases continue to exercise the complete verifier.

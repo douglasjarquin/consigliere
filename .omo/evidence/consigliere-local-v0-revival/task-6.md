@@ -100,3 +100,15 @@ Database and event assertions found no raw capability secret, and the bounded co
 Dirty Git workspaces, hung commands, runner process-group termination, daemon restart, native resume, and repeated OS interruption are ordered into later tasks and were not claimed by this task.
 
 No Boss, GitHub, source-repository, daemon-owner, Made, remote-worker, transcript, telemetry, PR, push, merge, or automatic delivery authority was added.
+
+## Exact-head harness transport hardening
+
+The exact-head security review found that the Codex harness did not need the daemon API socket or reusable Attempt capability to emit its private report marker, but the old environment forwarded both values.
+
+Tests-first RED proof changed the CLI bridge test to omit both transport values, and the bridge then failed with `required bound identity CS_API_SOCKET is missing`; the runner environment test also observed the old socket and capability values.
+
+Commit `771e72a32145dca791ae30286cdddf8b774a7285` makes bridge-mode `cs-attempt` validate only its bound identity fields, removes the transport values from `RunnerProcess`, and keeps the Go runner scrubber from forwarding them.
+
+Tests-first GREEN proof passed the CLI bridge test, the runner spawn suite, and the Elixir runner environment regression; the combined Elixir hardening slice passed 11 tests.
+
+The trusted runner retains the short-lived report capability and forwards only the bounded bridge report, while the harness receives no direct daemon transport secret.

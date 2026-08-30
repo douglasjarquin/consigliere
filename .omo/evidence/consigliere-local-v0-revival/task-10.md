@@ -67,6 +67,18 @@ The storage-fault path is intentionally limited to a disposable capture and its 
 
 Full prompt, transcript, and raw secret-bearing event retention were not added.
 
+## Exact-head bounded secret redaction follow-up
+
+The exact-head security review found that compound environment names, private-key fields, and PEM material were not covered by the existing bounded redaction families.
+
+Tests-first RED proof retained synthetic `AWS_SECRET_ACCESS_KEY`, `PRIVATE_KEY`, PEM body, and structured `private_key` values in the redaction output.
+
+Commit `c71bee7a6706b7279beafba0a951795124ad7ed4` adds fixed compound assignment patterns, private-key key fragments, and a line-bounded PEM redactor without broadening the regex into an unbounded key matcher.
+
+Tests-first GREEN proof passed the new text and structured-value cases with the existing ContextPack and event redaction regressions; the combined hardening slice passed 11 tests.
+
+The redactor removes the synthetic values while preserving non-sensitive content and remains bounded for oversized non-secret context.
+
 ## Exact-head structured redaction follow-up
 
 The exact-head security review found that quoted JSON credential keys such as `access_token` and the `CS_CAPABILITY` environment assignment could retain their values in redacted text.

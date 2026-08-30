@@ -151,3 +151,45 @@ The new real-process regression observed the prior implementation return `:pause
 Tests-first GREEN proof is the combined event and pause command recorded in task 10 above.
 
 The green result was 16 passed, and the new process assertion confirmed the unrelated session-leader group remained alive while pause stayed pending.
+
+## Exact-head process-group membership follow-up
+
+The exact-head security review found that a stale runner or harness PID could be alive while belonging to a different process group than the PGID recorded in its manifest.
+
+Commit `c1ff0829985626df7a13ff4afa899e9e40667e3a` adds platform-specific process-group membership observation and requires both the recorded runner and harness to be verified members before inventory liveness can be `:verified`.
+
+Tests-first RED proof:
+
+    docker run --rm -v "$PWD":/workspace -w /workspace/daemon elixir:1.20-otp-29 sh -lc 'set -o pipefail; apt-get update -qq >/dev/null && apt-get install -y -qq golang-go >/dev/null && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && MIX_ENV=test mix test test/consigliere/process_group_test.exs test/consigliere/runtime/inventory_test.exs --no-color 2>&1 | tail -n 120'
+
+The new inventory fixture returned `:verified` under the prior implementation for a live runner and harness in a different session group, and the new ProcessGroup test was undefined.
+
+Tests-first GREEN proof:
+
+    docker run --rm -v "$PWD":/workspace -w /workspace/daemon elixir:1.20-otp-29 sh -lc 'set -o pipefail; apt-get update -qq >/dev/null && apt-get install -y -qq golang-go >/dev/null && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && mix format --check-formatted && MIX_ENV=test mix test test/consigliere/process_group_test.exs test/consigliere/runtime/inventory_test.exs test/consigliere/checkpoints_test.exs test/consigliere/reconciler_persist_test.exs --no-color 2>&1 | tail -n 140'
+
+Result: 30 tests passed.
+
+The test launched two real session leaders, confirmed the same-group identity, and rejected the unrelated group without signaling it.
+
+The reconciler fixture now records harness identity fields so its positive live path exercises the same membership requirement.
+
+The classic double-fork daemonization case was probed in the existing real runner suite and remains a documented structural limitation of periodic process-tree polling, rather than an unbounded V0 claim.
+
+## Exact-head final verification
+
+The full Linux daemon gate at the preceding source commit `cbdf6f7f2cbc2b1718ac73eaa47c0ad` passed `461 passed (1 doctest, 460 tests)` with warnings treated as errors.
+
+The CLI and runner format, vet, ordinary, race, shuffle, and build gates also passed at that exact source head.
+
+## Exact-head termination fence follow-up
+
+The exact-head review found that pause revoked live capabilities and then independently minted a new Attempt fence before the runner manifest could be reconciled, leaving the live manifest stale and making verified-death identity fail closed.
+
+Tests-first RED proof launched a real runner, captured its manifest fence, paused the Mission, and observed that the persisted Attempt fence differed from the manifest fence.
+
+Commit `eca84cff15b651b9fc6a97aa56fd67b0fee143f6` keeps pause capability revocation and termination status changes in place without rotating the fence; the existing terminal identity and capability checks still block worker mutation after revocation.
+
+Tests-first GREEN proof passed the real runner pause regression and the combined identity hardening slice with 5 pause tests and 41 tests overall.
+
+The final Linux daemon gate at source head `c71bee7a6706b7279beafba0a951795124ad7ed4` passed `465 passed (1 doctest, 464 tests)` with warnings treated as errors.
