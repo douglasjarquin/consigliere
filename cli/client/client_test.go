@@ -197,6 +197,19 @@ func TestWhyHumanOutput(t *testing.T) {
 	}
 }
 
+func TestStatusUsesMissionWhyRead(t *testing.T) {
+	op, payload, err := mapCommand("status", []string{"m1"}, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op != "mission.why" {
+		t.Fatalf("op=%q", op)
+	}
+	if payload["mission_id"] != "m1" {
+		t.Fatalf("payload=%v", payload)
+	}
+}
+
 func TestUnknownCommand(t *testing.T) {
 	var out, errb strings.Builder
 	code := Run([]string{"nope"}, &out, &errb)

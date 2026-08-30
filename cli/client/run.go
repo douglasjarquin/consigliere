@@ -140,6 +140,7 @@ cs mission continue MISSION --sha CHECKPOINT_SHA
 cs mission request-changes MISSION --reason TEXT
 cs mission authorize MISSION
 cs orient --json [--project PROJECT] [--mission MISSION]
+cs status MISSION
 cs why <mission-id>
 cs inbox
 cs review
@@ -324,6 +325,11 @@ func mapCommand(cmd string, pos []string, opts map[string]string) (string, map[s
 			return "", nil, fmt.Errorf("usage: cs why <mission-id>")
 		}
 		return "mission.why", map[string]any{"mission_id": pos[0]}, nil
+	case "status":
+		if len(pos) == 0 {
+			return "", nil, fmt.Errorf("usage: cs status <mission-id>")
+		}
+		return "mission.why", map[string]any{"mission_id": pos[0]}, nil
 	case "inbox":
 		return "questions.inbox", map[string]any{}, nil
 	case "away":
@@ -457,7 +463,7 @@ func printHuman(w io.Writer, cmd string, pos []string, resp *Response) {
 	case "health":
 		fmt.Fprintf(w, "status=%v protocol=%v release=%v schema=%v harness=%v\n",
 			payload["status"], payload["protocol"], payload["release"], payload["schema"], payload["harness"])
-	case "why":
+	case "why", "status":
 		fmt.Fprintf(w, "mission %v phase=%v runnable=%v reason=%v\n",
 			payload["id"], payload["phase"], payload["runnable"], payload["reason"])
 		fmt.Fprintf(w, "  project=%s base_sha=%s checkpoint_sha=%s\n",

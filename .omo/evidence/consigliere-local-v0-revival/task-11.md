@@ -49,6 +49,8 @@ Observed result:
 
 The Elixir process fixtures also launched a real session-leader group, verified the recorded runner executable, adopted and terminated the exact group, and confirmed the group was gone before reconciliation completed.
 
+The final CLI characterization also added the documented read-only `cs status MISSION` alias to the same bounded `mission.why` projection, so the packaged status surface and the state explanation surface cannot diverge.
+
 ## Adversarial coverage
 
 - Forged manifests, missing Attempt rows, unsafe PGIDs, stale fences, mismatched workspace paths, lease generations, and fencing generations failed closed without signaling.
