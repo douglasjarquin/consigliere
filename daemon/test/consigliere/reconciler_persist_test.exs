@@ -330,7 +330,9 @@ defmodule Consigliere.ReconcilerPersistTest do
   defp live_process_attrs(pid) do
     %{
       "runner_pid" => pid,
-      "runner_executable_path" => System.find_executable("sleep") || "/bin/sleep"
+      "runner_executable_path" => System.find_executable("sleep") || "/bin/sleep",
+      "harness_pid" => pid,
+      "harness_executable_path" => System.find_executable("sleep") || "/bin/sleep"
     }
   end
 end

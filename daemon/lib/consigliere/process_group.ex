@@ -64,6 +64,17 @@ defmodule Consigliere.ProcessGroup do
 
   def liveness(_), do: :identity_mismatch
 
+  def member?(pid, pgid) when is_integer(pid) and pid > 1 and is_integer(pgid) and pgid > 1 do
+    case :os.type() do
+      {:unix, :linux} -> linux_member?(pid, pgid)
+      _ -> ps_member?(pid, pgid)
+    end
+  rescue
+    _ -> false
+  end
+
+  def member?(_pid, _pgid), do: false
+
   def alive?(pgid) when is_integer(pgid) and pgid > 1 do
     liveness(pgid) != :absent
   end
@@ -138,6 +149,41 @@ defmodule Consigliere.ProcessGroup do
       _ ->
         []
     end
+  end
+
+  defp linux_member?(pid, pgid) do
+    case File.read("/proc/#{pid}/stat") do
+      {:ok, contents} -> proc_stat_member?(contents, pgid)
+      _ -> false
+    end
+  end
+
+  defp proc_stat_member?(contents, pgid) do
+    case Regex.run(~r/\) [A-Za-z] \d+ (\d+)/, contents, capture: :all_but_first) do
+      [pgrp] -> Integer.parse(pgrp) == {pgid, ""}
+      _ -> false
+    end
+  end
+
+  defp ps_member?(pid, pgid) do
+    case tool_path(@ps_paths) do
+      nil ->
+        false
+
+      ps ->
+        case System.cmd(ps, ["-o", "pgid=", "-p", Integer.to_string(pid)], stderr_to_stdout: true) do
+          {output, 0} ->
+            case Integer.parse(String.trim(output)) do
+              {^pgid, ""} -> true
+              _ -> false
+            end
+
+          _ ->
+            false
+        end
+    end
+  rescue
+    _ -> false
   end
 
   defp ps_runnable(pgid) do

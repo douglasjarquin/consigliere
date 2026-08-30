@@ -36,6 +36,21 @@ defmodule Consigliere.ProcessGroupTest do
     assert ProcessGroup.probe(1) == :unsafe
   end
 
+  test "member?/2 binds a process identity to its recorded process group" do
+    {first_port, first_pgid} = ProcessHelpers.spawn_session_leader()
+    {second_port, second_pgid} = ProcessHelpers.spawn_session_leader()
+
+    on_exit(fn ->
+      _ = ProcessGroup.terminate(first_pgid, term_timeout_ms: 100, kill_timeout_ms: 100)
+      _ = ProcessGroup.terminate(second_pgid, term_timeout_ms: 100, kill_timeout_ms: 100)
+      if Port.info(first_port), do: Port.close(first_port)
+      if Port.info(second_port), do: Port.close(second_port)
+    end)
+
+    assert ProcessGroup.member?(first_pgid, first_pgid)
+    refute ProcessGroup.member?(second_pgid, first_pgid)
+  end
+
   test "termination does not depend on the caller PATH" do
     {port, pgid} = ProcessHelpers.spawn_session_leader()
     previous_path = System.get_env("PATH")

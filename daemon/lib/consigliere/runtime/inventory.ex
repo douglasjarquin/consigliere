@@ -43,14 +43,16 @@ defmodule Consigliere.Runtime.Inventory do
   def liveness(manifest) when is_map(manifest) do
     with :ok <- safe_pgid(manifest),
          {:ok, group_state} <- group_liveness(manifest),
-         {:ok, runner_state} <- runner_identity(manifest) do
-      case {group_state, runner_state} do
-        {:observation_failed, _} -> :observation_failed
-        {:permission_unknown, _} -> :permission_unknown
-        {_, :permission_unknown} -> :permission_unknown
-        {:absent, :absent} -> :absent
-        {:absent, :missing} -> :absent
-        {:verified, :verified} -> :verified
+         {:ok, runner_state} <- runner_identity(manifest),
+         {:ok, harness_state} <- harness_identity(manifest) do
+      case {group_state, runner_state, harness_state} do
+        {:observation_failed, _, _} -> :observation_failed
+        {:permission_unknown, _, _} -> :permission_unknown
+        {_, :permission_unknown, _} -> :permission_unknown
+        {_, _, :permission_unknown} -> :permission_unknown
+        {:absent, :absent, _} -> :absent
+        {:absent, :missing, _} -> :absent
+        {:verified, :verified, :verified} -> :verified
         _ -> :identity_mismatch
       end
     else
@@ -202,18 +204,43 @@ defmodule Consigliere.Runtime.Inventory do
   defp group_liveness(_), do: {:error, :unsafe_pgid}
 
   defp runner_identity(%{"runner_pid" => pid} = manifest) when is_integer(pid) and pid > 1 do
-    case ProcessIdentity.verify(
-           pid,
-           manifest["runner_executable_path"],
-           manifest["runner_executable_sha256"]
-         ) do
-      :verified -> {:ok, :verified}
-      :absent -> {:ok, :absent}
-      :identity_mismatch -> {:error, :identity}
-      :permission_unknown -> {:ok, :permission_unknown}
-      :observation_failed -> {:error, :observation_failed}
-    end
+    identity_state(
+      pid,
+      manifest["pgid"],
+      manifest["runner_executable_path"],
+      manifest["runner_executable_sha256"]
+    )
   end
 
   defp runner_identity(_), do: {:ok, :missing}
+
+  defp harness_identity(%{"harness_pid" => pid} = manifest) when is_integer(pid) and pid > 1 do
+    identity_state(
+      pid,
+      manifest["pgid"],
+      manifest["harness_executable_path"],
+      manifest["harness_executable_sha256"]
+    )
+  end
+
+  defp harness_identity(_), do: {:ok, :missing}
+
+  defp identity_state(pid, pgid, executable_path, executable_sha256) do
+    case ProcessIdentity.verify(pid, executable_path, executable_sha256) do
+      :verified ->
+        if ProcessGroup.member?(pid, pgid), do: {:ok, :verified}, else: {:error, :identity}
+
+      :absent ->
+        {:ok, :absent}
+
+      :identity_mismatch ->
+        {:error, :identity}
+
+      :permission_unknown ->
+        {:ok, :permission_unknown}
+
+      :observation_failed ->
+        {:error, :observation_failed}
+    end
+  end
 end

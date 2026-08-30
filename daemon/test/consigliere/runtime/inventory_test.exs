@@ -26,6 +26,36 @@ defmodule Consigliere.Runtime.InventoryTest do
     assert manifest["attempt_id"] == attempt.id
   end
 
+  test "live inventory rejects a runner and harness outside the recorded process group", %{
+    home: home
+  } do
+    {group_port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
+    {other_port, other_pid} = Consigliere.ProcessHelpers.spawn_session_leader()
+    executable = System.find_executable("sleep") || "/bin/sleep"
+
+    on_exit(fn ->
+      _ = ProcessGroup.terminate(pgid, term_timeout_ms: 100, kill_timeout_ms: 100)
+      _ = ProcessGroup.terminate(other_pid, term_timeout_ms: 100, kill_timeout_ms: 100)
+      if Port.info(group_port), do: Port.close(group_port)
+      if Port.info(other_port), do: Port.close(other_port)
+    end)
+
+    {attempt, _mission} = running_attempt!()
+
+    path =
+      write_manifest!(home, attempt, %{
+        "state" => "running",
+        "pgid" => pgid,
+        "runner_pid" => other_pid,
+        "runner_executable_path" => executable,
+        "harness_pid" => other_pid,
+        "harness_executable_path" => executable
+      })
+
+    assert {:valid_live, manifest, ^attempt} = Inventory.verify(path, home)
+    assert Inventory.liveness(manifest) == :identity_mismatch
+  end
+
   test "directory name mismatch is identity_mismatch and is not signalable", %{home: home} do
     {attempt, _} = running_attempt!()
     dir = Path.join(Home.runtime_attempts_dir(home), Ecto.UUID.generate())
