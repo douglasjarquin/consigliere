@@ -125,6 +125,14 @@ defmodule Consigliere.Harness.ContextPackTest do
              ContextPack.compose(mission, %{workspace_path: "/tmp/ws"})
   end
 
+  test "final completion does not require a checkpoint in the same Attempt" do
+    {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
+
+    assert {:ok, result} = ContextPack.compose(mission)
+    assert result.pack["completion"]["require_checkpoint"] == false
+    assert result.pack["protocol"]["completion"] =~ "do not report a checkpoint first"
+  end
+
   test "compose redacts credential-shaped mission content" do
     {:ok, mission} =
       Missions.create(

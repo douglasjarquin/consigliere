@@ -13,6 +13,7 @@ defmodule Consigliere.Harness.ContextPack do
     "Use only the listed Attempt operations; do not grant work or integration.",
     "Report progress, checkpoints, completion, or failure through the Attempt protocol.",
     "A checkpoint or completion is valid only when the daemon verifies its exact Git SHA.",
+    "Report exactly one terminal result for this Attempt; a final completion must not follow a checkpoint.",
     "After the final commit, make the private Attempt reporter the last action and do not run commands after it."
   ]
 
@@ -62,12 +63,12 @@ defmodule Consigliere.Harness.ContextPack do
         "checkpoint" =>
           "For a recoverable checkpoint, run $CS_ATTEMPT_BIN checkpoint --sha \"$(git rev-parse HEAD)\"; never infer SHA from prose",
         "completion" =>
-          "After the final exact-SHA commit, run $CS_ATTEMPT_BIN complete --sha \"$(git rev-parse HEAD)\" as the last action; terminal_sequence latest is resolved by the daemon, which verifies the native terminal event and runner death before terminal state",
+          "After the final exact-SHA commit, run only $CS_ATTEMPT_BIN complete --sha \"$(git rev-parse HEAD)\" as the last action; do not report a checkpoint first. terminal_sequence latest is resolved by the daemon, which verifies the native terminal event and runner death before terminal state",
         "failure" =>
           "attempt.fail reports failure; the daemon verifies runner death before terminal state"
       },
       "completion" => %{
-        "require_checkpoint" => true,
+        "require_checkpoint" => false,
         "require_terminal_event" => true
       }
     }
