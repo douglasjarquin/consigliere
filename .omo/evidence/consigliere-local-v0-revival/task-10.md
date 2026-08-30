@@ -66,3 +66,19 @@ Low-disk behavior was not simulated by filling a host filesystem.
 The storage-fault path is intentionally limited to a disposable capture and its Attempt workspace, and the doctor diagnostic reports the typed condition without deleting durable state.
 
 Full prompt, transcript, and raw secret-bearing event retention were not added.
+
+## CI portability regression
+
+The first final CI run reproduced `CaptureTest` returning `capture_unavailable` when its disposable file lived directly under the shared system temporary directory.
+
+The bounded capture writer was attempting to chmod that existing system directory to `0700`, which correctly fails for a directory owned by another user.
+
+The RED reproduction was the existing head-and-tail capture test in the native macOS suite and the Elixir daemon job of CI run `33294822927`.
+
+The GREEN fix leaves the existing parent directory ownership unchanged and still creates the captured file with mode `0600`.
+
+Command:
+
+    MIX_ENV=test mix test test/consigliere/harness/capture_test.exs --seed 0
+
+Result: 2 passed.

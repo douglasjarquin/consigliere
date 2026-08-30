@@ -91,7 +91,6 @@ defmodule Consigliere.Harness.Capture do
 
   defp write(path, data) do
     File.mkdir_p!(Path.dirname(path))
-    File.chmod!(Path.dirname(path), 0o700)
     File.write!(path, data, [:binary])
     File.chmod!(path, 0o600)
     :ok
