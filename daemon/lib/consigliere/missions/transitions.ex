@@ -550,7 +550,7 @@ defmodule Consigliere.Missions.Transitions do
         mission
 
       true ->
-        revoke_and_fence!(mission)
+        revoke_live_capabilities!(mission)
         Consigliere.Termination.request_live_attempts!(mission, "paused")
         open_blocker!(mission, "pausing", reason)
         Txn.append_event!("mission.pause_requested", "mission", mission.id, %{reason: reason})
@@ -724,14 +724,13 @@ defmodule Consigliere.Missions.Transitions do
     end
   end
 
-  defp revoke_and_fence!(mission) do
+  defp revoke_live_capabilities!(mission) do
     live = ~w(planned starting running checkpoint_requested terminating)
 
     from(a in Attempt, where: a.mission_id == ^mission.id and a.status in ^live)
     |> Repo.all()
     |> Enum.each(fn attempt ->
       Consigliere.Capabilities.revoke_for_attempt_txn(attempt.id)
-      Txn.update!(Attempt.changeset(attempt, %{fencing_token: Txn.mint_fencing_token()}))
     end)
   end
 

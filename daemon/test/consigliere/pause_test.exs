@@ -6,10 +6,13 @@ defmodule Consigliere.PauseTest do
   alias Consigliere.Attempts.Attempt
   alias Consigliere.Capabilities
   alias Consigliere.Fixtures
+  alias Consigliere.Home
   alias Consigliere.Missions
   alias Consigliere.Missions.Mission
   alias Consigliere.ProcessGroup
   alias Consigliere.Repo
+  alias Consigliere.Runtime.Inventory
+  alias Consigliere.Missions.Transitions
 
   setup do
     Fixtures.reset_phase1_tables!()
@@ -52,6 +55,23 @@ defmodule Consigliere.PauseTest do
       refute Process.alive?(snap.runner_pid)
       assert Repo.get!(Mission, mission.id).phase == "paused"
     end
+  end
+
+  test "pause rotates the runner fence once and keeps the manifest bound" do
+    {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
+    {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
+
+    [{coord, _}] = wait_coord(mission.id)
+    _ = await_runner(coord)
+    attempt = Repo.get_by!(Attempt, mission_id: mission.id)
+    manifest_path = Inventory.path_for(Home.dir(), attempt.id)
+    manifest = JSON.decode!(File.read!(manifest_path))
+
+    assert {:ok, _paused_request} = Transitions.pause(mission.id, Actor.boss())
+
+    updated_attempt = Repo.get!(Attempt, attempt.id)
+    assert updated_attempt.fencing_token == manifest["fencing_token"]
   end
 
   test "pause does not signal a persisted pgid without verified inventory" do

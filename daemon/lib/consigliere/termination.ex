@@ -78,11 +78,10 @@ defmodule Consigliere.Termination do
   end
 
   def request_attempt!(attempt, cause) do
-    token = Txn.mint_fencing_token()
     Capabilities.revoke_for_attempt_txn(attempt.id)
 
     attempt =
-      Txn.update!(Attempt.changeset(attempt, %{status: "terminating", fencing_token: token}))
+      Txn.update!(Attempt.changeset(attempt, %{status: "terminating"}))
 
     Txn.append_event!("attempt.termination_requested", "attempt", attempt.id, %{
       cause: to_string(cause)
