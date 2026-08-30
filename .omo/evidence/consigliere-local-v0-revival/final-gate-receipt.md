@@ -1,6 +1,6 @@
 # Final exact-head gate receipt
 
-The final evidence head is `8e5131a83c04868ac2bf93578b07ffe5991074b9` on `revival/v0-local-codex`.
+The final runtime evidence is bound to source commit `95ea4e5e38c6350f6560339708bbc33b985010b8` on `revival/v0-local-codex`.
 
 The packaged runtime input parent is `95ea4e5e38c6350f6560339708bbc33b985010b8`.
 
