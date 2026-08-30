@@ -111,9 +111,17 @@ defmodule Consigliere.Dispatch do
   defp resume(state, _mission, _attempt), do: state
 
   defp continue(state, mission, grant, %Attempt{status: "planned"} = attempt) do
-    {:ok, attempt} = Attempts.request_spawn(attempt.id, Actor.system())
-    mark_spawn_requested(attempt)
-    launch(state, mission, grant, attempt)
+    case Attempts.request_spawn(attempt.id, Actor.system()) do
+      {:ok, attempt} ->
+        mark_spawn_requested(attempt)
+        launch(state, mission, grant, attempt)
+
+      {:error, {:illegal_transition, %{reason: :wrong_status}}} = error ->
+        reconcile_spawn_race(state, mission, grant, attempt.id, error)
+
+      {:error, reason} ->
+        fail_planned_dispatch(state, mission, attempt, reason)
+    end
   end
 
   defp continue(state, mission, grant, attempt), do: launch(state, mission, grant, attempt)
@@ -297,6 +305,38 @@ defmodule Consigliere.Dispatch do
         runner_pid: runner_pid,
         runner_ref: Process.monitor(runner_pid)
     }
+  end
+
+  defp reconcile_spawn_race(state, mission, grant, attempt_id, _error) do
+    case Repo.get(Attempt, attempt_id) do
+      %Attempt{status: status} = attempt when status in ["starting", "running"] ->
+        case Registry.lookup(Consigliere.Registry, {:runner, attempt.id}) do
+          [{runner_pid, _}] ->
+            attach(state, attempt, runner_pid, grant)
+
+          [] ->
+            mark_unknown_dispatch(%{state | slot: grant}, attempt, inventory_state(attempt.id))
+        end
+
+      %Attempt{status: status} = attempt ->
+        if AttemptStates.terminal?(status) do
+          GlobalScheduler.release_slot(mission.id)
+
+          %{
+            state
+            | slot: nil,
+              attempt_id: attempt_id,
+              runner_pid: nil,
+              view: Map.put(state.view, :reason, :dispatch_terminal)
+          }
+        else
+          %{state | view: Map.put(state.view, :reason, :dispatch_retry), attempt_id: attempt.id}
+        end
+
+      nil ->
+        GlobalScheduler.release_slot(mission.id)
+        %{state | slot: nil, attempt_id: attempt_id, runner_pid: nil}
+    end
   end
 
   defp request_slot(mission_id) do
