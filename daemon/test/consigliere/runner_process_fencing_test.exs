@@ -50,18 +50,21 @@ defmodule Consigliere.RunnerProcessFencingTest do
     assert RunnerProcess.heartbeat_count(pid) < before + 20,
            "a stale fencing token must not create heartbeat state"
 
+    live_session = :sys.get_state(pid).session
+
     live =
-      session
+      live_session
       |> RunnerLauncher.encode_frame(
         %{
           "type" => "stdout_chunk",
           "data" => String.duplicate("live\n", 80)
         },
-        next_seq
+        live_session.recv_seq + 1
       )
       |> JSON.encode!()
 
-    assert {:ok, _message, _session} = RunnerLauncher.verify_frame(session, live <> "\n")
+    assert {:ok, _message, _session} =
+             RunnerLauncher.verify_frame(live_session, live <> "\n")
 
     send(pid, {:tcp, socket, live <> "\n"})
     Process.sleep(80)
