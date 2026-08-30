@@ -198,3 +198,9 @@ The default advisory log response contained only allowlisted durable event summa
 The source-level adversarial regression supplied prompt-injection text and a bearer-shaped secret in the Attempt log, then verified that neither appeared in the advisory response.
 
 The exact package identifiers, result SHA, artifact hashes, gate commands, and cleanup receipt are in `watcher-followup-c727e94.md` with the current-head addendum below.
+
+## Native command bound follow-up
+
+The final packaged run was rebuilt from source head `4e99cf4219998c15b01d23b23349730f27546c61` after the native command output-bound review finding.
+
+The real Codex terminal transition again reached `ready_for_review`, imported one exact result SHA, and returned `ATTEMPT_LOGS_EXIT=0` with structured event summaries.

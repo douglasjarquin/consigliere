@@ -157,3 +157,43 @@ The current package cleanup command was `trash /tmp/cs-p0-real.DH2BRL; trash "$P
 It returned `home_present=0 watcher_present=0 home_trash_rc=0 watcher_trash_rc=0` and verified `cs-p0-real.DH2BRL absent` and `watcher-followup absent`.
 
 The unrelated taskwork scratch remains preserved.
+
+## Current-head native command bound addendum
+
+The source head advanced to `4e99cf4219998c15b01d23b23349730f27546c61` for the adjacent native command output bound identified during exact-head code review.
+
+The tests-first RED command was `PATH="/opt/homebrew/opt/erlang/bin:$PATH" MIX_ENV=test mix test test/consigliere/runtime/command_test.exs --seed 0 --no-color` after adding a one-chunk 200,000-byte `/dev/zero` regression.
+
+The RED result was `1/2 passed`, with the old implementation returning a 131,072-byte `output_too_large` result under the bounded heap fixture.
+
+The GREEN implementation checks the accumulated byte count plus the received chunk size before combining iodata, then returns at most 65,536 bytes.
+
+The GREEN command was `PATH="/opt/homebrew/opt/erlang/bin:$PATH" mix format lib/consigliere/runtime/command.ex test/consigliere/runtime/command_test.exs && PATH="/opt/homebrew/opt/erlang/bin:$PATH" MIX_ENV=test mix test test/consigliere/runtime/command_test.exs test/consigliere/project_verifications_command_test.exs --seed 0 --no-color`.
+
+The result was `7 passed` with exit `0`.
+
+The serial full daemon gate was rerun after the runtime fix and returned `500 passed (1 doctest, 499 tests)` with exit `0`.
+
+The final package was rebuilt from this runtime source and returned package exit `0`.
+
+It contained native arm64 Mach-O `cs`, `csd`, `cs-runner`, and `cs-attempt` artifacts with SHA-256 values `cs=e291faa43bdd39c19a0313278854aa14362c670476e35c98ae4807e6ecd2339c`, `csd=0b129ccebc0f60dee66257a97ef3e29463975599e5c8f57615946009ebf62b79`, `cs-runner=3fb8fee892f594409508d5417075139daf442f4b2069032b2aec42a4b6af8d95`, and `cs-attempt=a908c6a03230a5c700878985ee336d2d9c41e888fc8c6864c4b9452b097987a6`.
+
+The package contained 15 required release migration `.exs` files and no checkout `go.mod` or `mix.exs`.
+
+The final packaged real Codex run used `codex-cli 0.151.0`, reached `ready_for_review` at poll 32, and ended with Mission `04877deb-2e4b-4eac-be4b-8c6bc85fdee8`, Attempt `2815c4c0-5e0c-4dcc-8754-9e9f27afc255`, and imported result SHA `319cff82093f53ade791d2175646d6d42dba2e2a`.
+
+Its default `cs attempt logs` call returned `ATTEMPT_LOGS_EXIT=0` and only fixed durable event summaries.
+
+The lifecycle proof passed repeated stop, restart, status, why, review, doctor, and final stop with `LIFECYCLE=stopped sockets=0 pid_files=0`.
+
+The final cleanup command was `trash /tmp/cs-p0-real.IeqOkM; trash "$PWD/.tmp/watcher-final"`.
+
+It returned `home_present=0 watcher_present=0 home_trash_rc=0 watcher_trash_rc=0` and verified both task-owned paths absent.
+
+The exact-head runner gate was `test -z "$(gofmt -l .)" && go vet ./... && go test -race -shuffle=on -count=1 ./...` from `runner/cs-runner` and returned `ok consigliere/cs-runner 44.122s` with exit `0`.
+
+The exact-head CLI gate used the same format, vet, race, and shuffle command from `cli` and passed `cli/client` and `cli/service` with exit `0`.
+
+The final 4e99 package cleanup used `/usr/bin/trash` on `/private/tmp/cs-p0-real.IeqOkM` and the task-owned `.tmp/watcher-final` directory.
+
+It returned `home_present=0 watcher_present=0 home_trash_rc=0 watcher_trash_rc=0` and verified `cs-p0-real.IeqOkM absent` and `watcher-final absent`.

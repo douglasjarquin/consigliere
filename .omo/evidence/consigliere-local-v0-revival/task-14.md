@@ -149,3 +149,5 @@ The corrected source head `2c7f5b67c8d37737d8f2dd3e0f7110687a800748` keeps `atte
 The advisory regression covers prompt injection, bearer-shaped secrets, private-path omission, bounded output, and preservation of Boss-only mutation denials.
 
 The exact package/manual proof returned exit `0` for the default `cs attempt logs` command and exposed structured event summaries only.
+
+The final source head `4e99cf4219998c15b01d23b23349730f27546c61` preserves that event-only advisory response while adding the adjacent native command bound and regression.

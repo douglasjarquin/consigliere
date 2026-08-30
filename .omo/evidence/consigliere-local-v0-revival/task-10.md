@@ -194,3 +194,13 @@ Commit `f1d1dfa02f39bf88b682855a440d8dc6d5214ebf` adds a bounded stdout line buf
 Tests-first GREEN proof passed the split completion and fencing regressions with 6 tests.
 
 The final Linux suite then passed three consecutive seed-0 runs with `468 passed (1 doctest, 467 tests)` each.
+
+## Watcher follow-up native command bound
+
+The exact source head `4e99cf4219998c15b01d23b23349730f27546c61` also closes the adjacent native command boundary identified during review.
+
+The RED regression emitted one 200,000-byte `/dev/zero` chunk under a bounded heap and observed `output_too_large` with an unbounded 131,072-byte flattened result.
+
+The GREEN implementation checks the accumulated byte count plus the received chunk size before combining iodata and returns only the remaining bounded prefix.
+
+The focused command passed `7 tests`, and the serial full daemon gate passed `500 tests (1 doctest, 499 tests)`.
