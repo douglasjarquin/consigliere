@@ -81,7 +81,7 @@ defmodule Consigliere.Harness.Events do
         attrs = maybe_session(type, payload, attrs)
         attempt = Txn.update!(Attempt.changeset(attempt, attrs))
         Txn.append_event!(type, "attempt", attempt.id, payload)
-        apply_type(type, attempt, payload, actor)
+        apply_type(type, attempt, payload, actor, seq)
         :accepted
     end
   end
@@ -107,28 +107,30 @@ defmodule Consigliere.Harness.Events do
 
   defp maybe_session(_type, _payload, attrs), do: attrs
 
-  defp apply_type("session.completed", attempt, _payload, _actor) do
+  defp apply_type("session.completed", attempt, _payload, _actor, _seq) do
     Txn.update!(Attempt.changeset(attempt, %{exit_classification: "completed"}))
   end
 
-  defp apply_type("session.failed", attempt, payload, _actor) do
+  defp apply_type("session.failed", attempt, payload, _actor, _seq) do
     klass = Map.get(payload, "class") || Map.get(payload, "reason") || "failed"
     Txn.update!(Attempt.changeset(attempt, %{exit_classification: to_string(klass)}))
   end
 
-  defp apply_type("checkpoint.created", attempt, payload, actor) do
+  defp apply_type("checkpoint.created", attempt, payload, actor, seq) do
     sha = Map.get(payload, "sha") || Map.get(payload, "commit_sha")
 
     if is_binary(sha) and sha != "" do
       Consigliere.Attempts.Transitions.request_checkpoint_txn(attempt.id, actor, %{
-        reported_checkpoint_sha: sha
+        reported_checkpoint_sha: sha,
+        terminal_sequence: seq,
+        internal: true
       })
     else
       :ok
     end
   end
 
-  defp apply_type("question.requested", attempt, payload, actor) do
+  defp apply_type("question.requested", attempt, payload, actor, _seq) do
     Consigliere.Questions.Transitions.open_txn(
       %{
         attempt_id: attempt.id,
@@ -142,7 +144,7 @@ defmodule Consigliere.Harness.Events do
     )
   end
 
-  defp apply_type(_type, _attempt, _payload, _actor), do: :ok
+  defp apply_type(_type, _attempt, _payload, _actor, _seq), do: :ok
 
   defp fetch_attempt!(id) do
     case Repo.get(Attempt, id) do

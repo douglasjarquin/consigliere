@@ -7,8 +7,10 @@ defmodule Consigliere.CapabilitiesSecurityTest do
   alias Consigliere.Attempts
   alias Consigliere.Capabilities
   alias Consigliere.Fixtures
+  alias Consigliere.Harness.Events
   alias Consigliere.Missions
   alias Consigliere.Repo
+  alias Consigliere.Workspaces.Workspace
 
   setup do
     Fixtures.reset_phase1_tables!()
@@ -18,6 +20,9 @@ defmodule Consigliere.CapabilitiesSecurityTest do
   test "the full V0 worker operation set works through an authenticated channel" do
     {mission, attempt} = running_attempt!()
     {secret, capability} = mint!(attempt)
+    workspace = Repo.get!(Workspace, attempt.workspace_id)
+
+    record_event!(attempt, "progress.reported", 1)
 
     assert response("ping", %{}, secret, capability)["ok"]
 
@@ -50,7 +55,15 @@ defmodule Consigliere.CapabilitiesSecurityTest do
         "attempt.checkpoint",
         %{
           "attempt_id" => attempt.id,
-          "reported_checkpoint_sha" => "a" <> String.duplicate("0", 39)
+          "mission_id" => mission.id,
+          "project_id" => mission.project_id,
+          "workspace_id" => workspace.id,
+          "workspace_generation" => workspace.lease_id,
+          "base_sha" => mission.base_sha,
+          "fencing_generation" => attempt.fencing_token,
+          "result_sha" => "a" <> String.duplicate("0", 39),
+          "result_kind" => "checkpoint",
+          "terminal_sequence" => 1
         },
         secret,
         capability
@@ -61,11 +74,25 @@ defmodule Consigliere.CapabilitiesSecurityTest do
 
     {_mission, completion_attempt} = running_attempt!()
     {completion_secret, completion_capability} = mint!(completion_attempt)
+    completion_mission = Repo.get!(Consigliere.Missions.Mission, completion_attempt.mission_id)
+    completion_workspace = Repo.get!(Workspace, completion_attempt.workspace_id)
+    record_event!(completion_attempt, "session.completed", 1)
 
     completion =
       response(
         "attempt.complete",
-        %{"attempt_id" => completion_attempt.id},
+        %{
+          "attempt_id" => completion_attempt.id,
+          "mission_id" => completion_mission.id,
+          "project_id" => completion_mission.project_id,
+          "workspace_id" => completion_workspace.id,
+          "workspace_generation" => completion_workspace.lease_id,
+          "base_sha" => completion_mission.base_sha,
+          "fencing_generation" => completion_attempt.fencing_token,
+          "result_sha" => "b" <> String.duplicate("0", 39),
+          "result_kind" => "completed",
+          "terminal_sequence" => 1
+        },
         completion_secret,
         completion_capability
       )
@@ -186,6 +213,14 @@ defmodule Consigliere.CapabilitiesSecurityTest do
     {:ok, attempt} =
       Attempts.mark_running(attempt.id, Actor.system(), %{fencing_token: attempt.fencing_token})
 
+    workspace = Repo.get!(Workspace, attempt.workspace_id)
+    base_sha = "a" <> String.duplicate("0", 39)
+
+    {:ok, mission} =
+      Repo.update(Consigliere.Missions.Mission.changeset(mission, %{base_sha: base_sha}))
+
+    {:ok, _workspace} = Repo.update(Workspace.changeset(workspace, %{base_sha: base_sha}))
+
     {mission, attempt}
   end
 
@@ -193,6 +228,20 @@ defmodule Consigliere.CapabilitiesSecurityTest do
     {:ok, secret} = Capabilities.mint(attempt, opts)
     {:ok, capability} = Capabilities.authenticate(secret)
     {secret, capability}
+  end
+
+  defp record_event!(attempt, type, sequence) do
+    assert {:ok, :accepted} =
+             Events.ingest(
+               %{
+                 "event_id" => "security-#{type}-#{attempt.id}",
+                 "type" => type,
+                 "native_sequence" => sequence,
+                 "attempt_id" => attempt.id,
+                 "payload" => %{}
+               },
+               Actor.attempt(attempt.id, attempt.fencing_token)
+             )
   end
 
   defp response(op, payload, secret, capability, scope_override \\ nil) do

@@ -105,9 +105,10 @@ defmodule Consigliere.Projects do
   def verify_workspace_identity(
         %Project{} = project,
         %Mission{} = mission,
-        %Workspace{} = workspace
+        %Workspace{} = workspace,
+        expected_sha \\ nil
       ) do
-    expected_sha = mission.current_checkpoint_sha || mission.base_sha
+    expected_sha = expected_sha || mission.current_checkpoint_sha || mission.base_sha
 
     cond do
       mission.project_id != project.id ->
@@ -149,11 +150,19 @@ defmodule Consigliere.Projects do
       not is_binary(expected_sha) or expected_sha == "" ->
         {:error, :checkpoint_missing}
 
-      not Git.mirror_has_commit?(project.trusted_mirror_path, expected_sha) ->
+      not trusted_expected_sha?(project, mission, expected_sha) ->
         {:error, :checkpoint_not_trusted}
 
       true ->
         Git.verify_workspace(workspace.path, expected_sha, project.trusted_mirror_path)
+    end
+  end
+
+  defp trusted_expected_sha?(project, mission, sha) do
+    if sha == mission.base_sha or sha == mission.current_checkpoint_sha do
+      Git.mirror_has_commit?(project.trusted_mirror_path, sha)
+    else
+      Git.valid_full_sha?(sha)
     end
   end
 

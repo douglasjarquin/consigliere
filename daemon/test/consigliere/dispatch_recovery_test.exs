@@ -95,7 +95,12 @@ defmodule Consigliere.DispatchRecoveryTest do
 
     first = request.()
     second = request.()
-    assert JSON.decode!(first) == JSON.decode!(second)
+    first = JSON.decode!(first)
+    second = JSON.decode!(second)
+    assert first["outcome"] == "accepted"
+    assert second["outcome"] == "duplicate"
+    assert second["payload"] == first["payload"]
+    assert second["stored_envelope"] == Map.delete(first, "id")
 
     assert Repo.aggregate(
              from(a in Consigliere.Authorizations.Authorization,

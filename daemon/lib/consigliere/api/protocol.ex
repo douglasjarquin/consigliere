@@ -21,7 +21,7 @@ defmodule Consigliere.API.Protocol do
 
   @version 1
   @request_keys MapSet.new(
-                  ~w(v id op actor payload capability secret idempotency_key operation_version canonical_hash)
+                  ~w(v id op actor payload capability secret scope idempotency_key operation_version canonical_hash)
                 )
   @attempt_ops Consigliere.Capabilities.worker_operations()
   @review_phases ~w(awaiting_authorization ready_for_review
@@ -273,6 +273,11 @@ defmodule Consigliere.API.Protocol do
     Missions.resume(payload["mission_id"], actor) |> ok_mission()
   end
 
+  defp run_allowed("mission.continue", payload, actor) do
+    Missions.continue_from_checkpoint(payload["mission_id"], actor, payload["checkpoint_sha"])
+    |> ok_continuation()
+  end
+
   defp run_allowed("mission.list", _payload, actor) do
     with :ok <- require_reader(actor) do
       missions =
@@ -422,20 +427,13 @@ defmodule Consigliere.API.Protocol do
             )
 
           {:ok,
-           %{
-             "id" => mission.id,
-             "phase" => mission.phase,
-             "objective" => mission.objective,
-             "scope" => mission.scope,
-             "acceptance_criteria" => mission.acceptance_criteria,
-             "project_id" => mission.project_id,
-             "base_sha" => mission.base_sha,
-             "authorization_id" => mission.authorization_id,
-             "blockers" =>
-               Enum.map(blockers, fn b ->
-                 %{"kind" => b.kind, "reason" => b.reason, "subject_id" => b.subject_id}
-               end)
-           }}
+           mission_payload(mission)
+           |> Map.put(
+             "blockers",
+             Enum.map(blockers, fn b ->
+               %{"kind" => b.kind, "reason" => b.reason, "subject_id" => b.subject_id}
+             end)
+           )}
         end
     end
   end
@@ -453,14 +451,12 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp run_allowed("attempt.checkpoint", payload, actor) do
-    Attempts.request_checkpoint(payload["attempt_id"], actor, %{
-      reported_checkpoint_sha: payload["reported_checkpoint_sha"] || payload["checkpoint_sha"]
-    })
+    Attempts.request_checkpoint(payload["attempt_id"], actor, payload)
     |> ok_attempt()
   end
 
   defp run_allowed("attempt.complete", payload, actor) do
-    Attempts.report_completion(payload["attempt_id"], actor)
+    Attempts.report_completion(payload["attempt_id"], actor, payload)
     |> ok_attempt()
   end
 
@@ -581,17 +577,127 @@ defmodule Consigliere.API.Protocol do
 
   defp ok_attempt(other), do: other
 
+  defp ok_continuation({:ok, %{mission: mission, attempt: attempt, workspace: workspace}}) do
+    {:ok,
+     %{
+       "mission_id" => mission.id,
+       "attempt_id" => attempt.id,
+       "workspace_id" => workspace.id,
+       "workspace_generation" => workspace.lease_id,
+       "checkpoint_sha" => mission.current_checkpoint_sha
+     }}
+  end
+
+  defp ok_continuation(other), do: other
+
   defp mission_payload(mission) do
+    result = latest_result(mission.id)
+
     %{
       "id" => mission.id,
       "phase" => mission.phase,
       "project_id" => mission.project_id,
+      "project" => project_payload(mission.project_id),
       "objective" => mission.objective,
       "scope" => mission.scope,
       "acceptance_criteria" => mission.acceptance_criteria,
       "base_sha" => mission.base_sha,
-      "authorization_id" => mission.authorization_id
+      "authorization_id" => mission.authorization_id,
+      "current_checkpoint_sha" => mission.current_checkpoint_sha,
+      "result_sha" => result && (result.imported_sha || result.reported_sha),
+      "result_status" => result && result.status,
+      "result_kind" => result && result.result_kind,
+      "result_ref" => result && result.result_ref,
+      "workspace" => latest_workspace(mission.id),
+      "verification" => verification_payload(result && result.attempt_id)
     }
+  end
+
+  defp project_payload(nil), do: nil
+
+  defp project_payload(project_id) do
+    case Repo.get(Consigliere.Projects.Project, project_id) do
+      nil ->
+        nil
+
+      project ->
+        %{
+          "id" => project.id,
+          "name" => project.name,
+          "repository_url" => project.repository_url,
+          "default_branch" => project.default_branch,
+          "base_sha" => project.base_sha,
+          "base_ref" => project.base_ref
+        }
+    end
+  end
+
+  defp latest_workspace(mission_id) do
+    attempt =
+      Repo.one(
+        from(a in Consigliere.Attempts.Attempt,
+          where: a.mission_id == ^mission_id,
+          order_by: [desc: a.inserted_at],
+          limit: 1
+        )
+      )
+
+    workspace =
+      case attempt do
+        %{workspace_id: workspace_id} when is_binary(workspace_id) ->
+          Repo.get(Consigliere.Workspaces.Workspace, workspace_id)
+
+        _ ->
+          nil
+      end
+
+    case workspace do
+      nil ->
+        nil
+
+      workspace ->
+        %{
+          "attempt_id" => attempt.id,
+          "id" => workspace.id,
+          "path" => workspace.path,
+          "generation" => workspace.lease_id,
+          "base_sha" => workspace.base_sha,
+          "parent_checkpoint_sha" => workspace.parent_checkpoint_sha,
+          "status" => workspace.status
+        }
+    end
+  end
+
+  defp latest_result(mission_id) do
+    Repo.one(
+      from(r in Consigliere.AttemptResults.AttemptResult,
+        where: r.mission_id == ^mission_id,
+        order_by: [desc: r.inserted_at],
+        limit: 1
+      )
+    )
+  end
+
+  defp verification_payload(nil), do: []
+
+  defp verification_payload(attempt_id) do
+    Consigliere.ProjectVerifications.runs(attempt_id)
+    |> Enum.map(fn run ->
+      %{
+        "ordinal" => run.ordinal,
+        "gate_type" => run.gate_type,
+        "command_identity" => run.command_identity,
+        "input_sha" => run.input_sha,
+        "started_at" => datetime_to_iso(run.started_at),
+        "finished_at" => run.finished_at && datetime_to_iso(run.finished_at),
+        "exit_status" => run.exit_status,
+        "timed_out" => run.timed_out,
+        "output_bytes" => run.output_bytes,
+        "output_digest" => run.output_digest,
+        "outcome" => run.outcome,
+        "error_code" => run.error_code
+      }
+    end)
   end
 
   defp wrap({:ok, :replay, envelope}, id) when is_map(envelope) do
@@ -725,12 +831,7 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp mission_summary(mission) do
-    %{
-      "id" => mission.id,
-      "phase" => mission.phase,
-      "objective" => mission.objective,
-      "project_id" => mission.project_id
-    }
+    mission_payload(mission)
   end
 
   defp why_mission(nil, _actor), do: {:error, {:invalid, "mission_id required"}}
@@ -767,10 +868,8 @@ defmodule Consigliere.API.Protocol do
           reason = durable_dispatch_reason(dispatch, reason)
 
           {:ok,
-           %{
-             "id" => mission.id,
-             "phase" => mission.phase,
-             "objective" => mission.objective,
+           mission_payload(mission)
+           |> Map.merge(%{
              "runnable" => runnable,
              "reason" => Atom.to_string(reason),
              "next_step" => Atom.to_string(reason),
@@ -785,7 +884,7 @@ defmodule Consigliere.API.Protocol do
                    "status" => b.status
                  }
                end)
-           }}
+           })}
         end
     end
   end

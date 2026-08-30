@@ -368,7 +368,7 @@ defmodule Consigliere.CommandReceipts do
   defp bounded_reason(%{"reason" => reason}), do: bounded_reason(reason)
   defp bounded_reason(_reason), do: "operation_failed"
 
-  defp bounded_value(_value, depth) when depth > 3, do: "truncated"
+  defp bounded_value(_value, depth) when depth > 5, do: "truncated"
 
   defp bounded_value(value, _depth) when is_binary(value),
     do: String.slice(value, 0, @max_detail_bytes)

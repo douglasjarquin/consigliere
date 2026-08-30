@@ -68,6 +68,14 @@ The boss confirmation is foreground and explicit, and a lost response is retried
 
 The path creates no pull request, performs no push, and performs no merge.
 
+An Attempt reports a full exact result identity and terminal event sequence through its authenticated capability channel.
+
+The daemon waits for verified runner death, verifies the result in the bound Workspace, imports it once to the daemon-owned Project result ref, and records the same SHA on the Attempt and Mission.
+
+Only bounded local Project verification can advance the Mission to `ready_for_review`.
+
+The boss can continue a checkpoint by naming its exact current SHA, which creates a fresh Attempt and Workspace generation without native Codex transcript resume.
+
 ## Ordered implementation queue
 
 The implementation queue is fixed for this revival and is executed in this order.

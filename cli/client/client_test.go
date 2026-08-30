@@ -285,6 +285,17 @@ func TestMapCommandLocalV0Workflow(t *testing.T) {
 			wantOp:  "mission.grant_work",
 			want:    map[string]any{"mission_id": "mission-1"},
 		},
+		{
+			name:    "mission continue",
+			command: "mission",
+			pos:     []string{"continue", "mission-1"},
+			opts:    map[string]string{"sha": "a" + strings.Repeat("0", 39)},
+			wantOp:  "mission.continue",
+			want: map[string]any{
+				"mission_id":     "mission-1",
+				"checkpoint_sha": "a" + strings.Repeat("0", 39),
+			},
+		},
 	}
 
 	for _, test := range tests {

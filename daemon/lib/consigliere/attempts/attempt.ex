@@ -22,6 +22,8 @@ defmodule Consigliere.Attempts.Attempt do
     field(:pgid, :integer)
     field(:exit_classification, :string)
     field(:reported_checkpoint_sha, :string)
+    field(:imported_sha, :string)
+    field(:result_ref, :string)
     field(:native_session_id, :string)
     field(:input_context_hash, :string)
     field(:invocation_id, :string)
@@ -49,6 +51,8 @@ defmodule Consigliere.Attempts.Attempt do
     :pgid,
     :exit_classification,
     :reported_checkpoint_sha,
+    :imported_sha,
+    :result_ref,
     :native_session_id,
     :input_context_hash,
     :invocation_id,

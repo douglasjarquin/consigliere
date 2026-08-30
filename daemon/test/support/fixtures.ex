@@ -58,6 +58,8 @@ defmodule Consigliere.Fixtures do
     Repo.delete_all(Incident)
     Repo.delete_all(HarnessEvent)
     Repo.delete_all(Consigliere.Capabilities.AttemptCapability)
+    Repo.delete_all(Consigliere.ProjectVerifications.VerificationRun)
+    Repo.delete_all(Consigliere.AttemptResults.AttemptResult)
     Repo.delete_all(Attempt)
     Repo.delete_all(Workspace)
     Repo.delete_all(Authorization)

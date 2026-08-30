@@ -7,10 +7,13 @@ defmodule Consigliere.ProgressionTest do
   alias Consigliere.Fixtures
   alias Consigliere.Gates.Gate
   alias Consigliere.Git
+  alias Consigliere.Harness.Events
+  alias Consigliere.Home
   alias Consigliere.Incidents.Incident
   alias Consigliere.Missions
   alias Consigliere.Missions.Mission
   alias Consigliere.Progression
+  alias Consigliere.Projects
   alias Consigliere.Repo
 
   setup do
@@ -26,7 +29,8 @@ defmodule Consigliere.ProgressionTest do
        %{root: root} do
     %{attempt: attempt, mission: mission, sha: sha} = completed_with_commit!(root)
 
-    assert {:ok, _} = Progression.run(attempt.id, forced_outcome: :passed)
+    assert {:ok, _} =
+             Progression.run(attempt.id, process_group: :dead_verified, forced_outcome: :passed)
 
     attempt = Repo.get!(Attempt, attempt.id)
     mission = Repo.get!(Mission, mission.id)
@@ -64,24 +68,33 @@ defmodule Consigliere.ProgressionTest do
   test "duplicate progression of the same Attempt imports once", %{root: root} do
     %{attempt: attempt, mission: mission, sha: sha} = completed_with_commit!(root)
 
-    assert {:ok, _} = Progression.run(attempt.id, forced_outcome: :passed)
-    assert {:ok, _} = Progression.run(attempt.id, forced_outcome: :passed)
+    assert {:ok, _} =
+             Progression.run(attempt.id, process_group: :dead_verified, forced_outcome: :passed)
+
+    assert {:ok, _} =
+             Progression.run(attempt.id, process_group: :dead_verified, forced_outcome: :passed)
 
     assert Repo.get!(Mission, mission.id).current_checkpoint_sha == sha
     assert Repo.aggregate(Gate, :count) == 1
   end
 
   test "a Question checkpoint imports the SHA and leaves the Mission active", %{root: root} do
-    %{attempt: attempt, mission: mission, workspace: workspace} =
+    %{attempt: attempt, mission: mission, workspace: workspace, ws: ws} =
       running_in_workspace!(root)
 
     File.write!(Path.join(workspace, "note.txt"), "ask\n")
     sha = Git.commit_all(workspace, "checkpoint")
+    record_checkpoint_event!(attempt, 1)
 
     {:ok, attempt} =
-      Attempts.request_checkpoint(attempt.id, Actor.system(), %{reported_checkpoint_sha: sha})
+      Attempts.request_checkpoint(
+        attempt.id,
+        Actor.attempt(attempt.id, attempt.fencing_token),
+        result_attrs(%{mission: mission, ws: ws, attempt: attempt}, "checkpoint", sha, 1)
+      )
 
-    assert {:ok, _} = Progression.run(attempt.id, forced_outcome: :passed)
+    assert {:ok, _} =
+             Progression.run(attempt.id, process_group: :dead_verified, forced_outcome: :passed)
 
     attempt = Repo.get!(Attempt, attempt.id)
     mission = Repo.get!(Mission, mission.id)
@@ -97,10 +110,25 @@ defmodule Consigliere.ProgressionTest do
     File.write!(Path.join(other, "x.txt"), "unrelated\n")
     foreign = Git.commit_all(other, "foreign")
 
-    {:ok, _} =
-      Repo.update(Attempt.changeset(attempt, %{reported_checkpoint_sha: foreign}))
+    record_terminal_event!(attempt, 1)
 
-    assert {:error, _} = Progression.run(attempt.id)
+    {:ok, _} =
+      Attempts.report_completion(
+        attempt.id,
+        Actor.attempt(attempt.id, attempt.fencing_token),
+        result_attrs(
+          %{
+            mission: mission,
+            ws: Repo.get!(Consigliere.Workspaces.Workspace, attempt.workspace_id),
+            attempt: attempt
+          },
+          "completed",
+          foreign,
+          1
+        )
+      )
+
+    assert {:error, _} = Progression.run(attempt.id, process_group: :dead_verified)
     assert Repo.get!(Mission, mission.id).current_checkpoint_sha == nil
     assert Repo.get!(Attempt, attempt.id).status == "failed"
     assert Repo.aggregate(Incident, :count) >= 1
@@ -110,41 +138,101 @@ defmodule Consigliere.ProgressionTest do
   test "cs why names the post-Attempt step after a completed import", %{root: root} do
     %{attempt: attempt, mission: mission} = completed_with_commit!(root)
     assert Progression.next_action(Repo.get!(Mission, mission.id)) == :import
-    assert {:ok, _} = Progression.run(attempt.id, forced_outcome: :passed)
+
+    assert {:ok, _} =
+             Progression.run(attempt.id, process_group: :dead_verified, forced_outcome: :passed)
+
     assert Progression.next_action(Repo.get!(Mission, mission.id)) == :review
   end
 
   defp running_in_workspace!(root) do
-    workspace = Path.join(root, "workspace")
-    {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
+    source = Path.join(root, "source")
+    Git.init_workspace(source)
+    File.write!(Path.join(source, "README"), "base\n")
+    base_sha = Git.commit_all(source, "base")
+
+    {:ok, project} =
+      Projects.register(
+        %{name: "progression", repository_path: source, repository_url: "file://#{source}"},
+        Actor.boss()
+      )
+
+    {:ok, mission} =
+      Missions.create(
+        Fixtures.mission_attrs(%{project_id: project.id, base_sha: base_sha}),
+        Actor.boss()
+      )
+
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
-    {:ok, mission} = Fixtures.grant_work_quietly(mission.id, Actor.boss())
+    {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
+    workspace_path = Path.join(Home.workspaces_dir(), mission.id)
 
     {:ok, %{attempt: attempt, workspace: ws, mission: mission}} =
-      Missions.start(mission.id, Actor.system(), %{workspace_path: workspace})
+      Missions.start(mission.id, Actor.system(), %{workspace_path: workspace_path})
 
     {:ok, attempt} = Attempts.request_spawn(attempt.id, Actor.system())
 
     {:ok, attempt} =
       Attempts.mark_running(attempt.id, Actor.system(), %{fencing_token: attempt.fencing_token})
 
-    Git.init_workspace(workspace)
-    File.write!(Path.join(workspace, "work.txt"), "done\n")
-    sha = Git.commit_all(workspace, "work")
-    %{attempt: attempt, mission: mission, workspace: workspace, ws: ws, sha: sha}
+    File.write!(Path.join(ws.path, "work.txt"), "done\n")
+    sha = Git.commit_all(ws.path, "work")
+    %{attempt: attempt, mission: mission, workspace: ws.path, ws: ws, sha: sha, project: project}
   end
 
   defp completed_with_commit!(root) do
     ctx = running_in_workspace!(root)
+    record_terminal_event!(ctx.attempt, 1)
 
     {:ok, attempt} =
-      Repo.update(
-        Attempt.changeset(ctx.attempt, %{
-          exit_classification: "completed",
-          reported_checkpoint_sha: ctx.sha
-        })
+      Attempts.report_completion(
+        ctx.attempt.id,
+        Actor.attempt(ctx.attempt.id, ctx.attempt.fencing_token),
+        result_attrs(ctx, "completed", ctx.sha, 1)
       )
 
     %{ctx | attempt: attempt}
+  end
+
+  defp record_terminal_event!(attempt, sequence) do
+    assert {:ok, :accepted} =
+             Events.ingest(
+               %{
+                 "event_id" => "progression-terminal-#{attempt.id}",
+                 "type" => "session.completed",
+                 "native_sequence" => sequence,
+                 "attempt_id" => attempt.id,
+                 "payload" => %{}
+               },
+               Actor.attempt(attempt.id, attempt.fencing_token)
+             )
+  end
+
+  defp record_checkpoint_event!(attempt, sequence) do
+    assert {:ok, :accepted} =
+             Events.ingest(
+               %{
+                 "event_id" => "progression-checkpoint-#{attempt.id}",
+                 "type" => "turn.completed",
+                 "native_sequence" => sequence,
+                 "attempt_id" => attempt.id,
+                 "payload" => %{}
+               },
+               Actor.attempt(attempt.id, attempt.fencing_token)
+             )
+  end
+
+  defp result_attrs(ctx, kind, sha, sequence) do
+    %{
+      mission_id: ctx.mission.id,
+      project_id: ctx.mission.project_id,
+      workspace_id: ctx.ws.id,
+      workspace_generation: ctx.ws.lease_id,
+      base_sha: ctx.mission.base_sha,
+      fencing_generation: ctx.attempt.fencing_token,
+      terminal_sequence: sequence,
+      result_sha: sha,
+      result_kind: kind
+    }
   end
 end

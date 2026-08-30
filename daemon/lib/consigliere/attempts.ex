@@ -10,7 +10,7 @@ defmodule Consigliere.Attempts do
   defdelegate mark_spawn_failed(attempt_id, actor, reason), to: Transitions
   defdelegate touch_last_event(attempt_id, actor, at), to: Transitions
   defdelegate report_progress(attempt_id, actor, attrs \\ %{}), to: Transitions
-  defdelegate report_completion(attempt_id, actor), to: Transitions
+  defdelegate report_completion(attempt_id, actor, attrs \\ %{}), to: Transitions
   defdelegate report_failure(attempt_id, actor, attrs \\ %{}), to: Transitions
   defdelegate record_checkpointed(attempt_id, actor, attrs), to: Transitions
   defdelegate complete(attempt_id, actor, attrs), to: Transitions
@@ -25,7 +25,7 @@ defmodule Consigliere.Attempts do
 
   def classify_exit(attempt_id, attrs) do
     with {:ok, attempt} <- Transitions.classify_exit(attempt_id, attrs) do
-      Consigliere.Progression.after_classify(attempt)
+      Consigliere.Progression.after_classify(attempt, process_group: attrs[:process_group])
       {:ok, Consigliere.Repo.get!(Attempt, attempt_id)}
     end
   end

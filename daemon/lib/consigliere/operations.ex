@@ -24,7 +24,11 @@ defmodule Consigliere.Operations do
       required: ~w(mission_id reason)
     },
     "mission.grant_work" => %{version: @version, mode: :database, required: ~w(mission_id)},
-    "mission.continue" => %{version: @version, mode: :external, required: ~w(mission_id)},
+    "mission.continue" => %{
+      version: @version,
+      mode: :external,
+      required: ~w(mission_id checkpoint_sha)
+    },
     "mission.cancel" => %{version: @version, mode: :external, required: ~w(mission_id)},
     "mission.pause" => %{version: @version, mode: :external, required: ~w(mission_id)},
     "mission.resume" => %{version: @version, mode: :external, required: ~w(mission_id)},
@@ -34,8 +38,18 @@ defmodule Consigliere.Operations do
     "away.mark" => %{version: @version, mode: :database},
     "away.return" => %{version: @version, mode: :database},
     "attempt.progress" => %{version: @version, mode: :database, required: ~w(attempt_id)},
-    "attempt.checkpoint" => %{version: @version, mode: :database, required: ~w(attempt_id)},
-    "attempt.complete" => %{version: @version, mode: :database, required: ~w(attempt_id)},
+    "attempt.checkpoint" => %{
+      version: @version,
+      mode: :database,
+      required: ~w(attempt_id mission_id workspace_id workspace_generation base_sha
+                   fencing_generation result_sha result_kind terminal_sequence)
+    },
+    "attempt.complete" => %{
+      version: @version,
+      mode: :database,
+      required: ~w(attempt_id mission_id workspace_id workspace_generation base_sha
+                   fencing_generation result_sha result_kind terminal_sequence)
+    },
     "attempt.fail" => %{version: @version, mode: :database, required: ~w(attempt_id)},
     "internal.dispatch" => %{version: @version, mode: :external, required: ~w(attempt_id)},
     "post_attempt.progress" => %{version: @version, mode: :external, required: ~w(attempt_id)}
@@ -67,7 +81,8 @@ defmodule Consigliere.Operations do
       %{required: required} ->
         with :ok <- validate_value(payload),
              :ok <- require_map(payload),
-             :ok <- require_fields(payload, required) do
+             :ok <- require_fields(payload, required),
+             :ok <- validate_result_fields(op, payload) do
           :ok
         end
 
@@ -83,8 +98,11 @@ defmodule Consigliere.Operations do
 
   defp require_fields(payload, fields) do
     Enum.reduce_while(fields, :ok, fn field, :ok ->
-      case Map.get(payload, field) do
-        value when is_binary(value) and byte_size(value) > 0 ->
+      case {field, Map.get(payload, field)} do
+        {"terminal_sequence", value} when is_integer(value) and value > 0 ->
+          {:cont, :ok}
+
+        {_field, value} when is_binary(value) and byte_size(value) > 0 ->
           {:cont, :ok}
 
         _ ->
@@ -92,6 +110,22 @@ defmodule Consigliere.Operations do
       end
     end)
   end
+
+  defp validate_result_fields(op, payload)
+       when op in ["attempt.checkpoint", "attempt.complete"] do
+    sequence = Map.get(payload, "terminal_sequence")
+    kind = Map.get(payload, "result_kind")
+
+    cond do
+      not is_integer(sequence) or sequence < 1 -> {:error, "terminal_sequence must be positive"}
+      kind not in ["checkpoint", "completed"] -> {:error, "result_kind is invalid"}
+      op == "attempt.checkpoint" and kind != "checkpoint" -> {:error, "result_kind mismatch"}
+      op == "attempt.complete" and kind != "completed" -> {:error, "result_kind mismatch"}
+      true -> :ok
+    end
+  end
+
+  defp validate_result_fields(_op, _payload), do: :ok
 
   defp validate_value(value) do
     case Consigliere.V0.Limits.validate_value(value) do

@@ -1,6 +1,6 @@
 defmodule Consigliere.Progression do
   @moduledoc """
-  Post-Attempt import and validation. Git and Made run outside the
+  Post-Attempt import and validation. Git and Project checks run outside the
   serialized SQLite writer. Safe to call repeatedly for one Attempt.
   """
 
@@ -9,7 +9,8 @@ defmodule Consigliere.Progression do
   alias Consigliere.Actor
   alias Consigliere.Attempts
   alias Consigliere.Attempts.Attempt
-  alias Consigliere.Checkpoints
+  alias Consigliere.AttemptResults
+  alias Consigliere.AttemptResults.AttemptResult
   alias Consigliere.DatabaseWriter
   alias Consigliere.Git
   alias Consigliere.Gates.Gate
@@ -17,27 +18,33 @@ defmodule Consigliere.Progression do
   alias Consigliere.Incidents.Incident
   alias Consigliere.Missions
   alias Consigliere.Missions.Mission
+  alias Consigliere.Projects
   alias Consigliere.Projects.Project
   alias Consigliere.Repo
   alias Consigliere.Txn
   alias Consigliere.Workspaces.Workspace
 
   def progressable?(%Attempt{} = attempt) do
-    sha_present?(attempt) and
-      (attempt.status in ["running", "checkpoint_requested"] or
-         (attempt.status == "completed" and not imported?(attempt)))
+    case AttemptResults.by_attempt(attempt.id) do
+      %AttemptResult{status: status}
+      when status in ["reported", "death_verified", "commit_verified", "imported"] ->
+        attempt.status in ["running", "checkpoint_requested"]
+
+      _ ->
+        false
+    end
   end
 
   def progressable?(_), do: false
 
-  def after_classify(%Attempt{} = attempt) do
+  def after_classify(%Attempt{} = attempt, opts \\ []) do
     cond do
       attempt.exit_classification == "protocol_failure" ->
         note_protocol_failure(attempt, "semantic completion without a committed SHA")
         {:ok, attempt}
 
       progressable?(attempt) ->
-        run(attempt.id)
+        run(attempt.id, opts)
 
       attempt.exit_classification == "completed" and
         attempt.status in ["running", "checkpoint_requested"] and not sha_present?(attempt) ->
@@ -51,6 +58,7 @@ defmodule Consigliere.Progression do
   def run(attempt_id, opts \\ []) do
     attempt = Repo.get!(Attempt, attempt_id)
     mission = Repo.get!(Mission, attempt.mission_id)
+    result = AttemptResults.by_attempt(attempt.id)
 
     cond do
       mission.phase not in ["active"] ->
@@ -59,11 +67,17 @@ defmodule Consigliere.Progression do
       attempt.status == "checkpointed" ->
         {:ok, :checkpointed}
 
-      attempt.status == "completed" and imported?(attempt) ->
+      result == nil ->
+        {:error, :result_missing}
+
+      result.status == "failed" ->
+        {:error, {:progression_failed, result.failure_code}}
+
+      attempt.status == "completed" and result.status == "imported" ->
         Consigliere.Progression.Gates.finish(attempt, mission, opts)
 
-      progressable?(attempt) ->
-        do_run(attempt, mission, opts)
+      progressable?(attempt) or result.status in ["reported", "death_verified", "commit_verified"] ->
+        do_run(attempt, mission, result, opts)
 
       true ->
         {:ok, :skipped}
@@ -103,55 +117,30 @@ defmodule Consigliere.Progression do
 
   def next_action(_), do: :none
 
-  defp do_run(attempt, mission, opts) do
-    sha = attempt.reported_checkpoint_sha
+  defp do_run(attempt, mission, result, opts) do
+    with :ok <- require_death(result, opts),
+         :ok <- mark_death(result),
+         :ok <- verify_result(attempt, mission, result),
+         :ok <- mark_commit_verified(result),
+         {:ok, sha} <- import_result(attempt, mission, result),
+         {:ok, imported} <- mark_imported(result, sha),
+         {:ok, _} <- finalize_attempt(attempt, imported) do
+      GlobalScheduler.release_slot(mission.id)
 
-    if not sha_present?(attempt) do
-      protocol_fail(attempt, "semantic completion without a committed SHA")
-    else
-      workspace = workspace_of(attempt)
-      mirror = mirror_of(mission)
+      case imported.result_kind do
+        "checkpoint" ->
+          {:ok, :checkpointed}
 
-      opts_import = [
-        process_group: :dead_verified,
-        workspace_path: workspace.path,
-        mirror_path: mirror,
-        sha: sha,
-        base_sha: workspace.base_sha || mission.base_sha
-      ]
-
-      case attempt.status do
-        "checkpoint_requested" ->
-          case Checkpoints.import_after_death(attempt.id, opts_import) do
-            {:ok, _} ->
-              GlobalScheduler.release_slot(mission.id)
-              {:ok, :checkpointed}
-
-            {:error, reason} ->
-              protocol_fail(attempt, "checkpoint import failed: #{inspect(reason)}")
-          end
-
-        _ ->
-          case Git.import_sha(workspace.path, mirror, sha, workspace.base_sha || mission.base_sha) do
-            {:ok, sha} ->
-              _ =
-                Attempts.complete(attempt.id, Actor.system(), %{
-                  process_group: :dead_verified,
-                  imported_sha: sha
-                })
-
-              GlobalScheduler.release_slot(mission.id)
-
-              Consigliere.Progression.Gates.finish(
-                Repo.get!(Attempt, attempt.id),
-                Repo.get!(Mission, mission.id),
-                opts
-              )
-
-            {:error, reason} ->
-              protocol_fail(attempt, "checkpoint import failed: #{inspect(reason)}")
-          end
+        "completed" ->
+          Consigliere.Progression.Gates.finish(
+            Repo.get!(Attempt, attempt.id),
+            Repo.get!(Mission, mission.id),
+            opts
+          )
       end
+    else
+      {:error, :death_not_verified} = error -> error
+      {:error, reason} -> progression_fail(attempt, result, reason)
     end
   end
 
@@ -166,6 +155,185 @@ defmodule Consigliere.Progression do
     GlobalScheduler.release_slot(attempt.mission_id)
     {:error, :protocol_failure}
   end
+
+  defp require_death(%AttemptResult{status: status}, _opts)
+       when status in ["death_verified", "commit_verified", "imported"],
+       do: :ok
+
+  defp require_death(_result, opts) do
+    if Keyword.get(opts, :process_group) == :dead_verified,
+      do: :ok,
+      else: {:error, :death_not_verified}
+  end
+
+  defp mark_death(%AttemptResult{status: "reported"} = result) do
+    _ = AttemptResults.mark(result.id, "death_verified")
+    :ok
+  end
+
+  defp mark_death(_result), do: :ok
+
+  defp verify_result(attempt, mission, result) do
+    workspace = workspace_of(attempt)
+    project = mission.project_id && Repo.get(Project, mission.project_id)
+    ancestry = result.parent_checkpoint_sha || result.base_sha
+
+    cond do
+      not match?(%Workspace{}, workspace) ->
+        {:error, :workspace_missing}
+
+      not match?(%Project{}, project) ->
+        {:error, :project_missing}
+
+      attempt.mission_id != result.mission_id ->
+        {:error, :mission_identity_mismatch}
+
+      mission.project_id != result.project_id ->
+        {:error, :project_identity_mismatch}
+
+      attempt.workspace_id != result.workspace_id ->
+        {:error, :workspace_identity_mismatch}
+
+      workspace.lease_id != result.workspace_generation ->
+        {:error, :workspace_generation_mismatch}
+
+      attempt.fencing_token != result.fencing_generation ->
+        {:error, :fencing_generation_mismatch}
+
+      mission.base_sha != result.base_sha ->
+        {:error, :base_sha_mismatch}
+
+      workspace.base_sha != result.base_sha ->
+        {:error, :workspace_base_mismatch}
+
+      workspace.parent_checkpoint_sha != result.parent_checkpoint_sha ->
+        {:error, :parent_checkpoint_mismatch}
+
+      not Git.valid_full_sha?(result.reported_sha) ->
+        {:error, :result_sha_invalid}
+
+      not Git.valid_full_sha?(ancestry) ->
+        {:error, :ancestry_sha_invalid}
+
+      true ->
+        with :ok <- Git.tighten_workspace_permissions(workspace.path),
+             :ok <-
+               Projects.verify_workspace_identity(
+                 project,
+                 mission,
+                 workspace,
+                 result.reported_sha
+               ),
+             :ok <- Git.verify_ancestry(workspace.path, result.reported_sha, ancestry) do
+          :ok
+        else
+          {:error, reason} -> {:error, map_git_failure(reason)}
+        end
+    end
+  end
+
+  defp mark_commit_verified(%AttemptResult{status: "death_verified"} = result) do
+    _ = AttemptResults.mark(result.id, "commit_verified", %{verified_at: DateTime.utc_now()})
+    :ok
+  end
+
+  defp mark_commit_verified(_result), do: :ok
+
+  defp import_result(attempt, mission, result) do
+    workspace = workspace_of(attempt)
+    mirror = mirror_of(mission)
+
+    Git.import_result_sha(
+      workspace.path,
+      mirror,
+      mission.project_id,
+      attempt.id,
+      result.reported_sha,
+      result.parent_checkpoint_sha || result.base_sha
+    )
+  end
+
+  defp mark_imported(result, sha) do
+    ref = Git.result_ref(result.project_id, result.attempt_id)
+
+    _ =
+      AttemptResults.mark(result.id, "imported", %{
+        imported_sha: sha,
+        result_ref: ref,
+        imported_at: DateTime.utc_now()
+      })
+
+    {:ok, Repo.get!(AttemptResult, result.id)}
+  end
+
+  defp finalize_attempt(attempt, result) do
+    case result.result_kind do
+      "checkpoint" ->
+        Attempts.record_checkpointed(attempt.id, Actor.system(), %{
+          process_group: :dead_verified,
+          imported_sha: result.imported_sha,
+          result_ref: result.result_ref
+        })
+
+      "completed" ->
+        Attempts.complete(attempt.id, Actor.system(), %{
+          process_group: :dead_verified,
+          imported_sha: result.imported_sha,
+          result_ref: result.result_ref
+        })
+    end
+  end
+
+  defp progression_fail(attempt, result, reason) do
+    code = reason |> map_git_failure() |> to_string()
+    _ = AttemptResults.fail(result.id, code, bounded_reason(reason))
+    _ = note_progression_failure(attempt, code)
+
+    if attempt.status in ["running", "checkpoint_requested"] do
+      _ =
+        Attempts.fail(attempt.id, Actor.system(), %{
+          process_group: :dead_verified,
+          exit_classification: code
+        })
+    end
+
+    GlobalScheduler.release_slot(attempt.mission_id)
+    {:error, {:progression_failed, code}}
+  end
+
+  defp note_progression_failure(attempt, code) do
+    DatabaseWriter.transaction(fn ->
+      Txn.insert!(
+        Incident.changeset(%Incident{}, %{
+          mission_id: attempt.mission_id,
+          subject_type: "attempt",
+          subject_id: attempt.id,
+          severity: "error",
+          reason: "post-attempt progression failed: #{String.slice(code, 0, 128)}"
+        })
+      )
+    end)
+
+    :ok
+  end
+
+  defp map_git_failure(:not_ancestor), do: :not_ancestor
+  defp map_git_failure(:invalid_sha), do: :result_sha_invalid
+  defp map_git_failure(:head_mismatch), do: :workspace_head_mismatch
+  defp map_git_failure(:hooks_path_missing), do: :workspace_configuration_violation
+  defp map_git_failure(:hooks_path_present), do: :workspace_configuration_violation
+  defp map_git_failure(:credential_helper_present), do: :workspace_configuration_violation
+  defp map_git_failure(:remotes_present), do: :workspace_configuration_violation
+  defp map_git_failure(:alternates_present), do: :workspace_configuration_violation
+  defp map_git_failure(:unsafe_permissions), do: :workspace_configuration_violation
+  defp map_git_failure(:git_symlink), do: :workspace_configuration_violation
+  defp map_git_failure(:shared_objects), do: :workspace_configuration_violation
+  defp map_git_failure({:result_import_failed, _}), do: :result_import_failed
+  defp map_git_failure(:result_ref_mismatch), do: :result_ref_mismatch
+  defp map_git_failure(reason) when is_atom(reason), do: reason
+  defp map_git_failure(_reason), do: :progression_failed
+
+  defp bounded_reason(reason), do: inspect(reason) |> String.slice(0, 512)
 
   def note_protocol_failure(attempt, reason) do
     DatabaseWriter.transaction(fn ->
@@ -188,16 +356,6 @@ defmodule Consigliere.Progression do
        do: true
 
   defp sha_present?(_), do: false
-
-  defp imported?(attempt) do
-    case Repo.get(Mission, attempt.mission_id) do
-      %Mission{current_checkpoint_sha: sha} ->
-        sha_present?(attempt) and sha == attempt.reported_checkpoint_sha
-
-      _ ->
-        false
-    end
-  end
 
   defp pending_gates?(%Mission{current_checkpoint_sha: sha} = mission)
        when is_binary(sha) and sha != "" do

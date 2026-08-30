@@ -4,13 +4,13 @@ defmodule Consigliere.Reconciler.Pass do
   import Ecto.Query
 
   alias Consigliere.Actor
+  alias Consigliere.AttemptResults
   alias Consigliere.AttemptStates
   alias Consigliere.Attempts
   alias Consigliere.DatabaseWriter
   alias Consigliere.GlobalScheduler
   alias Consigliere.HarnessEvents.HarnessEvent
   alias Consigliere.Incidents.Incident
-  alias Consigliere.Missions.Mission
   alias Consigliere.ProcessGroup
   alias Consigliere.Repo
   alias Consigliere.Runtime.Inventory
@@ -106,17 +106,12 @@ defmodule Consigliere.Reconciler.Pass do
   defp finalize_dead(attempt, inventory) do
     result =
       cond do
-        checkpoint_imported?(attempt) ->
-          Attempts.record_checkpointed(attempt.id, Actor.system(), %{
-            imported_sha: attempt.reported_checkpoint_sha,
-            process_group: :dead_verified
-          })
-
-          {:checkpointed, attempt.id}
-
         inventory != :dead_verified ->
           Attempts.mark_lost(attempt.id, Actor.system(), %{inventory: inventory})
           {:quarantined, attempt.id}
+
+        imported_result?(attempt) ->
+          complete_or_lost(attempt)
 
         completed_intent?(attempt) ->
           complete_or_lost(attempt)
@@ -140,7 +135,7 @@ defmodule Consigliere.Reconciler.Pass do
   end
 
   defp complete_or_lost(attempt) do
-    case Consigliere.Progression.after_classify(attempt) do
+    case Consigliere.Progression.after_classify(attempt, process_group: :dead_verified) do
       {:ok, %Consigliere.Attempts.Attempt{status: "completed"}} ->
         {:completed, attempt.id}
 
@@ -150,10 +145,16 @@ defmodule Consigliere.Reconciler.Pass do
       {:ok, %Consigliere.Attempts.Attempt{status: "failed"}} ->
         {:failed, attempt.id}
 
+      {:ok, :checkpointed} ->
+        {:checkpointed, attempt.id}
+
       {:ok, _} ->
         {:completed, attempt.id}
 
       {:error, :protocol_failure} ->
+        {:failed, attempt.id}
+
+      {:error, {:progression_failed, _reason}} ->
         {:failed, attempt.id}
     end
   end
@@ -179,13 +180,11 @@ defmodule Consigliere.Reconciler.Pass do
     )
   end
 
-  defp checkpoint_imported?(attempt) do
-    attempt.status == "checkpoint_requested" and
-      is_binary(attempt.reported_checkpoint_sha) and
-      case Repo.get(Mission, attempt.mission_id) do
-        %Mission{current_checkpoint_sha: sha} -> sha == attempt.reported_checkpoint_sha
-        _ -> false
-      end
+  defp imported_result?(attempt) do
+    case AttemptResults.by_attempt(attempt.id) do
+      %AttemptResults.AttemptResult{status: "imported"} -> true
+      _ -> false
+    end
   end
 
   defp valid_pgid?(pgid) when is_integer(pgid) and pgid > 1, do: true

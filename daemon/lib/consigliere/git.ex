@@ -59,11 +59,21 @@ defmodule Consigliere.Git do
     String.trim(git!(["rev-parse", "HEAD"], cd: workspace))
   end
 
+  def valid_full_sha?(sha)
+      when is_binary(sha) and byte_size(sha) == 40,
+      do: Regex.match?(~r/\A[0-9a-fA-F]{40}\z/, sha)
+
+  def valid_full_sha?(_), do: false
+
   def verify_commit(workspace, sha) do
-    case privileged(["cat-file", "-t", sha], cd: workspace) do
-      {:ok, "commit\n"} -> :ok
-      {:ok, other} -> {:error, {:not_a_commit, String.trim(other)}}
-      {:error, reason} -> {:error, reason}
+    if not valid_full_sha?(sha) do
+      {:error, :invalid_sha}
+    else
+      case privileged(["cat-file", "-t", sha], cd: workspace) do
+        {:ok, "commit\n"} -> :ok
+        {:ok, other} -> {:error, {:not_a_commit, String.trim(other)}}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
@@ -92,6 +102,38 @@ defmodule Consigliere.Git do
              git_dir: mirror
            ) do
       {:ok, sha}
+    end
+  end
+
+  def result_ref(project_id, attempt_id) do
+    "refs/consigliere/projects/#{project_id}/attempts/#{attempt_id}/result"
+  end
+
+  def import_result_sha(workspace, mirror, project_id, attempt_id, sha, base_sha \\ nil) do
+    ref = result_ref(project_id, attempt_id)
+
+    with true <- valid_full_sha?(sha),
+         :ok <- verify_ancestry(workspace, sha, base_sha),
+         :ok <- ensure_mirror(mirror) do
+      case read_ref(mirror, ref) do
+        {:ok, ^sha} ->
+          {:ok, sha}
+
+        {:ok, _other} ->
+          {:error, :result_ref_mismatch}
+
+        {:error, _reason} ->
+          case privileged(
+                 ["fetch", Path.join(workspace, ".git"), "#{sha}:#{ref}"],
+                 git_dir: mirror
+               ) do
+            {:ok, _} -> {:ok, sha}
+            {:error, reason} -> {:error, {:result_import_failed, reason}}
+          end
+      end
+    else
+      false -> {:error, :invalid_sha}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -125,6 +167,8 @@ defmodule Consigliere.Git do
     _ = privileged(["remote", "remove", "origin"], cd: dest)
     _ = privileged(["config", "--local", "--unset-regexp", "^remote\\..*"], cd: dest)
     _ = privileged(["config", "--local", "--unset-all", "credential.helper"], cd: dest)
+    privileged(["config", "--local", "user.email", "consigliere@local"], cd: dest)
+    privileged(["config", "--local", "user.name", "consigliere"], cd: dest)
     privileged(["config", "--local", "core.hooksPath", empty_hooks_dir()], cd: dest)
     tighten_permissions!(dest)
 
@@ -174,6 +218,15 @@ defmodule Consigliere.Git do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  def tighten_workspace_permissions(workspace) when is_binary(workspace) do
+    tighten_permissions!(workspace)
+    :ok
+  rescue
+    error -> {:error, {:permission_hardening_failed, Exception.message(error)}}
+  end
+
+  def tighten_workspace_permissions(_), do: {:error, :workspace_path_invalid}
 
   defp reject_shared_objects(nil, _), do: :ok
 

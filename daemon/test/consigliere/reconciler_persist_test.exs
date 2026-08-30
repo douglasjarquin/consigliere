@@ -231,7 +231,7 @@ defmodule Consigliere.ReconcilerPersistTest do
     assert Repo.get!(Attempt, attempt.id).status == "running"
   end
 
-  test "checkpoint_requested with an already-imported SHA becomes checkpointed on dead_verified",
+  test "checkpoint_requested without a durable result is lost on dead_verified",
        %{home: home} do
     %{attempt: attempt, mission: mission} = running_attempt!()
 
@@ -250,8 +250,8 @@ defmodule Consigliere.ReconcilerPersistTest do
 
     write_manifest!(home, attempt.id, %{"state" => "dead_verified"})
     results = Reconciler.run(home: home)
-    assert {:checkpointed, _} = Enum.find(results, &match?({:checkpointed, _}, &1))
-    assert Repo.get!(Attempt, attempt.id).status == "checkpointed"
+    assert {:lost, _} = Enum.find(results, &match?({:lost, _}, &1))
+    assert Repo.get!(Attempt, attempt.id).status == "lost"
   end
 
   test "a running manifest with no Attempt row does not signal the claimed process group", %{

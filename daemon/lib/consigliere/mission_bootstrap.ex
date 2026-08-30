@@ -20,7 +20,7 @@ defmodule Consigliere.MissionBootstrap do
   @phases ~w(authorized active ready_for_review awaiting_integration_authorization integrating)
   @dispatch_terminal ~w(failed completed)
   @recoverable_attempts ~w(planned starting)
-  @ensure_events ~w(mission.authorized mission.started mission.resumed)
+  @ensure_events ~w(mission.authorized mission.started mission.resumed mission.continued)
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)

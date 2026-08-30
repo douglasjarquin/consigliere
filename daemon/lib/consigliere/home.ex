@@ -132,20 +132,25 @@ defmodule Consigliere.Home do
           attempt_dir = Path.join(attempts, entry)
 
           if File.dir?(attempt_dir) do
-            case bounded_storage_file(
-                   Path.join(attempt_dir, "usage.jsonl"),
-                   Consigliere.V0.Limits.usage_bytes(),
-                   :usage_ledger_full
-                 ) do
-              :ok ->
-                bounded_storage_file(
-                  Path.join(logs_dir(home), "attempts/#{entry}.log"),
-                  Consigliere.V0.Limits.capture_bytes(),
-                  :capture_too_large
-                )
+            result =
+              with :ok <-
+                     bounded_storage_file(
+                       Path.join(attempt_dir, "usage.jsonl"),
+                       Consigliere.V0.Limits.usage_bytes(),
+                       :usage_ledger_full
+                     ),
+                   :ok <-
+                     bounded_storage_file(
+                       Path.join(logs_dir(home), "attempts/#{entry}.log"),
+                       Consigliere.V0.Limits.capture_bytes(),
+                       :capture_too_large
+                     ) do
+                :ok
+              end
 
-              {:error, _reason} = error ->
-                {:halt, error}
+            case result do
+              :ok -> {:cont, :ok}
+              {:error, _reason} = error -> {:halt, error}
             end
           else
             {:cont, :ok}

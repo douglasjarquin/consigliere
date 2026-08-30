@@ -4,6 +4,7 @@ defmodule Consigliere.Attempts.Transitions do
   import Ecto.Query
 
   alias Consigliere.DatabaseWriter
+  alias Consigliere.AttemptResults
   alias Consigliere.Repo
   alias Consigliere.Txn
   alias Consigliere.Attempts.Attempt
@@ -172,17 +173,28 @@ defmodule Consigliere.Attempts.Transitions do
     attempt
   end
 
-  def report_completion(attempt_id, actor) do
-    DatabaseWriter.transaction(fn -> report_completion_txn(attempt_id, actor) end)
+  def report_completion(attempt_id, actor, attrs \\ %{}) do
+    DatabaseWriter.transaction(fn -> report_completion_txn(attempt_id, actor, attrs) end)
   end
 
-  def report_completion_txn(attempt_id, actor) do
+  def report_completion_txn(attempt_id, actor, attrs \\ %{}) do
     attempt = fetch!(attempt_id)
     require_fence!(actor, attempt)
     require_live_report!(attempt, "completion")
+    _result = AttemptResults.capture_txn(attempt, actor, attrs, "completed")
+
+    exit_classification =
+      if attempt.exit_classification == "completed",
+        do: "completed",
+        else: "completion_reported"
 
     attempt =
-      Txn.update!(Attempt.changeset(attempt, %{exit_classification: "completion_reported"}))
+      Txn.update!(
+        Attempt.changeset(attempt, %{
+          exit_classification: exit_classification,
+          reported_checkpoint_sha: result_sha(attrs)
+        })
+      )
 
     Txn.append_event!("attempt.completion_reported", "attempt", attempt.id)
     attempt
@@ -215,11 +227,18 @@ defmodule Consigliere.Attempts.Transitions do
     require_request_checkpoint_actor!(actor, attempt)
     require_status!(attempt, "running", "checkpoint_requested")
 
+    strict? = actor.principal == "attempt" and not Map.get(attrs, :internal, false)
+
+    if strict? or
+         (not Map.get(attrs, :internal, false) and exact_checkpoint_report?(attempt, attrs)) do
+      _result = AttemptResults.capture_txn(attempt, actor, attrs, "checkpoint", strict?)
+    end
+
     attempt =
       Txn.update!(
         Attempt.changeset(attempt, %{
           status: "checkpoint_requested",
-          reported_checkpoint_sha: Map.get(attrs, :reported_checkpoint_sha)
+          reported_checkpoint_sha: result_sha(attrs)
         })
       )
 
@@ -243,8 +262,23 @@ defmodule Consigliere.Attempts.Transitions do
     Capabilities.revoke_for_attempt_txn(attempt.id)
 
     sha = Map.fetch!(attrs, :imported_sha)
+    result = AttemptResults.by_attempt(attempt.id)
 
-    attempt = Txn.update!(Attempt.changeset(attempt, %{status: "checkpointed"}))
+    if result &&
+         (result.result_kind != "checkpoint" or result.reported_sha != sha or
+            result.status != "imported" or Map.get(attrs, :result_ref) != result.result_ref) do
+      Txn.illegal(attempt.status, "checkpointed", :result_not_imported)
+    end
+
+    attempt =
+      Txn.update!(
+        Attempt.changeset(attempt, %{
+          status: "checkpointed",
+          imported_sha: sha,
+          result_ref: Map.get(attrs, :result_ref)
+        })
+      )
+
     mission = Repo.get!(Mission, attempt.mission_id)
     Txn.update!(Mission.changeset(mission, %{current_checkpoint_sha: sha}))
 
@@ -330,10 +364,25 @@ defmodule Consigliere.Attempts.Transitions do
     require_dead!(attempt, attrs, "completed")
     Capabilities.revoke_for_attempt_txn(attempt.id)
 
-    attempt =
-      Txn.update!(Attempt.changeset(attempt, %{status: "completed", finished_at: Txn.now()}))
+    sha = Map.get(attrs, :imported_sha)
+    result = AttemptResults.by_attempt(attempt.id)
 
-    if sha = Map.get(attrs, :imported_sha) do
+    unless (result && result.result_kind == "completed") and result.reported_sha == sha and
+             result.status == "imported" and Map.get(attrs, :result_ref) == result.result_ref do
+      Txn.illegal(attempt.status, "completed", :result_not_imported)
+    end
+
+    attempt =
+      Txn.update!(
+        Attempt.changeset(attempt, %{
+          status: "completed",
+          imported_sha: sha,
+          result_ref: Map.get(attrs, :result_ref),
+          finished_at: Txn.now()
+        })
+      )
+
+    if sha do
       mission = Repo.get!(Mission, attempt.mission_id)
       Txn.update!(Mission.changeset(mission, %{current_checkpoint_sha: sha}))
 
@@ -479,6 +528,20 @@ defmodule Consigliere.Attempts.Transitions do
     death == :dead_verified and
       (completed? or attempt.status == "checkpoint_requested") and
       (not is_binary(attempt.reported_checkpoint_sha) or attempt.reported_checkpoint_sha == "")
+  end
+
+  defp result_sha(attrs) do
+    Map.get(attrs, :result_sha) || Map.get(attrs, :reported_checkpoint_sha) ||
+      Map.get(attrs, "result_sha") || Map.get(attrs, "reported_checkpoint_sha")
+  end
+
+  defp exact_checkpoint_report?(attempt, attrs) do
+    sha = result_sha(attrs)
+    base_sha = Map.get(attrs, :base_sha) || Map.get(attrs, "base_sha")
+
+    is_binary(sha) and Consigliere.Git.valid_full_sha?(sha) and
+      is_binary(base_sha) and Consigliere.Git.valid_full_sha?(base_sha) and
+      is_binary(attempt.fencing_token)
   end
 
   defp progress_after_death?(attempt, completed?, death) do

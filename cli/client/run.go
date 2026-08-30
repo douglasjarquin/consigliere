@@ -135,6 +135,7 @@ cs missions
 cs mission <id>
 cs mission create --project PROJECT --objective TEXT --scope TEXT --acceptance TEXT
 cs mission submit MISSION
+cs mission continue MISSION --sha CHECKPOINT_SHA
 cs mission request-changes MISSION --reason TEXT
 cs mission authorize MISSION
 cs why <mission-id>
@@ -260,6 +261,14 @@ func mapCommand(cmd string, pos []string, opts map[string]string) (string, map[s
 				return "", nil, fmt.Errorf("usage: cs mission authorize MISSION")
 			}
 			return "mission.grant_work", map[string]any{"mission_id": pos[1]}, nil
+		case "continue":
+			if len(pos) < 2 || pos[1] == "" || opts["sha"] == "" {
+				return "", nil, fmt.Errorf("usage: cs mission continue MISSION --sha CHECKPOINT_SHA")
+			}
+			return "mission.continue", map[string]any{
+				"mission_id":     pos[1],
+				"checkpoint_sha": opts["sha"],
+			}, nil
 		default:
 			return "mission.get", map[string]any{"mission_id": pos[0]}, nil
 		}
@@ -369,13 +378,21 @@ func printHuman(w io.Writer, cmd string, pos []string, resp *Response) {
 		printRows(w, payload)
 	case "mission":
 		if id := firstString(payload, "id"); id != "" {
-			fmt.Fprintf(w, "mission %s phase=%s base_sha=%s\n",
-				id,
-				firstString(payload, "phase"),
-				firstString(payload, "base_sha"),
-			)
+			printMissionSummary(w, payload)
 			if auth := firstString(payload, "authorization_id"); auth != "" {
 				fmt.Fprintf(w, "authorization: %s\n", auth)
+			}
+			printMissionEvidence(w, payload, "")
+			return
+		}
+		printRows(w, payload)
+	case "review":
+		if rows, ok := payload["missions"].([]any); ok {
+			for _, raw := range rows {
+				if row, ok := raw.(map[string]any); ok {
+					printMissionSummary(w, row)
+					printMissionEvidence(w, row, "")
+				}
 			}
 			return
 		}
@@ -386,6 +403,12 @@ func printHuman(w io.Writer, cmd string, pos []string, resp *Response) {
 	case "why":
 		fmt.Fprintf(w, "mission %v phase=%v runnable=%v reason=%v\n",
 			payload["id"], payload["phase"], payload["runnable"], payload["reason"])
+		fmt.Fprintf(w, "  project=%s base_sha=%s checkpoint_sha=%s\n",
+			firstString(payload, "project_id"),
+			firstString(payload, "base_sha"),
+			firstString(payload, "current_checkpoint_sha"),
+		)
+		printMissionEvidence(w, payload, "  ")
 		if pr, ok := payload["phase_reason"].(string); ok && pr != "" {
 			fmt.Fprintf(w, "  %s\n", pr)
 		}
@@ -419,6 +442,52 @@ func printHuman(w io.Writer, cmd string, pos []string, resp *Response) {
 		printRows(w, payload)
 	}
 	_ = pos
+}
+
+func printMissionSummary(w io.Writer, payload map[string]any) {
+	fmt.Fprintf(w, "mission %s phase=%s project=%s base_sha=%s checkpoint_sha=%s\n",
+		firstString(payload, "id"),
+		firstString(payload, "phase"),
+		firstString(payload, "project_id"),
+		firstString(payload, "base_sha"),
+		firstString(payload, "current_checkpoint_sha"),
+	)
+}
+
+func printMissionEvidence(w io.Writer, payload map[string]any, prefix string) {
+	fmt.Fprintf(w, "%sresult: sha=%s status=%s kind=%s ref=%s\n",
+		prefix,
+		firstString(payload, "result_sha"),
+		firstString(payload, "result_status"),
+		firstString(payload, "result_kind"),
+		firstString(payload, "result_ref"),
+	)
+
+	if workspace, ok := payload["workspace"].(map[string]any); ok {
+		fmt.Fprintf(w, "%sworkspace: id=%s attempt=%s generation=%s status=%s path=%s\n",
+			prefix,
+			firstString(workspace, "id"),
+			firstString(workspace, "attempt_id"),
+			firstString(workspace, "generation"),
+			firstString(workspace, "status"),
+			firstString(workspace, "path"),
+		)
+	}
+
+	if verification, ok := payload["verification"].([]any); ok {
+		for _, raw := range verification {
+			if run, ok := raw.(map[string]any); ok {
+				fmt.Fprintf(w, "%sverification: gate=%s ordinal=%s outcome=%s input_sha=%s output_digest=%s\n",
+					prefix,
+					firstString(run, "gate_type"),
+					firstString(run, "ordinal"),
+					firstString(run, "outcome"),
+					firstString(run, "input_sha"),
+					firstString(run, "output_digest"),
+				)
+			}
+		}
+	}
 }
 
 func printRows(w io.Writer, payload map[string]any) {
@@ -459,7 +528,7 @@ func firstString(m map[string]any, keys ...string) string {
 
 func task5BossOperation(op string) bool {
 	switch op {
-	case "project.add", "mission.create", "mission.submit", "mission.request_changes", "mission.grant_work":
+	case "project.add", "mission.create", "mission.submit", "mission.request_changes", "mission.grant_work", "mission.continue":
 		return true
 	default:
 		return false
@@ -518,7 +587,7 @@ func workflowPreview(op string, payload map[string]any, d Dialer) (map[string]an
 	case "mission.create":
 		previewOp = "project.get"
 		previewPayload = map[string]any{"project_id": payload["project_id"]}
-	case "mission.submit", "mission.request_changes", "mission.grant_work":
+	case "mission.submit", "mission.request_changes", "mission.grant_work", "mission.continue":
 		previewOp = "mission.get"
 		previewPayload = map[string]any{"mission_id": payload["mission_id"]}
 	default:

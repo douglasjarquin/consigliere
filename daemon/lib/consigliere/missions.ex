@@ -77,6 +77,16 @@ defmodule Consigliere.Missions do
     end
   end
 
+  def continue_from_checkpoint(mission_id, actor, checkpoint_sha) do
+    with {:ok, result} <-
+           Consigliere.DatabaseWriter.transaction(fn ->
+             Transitions.continue_from_checkpoint_txn(mission_id, actor, checkpoint_sha)
+           end) do
+      _ = Consigliere.MissionBootstrap.ensure_mission(mission_id)
+      {:ok, result}
+    end
+  end
+
   defp peek_base_sha(mission_id) do
     case Consigliere.Repo.get(Consigliere.Missions.Mission, mission_id) do
       %{project_id: project_id} when is_binary(project_id) ->

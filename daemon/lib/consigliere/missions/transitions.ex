@@ -107,6 +107,7 @@ defmodule Consigliere.Missions.Transitions do
   end
 
   def grant_work_authorization_with_dispatch_txn(mission_id, actor, attrs) do
+    Txn.require_principal(actor, ["boss"])
     existing_mission = fetch_mission!(mission_id)
 
     if project_has_active_mission?(existing_mission) do
@@ -162,6 +163,79 @@ defmodule Consigliere.Missions.Transitions do
     })
 
     mission
+  end
+
+  def continue_from_checkpoint_txn(mission_id, actor, checkpoint_sha) do
+    Txn.require_principal(actor, ["boss"])
+    mission = fetch_mission!(mission_id)
+    require_phase!(mission, "active", "active")
+
+    unless is_binary(checkpoint_sha) and checkpoint_sha == mission.current_checkpoint_sha and
+             Consigliere.Git.valid_full_sha?(checkpoint_sha) do
+      Txn.illegal(mission.phase, "active", :checkpoint_mismatch)
+    end
+
+    previous =
+      Repo.one(
+        from(a in Attempt,
+          where: a.mission_id == ^mission.id and a.status == "checkpointed",
+          order_by: [desc: a.finished_at, desc: a.inserted_at],
+          limit: 1
+        )
+      ) || Txn.illegal(mission.phase, "active", :checkpoint_attempt_missing)
+
+    attempt_id = Ecto.UUID.generate()
+    workspace_id = Ecto.UUID.generate()
+    workspace_path = Path.join(Consigliere.Home.workspaces_dir(), "#{mission.id}-#{attempt_id}")
+
+    workspace =
+      Txn.insert!(
+        Workspace.changeset(%Workspace{id: workspace_id}, %{
+          mission_id: mission.id,
+          path: workspace_path,
+          lease_id: Txn.mint_fencing_token(),
+          fencing_token: Txn.mint_fencing_token(),
+          status: "active",
+          project_id: mission.project_id,
+          base_sha: mission.base_sha,
+          parent_checkpoint_sha: checkpoint_sha
+        })
+      )
+
+    attempt =
+      Txn.insert!(
+        Attempt.changeset(%Attempt{id: attempt_id}, %{
+          mission_id: mission.id,
+          workspace_id: workspace.id,
+          retry_of_attempt_id: previous.id,
+          role: "soldier",
+          harness: Consigliere.Adapters.harness().capabilities()["harness_name"],
+          status: "planned",
+          fencing_token: Txn.mint_fencing_token()
+        })
+      )
+
+    _operation =
+      DispatchOperations.ensure_txn(attempt, %{
+        status: "pending",
+        slot_state: "pending",
+        correlation_id: "continue:#{attempt.id}",
+        idempotency_key: "continue:#{mission.id}:#{checkpoint_sha}",
+        authorization_id: mission.authorization_id,
+        project_id: mission.project_id,
+        workspace_generation: workspace.lease_id,
+        base_sha: mission.base_sha,
+        parent_checkpoint_sha: checkpoint_sha
+      })
+
+    Txn.append_event!("mission.continued", "mission", mission.id, %{
+      previous_attempt_id: previous.id,
+      attempt_id: attempt.id,
+      workspace_id: workspace.id,
+      checkpoint_sha: checkpoint_sha
+    })
+
+    %{mission: mission, attempt: attempt, workspace: workspace}
   end
 
   defp project_has_active_mission?(%Mission{project_id: nil}), do: false

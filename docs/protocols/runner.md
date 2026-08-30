@@ -76,6 +76,28 @@ Expiry, revocation, stale generations, malformed scopes, and mismatched request 
 
 The context pack exposes this operation set and these reporting rules without carrying a reusable capability secret, Boss credential, GitHub credential, or daemon-owner credential.
 
+## Exact result reporting and progression
+
+An Attempt completion or checkpoint report must carry the full 40-character Git SHA, Attempt ID, Mission ID, Project ID, Workspace ID, workspace lease generation, base SHA, fencing generation, result kind, and accepted terminal event sequence.
+
+The optional parent checkpoint SHA is bound to the Workspace record and is required when the Workspace has a parent checkpoint.
+
+The daemon accepts a result report only when the authenticated capability, durable Attempt, Mission, Workspace, lease, fence, and terminal event all agree.
+
+The daemon verifies the runner and its process group are dead before it reads or imports a reported result.
+
+It then verifies the exact commit in the expected Workspace, verifies ancestry from the bound parent checkpoint or base SHA, verifies the Workspace Git configuration, and imports the object once to `refs/consigliere/projects/<project-id>/attempts/<attempt-id>/result` in the trusted mirror.
+
+The imported SHA and daemon-owned result ref are persisted on the Attempt and result record before Project verification starts.
+
+Project verification uses at most eight literal argv arrays, substitutes only the exact imported SHA, runs without a shell and with scrubbed environment, limits each command to 900 seconds and the full list to 1,800 seconds, and stores only bounded outcome fields and output digests.
+
+A successful verification advances the Mission to `ready_for_review` and never performs a push, pull request creation, merge, or Made-managed validation.
+
+An explicit boss Continue request must name the current full checkpoint SHA and creates one fresh Attempt, capability scope, fence, lease, and Workspace generation from that exact SHA.
+
+Continue never resumes a native Codex transcript and never reuses the prior Attempt's authority.
+
 ## Runtime manifest protocol
 
 The runtime manifest is the durable, crash-safe record of "this runner is running this harness for this Attempt," independent of both the daemon's database and the runner's own liveness.
