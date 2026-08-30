@@ -141,19 +141,11 @@ defmodule Consigliere.RunnerProcess do
   end
 
   def handle_info({port, {:exit_status, 0}}, %{session: %{port: port}} = state) do
-    if state.harness_exit_received do
-      {:stop, state.stop_reason || manifest_exit_reason(state), state}
-    else
-      {:noreply, %{state | port_exit_status: 0}}
-    end
+    {:noreply, %{state | port_exit_status: 0}}
   end
 
   def handle_info({port, {:exit_status, status}}, %{session: %{port: port}} = state) do
-    if state.harness_exit_received do
-      {:stop, state.stop_reason || {:harness_exited, status}, state}
-    else
-      {:noreply, %{state | port_exit_status: status}}
-    end
+    {:noreply, %{state | port_exit_status: status}}
   end
 
   def handle_info({:tcp, socket, line}, %{session: %{socket: socket}} = state) do

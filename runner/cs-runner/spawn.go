@@ -33,18 +33,28 @@ func SpawnHarness(command []string, confirmTimeout time.Duration) (*HarnessHandl
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Env = scrubbedHarnessEnv()
 
-	stdout, err := cmd.StdoutPipe()
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
+		return nil, fmt.Errorf("create stdout pipe: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
-		return nil, fmt.Errorf("stderr pipe: %w", err)
+		_ = stdout.Close()
+		_ = stdoutWriter.Close()
+		return nil, fmt.Errorf("create stderr pipe: %w", err)
 	}
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
 
 	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
+		_ = stdoutWriter.Close()
+		_ = stderr.Close()
+		_ = stderrWriter.Close()
 		return nil, fmt.Errorf("start harness: %w", err)
 	}
+	_ = stdoutWriter.Close()
+	_ = stderrWriter.Close()
 
 	pid := cmd.Process.Pid
 	deadline := time.Now().Add(confirmTimeout)
@@ -64,6 +74,8 @@ func SpawnHarness(command []string, confirmTimeout time.Duration) (*HarnessHandl
 	// verify the cleanup can do so.
 	syscall.Kill(pid, syscall.SIGKILL)
 	cmd.Wait()
+	_ = stdout.Close()
+	_ = stderr.Close()
 	return &HarnessHandle{PID: pid}, fmt.Errorf("harness pid %d never completed its own setsid() within %v", pid, confirmTimeout)
 }
 

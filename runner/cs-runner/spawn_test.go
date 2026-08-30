@@ -1,11 +1,39 @@
 package main
 
 import (
+	"io"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 )
+
+func TestSpawnHarness_PipesRemainReadableAfterWait(t *testing.T) {
+	handle, err := SpawnHarness([]string{"sh", "-c", "printf 'stdout'; printf 'stderr' >&2"}, 2*time.Second)
+	if err != nil {
+		t.Fatalf("SpawnHarness: %v", err)
+	}
+
+	if err := handle.Cmd.Wait(); err != nil {
+		t.Fatalf("Cmd.Wait: %v", err)
+	}
+
+	stdout, err := io.ReadAll(handle.Stdout)
+	if err != nil {
+		t.Fatalf("read stdout after Wait: %v", err)
+	}
+	if string(stdout) != "stdout" {
+		t.Fatalf("stdout = %q, want %q", stdout, "stdout")
+	}
+
+	stderr, err := io.ReadAll(handle.Stderr)
+	if err != nil {
+		t.Fatalf("read stderr after Wait: %v", err)
+	}
+	if string(stderr) != "stderr" {
+		t.Fatalf("stderr = %q, want %q", stderr, "stderr")
+	}
+}
 
 func TestSpawnHarness_ConfirmsOwnProcessGroupBeforeReturning(t *testing.T) {
 	handle, err := SpawnHarness([]string{"sleep", "5"}, 2*time.Second)
