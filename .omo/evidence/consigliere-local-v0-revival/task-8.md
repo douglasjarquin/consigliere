@@ -105,7 +105,7 @@ The final audit reproduced a recovery leak where canceling a planned Attempt lef
 
 The RED regression was `MIX_ENV=test mix test test/consigliere/global_scheduler_test.exs --no-color --seed 0`, which returned `3/4 passed` because the canceled operation remained `pending`.
 
-The fix is committed in `49db8626a1a2113f8d7faac1521f4ea4305c0b19` and releases the planned operation inside the same transaction that marks the Attempt canceled.
+The fix is committed in `49db8624a8140eda0449a03f5f706142eeb99493` and releases the planned operation inside the same transaction that marks the Attempt canceled.
 
 The final invariant audit also added the SQLite partial unique index `attempts_one_recoverable_per_mission` for `planned` and `starting` rows, preflight checks in every Attempt-creation path, and a planned supersession regression.
 
