@@ -72,13 +72,83 @@ This live run therefore supplies a real packaged failure exercise and a direct W
 
 ## Evidence sufficiency
 
-Comparable Mission count is zero completed records out of the required minimum of 20.
+Comparable Mission count remains below the required minimum of 20 completed, naturally occurring records.
 
 The canary evidence is insufficient for Promote and makes no economic or superiority claim.
 
-The report must remain open for the human operator's Continue or Stop decision.
+The human operator explicitly chose Continue by authorizing a same-task retry after the earlier no-result Attempt.
 
-No human Continue or Stop decision has been supplied in this run.
+That Continue decision does not authorize a fixed duration, a fixed Continue limit, duplicate comparison work, or an automatic Promote decision.
+
+## Same-task recovery measurement
+
+The fresh packaged Consigliere measurement used the committed revival head `ed3f4d0e51b41b585a0141910b4d374d063891d4`.
+
+The private canary `CS_HOME` was a temporary operator-owned home and its raw database, usage rows, manifests, and logs remain outside this repository.
+
+The first bridge-enabled Attempt was `0ac0db2d-f568-4db4-862c-d9028a23628c`.
+
+It imported checkpoint SHA `2c5579a09572c4008560c18dde7c194f9920335a` from the trusted base `ed12af8b7e630d47a0384d42362b2fa53ab932d7`.
+
+The operator then continued the same Mission from that exact checkpoint, creating exactly one fresh recovery Attempt `ec118f71-3e8d-43a0-b7fb-064d74f0a708` with a new Workspace generation and fence.
+
+The recovery Attempt imported the same exact checkpoint SHA and remained checkpointed rather than falsely becoming completed.
+
+Both Attempt manifests ended in `dead_verified` with exit code 0, and the daemon-owned result record for each Attempt was `checkpoint` and `imported`.
+
+The second Attempt emitted a completion report after its checkpoint report.
+
+The durable first-terminal rule preserved the checkpoint result and rejected the later completion as `result_conflict`, preventing a false review-ready projection.
+
+The temporary canary daemon stopped through packaged `csd stop` with exit code 0, removed its PID file, and left no matching daemon, runner, or Codex process.
+
+The bounded private usage ledger recorded one row per Attempt.
+
+The first row recorded sequence 57 with input 463311, cached input 425728, and output 8165 tokens.
+
+The recovery row recorded sequence 43 with input 437784, cached input 406272, and output 5567 tokens.
+
+The recorded ContextPack measurements were 3087 bytes and 772 input tokens for the first Attempt, and 3234 bytes and 809 input tokens for the recovery Attempt.
+
+The measurement used `codex-cli 0.151.0`, harness `codex`, model `gpt-5.6-luna`, reasoning effort `high`, `workspace-write` sandbox, and `never` approval policy.
+
+The packaged artifact hashes were `cs` `3c8ea2d7d27acf44d7a3df79b277885f77e635793cc49f0d2c7d29122ba2e9df`, `csd` `2e3687d3efa580bb15c2423f8d3e6b69f4b5c674f987a2efc902c141b9d0d3cf`, `cs-runner` `eb3895ce22035205b6c06ea2e4e197e9e4a0645b7a04bd3eb05cfd398f7f2358`, and `cs-attempt` `2e489d90e01196587a4665cf6ab1280939b8187b9bc86a0e668815d96e9493e4`.
+
+The FirstMate inputs remained the three operator-provided optimized configuration files, with agent SHA-256 `f3f1d3152b9fa47584cb35c03096346221d1160713608be516ee855113c9e33c` and main and runner SHA-256 `a23edfca5017c9823ee3fae08601d39c96958edd591d050a383b5acaa89a0675`.
+
+No FirstMate Mission was forced and no duplicate implementation was created because the operator supplied one natural task and no comparable Mission sample across both systems.
+
+The recovery run therefore records one human Continue decision, two recoverable Consigliere Attempt records, zero completed comparable Missions, and insufficient evidence for Promote.
+
+## Final packaged same-task retry
+
+After the status-surface fix, the operator-selected same task was run once from a fresh private `CS_HOME` with a fresh auth-only Codex home and the package built from `31379603d124b7f0f4452a3525a500ad12b5e9be`.
+
+The final Project was `e6d27e58-6f87-45b0-93ec-3ed706cd8898` and the final Mission was `9fd5ddb4-508d-4d5b-a8c6-b4d8811f995f`.
+
+The final Attempt was `4ce0ec04-409e-4c07-965d-50da22ccb03b`.
+
+The final Attempt used a fresh Workspace identity and generation, authenticated runner fence, and fresh Codex invocation, all bound to the exact Project and Mission.
+
+The Attempt completed with verified process-group death and imported exact result SHA `053257f093a6e6c7937e8c9fad49f272870cef6c`, whose parent was the trusted base `ed12af8b7e630d47a0384d42362b2fa53ab932d7`.
+
+The result ref was `refs/consigliere/projects/e6d27e58-6f87-45b0-93ec-3ed706cd8898/attempts/4ce0ec04-409e-4c07-965d-50da22ccb03b/result`.
+
+The Mission reached `ready_for_review` only after the literal review verification passed with input SHA `053257f093a6e6c7937e8c9fad49f272870cef6c` and output digest `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+The final Workspace was clean and its exact diff was one deletion of the requested public Zumba line from `mise.main.toml`, with no other tracked changes.
+
+The private per-turn ledger recorded one bounded row with native sequence 23, input 288024, cached input 265472, and output 5461 tokens.
+
+The ContextPack measured 3238 bytes and 810 estimated input tokens, and its persisted hash matched the private runtime record.
+
+The final package hashes were `cs` `e97cd1f26134558fdc76db557f7ce57f0f172a97ad3c80fcaf692b5d1ee018f4`, `csd` `06c1ddcbcb1b2207f94d8b41224fa8652a101faab3cec81bb93508a8b34bf4c0`, `cs-runner` `99631840887bc4ebb034e2da9489dc88ead115455d571f8c8002c9485ac25543`, and `cs-attempt` `5d23cf4088ef1783de79e3e76ca6bc2b0d7933e1f884ebb4607cc52e5d4df1d3`.
+
+The final packaged manual path ran `csd restart`, `cs status MISSION`, `cs why MISSION`, `cs review`, `cs doctor`, `csd status`, and `csd stop`.
+
+The restart acquired a new daemon identity, the status and explanation surfaces exposed the exact result and passed verification, doctor reported live sockets and verified lock ownership, and stop removed the PID file after cleanup.
+
+The final run is one completed Consigliere record and zero FirstMate records, so there is no defensible cross-system comparable sample and no Promote claim.
 
 ## Adversarial coverage
 
@@ -89,6 +159,14 @@ No human Continue or Stop decision has been supplied in this run.
 - Cancel and native resume were not used because V0 forbids native transcript resume and the selected Mission had no operator cancellation decision.
 - Repeated interruption was not forced because it would create duplicate or non-natural canary work.
 - Misleading model output was not trusted; final Workspace identity and exact Git diff checks were used instead.
+- The private reporter's unsupported `progress` subcommand was rejected with bounded usage errors, while the supported checkpoint path remained authenticated and durable.
+- Fresh packaged Codex startup emitted bounded warnings for optional agent definition files absent from the isolated `CODEX_HOME`; the native Codex task continued and no credentials or transcripts were exposed.
+- Python `tomllib` was unavailable in the isolated environment, so the Mission used the installed `mise` parser path and recorded the parser warning without treating it as a successful model claim.
+- A duplicate checkpoint-plus-completion report was contained by the first-terminal result rule and surfaced as a durable `result_conflict` rather than overwriting the checkpoint.
+- A long worktree-relative `CS_HOME` reproduced the macOS Unix-domain socket `einval` boundary; the final measurement used a short private home and recorded the failed owner cleanup as an identity-safe refusal rather than unlinking by path.
+- One local polling wrapper used zsh's reserved `status` variable and interrupted its own run; packaged `csd stop` then reconciled the exact runner group, and the final retry used a task-specific state variable.
+- A host Codex configuration with unrelated plugin activity was isolated from the final run by supplying only a temporary auth file through `CS_CODEX_AUTH_HOME`; the auth copy was moved to Trash after the run.
+- The final completion's exact result, verification digest, status projection, restart identity, and stop cleanup were independently checked after the original advisory conversation was absent.
 - Prompt injection was not observed in the selected repository content, and the bounded Mission context restricted authority to the listed Attempt operations.
 - Network delivery, GitHub mutation, pull request creation, push, and merge were not attempted by the canary.
 
