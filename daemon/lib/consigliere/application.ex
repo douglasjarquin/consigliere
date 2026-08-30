@@ -40,7 +40,6 @@ defmodule Consigliere.Application do
       {Registry, keys: :duplicate, name: Consigliere.EventBus.Registry},
       Consigliere.EventBus,
       Consigliere.OutboxDispatcher,
-      Consigliere.NotificationDispatcher,
       Consigliere.Termination,
       Consigliere.GlobalScheduler,
       Consigliere.Reconciler,

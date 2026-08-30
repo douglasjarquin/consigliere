@@ -17,4 +17,8 @@ defmodule Consigliere.ApplicationChildrenTest do
              "#{inspect(command)} must supervise Home.Lock"
     end
   end
+
+  test "V0 boot does not supervise visible notification delivery" do
+    refute Consigliere.NotificationDispatcher in App.children(nil)
+  end
 end
