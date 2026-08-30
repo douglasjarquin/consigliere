@@ -135,3 +135,19 @@ Tests-first GREEN proof:
 Result: 2 passed.
 
 The process-group assertion confirmed that the unverified persisted PGID remained alive while the Attempt was quarantined as unconfirmed.
+
+## Pause termination identity follow-up
+
+The exact-head review found that Boss pause independently trusted `Attempt.pgid` in both its termination and liveness checks, bypassing the canonical inventory and runner identity boundary.
+
+Commit `94079e332f6b95cfe32678e65b93bc6a66fb8614` routes pause death verification and process-alive checks through `Consigliere.Termination`, so an unverified or recycled PGID leaves the Mission `:pausing` and cannot be signaled.
+
+Tests-first RED proof:
+
+    docker run --rm -v "$PWD":/workspace -w /workspace/daemon elixir:1.20-otp-29 sh -lc 'apt-get update -qq && apt-get install -y -qq golang-go >/dev/null && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && MIX_ENV=test mix test test/consigliere/pause_test.exs --no-color'
+
+The new real-process regression observed the prior implementation return `:paused` after signaling the persisted live PGID; the same run also lacked the packaged runner binary for an existing live-runner fixture, so its bounded result was 2/4 passed.
+
+Tests-first GREEN proof is the combined event and pause command recorded in task 10 above.
+
+The green result was 16 passed, and the new process assertion confirmed the unrelated session-leader group remained alive while pause stayed pending.

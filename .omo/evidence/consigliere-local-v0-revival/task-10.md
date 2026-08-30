@@ -97,6 +97,26 @@ GREEN regression proof:
 
 Result: 5 passed, including both oversized context tests and the structured redaction test.
 
+## Structured payload redaction follow-up
+
+The exact-head review then found that `Redaction.value/1` sanitized nested strings but did not redact values selected by sensitive map keys before harness-event persistence.
+
+Commit `4a22c19313a53faa3fe019f396f58d3cfdbf9a5d` redacts sensitive map-key families before recursion and adds a synthetic event-to-database regression covering `access_token` and `CS_CAPABILITY` values in both the harness-event and domain-event rows.
+
+Tests-first RED proof:
+
+    docker run --rm -v "$PWD":/workspace -w /workspace/daemon elixir:1.20-otp-29 sh -lc 'apt-get update -qq && apt-get install -y -qq golang-go >/dev/null && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && MIX_ENV=test mix test test/consigliere/harness/events_test.exs --no-color'
+
+The new persistence assertion observed `synthetic-event-access` in the stored `access_token` field under the prior implementation.
+
+Tests-first GREEN proof:
+
+    docker run --rm -v "$PWD":/workspace -w /workspace/runner/cs-runner elixir:1.20-otp-29 sh -lc 'apt-get update -qq && apt-get install -y -qq golang-go >/dev/null && go build -o /workspace/daemon/priv/cs-runner . && cd /workspace/daemon && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && mix format --check-formatted && MIX_ENV=test mix test test/consigliere/harness/events_test.exs test/consigliere/pause_test.exs --no-color'
+
+Result: 16 passed.
+
+The retained rows contain `[REDACTED]` for sensitive values and preserve non-sensitive values unchanged.
+
 ## CI portability regression
 
 The first final CI run reproduced `CaptureTest` returning `capture_unavailable` when its disposable file lived directly under the shared system temporary directory.
