@@ -1,0 +1,10 @@
+surface: runner Go gate
+source_runtime_commit: 95ea4e5e38c6350f6560339708bbc33b985010b8
+invocation: cd runner/cs-runner && test -z "$(gofmt -l .)" && go vet ./... && go test ./... && go test -race -shuffle=on -count=1 ./... && go build ./...
+gofmt_exit: 0
+go_vet_exit: 0
+go_test_exit: 0
+go_test_race_shuffle_exit: 0
+go_build_exit: 0
+exit_code: 0
+redaction: package paths and nonessential timing output omitted from this bounded record

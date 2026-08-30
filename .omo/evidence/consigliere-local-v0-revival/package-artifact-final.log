@@ -1,0 +1,18 @@
+surface: exact-SHA package artifact
+source_runtime_commit: 95ea4e5e38c6350f6560339708bbc33b985010b8
+invocation: PATH=/opt/homebrew/opt/erlang/bin:$PATH scripts/package.sh /Users/douglasjarquin/.herdr/worktrees/consigliere/cs-consigliere-local-v0-revival/.tmp/package-95ea4e5-Gfnr21
+package_exit: 0
+package_prefix: .tmp/package-95ea4e5-Gfnr21
+cs_type: Mach-O 64-bit executable arm64
+csd_type: Mach-O 64-bit executable arm64
+cs_runner_type: Mach-O 64-bit executable arm64
+cs_attempt_type: Mach-O 64-bit executable arm64
+cs_sha256: 4b977c4361239244630749d331837c58d5aad99e1d197103d4847c628a433815
+csd_sha256: 49074f20047840f485d110190da0fd20fbd52646969dc5f1d920f778cb584bed
+cs_runner_sha256: a188c50b3c0fa578dc7606a38bec41eeafa1889cd2ca41b553f9ec016481c5a8
+cs_attempt_sha256: c6c0a480facfafdb45c7b37e36d41fd6fc17605da576c6b0e7633cb5776702a9
+package_only_version: {"cs":"0.1.0","protocol":1}
+package_only_runner_help_exit: 0
+package_only_attempt_help_exit: 0
+forbidden_source_scan: zero source-like files outside shipped Ecto migrations
+redaction: no credentials, prompts, transcripts, or private canary records included

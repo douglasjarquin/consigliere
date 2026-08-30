@@ -1,0 +1,9 @@
+surface: native macOS daemon characterization gate
+source_runtime_commit: 95ea4e5e38c6350f6560339708bbc33b985010b8
+invocation: PATH=/opt/homebrew/opt/erlang/bin:$PATH MIX_APP_PATH="$PWD/_build/test/lib/consigliere_daemon" make -C daemon clean all; cd daemon; MIX_ENV=test mix format --check-formatted; MIX_ENV=test mix compile --warnings-as-errors; MIX_ENV=test mix test --no-color --seed 0
+format_exit: 0
+compile_exit: 0
+result: 467/476 passed (1 doctest, 466/475 tests)
+host_only_observations: stale probe-socket timing, macOS short Unix-socket paths, /var versus /private/var spelling, and process-group fixture or cleanup timing
+release_gate: not authoritative; Linux CI-shaped daemon gate passed 476/476 three times
+redaction: test UUIDs, debug SQL, and local process details omitted from this bounded record

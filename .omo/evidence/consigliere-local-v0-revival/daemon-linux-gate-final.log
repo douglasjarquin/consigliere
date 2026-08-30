@@ -1,0 +1,14 @@
+surface: authoritative Linux daemon gate
+source_runtime_commit: 95ea4e5e38c6350f6560339708bbc33b985010b8
+invocation: docker run --rm -v "$PWD":/workspace -w /workspace/runner/cs-runner elixir:1.20-otp-29 sh -lc 'apt-get update -qq && apt-get install -y -qq golang-go >/dev/null && go version && go build -o /workspace/daemon/priv/cs-runner . && cd /workspace/daemon && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && mix format --check-formatted && MIX_ENV=test mix compile --warnings-as-errors && MIX_ENV=test mix test --no-color --seed 0'
+container_go_version: go1.26.6 linux/arm64
+format_exit: 0
+compile_warnings_as_errors_exit: 0
+mix_test_seed_0_run_1: Result: 476 passed (1 doctest, 475 tests)
+mix_test_seed_0_run_2: Result: 476 passed (1 doctest, 475 tests)
+mix_test_seed_0_run_3: Result: 476 passed (1 doctest, 475 tests)
+exit_code: 0
+raw_run_1: /tmp/cs-linux-full-f840893-fixed-r1.log
+raw_run_2: /tmp/cs-linux-full-f840893-fixed-r2.log
+raw_run_3: /tmp/cs-linux-full-f840893-fixed-r3.log
+redaction: debug SQL, test UUIDs, and transient container output omitted from this bounded record

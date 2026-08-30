@@ -6,6 +6,10 @@ The packaged runtime input parent is `95ea4e5e38c6350f6560339708bbc33b985010b8`.
 
 `git diff --exit-code 95ea4e5e38c6350f6560339708bbc33b985010b8 HEAD -- daemon cli runner scripts .github` exited `0` with no runtime, package, workflow, CLI, or runner input changes.
 
+The bounded redacted output records for these claims are `daemon-linux-gate-final.log`, `cli-go-gate-final.log`, `runner-go-gate-final.log`, `package-artifact-final.log`, `installed-lifecycle-final.log`, and `macos-native-gate-final.log` in this evidence directory.
+
+The older `daemon-compile-gate-rerun.log` and `daemon-compile-gate.log` are failed macOS environment probes with exit code `127` because the local Erlang executable was not on `PATH`; they are not authoritative Linux gate runs and are excluded from the final success claims.
+
 The authoritative Linux command was `docker run --rm -v "$PWD":/workspace -w /workspace/runner/cs-runner elixir:1.20-otp-29 sh -lc 'apt-get update -qq; apt-get install -y -qq golang-go; go version; go build -o /workspace/daemon/priv/cs-runner .; cd /workspace/daemon; mix local.hex --force; mix local.rebar --force; mix deps.get; mix format --check-formatted; MIX_ENV=test mix compile --warnings-as-errors; MIX_ENV=test mix test --no-color --seed 0'`.
 
 The Linux container built actual Go `1.26.6`, format passed, warnings-as-errors compilation passed, and three sequential seed-0 runs each returned `476 passed (1 doctest, 475 tests)` with exit code `0`.
