@@ -158,11 +158,21 @@ defmodule Consigliere.Termination do
     end
   end
 
-  defp verify_death(attempt) do
+  @doc false
+  def verify_death(attempt) do
     case resolve_pgid(attempt) do
       {:ok, pgid} -> ProcessGroup.terminate(pgid)
       :none -> :dead_verified
       :unknown -> :dead_unverified
+    end
+  end
+
+  @doc false
+  def process_alive?(attempt) do
+    case resolve_pgid(attempt) do
+      {:ok, pgid} -> ProcessGroup.alive?(pgid)
+      :none -> false
+      :unknown -> true
     end
   end
 

@@ -12,7 +12,6 @@ defmodule Consigliere.Pause do
   alias Consigliere.DatabaseWriter
   alias Consigliere.MissionBlockers.MissionBlocker
   alias Consigliere.Missions.Mission
-  alias Consigliere.ProcessGroup
   alias Consigliere.Projects.Project
   alias Consigliere.Repo
   alias Consigliere.Termination
@@ -33,7 +32,7 @@ defmodule Consigliere.Pause do
 
   defp stop_one(attempt) do
     Termination.cancel_runner(attempt.id)
-    death = verify_death(attempt)
+    death = Termination.verify_death(attempt)
 
     if death == :dead_verified do
       maybe_import(attempt)
@@ -42,19 +41,6 @@ defmodule Consigliere.Pause do
     end
 
     death
-  end
-
-  defp verify_death(attempt) do
-    cond do
-      is_integer(attempt.pgid) and attempt.pgid > 1 ->
-        ProcessGroup.terminate(attempt.pgid)
-
-      process_alive?(attempt) ->
-        :dead_unverified
-
-      true ->
-        :dead_verified
-    end
   end
 
   defp maybe_import(attempt) do
@@ -89,7 +75,7 @@ defmodule Consigliere.Pause do
   defp maybe_quarantine(_), do: :ok
 
   defp finalize(mission_id) do
-    leftover = Enum.filter(live_attempts(mission_id), &process_alive?/1)
+    leftover = Enum.filter(live_attempts(mission_id), &Termination.process_alive?/1)
 
     DatabaseWriter.transaction(fn ->
       mission = Repo.get!(Mission, mission_id)
@@ -120,16 +106,6 @@ defmodule Consigliere.Pause do
             a.status in ["planned", "starting", "running", "checkpoint_requested", "terminating"]
       )
     )
-  end
-
-  defp process_alive?(%Attempt{id: id, pgid: pgid}) do
-    runner =
-      case Registry.lookup(Consigliere.Registry, {:runner, id}) do
-        [{pid, _}] -> Process.alive?(pid)
-        _ -> false
-      end
-
-    runner or (is_integer(pgid) and pgid > 1 and ProcessGroup.alive?(pgid))
   end
 
   defp close_blockers!(mission, kind) do

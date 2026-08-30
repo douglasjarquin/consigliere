@@ -2,11 +2,13 @@ defmodule Consigliere.PauseTest do
   use ExUnit.Case, async: false
 
   alias Consigliere.Actor
+  alias Consigliere.Attempts
   alias Consigliere.Attempts.Attempt
   alias Consigliere.Capabilities
   alias Consigliere.Fixtures
   alias Consigliere.Missions
   alias Consigliere.Missions.Mission
+  alias Consigliere.ProcessGroup
   alias Consigliere.Repo
 
   setup do
@@ -50,6 +52,35 @@ defmodule Consigliere.PauseTest do
       refute Process.alive?(snap.runner_pid)
       assert Repo.get!(Mission, mission.id).phase == "paused"
     end
+  end
+
+  test "pause does not signal a persisted pgid without verified inventory" do
+    {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
+    {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
+
+    {:ok, %{attempt: attempt}} =
+      Missions.start(mission.id, Actor.system(), %{
+        workspace_path: "/tmp/cs-#{System.unique_integer([:positive])}"
+      })
+
+    {:ok, attempt} = Attempts.request_spawn(attempt.id, Actor.system())
+
+    {:ok, attempt} =
+      Attempts.mark_running(attempt.id, Actor.system(), %{fencing_token: attempt.fencing_token})
+
+    {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()
+
+    on_exit(fn ->
+      _ = ProcessGroup.terminate(pgid, term_timeout_ms: 100, kill_timeout_ms: 100)
+      if Port.info(port), do: Port.close(port)
+    end)
+
+    {:ok, _} = Repo.update(Attempt.changeset(attempt, %{pgid: pgid}))
+
+    assert {:ok, result} = Missions.pause(mission.id, Actor.boss())
+    assert result.status == :pausing
+    assert ProcessGroup.alive?(pgid)
   end
 
   test "resume from settled pause is idempotent and returns an authorized Mission" do
