@@ -18,7 +18,11 @@ Consigliere used its packaged native macOS arm64 `cs`, `csd`, `cs-runner`, and O
 
 The final run supplied only a temporary auth file through `CS_CODEX_AUTH_HOME`, so unrelated host Codex configuration, plugins, and hooks were not part of the measurement.
 
-The package was rebuilt from committed revival head `e2b7fe445e96c356354f31f849e9756b265ecec8`.
+The real canary execution package was built from committed revival head `e2b7fe445e96c356354f31f849e9756b265ecec8`.
+
+The final exact-head package was rebuilt from `15713366c6967b0a0e1359c7406df6b5eb118a64` for the installed lifecycle and scope gates recorded in F3.
+
+That final package was not used to rerun the same Mission because the operator-controlled canary forbids duplicate implementation work.
 
 The private ledger captured bounded per-turn token counters and ContextPack byte and input-token measurements without retaining full prompts or transcripts.
 
