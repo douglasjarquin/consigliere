@@ -99,3 +99,19 @@ Result: 2 passed.
 The two tests observed a real live `sleep` process, rejected a different executable with the same basename, and verified the exact executable path and SHA-256 hash.
 
 The later affected reconciliation suite retained its known macOS-only process-fixture observations and is covered by the authoritative Linux container gate recorded in the final verification lanes.
+
+## PATH-independent termination follow-up
+
+The full Linux gate then reproduced a flaky `RunnerProcessCodexTest` failure where the Attempt became `lost` instead of `failed` while another test temporarily removed `kill` from `PATH`.
+
+Commit `3039294c305d419dc29b6ae5a2f1d2cb9978114b` makes the daemon's `kill` and macOS `ps` observers resolve from fixed system paths, and adds a regression that terminates a real process group with `PATH=/nonexistent`.
+
+RED proof was the authoritative container run at the preceding source, which returned `453 passed` and one `RunnerProcessCodexTest` failure with `lost` versus `failed`.
+
+GREEN proof:
+
+    docker run --rm -v "$PWD:/workspace" -w /workspace/runner/cs-runner elixir:1.20-otp-29 sh -lc 'apt-get update -qq && apt-get install -y -qq golang-go >/dev/null && go build -o /workspace/daemon/priv/cs-runner . && cd /workspace/daemon && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && mix format --check-formatted && MIX_ENV=test mix compile --warnings-as-errors && MIX_ENV=test mix test'
+
+Result: 454 passed.
+
+The focused process-group suite also passed with 6 tests, including the PATH-independent real termination case.
