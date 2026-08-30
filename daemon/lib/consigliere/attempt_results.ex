@@ -247,6 +247,7 @@ defmodule Consigliere.AttemptResults do
   end
 
   defp report_field("result_sha"), do: :reported_sha
+  defp report_field("terminal_sequence"), do: :accepted_terminal_sequence
   defp report_field(key), do: String.to_atom(key)
 
   defp value(attrs, key) when is_atom(key) do

@@ -128,6 +128,16 @@ defmodule Consigliere.ExactSHAProgressionTest do
     assert Repo.get_by!(AttemptResult, attempt_id: attempt.id).accepted_terminal_sequence == 7
     record_terminal_event!(attempt, 8)
 
+    assert {:error, _} =
+             complete_via_protocol(
+               secret,
+               attempt,
+               mission,
+               workspace,
+               result_sha,
+               8
+             )
+
     assert {:ok, _} =
              Consigliere.Progression.run(
                attempt.id,
