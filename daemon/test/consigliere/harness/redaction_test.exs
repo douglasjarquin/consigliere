@@ -16,4 +16,27 @@ defmodule Consigliere.Harness.RedactionTest do
     refute redacted =~ "synthetic-capability"
     assert redacted =~ "[REDACTED]"
   end
+
+  test "redacts compound secret assignments, private keys, and PEM blocks" do
+    value =
+      "AWS_SECRET_ACCESS_KEY=aws-secret\nPRIVATE_KEY=private-secret\n" <>
+        """
+        -----BEGIN PRIVATE KEY-----
+        private-material
+        -----END PRIVATE KEY-----
+        """
+
+    redacted = Redaction.text(value)
+
+    refute redacted =~ "aws-secret"
+    refute redacted =~ "private-secret"
+    refute redacted =~ "private-material"
+    assert redacted =~ "[REDACTED]"
+  end
+
+  test "redacts private key values in structured events" do
+    assert Redaction.value(%{"private_key" => "private-secret"}) == %{
+             "private_key" => "[REDACTED]"
+           }
+  end
 end

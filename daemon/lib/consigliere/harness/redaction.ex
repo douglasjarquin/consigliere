@@ -11,13 +11,15 @@ defmodule Consigliere.Harness.Redaction do
   @sensitive_path_pattern ~r{(?i)(?:/Users|/home|/private/tmp|/tmp)/[^\s"']*(?:\.codex|\.ssh|credentials?|auth\.json)[^\s"']*}
 
   @quoted_sensitive_assignment_pattern ~r/(?i)(["'](?:access_token|refresh_token|id_token|oauth_token|token|password|secret|api[_-]?key|credential|CS_CAPABILITY)["']\s*[:=]\s*)["']?[^\s,"'}]+/
-  @bare_sensitive_assignment_pattern ~r/(?i)(\b(?:CS_CAPABILITY|token|password|secret|api[_-]?key|credential)\b\s*[:=]\s*)["']?[^\s,"'}]+/
+  @bare_sensitive_assignment_pattern ~r/(?i)(\b(?:CS_CAPABILITY|token|password|secret|private[_-]?key|api[_-]?key|credential)\b\s*[:=]\s*)["']?[^\s,"'}]+/
+  @compound_sensitive_assignment_pattern ~r/(?i)(\b(?:AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|PRIVATE_KEY|PRIVATE_KEY_PEM)\b\s*=\s*)["']?[^\s,"'}]+/
   @sensitive_key_names ~w(auth authorization capability cs_capability attempt_capability)
-  @sensitive_key_fragments ~w(token password secret credential api_key api-key)
+  @sensitive_key_fragments ~w(token password secret credential api_key api-key private_key private-key)
 
   def text(value) when is_binary(value) do
     value
     |> redact_assignments()
+    |> redact_pem()
     |> redact_known_tokens()
   end
 
@@ -35,7 +37,33 @@ defmodule Consigliere.Harness.Redaction do
 
   defp redact_assignments(value) do
     value = Regex.replace(@quoted_sensitive_assignment_pattern, value, "\\1[REDACTED]")
-    Regex.replace(@bare_sensitive_assignment_pattern, value, "\\1[REDACTED]")
+    value = Regex.replace(@bare_sensitive_assignment_pattern, value, "\\1[REDACTED]")
+    Regex.replace(@compound_sensitive_assignment_pattern, value, "\\1[REDACTED]")
+  end
+
+  defp redact_pem(value) do
+    {lines, _in_block} =
+      value
+      |> String.split("\n", trim: false)
+      |> Enum.map_reduce(false, fn line, in_block ->
+        marker = String.upcase(line)
+
+        begins? =
+          String.contains?(marker, "-----BEGIN") and String.contains?(marker, "PRIVATE KEY-----")
+
+        ends? =
+          String.contains?(marker, "-----END") and String.contains?(marker, "PRIVATE KEY-----")
+
+        cond do
+          begins? and ends? -> {"[REDACTED PEM]", false}
+          begins? -> {"[REDACTED PEM]", true}
+          in_block and ends? -> {"[REDACTED PEM]", false}
+          in_block -> {"[REDACTED PEM]", true}
+          true -> {line, false}
+        end
+      end)
+
+    Enum.join(lines, "\n")
   end
 
   defp redact_known_tokens(value) do
