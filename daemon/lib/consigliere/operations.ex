@@ -10,6 +10,7 @@ defmodule Consigliere.Operations do
 
   @registry %{
     "ping" => %{version: @version, mode: :database},
+    "advisory.orient" => %{version: @version, mode: :read},
     "project.add" => %{version: @version, mode: :external, required: ~w(name repository_path)},
     "mission.create" => %{
       version: @version,
@@ -64,7 +65,12 @@ defmodule Consigliere.Operations do
 
   def spec(op) when is_binary(op), do: Map.get(@registry, op)
 
-  def mutating?(op), do: Map.has_key?(@registry, op)
+  def mutating?(op) do
+    case spec(op) do
+      %{mode: mode} when mode in [:database, :external] -> true
+      _ -> false
+    end
+  end
 
   def database_only?(op) do
     case spec(op) do

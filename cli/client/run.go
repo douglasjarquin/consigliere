@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -138,6 +139,7 @@ cs mission submit MISSION
 cs mission continue MISSION --sha CHECKPOINT_SHA
 cs mission request-changes MISSION --reason TEXT
 cs mission authorize MISSION
+cs orient --json [--project PROJECT] [--mission MISSION]
 cs why <mission-id>
 cs inbox
 cs review
@@ -187,6 +189,18 @@ func parseFlags(args []string) (map[string]string, []string) {
 }
 
 func canon(s string) string { return strings.ReplaceAll(s, "-", "_") }
+
+func advisoryIntOption(opts map[string]string, key string) (int, bool, error) {
+	raw, present := opts[key]
+	if !present || raw == "" {
+		return 0, false, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return 0, false, fmt.Errorf("invalid --%s: expected a non-negative integer", strings.ReplaceAll(key, "_", "-"))
+	}
+	return value, true, nil
+}
 
 func mapCommand(cmd string, pos []string, opts map[string]string) (string, map[string]any, error) {
 	switch cmd {
@@ -272,6 +286,39 @@ func mapCommand(cmd string, pos []string, opts map[string]string) (string, map[s
 		default:
 			return "mission.get", map[string]any{"mission_id": pos[0]}, nil
 		}
+	case "orient":
+		if len(pos) != 0 {
+			return "", nil, fmt.Errorf("usage: cs orient --json [--project PROJECT] [--mission MISSION]")
+		}
+
+		payload := map[string]any{}
+		for _, key := range []string{
+			"project", "mission", "session_id", "model", "effort", "cli_version", "context_hash",
+		} {
+			if value := opts[key]; value != "" {
+				switch key {
+				case "project":
+					payload["project_id"] = value
+				case "mission":
+					payload["mission_id"] = value
+				default:
+					payload[key] = value
+				}
+			}
+		}
+
+		for _, key := range []string{
+			"turn", "compactions", "resets", "human_interventions",
+			"input_tokens", "output_tokens", "cached_input_tokens", "total_tokens",
+		} {
+			if value, present, err := advisoryIntOption(opts, key); err != nil {
+				return "", nil, err
+			} else if present {
+				payload[key] = value
+			}
+		}
+
+		return "advisory.orient", payload, nil
 	case "why":
 		if len(pos) == 0 {
 			return "", nil, fmt.Errorf("usage: cs why <mission-id>")
@@ -397,6 +444,16 @@ func printHuman(w io.Writer, cmd string, pos []string, resp *Response) {
 			return
 		}
 		printRows(w, payload)
+	case "orient":
+		projects, _ := payload["projects"].([]any)
+		missions, _ := payload["missions"].([]any)
+		fmt.Fprintf(w, "orientation version=%v snapshot_bytes=%v ledger=%v projects=%d missions=%d\n",
+			payload["snapshot_version"],
+			payload["snapshot_bytes"],
+			payload["ledger_status"],
+			len(projects),
+			len(missions),
+		)
 	case "health":
 		fmt.Fprintf(w, "status=%v protocol=%v release=%v schema=%v harness=%v\n",
 			payload["status"], payload["protocol"], payload["release"], payload["schema"], payload["harness"])

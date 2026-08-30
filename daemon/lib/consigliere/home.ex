@@ -26,6 +26,7 @@ defmodule Consigliere.Home do
       workspaces_dir(home),
       Path.dirname(runtime_attempts_dir(home)),
       runtime_attempts_dir(home),
+      advisory_runtime_dir(home),
       evidence_dir(home),
       logs_dir(home)
     ]
@@ -76,6 +77,11 @@ defmodule Consigliere.Home do
   def trusted_projects_dir(home \\ dir()), do: Path.join(home, "trusted/projects")
   def workspaces_dir(home \\ dir()), do: Path.join(home, "workspaces")
   def runtime_attempts_dir(home \\ dir()), do: Path.join(home, "runtime/attempts")
+  def advisory_runtime_dir(home \\ dir()), do: Path.join(home, "runtime/advisory")
+
+  def advisory_ledger_path(home \\ dir()),
+    do: Path.join(advisory_runtime_dir(home), "usage.jsonl")
+
   def codex_home(home \\ dir()), do: Path.join(home, "runtime/codex")
 
   def ensure_codex_home!(home \\ dir()) do

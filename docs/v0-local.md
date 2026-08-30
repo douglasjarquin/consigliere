@@ -76,6 +76,22 @@ Only bounded local Project verification can advance the Mission to `ready_for_re
 
 The boss can continue a checkpoint by naming its exact current SHA, which creates a fresh Attempt and Workspace generation without native Codex transcript resume.
 
+## Model-advisory orientation
+
+The model-advisory channel uses the authenticated advisory credential and the bounded cs orient --json operation.
+
+The optional --project PROJECT and --mission MISSION filters narrow one snapshot without creating a per-repository manager.
+
+The snapshot includes Project identity and base SHA, Mission objective and phase, Attempt status, open Questions, Incidents, blockers, checkpoints, imported result refs, review-ready Missions, safe next actions, and boss-attention requests.
+
+The snapshot omits SQLite paths, trusted mirror paths, repository URLs, Workspace filesystem paths, process controls, credentials, capability secrets, command argv, raw logs, full prompts, and repository history.
+
+The advisory process may create a durable Mission draft and may request or recommend safe actions, but it cannot submit or authorize work, pause or cancel a Mission, answer a boss Question, waive policy, deliver, push, create a pull request, merge, reconcile, or stop the daemon.
+
+The advisory ledger stores only bounded session identity, turn and usage counters, snapshot size, compaction and reset counts, and human-intervention counts under the private local CS_HOME.
+
+Losing or compacting an advisory session loses no durable state because all actionable state remains in SQLite and one fresh orientation snapshot reconstructs the advisory context.
+
 ## Ordered implementation queue
 
 The implementation queue is fixed for this revival and is executed in this order.

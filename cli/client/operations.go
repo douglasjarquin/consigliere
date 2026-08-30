@@ -37,9 +37,18 @@ var v0Operations = map[string]int{
 	"post_attempt.progress":     1,
 }
 
+var v0ReadOperations = map[string]int{
+	"advisory.orient": 1,
+}
+
 func operationVersion(op string) (int, bool) {
-	version, ok := v0Operations[op]
-	return version, ok
+	if version, ok := v0Operations[op]; ok {
+		return version, true
+	}
+	if version, ok := v0ReadOperations[op]; ok {
+		return version, false
+	}
+	return 0, false
 }
 
 func CanonicalRequestHash(scope, op string, version int, key string, payload map[string]any) (string, error) {
@@ -138,8 +147,8 @@ func boundedRetryDelay() {
 }
 
 func isMutatingOperation(op string) bool {
-	_, ok := operationVersion(op)
-	return ok
+	_, mutating := operationVersion(op)
+	return mutating
 }
 
 func canonicalScope(principal string) string {

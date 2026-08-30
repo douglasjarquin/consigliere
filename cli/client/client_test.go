@@ -286,6 +286,35 @@ func TestMapCommandLocalV0Workflow(t *testing.T) {
 			want:    map[string]any{"mission_id": "mission-1"},
 		},
 		{
+			name:    "advisory orient",
+			command: "orient",
+			opts: map[string]string{
+				"project":             "project-1",
+				"mission":             "mission-1",
+				"session_id":          "session-1",
+				"turn":                "2",
+				"compactions":         "1",
+				"resets":              "0",
+				"human_interventions": "1",
+				"input_tokens":        "11",
+				"output_tokens":       "7",
+				"cached_input_tokens": "2",
+			},
+			wantOp: "advisory.orient",
+			want: map[string]any{
+				"project_id":          "project-1",
+				"mission_id":          "mission-1",
+				"session_id":          "session-1",
+				"turn":                2,
+				"compactions":         1,
+				"resets":              0,
+				"human_interventions": 1,
+				"input_tokens":        11,
+				"output_tokens":       7,
+				"cached_input_tokens": 2,
+			},
+		},
+		{
 			name:    "mission continue",
 			command: "mission",
 			pos:     []string{"continue", "mission-1"},
@@ -313,6 +342,52 @@ func TestMapCommandLocalV0Workflow(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOrientUsesAdvisoryChannelAndCredential(t *testing.T) {
+	var seen map[string]any
+	home, _ := serve(t, func(req map[string]any) map[string]any {
+		seen = req
+		return map[string]any{
+			"v": req["v"], "id": req["id"], "ok": true,
+			"payload": map[string]any{
+				"snapshot_version": 1,
+				"snapshot_bytes":   42,
+				"ledger_status":    "recorded",
+				"projects":         []any{},
+				"missions":         []any{},
+			},
+		}
+	})
+	t.Setenv("CS_HOME", home.Dir)
+
+	var out, errb strings.Builder
+	code := Run([]string{
+		"--json", "orient",
+		"--project", "project-1",
+		"--mission", "mission-1",
+		"--session-id", "session-1",
+		"--turn", "2",
+	}, &out, &errb)
+	if code != ExitOK {
+		t.Fatalf("exit %d stderr=%s", code, errb.String())
+	}
+	if seen["op"] != "advisory.orient" {
+		t.Fatalf("op=%v", seen["op"])
+	}
+	if seen["secret"] != "advisory" {
+		t.Fatalf("secret=%v", seen["secret"])
+	}
+	if seen["actor"].(map[string]any)["principal"] != "model_advisory" {
+		t.Fatalf("actor=%v", seen["actor"])
+	}
+	payload := seen["payload"].(map[string]any)
+	if payload["project_id"] != "project-1" || payload["mission_id"] != "mission-1" || payload["turn"] != float64(2) {
+		t.Fatalf("payload=%v", payload)
+	}
+	if strings.Contains(out.String(), "secret") || strings.Contains(out.String(), "credential") {
+		t.Fatalf("advisory response leaked credential fields: %q", out.String())
 	}
 }
 

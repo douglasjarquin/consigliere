@@ -4,6 +4,7 @@ defmodule Consigliere.API.Protocol do
   import Ecto.Query
 
   alias Consigliere.API.Auth
+  alias Consigliere.Advisory
   alias Consigliere.Actor
   alias Consigliere.CommandReceipts
   alias Consigliere.Attempts
@@ -24,6 +25,9 @@ defmodule Consigliere.API.Protocol do
                   ~w(v id op actor payload capability secret scope idempotency_key operation_version canonical_hash)
                 )
   @attempt_ops Consigliere.Capabilities.worker_operations()
+  @advisory_ops ~w(advisory.orient ping version health project.list project.get mission.list
+                   mission.get mission.why mission.review questions.inbox attempt.list
+                   incident.list event.list attempt.logs mission.create)
   @review_phases ~w(awaiting_authorization ready_for_review
                     awaiting_integration_authorization failed)
 
@@ -78,17 +82,36 @@ defmodule Consigliere.API.Protocol do
   end
 
   defp run_maybe_once_allowed(op, payload, actor, req, id) do
-    if Consigliere.Operations.mutating?(op) do
-      key = req["idempotency_key"] || id
+    case advisory_authorization(op, actor) do
+      :ok ->
+        if Consigliere.Operations.mutating?(op) do
+          key = req["idempotency_key"] || id
 
-      CommandReceipts.remember(actor, op, key, payload, fn ->
-        run(op, execution_payload(op, payload, key, id), actor)
-      end)
-      |> wrap(id)
-    else
-      run(op, payload, actor) |> wrap(id)
+          CommandReceipts.remember(actor, op, key, payload, fn ->
+            run_for_actor(op, execution_payload(op, payload, key, id), actor)
+          end)
+          |> wrap(id)
+        else
+          run_for_actor(op, payload, actor) |> wrap(id)
+        end
+
+      {:error, reason} ->
+        {:error, {:unauthorized, reason}} |> wrap(id)
     end
   end
+
+  defp advisory_authorization(_op, %Actor{principal: principal})
+       when principal != "model_advisory",
+       do: :ok
+
+  defp advisory_authorization(op, _actor) when op in @advisory_ops, do: :ok
+  defp advisory_authorization(_op, _actor), do: {:error, :advisory_operation_forbidden}
+
+  defp run_for_actor(op, payload, %Actor{principal: "model_advisory"} = actor) do
+    run(op, payload, actor) |> Advisory.sanitize_result()
+  end
+
+  defp run_for_actor(op, payload, actor), do: run(op, payload, actor)
 
   defp run(op, payload, %Actor{principal: "attempt", allowed_ops: ops} = actor)
        when is_list(ops) do
@@ -143,6 +166,13 @@ defmodule Consigliere.API.Protocol do
     do: {:error, "canonical_request_invalid"}
 
   defp run_allowed("ping", _payload, _actor), do: {:ok, %{"pong" => true}}
+
+  defp run_allowed("advisory.orient", payload, %Actor{principal: "model_advisory"}) do
+    Advisory.orient(payload, payload)
+  end
+
+  defp run_allowed("advisory.orient", _payload, _actor),
+    do: {:error, {:unauthorized, :advisory_principal_required}}
 
   defp run_allowed("health", _payload, actor) do
     with :ok <- require_reader(actor) do
