@@ -107,6 +107,29 @@ defmodule Consigliere.AdvisoryTest do
     refute ledger =~ Home.ensure_boss_secret!()
   end
 
+  test "advisory can read bounded redacted Attempt logs without private paths" do
+    project = Fixtures.dummy_project!()
+
+    {:ok, mission} =
+      Missions.create(
+        Fixtures.mission_attrs(%{project_id: project.id}),
+        Actor.boss()
+      )
+
+    attempt = Fixtures.attempt!(mission)
+    log_path = Path.join(Home.logs_dir(), "attempts/#{attempt.id}.log")
+    File.mkdir_p!(Path.dirname(log_path))
+    File.write!(log_path, "safe progress\nBearer super-secret\n")
+
+    response = advisory_call("attempt.logs", %{"attempt_id" => attempt.id})
+
+    assert response["ok"] == true
+    assert response["payload"]["attempt_id"] == attempt.id
+    assert Enum.any?(response["payload"]["lines"], &(&1 =~ "safe progress"))
+    refute Enum.any?(response["payload"]["lines"], &(&1 =~ "super-secret"))
+    refute Map.has_key?(response["payload"], "path")
+  end
+
   test "advisory can create a Mission draft but cannot perform Boss mutations" do
     project = Fixtures.dummy_project!()
 
@@ -138,7 +161,6 @@ defmodule Consigliere.AdvisoryTest do
              "target_pull_request" => "1"
            }},
           {"question.answer", %{"question_id" => "missing", "answer" => "injected"}},
-          {"attempt.logs", %{"attempt_id" => "missing"}},
           {"away.mark", %{}},
           {"reconcile", %{}},
           {"daemon.shutdown", %{}},

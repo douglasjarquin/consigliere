@@ -65,6 +65,12 @@ defmodule Consigliere.Advisory do
   def sanitize_result({:ok, value}), do: {:ok, sanitize(value)}
   def sanitize_result(other), do: other
 
+  def sanitize_logs_result({:ok, %{"attempt_id" => attempt_id, "lines" => lines}}) do
+    {:ok, %{"attempt_id" => sanitize(attempt_id), "lines" => sanitize(lines)}}
+  end
+
+  def sanitize_logs_result(other), do: sanitize_result(other)
+
   def sanitize(value, depth \\ 0)
 
   def sanitize(_value, depth) when depth > 6, do: "truncated"

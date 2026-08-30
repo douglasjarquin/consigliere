@@ -27,7 +27,7 @@ defmodule Consigliere.API.Protocol do
   @attempt_ops Consigliere.Capabilities.worker_operations()
   @advisory_ops ~w(advisory.orient ping version health project.list project.get mission.list
                    mission.get mission.why mission.review questions.inbox attempt.list
-                   incident.list event.list mission.create)
+                   incident.list event.list attempt.logs mission.create)
   @review_phases ~w(awaiting_authorization ready_for_review
                     awaiting_integration_authorization failed)
 
@@ -106,6 +106,10 @@ defmodule Consigliere.API.Protocol do
 
   defp advisory_authorization(op, _actor) when op in @advisory_ops, do: :ok
   defp advisory_authorization(_op, _actor), do: {:error, :advisory_operation_forbidden}
+
+  defp run_for_actor("attempt.logs", payload, %Actor{principal: "model_advisory"} = actor) do
+    run("attempt.logs", payload, actor) |> Advisory.sanitize_logs_result()
+  end
 
   defp run_for_actor(op, payload, %Actor{principal: "model_advisory"} = actor) do
     run(op, payload, actor) |> Advisory.sanitize_result()
