@@ -221,11 +221,15 @@ defmodule Consigliere.RunnerProcess do
   end
 
   defp handle_control_msg(%{"type" => "harness_exited", "exit_code" => 0}, state) do
-    %{state | stop_reason: :normal, harness_exit_received: true}
+    %{state | stop_reason: state.stop_reason || :normal, harness_exit_received: true}
   end
 
   defp handle_control_msg(%{"type" => "harness_exited", "exit_code" => code}, state) do
-    %{state | stop_reason: {:harness_exited, code}, harness_exit_received: true}
+    %{
+      state
+      | stop_reason: state.stop_reason || {:harness_exited, code},
+        harness_exit_received: true
+    }
   end
 
   defp handle_control_msg(_msg, state), do: state
@@ -346,6 +350,14 @@ defmodule Consigliere.RunnerProcess do
   end
 
   defp mark_protocol_failure(state, code) do
+    if match?({:protocol_failure, _}, state.stop_reason) do
+      state
+    else
+      mark_first_protocol_failure(state, code)
+    end
+  end
+
+  defp mark_first_protocol_failure(state, code) do
     actor =
       Actor.attempt(
         state.attempt_id,

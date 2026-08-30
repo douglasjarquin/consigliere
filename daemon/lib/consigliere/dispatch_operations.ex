@@ -69,4 +69,29 @@ defmodule Consigliere.DispatchOperations do
       Txn.update!(DispatchOperation.changeset(op, attrs))
     end)
   end
+
+  def hold_slot(attempt_id) do
+    DatabaseWriter.transaction(fn ->
+      case Repo.get_by(DispatchOperation, attempt_id: attempt_id) do
+        %DispatchOperation{slot_state: slot_state} = operation
+        when slot_state in ["pending", "granted", "held"] ->
+          Txn.update!(DispatchOperation.changeset(operation, %{slot_state: "unknown"}))
+
+        _ ->
+          :ok
+      end
+    end)
+  end
+
+  def release_held_slot(attempt_id) do
+    DatabaseWriter.transaction(fn ->
+      case Repo.get_by(DispatchOperation, attempt_id: attempt_id) do
+        %DispatchOperation{slot_state: "unknown"} = operation ->
+          Txn.update!(DispatchOperation.changeset(operation, %{slot_state: "released"}))
+
+        _ ->
+          :ok
+      end
+    end)
+  end
 end

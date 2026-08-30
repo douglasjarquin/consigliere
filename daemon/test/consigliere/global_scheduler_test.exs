@@ -2,6 +2,7 @@ defmodule Consigliere.GlobalSchedulerTest do
   use ExUnit.Case, async: false
 
   alias Consigliere.Actor
+  alias Consigliere.DispatchOperations
   alias Consigliere.Fixtures
   alias Consigliere.GlobalScheduler
   alias Consigliere.Missions
@@ -34,6 +35,7 @@ defmodule Consigliere.GlobalSchedulerTest do
       })
 
     {:ok, _} = Attempts.request_spawn(attempt.id, Actor.system())
+    {:ok, _operation} = DispatchOperations.ensure(attempt, %{slot_state: "unknown"})
 
     pid = Process.whereis(GlobalScheduler)
     ref = Process.monitor(pid)

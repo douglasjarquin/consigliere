@@ -6,13 +6,15 @@ defmodule Consigliere.GlobalScheduler do
 
   Planned is included alongside running/starting/checkpoint_requested so a
   restart cannot double-grant a slot that was already given to a Mission
-  whose Attempt has not spawned yet.
+  whose Attempt has not spawned yet. An unknown dispatch slot is also held
+  across restart until runner death is independently verified.
   """
   use GenServer
 
   import Ecto.Query
 
   alias Consigliere.AttemptStates
+  alias Consigliere.DispatchOperations.DispatchOperation
   alias Consigliere.Repo
   alias Consigliere.Attempts.Attempt
 
@@ -72,7 +74,16 @@ defmodule Consigliere.GlobalScheduler do
   defp rebuild_occupants do
     occupying = AttemptStates.occupying()
 
-    Repo.all(from(a in Attempt, where: a.status in ^occupying, select: a.mission_id))
-    |> MapSet.new()
+    attempts = Repo.all(from(a in Attempt, where: a.status in ^occupying, select: a.mission_id))
+
+    unresolved =
+      Repo.all(
+        from(o in DispatchOperation,
+          where: o.slot_state == "unknown",
+          select: o.mission_id
+        )
+      )
+
+    MapSet.new(attempts ++ unresolved)
   end
 end

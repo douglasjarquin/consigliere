@@ -8,6 +8,7 @@ defmodule Consigliere.Reconciler.Pass do
   alias Consigliere.AttemptStates
   alias Consigliere.Attempts
   alias Consigliere.DatabaseWriter
+  alias Consigliere.DispatchOperations
   alias Consigliere.GlobalScheduler
   alias Consigliere.HarnessEvents.HarnessEvent
   alias Consigliere.Incidents.Incident
@@ -47,6 +48,10 @@ defmodule Consigliere.Reconciler.Pass do
   def apply_terminal_manifest(manifest, attempt, runner_live?) do
     cond do
       AttemptStates.terminal?(attempt.status) ->
+        if manifest["state"] == "dead_verified" do
+          release_held_slot(attempt)
+        end
+
         {:skipped, attempt.id}
 
       runner_live? ->
@@ -130,8 +135,19 @@ defmodule Consigliere.Reconciler.Pass do
           {:lost, attempt.id}
       end
 
-    _ = GlobalScheduler.release_slot(attempt.mission_id)
+    if inventory == :dead_verified do
+      _ = DispatchOperations.release_held_slot(attempt.id)
+      _ = GlobalScheduler.release_slot(attempt.mission_id)
+    else
+      _ = DispatchOperations.hold_slot(attempt.id)
+    end
+
     result
+  end
+
+  defp release_held_slot(attempt) do
+    _ = DispatchOperations.release_held_slot(attempt.id)
+    _ = GlobalScheduler.release_slot(attempt.mission_id)
   end
 
   defp complete_or_lost(attempt) do

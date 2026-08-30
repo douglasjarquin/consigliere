@@ -4,12 +4,15 @@ defmodule Consigliere.Attempts.ClassifyExitTest do
   alias Consigliere.Actor
   alias Consigliere.Attempts
   alias Consigliere.Attempts.Attempt
+  alias Consigliere.DispatchOperations
   alias Consigliere.Fixtures
+  alias Consigliere.GlobalScheduler
   alias Consigliere.Missions
   alias Consigliere.Repo
 
   setup do
     Fixtures.reset_phase1_tables!()
+    GlobalScheduler.reset()
     :ok
   end
 
@@ -74,5 +77,28 @@ defmodule Consigliere.Attempts.ClassifyExitTest do
 
     assert failed.status == "failed"
     assert failed.exit_classification == "tool_error"
+  end
+
+  test "unverified death keeps the scheduler slot occupied" do
+    attempt = running_attempt!()
+    {:ok, _operation} = DispatchOperations.ensure(attempt, %{slot_state: "granted"})
+
+    assert {:ok, :granted} = GlobalScheduler.request_slot(attempt.mission_id)
+
+    assert {:ok, lost} =
+             Attempts.classify_exit(attempt.id, %{
+               process_group: :unconfirmed,
+               exit_status: nil
+             })
+
+    assert lost.status == "lost"
+    assert {:error, :busy} = GlobalScheduler.request_slot("another-mission")
+    assert DispatchOperations.get_by_attempt(attempt.id).slot_state == "unknown"
+
+    assert {:ok, _terminal} =
+             Attempts.classify_exit(attempt.id, %{process_group: :dead_verified})
+
+    assert DispatchOperations.get_by_attempt(attempt.id).slot_state == "released"
+    assert {:ok, :granted} = GlobalScheduler.request_slot("after-verified-death")
   end
 end

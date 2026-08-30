@@ -4,6 +4,7 @@ defmodule Consigliere.ReconcilerPersistTest do
   alias Consigliere.Actor
   alias Consigliere.Attempts
   alias Consigliere.Attempts.Attempt
+  alias Consigliere.DispatchOperations
   alias Consigliere.Fixtures
   alias Consigliere.GlobalScheduler
   alias Consigliere.Incidents.Incident
@@ -72,12 +73,16 @@ defmodule Consigliere.ReconcilerPersistTest do
 
   test "dead_unverified manifest quarantines the workspace and opens an incident", %{home: home} do
     %{attempt: attempt, workspace: workspace} = running_attempt!()
+    {:ok, _operation} = DispatchOperations.ensure(attempt, %{slot_state: "granted"})
+    assert {:ok, :granted} = GlobalScheduler.request_slot(attempt.mission_id)
     write_manifest!(home, attempt.id, %{"state" => "dead_unverified"})
 
     results = Reconciler.run(home: home)
     assert {:quarantined, _} = Enum.find(results, &match?({:quarantined, _}, &1))
     assert Repo.get!(Attempt, attempt.id).status == "lost"
     assert Repo.get!(Workspace, workspace.id).status == "quarantined"
+    assert DispatchOperations.get_by_attempt(attempt.id).slot_state == "unknown"
+    assert {:error, :busy} = GlobalScheduler.request_slot("unverified-replacement")
     assert Repo.aggregate(Incident, :count) >= 1
   end
 

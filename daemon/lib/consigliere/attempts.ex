@@ -5,6 +5,7 @@ defmodule Consigliere.Attempts do
   alias Consigliere.AttemptStates
   alias Consigliere.GlobalScheduler
   alias Consigliere.Attempts.Transitions
+  alias Consigliere.DispatchOperations
 
   defdelegate schedule(mission_id, actor, attrs), to: Transitions
   defdelegate request_spawn(attempt_id, actor), to: Transitions
@@ -29,8 +30,14 @@ defmodule Consigliere.Attempts do
     with {:ok, attempt} <- Transitions.classify_exit(attempt_id, attrs) do
       Consigliere.Progression.after_classify(attempt, process_group: attrs[:process_group])
 
-      if AttemptStates.terminal?(attempt.status),
-        do: GlobalScheduler.release_slot(attempt.mission_id)
+      if AttemptStates.terminal?(attempt.status) do
+        if attrs[:process_group] == :dead_verified do
+          _ = DispatchOperations.release_held_slot(attempt.id)
+          GlobalScheduler.release_slot(attempt.mission_id)
+        else
+          _ = DispatchOperations.hold_slot(attempt.id)
+        end
+      end
 
       {:ok, Consigliere.Repo.get!(Attempt, attempt_id)}
     end
