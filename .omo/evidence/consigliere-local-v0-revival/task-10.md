@@ -82,3 +82,7 @@ Command:
     MIX_ENV=test mix test test/consigliere/harness/capture_test.exs --seed 0
 
 Result: 2 passed.
+
+The follow-up implementation commit is `73dfccbb26440fac2ccf9f103f76e4c50762adcc`.
+
+Remote CI run `33295009901` then passed the full Elixir daemon job with 450 tests, including the capture regression, and all four companion jobs.
