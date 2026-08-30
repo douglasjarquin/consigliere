@@ -116,3 +116,19 @@ The temporary package prefix, Linux build fixtures, wrapper, fake Codex executab
 No credentials, raw logs, or transcripts were written to this evidence record.
 
 `git diff --check` passed before the implementation commit.
+
+## Durable progression checkpoint regression
+
+The RED test installed a SQLite trigger that rejects the durable `AttemptResult` status update during progression.
+
+Against the prior implementation, `Progression.run/2` still created the daemon-owned result ref even though the checkpoint write failed, proving that ignored persistence errors could publish external state without a durable checkpoint.
+
+The GREEN fix propagates terminal-sequence, death-verification, commit-verification, and imported-status persistence failures and stops before result-ref import when a required checkpoint cannot be recorded.
+
+Command:
+
+    MIX_ENV=test mix test test/consigliere/progression_test.exs --seed 0
+
+Result: 7 passed.
+
+No credentials, raw logs, or transcripts were written to this regression record.

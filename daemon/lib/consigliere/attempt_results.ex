@@ -103,17 +103,20 @@ defmodule Consigliere.AttemptResults do
       )
 
     if is_integer(sequence) and sequence > 0 do
-      DatabaseWriter.transaction(fn ->
-        current = Repo.get!(AttemptResult, result.id)
+      case DatabaseWriter.transaction(fn ->
+             current = Repo.get!(AttemptResult, result.id)
 
-        if current.accepted_terminal_sequence == sequence do
-          current
-        else
-          Txn.update!(AttemptResult.changeset(current, %{accepted_terminal_sequence: sequence}))
-        end
-      end)
-
-      :ok
+             if current.accepted_terminal_sequence == sequence do
+               current
+             else
+               Txn.update!(
+                 AttemptResult.changeset(current, %{accepted_terminal_sequence: sequence})
+               )
+             end
+           end) do
+        {:ok, _} -> :ok
+        {:error, _} -> {:error, :terminal_sequence_persist_failed}
+      end
     else
       {:error, :terminal_event_missing}
     end

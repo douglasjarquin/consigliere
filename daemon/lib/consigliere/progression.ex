@@ -169,8 +169,10 @@ defmodule Consigliere.Progression do
   end
 
   defp mark_death(%AttemptResult{status: "reported"} = result) do
-    _ = AttemptResults.mark(result.id, "death_verified")
-    :ok
+    case AttemptResults.mark(result.id, "death_verified") do
+      {:ok, _} -> :ok
+      {:error, _} -> {:error, :result_death_verification_persist_failed}
+    end
   end
 
   defp mark_death(_result), do: :ok
@@ -235,8 +237,10 @@ defmodule Consigliere.Progression do
   end
 
   defp mark_commit_verified(%AttemptResult{status: "death_verified"} = result) do
-    _ = AttemptResults.mark(result.id, "commit_verified", %{verified_at: DateTime.utc_now()})
-    :ok
+    case AttemptResults.mark(result.id, "commit_verified", %{verified_at: DateTime.utc_now()}) do
+      {:ok, _} -> :ok
+      {:error, _} -> {:error, :result_commit_verification_persist_failed}
+    end
   end
 
   defp mark_commit_verified(_result), do: :ok
@@ -258,14 +262,14 @@ defmodule Consigliere.Progression do
   defp mark_imported(result, sha) do
     ref = Git.result_ref(result.project_id, result.attempt_id)
 
-    _ =
-      AttemptResults.mark(result.id, "imported", %{
-        imported_sha: sha,
-        result_ref: ref,
-        imported_at: DateTime.utc_now()
-      })
-
-    {:ok, Repo.get!(AttemptResult, result.id)}
+    case AttemptResults.mark(
+           result.id,
+           "imported",
+           %{imported_sha: sha, result_ref: ref, imported_at: DateTime.utc_now()}
+         ) do
+      {:ok, _} -> {:ok, Repo.get!(AttemptResult, result.id)}
+      {:error, _} -> {:error, :result_import_persist_failed}
+    end
   end
 
   defp finalize_attempt(attempt, result) do
@@ -332,6 +336,9 @@ defmodule Consigliere.Progression do
   defp map_git_failure(:shared_objects), do: :workspace_configuration_violation
   defp map_git_failure({:result_import_failed, _}), do: :result_import_failed
   defp map_git_failure(:result_ref_mismatch), do: :result_ref_mismatch
+  defp map_git_failure(:result_death_verification_persist_failed), do: :result_persist_failed
+  defp map_git_failure(:result_commit_verification_persist_failed), do: :result_persist_failed
+  defp map_git_failure(:result_import_persist_failed), do: :result_persist_failed
   defp map_git_failure(reason) when is_atom(reason), do: reason
   defp map_git_failure(_reason), do: :progression_failed
 

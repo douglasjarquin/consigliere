@@ -78,6 +78,35 @@ defmodule Consigliere.ProgressionTest do
     assert Repo.aggregate(Gate, :count) == 1
   end
 
+  test "does not import when a durable progression checkpoint cannot be recorded", %{
+    root: root
+  } do
+    %{attempt: attempt, mission: mission, project: project, sha: sha} =
+      completed_with_commit!(root)
+
+    Repo.query!("""
+    CREATE TRIGGER attempt_results_block_progression
+    BEFORE UPDATE OF status ON attempt_results
+    BEGIN
+      SELECT RAISE(ABORT, 'progression status write blocked');
+    END
+    """)
+
+    on_exit(fn -> Repo.query("DROP TRIGGER IF EXISTS attempt_results_block_progression") end)
+
+    assert {:error, {:progression_failed, _reason}} =
+             Progression.run(attempt.id, process_group: :dead_verified, forced_outcome: :passed)
+
+    assert Repo.get!(Attempt, attempt.id).status == "failed"
+    assert Repo.get!(Mission, mission.id).phase == "active"
+    assert Repo.get!(Mission, mission.id).current_checkpoint_sha == nil
+
+    assert {:error, _} =
+             Git.read_ref(project.trusted_mirror_path, Git.result_ref(project.id, attempt.id))
+
+    assert sha != Repo.get!(Mission, mission.id).current_checkpoint_sha
+  end
+
   test "a Question checkpoint imports the SHA and leaves the Mission active", %{root: root} do
     %{attempt: attempt, mission: mission, workspace: workspace, ws: ws} =
       running_in_workspace!(root)
