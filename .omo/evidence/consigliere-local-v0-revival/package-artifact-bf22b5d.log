@@ -1,0 +1,27 @@
+source_commit=bf22b5d4cae239a222a3065ca4b34b574dd676ad
+
+command:
+
+    PATH=/opt/homebrew/opt/erlang/bin:$PATH scripts/package.sh .tmp/package-bf22b5d.A1egbx
+
+package_exit=0
+
+package_prefix=.tmp/package-bf22b5d.A1egbx
+
+artifact cs: cc52a160f40a4822e55499debbc32afee8697a3965102d70c86c42f6b7c62fce, Mach-O 64-bit executable arm64
+
+artifact csd: d006adef2851538b01c158a2f9ec6ae9281e3e4f1d38c7f1bf9097d90feaff5f, Mach-O 64-bit executable arm64
+
+artifact cs-runner: d44716cb5d2c1a925cea5548b05decf7f46ae7e832a83e7c2a047bf2577dfef5, Mach-O 64-bit executable arm64, release priv path
+
+artifact cs-attempt: 6d01684d222943bb348937ade4ca85569ae470e9cc78dda50d813c37bb4c09a2, Mach-O 64-bit executable arm64, release priv path
+
+installed_version={"cs":"0.1.0","protocol":1}
+
+runner_help_exit=0
+
+attempt_help_exit=2, bounded usage output expected for an operation-less helper invocation
+
+The release contains 15 `.exs` files under `priv/repo/migrations` as runtime migration input, but no `mix.exs`, `mix.lock`, or `.ex` source files.
+
+The release contains seven shell helper files used by the packaged test and runtime assets, all with `/bin/sh` shebangs, and no legacy Bash supervisor executable.

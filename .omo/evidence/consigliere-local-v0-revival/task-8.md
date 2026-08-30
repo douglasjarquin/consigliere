@@ -99,6 +99,24 @@ No second dispatcher, hidden spawn retry, worker before authorization, native tr
 
 `git diff --check` was clean, and the temporary driver, Go wrapper, and generated runner binaries were moved to Trash rather than permanently deleted.
 
+## Exact-head boundary closure
+
+At exact head `8d839378a55e36222e13c19e84e1f91543fc92c4`, the RED boundary slice returned `8/10` before the scheduler, advisory, and runner-persistence fixes, with the expected immediate-capacity and handshaken-runner failures.
+
+The GREEN command was `docker run --rm -v "$PWD":/workspace -w /workspace/runner/cs-runner elixir:1.20-otp-29 ... mix format --check-formatted ... MIX_ENV=test mix test test/consigliere/global_scheduler_test.exs test/consigliere/advisory_test.exs test/consigliere/runner_process_recovery_test.exs --no-color --seed 0`.
+
+It returned `10 passed`.
+
+The scheduler regression now proves a planned cancellation releases both the durable dispatch slot and the live scheduler cache without releasing a slot while another Attempt or unreleased dispatch remains.
+
+The advisory regression now rejects `attempt.logs` before log loading for the model-advisory principal.
+
+The runner regression now proves a fenced `starting` to `running` persistence failure cancels the authenticated external runner, records a bounded spawn failure, leaves no Registry runner, and reaches a terminal manifest.
+
+The full Linux daemon gate then returned `483 passed (1 doctest, 482 tests)` in three consecutive seed-0 runs.
+
+The exact-head receipt is `.omo/evidence/consigliere-local-v0-revival/daemon-linux-gate-8d83937.log`.
+
 ## Post-audit invariant closure
 
 The final audit reproduced a recovery leak where canceling a planned Attempt left its durable dispatch slot pending and a scheduler rebuild remained busy.
@@ -114,3 +132,15 @@ The GREEN command `MIX_ENV=test mix test test/consigliere/attempts/attempt_test.
 The authoritative Linux daemon gate on the committed follow-up returned `482 passed (1 doctest, 481 tests)` in each of three consecutive seed-0 runs.
 
 The failure classes covered here were stale planned slots, duplicate recoverable continuation, direct SQLite uniqueness violation, planned replacement, restart rebuild, and repeated cancellation.
+
+## Final exact-head boundary receipt
+
+The final source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
+
+The runner startup boundary RED proof against the pre-fix runtime failed with `a runner started without a durable Attempt`.
+
+The GREEN recovery suite passed six tests after startup now fails closed for missing, invalid, non-starting, and failed-persistence Attempt identities, tears down the authenticated runner, records a bounded spawn failure, and leaves no Registry runner.
+
+The complete Linux daemon gate then passed `486 passed (1 doctest, 485 tests)` in three consecutive seed-0 runs.
+
+The bounded receipt is `.omo/evidence/consigliere-local-v0-revival/runner-startup-boundary-bf22b5d.log`.

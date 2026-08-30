@@ -1,0 +1,17 @@
+source_commit=bf22b5d4cae239a222a3065ca4b34b574dd676ad
+
+command:
+
+    cd daemon && PATH=/opt/homebrew/opt/erlang/bin:$PATH mix format --check-formatted && MIX_ENV=test mix compile --warnings-as-errors && MIX_ENV=test mix test --no-color --seed 0
+
+format_rc=0
+
+compile_rc=0
+
+test_rc=2
+
+result=477/486 passed (1 doctest, 476/485 tests), nine host-specific characterization failures
+
+The nine failures are the known stale probe-socket timing, short macOS Unix-socket path, `/var` versus `/private/var`, and macOS process-group fixture observations.
+
+This native characterization is not substituted for the authoritative Linux release gate.

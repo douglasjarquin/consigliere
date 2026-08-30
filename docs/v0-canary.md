@@ -1,5 +1,11 @@
 # Consigliere Local V0 canary
 
+The final implementation head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
+
+Its native package and installed lifecycle are recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-bf22b5d.log` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-bf22b5d.log`.
+
+The already selected real canary remains the only implementation run and was not rerun after this bounded hardening because the operator-controlled canary forbids duplicate implementation work.
+
 ## Operator input
 
 The operator selected a noncritical `dotfiles` Project and the natural task of removing only the public Zumba repository from the main-host clone list.
@@ -20,9 +26,19 @@ The final run supplied only a temporary auth file through `CS_CODEX_AUTH_HOME`, 
 
 The real canary execution package was built from committed revival head `e2b7fe445e96c356354f31f849e9756b265ecec8`.
 
-The final exact-runtime-head package was rebuilt from `42933d103da9171c76b1564888e0d6557291fb5d` for the installed lifecycle and scope gates recorded in F3.
+The final exact-runtime-head package was rebuilt from `bf22b5d4cae239a222a3065ca4b34b574dd676ad` for the installed lifecycle and scope gates recorded in F3.
 
 That final package was not used to rerun the same Mission because the operator-controlled canary forbids duplicate implementation work.
+
+## Current exact-head closure
+
+The final source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
+
+The package was rebuilt from that exact head and the installed-only lifecycle passed from `/tmp` with a fresh `CS_HOME`, `env -i`, no source or Mix access, and no shared Made daemon.
+
+The full Linux daemon gate passed `486 passed (1 doctest, 485 tests)` in three consecutive seed-0 runs, and both Go gates passed format, vet, ordinary tests, race, shuffle, and build checks.
+
+The selected canary was not rerun against this head because doing so would create duplicate implementation work.
 
 The private ledger captured bounded per-turn token counters and ContextPack byte and input-token measurements without retaining full prompts or transcripts.
 

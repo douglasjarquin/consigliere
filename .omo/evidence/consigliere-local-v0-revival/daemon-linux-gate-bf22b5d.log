@@ -1,0 +1,17 @@
+source_commit=bf22b5d4cae239a222a3065ca4b34b574dd676ad
+
+command:
+
+    docker run --rm -v "$PWD":/workspace -w /workspace/runner/cs-runner elixir:1.20-otp-29 sh -lc 'set -e; apt-get update -qq && apt-get install -y -qq golang-go >/dev/null && go version && go build -o /workspace/daemon/priv/cs-runner . && cd /workspace/daemon && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && mix format --check-formatted && MIX_ENV=test mix compile --warnings-as-errors && MIX_ENV=test mix test --no-color --seed 0'
+
+go_version=go1.26.6 linux/arm64
+
+run_1: exit=0, result=486 passed (1 doctest, 485 tests)
+
+run_2: exit=0, result=486 passed (1 doctest, 485 tests)
+
+run_3: exit=0, result=486 passed (1 doctest, 485 tests)
+
+format=pass
+
+warnings_as_errors_compile=pass

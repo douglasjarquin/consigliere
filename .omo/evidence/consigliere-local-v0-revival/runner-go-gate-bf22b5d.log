@@ -1,0 +1,15 @@
+source_commit=bf22b5d4cae239a222a3065ca4b34b574dd676ad
+
+command:
+
+    cd runner/cs-runner && test -z "$(gofmt -l .)" && go vet ./... && go test ./... && go test -race -shuffle=on -count=1 ./... && go build ./...
+
+go_version=go1.27.0 darwin/arm64
+
+ordinary_tests=pass
+
+race_shuffle_tests=pass
+
+build=pass
+
+receipt=RUNNER_GO_GATE_PASS

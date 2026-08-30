@@ -172,6 +172,16 @@ The final run is one completed Consigliere record and zero FirstMate records, so
 
 No credentials, raw Codex configuration, full prompt, transcript, or unredacted logs are included here.
 
+## Final exact-head package retry boundary
+
+After the selected canary record, exact head `8d839378a55e36222e13c19e84e1f91543fc92c4` was packaged and exercised through the installed `csd migrate`, `csd start`, `cs ping`, `cs doctor`, `csd stop`, `csd restart`, and repeated-stop lifecycle.
+
+The package was native macOS arm64 and the installed lifecycle ended with zero sockets, PID files, owner files, notification files, and package processes.
+
+The current package and cleanup receipts are `.omo/evidence/consigliere-local-v0-revival/package-artifact-8d83937.log` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-8d83937.log`.
+
+The selected canary was not rerun because doing so would create duplicate implementation work; its one Mission, two operator-authorized Attempts, zero FirstMate records, and insufficient Promote evidence remain authoritative.
+
 ## Record accounting
 
 This evidence record intentionally preserves the earlier package qualification and failure-probe records instead of collapsing their Mission and Attempt identifiers.
@@ -245,5 +255,17 @@ The cleanup receipt was `CLEANUP=trashed:/tmp/cs-final-42933d1-home.e7matc`; the
 The CI-shaped Linux daemon gate used actual Go `1.26.6` and passed format, warnings-as-errors compilation, and `482 tests` including one doctest in each of three consecutive seed-0 runs.
 
 The CLI and runner Go gates passed formatting, vet, ordinary tests, race and shuffle tests, and builds.
+
+The final result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.
+
+## Final exact-head package closure
+
+The final implementation head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
+
+The selected canary Mission and its two Attempts were not rerun after the runtime hardening because the operator-controlled canary forbids duplicate implementation work.
+
+The package rebuilt from the final head passed the installed-only lifecycle from `/tmp`, including migration, start, ping, health, doctor, status, repeated stop, restart, and final stop with zero residual package processes.
+
+The exact package identities, command results, and Trash cleanup receipt are recorded in `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`.
 
 The final result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.

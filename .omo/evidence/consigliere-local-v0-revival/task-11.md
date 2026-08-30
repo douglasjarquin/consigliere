@@ -73,6 +73,18 @@ No credentials, raw logs, transcripts, or secrets were written to this evidence 
 
 `git diff --check` passed before the implementation commit.
 
+## Exact-head startup persistence closure
+
+Commit `8d839378a55e36222e13c19e84e1f91543fc92c4` closes the handshaken-runner leak found by the exact-head code review.
+
+`RunnerProcess` now accepts a runner only after the durable `starting` to `running` transition succeeds.
+
+If that transition fails, the authenticated control channel receives cancellation, the bounded termination completion is consumed, the socket and port are closed, the private channel secret is released, and the Attempt is marked `spawn_failed` when still recoverable.
+
+The RED/GREEN process proof and the three-run full Linux result are recorded in `task-8.md` and `.omo/evidence/consigliere-local-v0-revival/daemon-linux-gate-8d83937.log`.
+
+The current native macOS characterization is `474/483` with the same nine host-only fixture categories named in `.omo/evidence/consigliere-local-v0-revival/macos-native-gate-8d83937.log`.
+
 ## Exact-head hardening follow-up
 
 The exact-head review found that the prior verifier accepted a same-basename executable and hashed the configured path rather than the executable belonging to the observed PID.
@@ -237,3 +249,15 @@ The process-level report suite passed `2` tests, and the authoritative Linux dae
 The native macOS full suite passed `467/476` with nine host-specific socket, path, and reconciler-fixture observations; the packaged macOS lifecycle passed independently with exact owner identity change, repeated stop, restart, and zero residual package processes.
 
 Failure classes exercised or ruled out here were stale state, repeated interruption, malformed protocol completion, misleading process exit status, and flaky shared-test timing.
+
+## Final runner identity and release-gate receipt
+
+The final source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
+
+The fail-closed startup RED/GREEN proof is recorded in `runner-startup-boundary-bf22b5d.log`.
+
+The final Linux daemon suite passed `486 passed (1 doctest, 485 tests)` in three consecutive seed-0 runs, and the CLI and runner Go gates passed formatting, vet, ordinary tests, race and shuffle tests, and builds.
+
+The final package and installed lifecycle receipts are `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`.
+
+The selected real canary was not rerun after this runtime hardening because the operator-controlled rule forbids duplicate implementation work.

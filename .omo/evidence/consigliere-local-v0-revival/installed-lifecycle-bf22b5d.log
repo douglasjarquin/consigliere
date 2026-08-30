@@ -1,0 +1,17 @@
+source_commit=bf22b5d4cae239a222a3065ca4b34b574dd676ad
+
+package_prefix=.tmp/package-bf22b5d.A1egbx
+
+The installed lifecycle ran from `/tmp` with `env -i`, package-only `PATH`, a fresh CS_HOME, and no source checkout or Mix access.
+
+The sequence was `cs version --json`, `csd migrate`, `csd start`, `cs ping`, `cs health`, `cs doctor`, `csd status`, `cs projects`, repeated `csd stop`, `csd restart`, post-restart `cs ping`, `cs health`, `cs doctor`, `csd status`, and repeated final `csd stop`.
+
+Every product command exited `0`.
+
+The version response was `{"cs":"0.1.0","protocol":1}`.
+
+The restart changed the verified owner from PID `58056` to PID `58883`.
+
+The final cleanup receipt was `F3_INSTALLED_LIFECYCLE stop=verified sockets=0 pid_files=0 owner_files=0 notifications=0 package_processes=0`.
+
+The cleanup receipt was `CLEANUP=trashed:/tmp/cs-final-bf22b5d-home.7cleIL,/tmp/cs-final-bf22b5d-env.1qGLXZ`.

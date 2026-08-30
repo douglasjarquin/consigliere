@@ -1,0 +1,15 @@
+source_commit=bf22b5d4cae239a222a3065ca4b34b574dd676ad
+
+RED command against the pre-fix source head `8d839378a55e36222e13c19e84e1f91543fc92c4`:
+
+    MIX_ENV=test mix test test/consigliere/runner_process_recovery_test.exs:99 --no-color --seed 0
+
+RED result: `a runner started without a durable Attempt`, 0/1 passed.
+
+GREEN command at the implementation source commits `e5936d5` and `bf22b5d4cae239a222a3065ca4b34b574dd676ad`:
+
+    MIX_ENV=test mix test test/consigliere/runner_process_recovery_test.exs --no-color --seed 0
+
+GREEN result: 6 passed.
+
+The regression covers missing, invalid, and non-starting Attempt identities, external runner cleanup, registry absence, terminal manifest evidence, stale fencing, and repeated protocol failure persistence.

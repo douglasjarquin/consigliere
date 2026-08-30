@@ -43,3 +43,21 @@ The native macOS daemon command passed formatting and compilation and reported `
 The selected canary was not rerun against this final package because the operator-controlled canary forbids duplicate implementation work.
 
 The selected canary remains one completed Consigliere Mission with one operator-authorized continuation, zero FirstMate Missions, and insufficient evidence for Promote.
+
+## Current final exact-head gate receipt
+
+The final runtime and package evidence is bound to source commit `bf22b5d4cae239a222a3065ca4b34b574dd676ad` on `revival/v0-local-codex`.
+
+The authoritative Linux command passed format, warnings-as-errors compilation, and `486 passed (1 doctest, 485 tests)` in each of three consecutive seed-0 runs.
+
+The CLI and runner commands passed formatting, vet, ordinary tests, race and shuffle tests, and builds.
+
+The package command exited `0`, and the package artifact receipt records native arm64 `cs`, `csd`, `cs-runner`, and `cs-attempt` hashes plus the version response.
+
+The installed lifecycle ran from `/tmp` with `env -i`, fresh temporary homes, and package-only execution.
+
+Every lifecycle command exited `0`, restart changed the verified owner identity, repeated stop was idempotent, and final cleanup reported zero sockets, PID files, owner files, notification files, and package processes.
+
+The exact package and lifecycle outputs are `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`, with `macos-native-gate-bf22b5d.log` retaining the named host-only characterization.
+
+The selected canary was not rerun against this final package because the operator-controlled canary forbids duplicate implementation work.

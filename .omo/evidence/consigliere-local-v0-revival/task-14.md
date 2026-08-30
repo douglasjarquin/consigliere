@@ -113,3 +113,21 @@ The temporary package prefix, Linux binaries, wrapper, fake Codex executable, ge
 No credentials, raw logs, or transcripts were written to this evidence record.
 
 git diff --check passed before the implementation commit.
+
+## Exact-head advisory boundary closure
+
+Commit `8d839378a55e36222e13c19e84e1f91543fc92c4` removes `attempt.logs` from the model-advisory operation allowlist.
+
+The advisory principal now fails closed before reading Attempt log files, while the Boss and daemon read-only log paths remain unchanged.
+
+The RED/GREEN authorization proof is recorded in `task-8.md`, and the exact-head package and lifecycle receipts are `.omo/evidence/consigliere-local-v0-revival/package-artifact-8d83937.log` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-8d83937.log`.
+
+## Final exact-head advisory boundary receipt
+
+The final source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
+
+The advisory allowlist remains fail-closed for logs and every authority-bearing operation, and the final Linux daemon, Go, package, and installed-lifecycle receipts pass at that exact head.
+
+The current package and lifecycle receipts are `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`.
+
+The advisory surface was not broadened during the runner recovery hardening, and no canary duplicate or product delivery action was introduced.

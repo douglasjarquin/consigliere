@@ -89,3 +89,21 @@ Raw canary database, manifests, usage rows, and logs remain outside this reposit
 Only intended tracked implementation, test, documentation, and evidence files are staged for delivery; local untracked build logs and scratch artifacts are excluded from the PR.
 
 PR #101 remains historical input and PR #141 is the separate draft replacement; neither is merged.
+
+## Current final exact-head evidence
+
+The prior receipt targets are historical intermediate heads.
+
+The current implementation head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad` on `revival/v0-local-codex`.
+
+The final Linux daemon receipt reports `486 passed (1 doctest, 485 tests)` in three consecutive seed-0 runs.
+
+The final CLI and runner Go receipts report format, vet, ordinary tests, race and shuffle tests, and builds passing.
+
+The final package and installed lifecycle receipts are `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`.
+
+The selected real canary remains the single naturally occurring Mission with one operator-authorized continuation and zero FirstMate duplicate Missions.
+
+The canary was not rerun against the final package because the operator-controlled no-duplicate rule forbids duplicate implementation work.
+
+The natural comparable sample remains below 20, so the evidence is insufficient for Promote and the operator retains Continue or Stop.
