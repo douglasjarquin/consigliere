@@ -70,20 +70,26 @@ defmodule Consigliere.ProjectVerifications.Command do
     else
       receive do
         {^port, {:data, data}} ->
-          next = output <> data
-
-          if byte_size(next) > @max_output do
+          if byte_size(output) + byte_size(data) > @max_output do
             close_port(port)
+            remaining = @max_output - byte_size(output)
+
+            bounded_output =
+              if remaining > 0 do
+                output <> binary_part(data, 0, remaining)
+              else
+                output
+              end
 
             result(
               "infrastructure_error",
-              binary_part(next, 0, @max_output),
+              bounded_output,
               nil,
               false,
               "output_too_large"
             )
           else
-            collect(port, next, deadline, opts)
+            collect(port, output <> data, deadline, opts)
           end
 
         {^port, {:exit_status, status}} ->

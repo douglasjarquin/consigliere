@@ -44,6 +44,40 @@ defmodule Consigliere.ProjectVerificationsCommandTest do
     assert output_bytes <= 65_536
   end
 
+  test "bounds one oversized command output before accumulating it", %{workspace: workspace} do
+    parent = self()
+
+    pid =
+      spawn(fn ->
+        Process.flag(:max_heap_size, %{size: 600_000, kill: true, error_logger: false})
+
+        send(
+          parent,
+          {:result,
+           Command.run(
+             ["head", "-c", "200000", "/dev/zero"],
+             workspace,
+             total_timeout_ms: 2_000
+           )}
+        )
+      end)
+
+    ref = Process.monitor(pid)
+
+    receive do
+      {:result, %{outcome: "infrastructure_error", error_code: "output_too_large"} = result} ->
+        assert result.output_bytes == 65_536
+
+      {:DOWN, ^ref, :process, ^pid, reason} ->
+        flunk(
+          "oversized command process exited before returning a bounded result: #{inspect(reason)}"
+        )
+    after
+      5_000 ->
+        flunk("oversized command did not return a bounded result")
+    end
+  end
+
   test "does not inherit unlisted environment variables", %{workspace: workspace} do
     System.put_env("CS_SYNTHETIC_SECRET", "must-not-cross")
 
