@@ -10,6 +10,9 @@ defmodule Consigliere.ProcessGroup do
 
   @kill_paths ["/bin/kill", "/usr/bin/kill"]
   @ps_paths ["/bin/ps", "/usr/bin/ps"]
+  @observer_timeout_ms 2_000
+
+  alias Consigliere.Runtime.Command
 
   def terminate(pgid, opts \\ [])
 
@@ -65,15 +68,22 @@ defmodule Consigliere.ProcessGroup do
   def liveness(_), do: :identity_mismatch
 
   def member?(pid, pgid) when is_integer(pid) and pid > 1 and is_integer(pgid) and pgid > 1 do
-    case :os.type() do
-      {:unix, :linux} -> linux_member?(pid, pgid)
-      _ -> ps_member?(pid, pgid)
-    end
-  rescue
-    _ -> false
+    membership(pid, pgid) == :member
   end
 
   def member?(_pid, _pgid), do: false
+
+  def membership(pid, pgid)
+      when is_integer(pid) and pid > 1 and is_integer(pgid) and pgid > 1 do
+    case :os.type() do
+      {:unix, :linux} -> linux_membership(pid, pgid)
+      _ -> ps_membership(pid, pgid)
+    end
+  rescue
+    _ -> :unknown
+  end
+
+  def membership(_pid, _pgid), do: :unknown
 
   def alive?(pgid) when is_integer(pgid) and pgid > 1 do
     liveness(pgid) != :absent
@@ -89,7 +99,10 @@ defmodule Consigliere.ProcessGroup do
         {"", 1}
 
       kill ->
-        System.cmd(kill, [sig, "--", "-#{pgid}"], stderr_to_stdout: true)
+        case Command.run(kill, [sig, "--", "-#{pgid}"], timeout_ms: @observer_timeout_ms) do
+          {:ok, output, status} -> {output, status}
+          {:error, _reason, output} -> {output, 1}
+        end
     end
   rescue
     _ -> {"", 1}
@@ -121,20 +134,34 @@ defmodule Consigliere.ProcessGroup do
   end
 
   defp linux_runnable(pgid) do
-    stats =
-      Path.wildcard("/proc/[0-9]*/stat")
-      |> Enum.flat_map(&read_proc_stat(&1, pgid))
-      |> Enum.reject(&zombie?/1)
+    case File.ls("/proc") do
+      {:ok, entries} ->
+        entries
+        |> Enum.filter(&numeric_entry?/1)
+        |> Enum.reduce_while({:ok, []}, fn entry, {:ok, stats} ->
+          case read_proc_stat(Path.join(["/proc", entry, "stat"]), pgid) do
+            {:ok, values} -> {:cont, {:ok, stats ++ values}}
+            :absent -> {:cont, {:ok, stats}}
+            :error -> {:halt, :error}
+          end
+        end)
+        |> case do
+          {:ok, stats} -> {:ok, Enum.reject(stats, &zombie?/1)}
+          :error -> :error
+        end
 
-    {:ok, stats}
+      {:error, _reason} ->
+        :error
+    end
   rescue
     _ -> :error
   end
 
   defp read_proc_stat(path, pgid) do
     case File.read(path) do
-      {:ok, contents} -> parse_proc_stat(contents, pgid)
-      _ -> []
+      {:ok, contents} -> {:ok, parse_proc_stat(contents, pgid)}
+      {:error, :enoent} -> :absent
+      {:error, _reason} -> :error
     end
   end
 
@@ -151,39 +178,48 @@ defmodule Consigliere.ProcessGroup do
     end
   end
 
-  defp linux_member?(pid, pgid) do
+  defp linux_membership(pid, pgid) do
     case File.read("/proc/#{pid}/stat") do
-      {:ok, contents} -> proc_stat_member?(contents, pgid)
-      _ -> false
+      {:ok, contents} -> proc_stat_membership(contents, pgid)
+      {:error, :enoent} -> :absent
+      {:error, _reason} -> :unknown
     end
   end
 
-  defp proc_stat_member?(contents, pgid) do
+  defp proc_stat_membership(contents, pgid) do
     case Regex.run(~r/\) [A-Za-z] \d+ (\d+)/, contents, capture: :all_but_first) do
-      [pgrp] -> Integer.parse(pgrp) == {pgid, ""}
-      _ -> false
+      [pgrp] -> if Integer.parse(pgrp) == {pgid, ""}, do: :member, else: :not_member
+      _ -> :unknown
     end
   end
 
-  defp ps_member?(pid, pgid) do
+  defp ps_membership(pid, pgid) do
     case tool_path(@ps_paths) do
       nil ->
-        false
+        :unknown
 
       ps ->
-        case System.cmd(ps, ["-o", "pgid=", "-p", Integer.to_string(pid)], stderr_to_stdout: true) do
-          {output, 0} ->
+        case Command.run(ps, ["-o", "pgid=", "-p", Integer.to_string(pid)],
+               timeout_ms: @observer_timeout_ms
+             ) do
+          {:ok, output, 0} ->
             case Integer.parse(String.trim(output)) do
-              {^pgid, ""} -> true
-              _ -> false
+              {^pgid, ""} -> :member
+              {_other, ""} -> :not_member
+              _ -> :unknown
             end
 
-          _ ->
-            false
+          {:ok, output, _status} ->
+            if String.contains?(String.downcase(output), "no such process"),
+              do: :absent,
+              else: :unknown
+
+          {:error, _reason, _output} ->
+            :unknown
         end
     end
   rescue
-    _ -> false
+    _ -> :unknown
   end
 
   defp ps_runnable(pgid) do
@@ -192,8 +228,8 @@ defmodule Consigliere.ProcessGroup do
         :error
 
       ps ->
-        case System.cmd(ps, ["-axo", "pgid=,stat="], stderr_to_stdout: true) do
-          {out, 0} ->
+        case Command.run(ps, ["-axo", "pgid=,stat="], timeout_ms: @observer_timeout_ms) do
+          {:ok, out, 0} ->
             {:ok,
              out
              |> String.split("\n", trim: true)
@@ -225,4 +261,6 @@ defmodule Consigliere.ProcessGroup do
   defp zombie?(_), do: false
 
   defp tool_path(paths), do: Enum.find(paths, &File.regular?/1)
+
+  defp numeric_entry?(entry), do: Regex.match?(~r/\A[0-9]+\z/, entry)
 end

@@ -224,7 +224,7 @@ func validateRunnerFrameSchema(message map[string]any) error {
 	}
 	switch message["type"] {
 	case "runner_started":
-		for _, key := range []string{"runner_pid", "harness_pid", "pgid", "harness_executable_path", "harness_executable_sha256", "started_at", "manifest_digest", "runner_executable_sha256"} {
+		for _, key := range []string{"runner_pid", "harness_pid", "pgid", "harness_executable_path", "harness_executable_sha256", "harness_start_fingerprint", "runner_start_fingerprint", "started_at", "manifest_digest", "runner_executable_sha256"} {
 			allowed[key] = struct{}{}
 		}
 	case "stdout_chunk", "stderr_chunk":

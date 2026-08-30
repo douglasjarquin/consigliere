@@ -102,8 +102,18 @@ defmodule Consigliere.Runtime.Inventory do
     end
   end
 
-  defp schema(%{"schema_version" => 1, "attempt_id" => id, "state" => state})
-       when is_binary(id) and is_binary(state),
+  defp schema(%{
+         "schema_version" => 1,
+         "attempt_id" => id,
+         "state" => state,
+         "workspace_generation" => workspace_generation,
+         "fencing_generation" => fencing_generation,
+         "runner_start_fingerprint" => runner_start_fingerprint,
+         "harness_start_fingerprint" => harness_start_fingerprint
+       })
+       when is_binary(id) and is_binary(state) and byte_size(workspace_generation) > 0 and
+              byte_size(fencing_generation) > 0 and byte_size(runner_start_fingerprint) > 0 and
+              byte_size(harness_start_fingerprint) > 0,
        do: :ok
 
   defp schema(_), do: {:error, :corrupt}
@@ -210,6 +220,7 @@ defmodule Consigliere.Runtime.Inventory do
       manifest["pgid"],
       manifest["runner_executable_path"],
       manifest["runner_executable_sha256"],
+      manifest["runner_start_fingerprint"],
       :runner
     )
   end
@@ -222,18 +233,29 @@ defmodule Consigliere.Runtime.Inventory do
       manifest["pgid"],
       manifest["harness_executable_path"],
       manifest["harness_executable_sha256"],
+      manifest["harness_start_fingerprint"],
       :harness
     )
   end
 
   defp harness_identity(_), do: {:ok, :missing}
 
-  defp identity_state(pid, pgid, executable_path, executable_sha256, role) do
-    case ProcessIdentity.verify(pid, executable_path, executable_sha256) do
+  defp identity_state(pid, pgid, executable_path, executable_sha256, start_fingerprint, role) do
+    if not nonempty_string?(start_fingerprint) do
+      {:error, :identity}
+    else
+      verify_identity(pid, pgid, executable_path, executable_sha256, start_fingerprint, role)
+    end
+  end
+
+  defp verify_identity(pid, pgid, executable_path, executable_sha256, start_fingerprint, role) do
+    case ProcessIdentity.verify(pid, executable_path, executable_sha256, start_fingerprint) do
       :verified ->
-        case {role, ProcessGroup.member?(pid, pgid)} do
-          {:runner, false} -> {:ok, :verified}
-          {:harness, true} -> {:ok, :verified}
+        case {role, ProcessGroup.membership(pid, pgid)} do
+          {:runner, :not_member} -> {:ok, :verified}
+          {:harness, :member} -> {:ok, :verified}
+          {_, :absent} -> {:ok, :absent}
+          {_, :unknown} -> {:error, :observation_failed}
           _ -> {:error, :identity}
         end
 
@@ -250,4 +272,6 @@ defmodule Consigliere.Runtime.Inventory do
         {:error, :observation_failed}
     end
   end
+
+  defp nonempty_string?(value), do: is_binary(value) and value != ""
 end

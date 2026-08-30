@@ -94,6 +94,10 @@ defmodule Consigliere.Runtime.InventoryTest do
         "attempt_id" => attempt.id,
         "mission_id" => attempt.mission_id,
         "fencing_token" => attempt.fencing_token,
+        "fencing_generation" => attempt.fencing_token,
+        "workspace_generation" => "fixture-workspace-generation",
+        "runner_start_fingerprint" => "fixture-runner-start",
+        "harness_start_fingerprint" => "fixture-harness-start",
         "state" => "running",
         "pgid" => 424_242
       })
@@ -111,6 +115,18 @@ defmodule Consigliere.Runtime.InventoryTest do
 
     assert Inventory.verify(path, home) == :stale_generation
     refute Inventory.signalable?(:stale_generation)
+  end
+
+  test "running inventory requires both durable generations", %{home: home} do
+    {attempt, _} = running_attempt!()
+
+    path =
+      write_manifest!(home, attempt, %{
+        "state" => "running",
+        "workspace_generation" => nil
+      })
+
+    assert Inventory.verify(path, home) == :corrupt
   end
 
   test "pgid 1 is unsafe and is not signalable", %{home: home} do
@@ -133,6 +149,10 @@ defmodule Consigliere.Runtime.InventoryTest do
         "attempt_id" => id,
         "mission_id" => Ecto.UUID.generate(),
         "fencing_token" => "forge",
+        "fencing_generation" => "forge",
+        "workspace_generation" => "fixture-workspace-generation",
+        "runner_start_fingerprint" => "fixture-runner-start",
+        "harness_start_fingerprint" => "fixture-harness-start",
         "state" => "running",
         "pgid" => 424_242
       })
@@ -184,7 +204,9 @@ defmodule Consigliere.Runtime.InventoryTest do
     manifest = %{
       "pgid" => harness_pid,
       "runner_pid" => dead_runner_pid,
-      "harness_pid" => harness_pid
+      "harness_pid" => harness_pid,
+      "runner_start_fingerprint" => "dead-runner-start",
+      "harness_start_fingerprint" => start_fingerprint(harness_pid, "fixture-harness-start")
     }
 
     assert Inventory.liveness(manifest) == :orphaned_runner
@@ -215,6 +237,12 @@ defmodule Consigliere.Runtime.InventoryTest do
     dir = Path.join(Home.runtime_attempts_dir(home), attempt.id)
     File.mkdir_p!(dir)
 
+    workspace_generation =
+      case attempt.workspace_id do
+        nil -> "fixture-workspace-generation"
+        id -> Consigliere.Repo.get!(Consigliere.Workspaces.Workspace, id).lease_id
+      end
+
     manifest =
       Map.merge(
         %{
@@ -222,16 +250,41 @@ defmodule Consigliere.Runtime.InventoryTest do
           "attempt_id" => attempt.id,
           "mission_id" => attempt.mission_id,
           "fencing_token" => attempt.fencing_token,
+          "fencing_generation" => attempt.fencing_token,
+          "workspace_generation" => workspace_generation,
           "state" => "running",
           "pgid" => attempt.pgid || 424_242
         },
         attrs
       )
 
+    manifest =
+      Map.put_new(
+        manifest,
+        "runner_start_fingerprint",
+        start_fingerprint(manifest["runner_pid"], "fixture-runner-start")
+      )
+
+    manifest =
+      Map.put_new(
+        manifest,
+        "harness_start_fingerprint",
+        start_fingerprint(manifest["harness_pid"], "fixture-harness-start")
+      )
+
     path = Path.join(dir, "manifest.json")
     File.write!(path, JSON.encode!(manifest))
     path
   end
+
+  defp start_fingerprint(pid, fallback) when is_integer(pid) do
+    case ProcessIdentity.start_fingerprint(pid) do
+      {:ok, fingerprint} -> fingerprint
+      _ -> fallback
+    end
+  end
+
+  defp start_fingerprint(_pid, fallback), do: fallback
 
   defp find_dead_pgid do
     {port, pgid} = Consigliere.ProcessHelpers.spawn_session_leader()

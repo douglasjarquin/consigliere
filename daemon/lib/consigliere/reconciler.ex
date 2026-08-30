@@ -134,7 +134,7 @@ defmodule Consigliere.Reconciler do
     attempt_results =
       occupying_attempts()
       |> Enum.reject(fn attempt ->
-        MapSet.member?(seen, attempt.id) or runner_live?(attempt.id)
+        MapSet.member?(seen, attempt.id) or runner_live?(attempt)
       end)
       |> Enum.map(fn attempt ->
         safe(attempt.id, fn -> reconcile_attempt_without_manifest(attempt, home) end)
@@ -146,10 +146,14 @@ defmodule Consigliere.Reconciler do
   defp reconcile_path(path, home) do
     case Inventory.verify(path, home) do
       {:valid_live, manifest, attempt} ->
-        Pass.apply_live(manifest, attempt, runner_live?(attempt.id))
+        runner_live = runner_live?(attempt)
+        request_terminal_runner_stop(attempt)
+        Pass.apply_live(manifest, attempt, runner_live)
 
       {:valid_terminal, manifest, attempt} ->
-        Pass.apply_terminal_manifest(manifest, attempt, runner_live?(attempt.id))
+        runner_live = runner_live?(attempt)
+        request_terminal_runner_stop(attempt)
+        Pass.apply_terminal_manifest(manifest, attempt, runner_live)
 
       :identity_mismatch ->
         Pass.mismatch(path, :identity)
@@ -169,7 +173,7 @@ defmodule Consigliere.Reconciler do
   end
 
   defp reconcile_attempt_without_manifest(attempt, _home) do
-    Pass.without_manifest(attempt, runner_live?(attempt.id))
+    Pass.without_manifest(attempt, runner_live?(attempt))
   end
 
   defp occupying_attempts do
@@ -177,11 +181,35 @@ defmodule Consigliere.Reconciler do
     Repo.all(from(a in Attempt, where: a.status in ^statuses))
   end
 
-  defp runner_live?(attempt_id) do
-    case Registry.lookup(Consigliere.Registry, {:runner, attempt_id}) do
-      [{pid, _}] -> Process.alive?(pid)
-      [] -> false
+  defp runner_live?(%Attempt{status: status, id: attempt_id}) do
+    if AttemptStates.process_may_exist?(status) do
+      case Registry.lookup(Consigliere.Registry, {:runner, attempt_id}) do
+        [{pid, _}] -> Process.alive?(pid)
+        [] -> false
+      end
+    else
+      false
     end
+  end
+
+  defp request_terminal_runner_stop(%Attempt{status: status, id: attempt_id}) do
+    if AttemptStates.terminal?(status) do
+      case Registry.lookup(Consigliere.Registry, {:runner, attempt_id}) do
+        [{pid, _}] when is_pid(pid) ->
+          if Process.alive?(pid) do
+            case DynamicSupervisor.terminate_child(Consigliere.RunnerDynamicSupervisor, pid) do
+              :ok -> :ok
+              {:error, :not_found} -> :ok
+              {:error, _reason} -> :ok
+            end
+          end
+
+        _ ->
+          :ok
+      end
+    end
+
+    :ok
   end
 
   defp remember(seen, {tag, id})

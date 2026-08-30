@@ -45,4 +45,14 @@ defmodule Consigliere.Runtime.ProcessIdentityTest do
 
     assert ProcessIdentity.verify(pid, executable, expected_hash) == :verified
   end
+
+  test "rejects a recycled process identity when its start fingerprint differs" do
+    pid = String.to_integer(System.pid())
+    assert {:ok, fingerprint} = ProcessIdentity.start_fingerprint(pid)
+
+    assert ProcessIdentity.verify(pid, nil, nil, "different-#{fingerprint}") ==
+             :identity_mismatch
+
+    assert ProcessIdentity.verify(pid, nil, nil, fingerprint) == :verified
+  end
 end

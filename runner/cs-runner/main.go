@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -238,6 +239,24 @@ func runAuthenticated(identity InvocationIdentity, manifestPath, controlSocketPa
 	base.HarnessExecutablePath = execPath
 	base.HarnessExecutableSHA256 = execHash
 	base.RunnerExecutableSHA256 = runnerHash
+	base.RunnerStartFingerprint, err = processStartFingerprint(base.RunnerPID)
+	if err != nil {
+		terminateAndReport(manifestPath, base, startDescendantTracker(handle.PID, descendantPollInterval), "process_identity_observation_failed")
+		return fmt.Errorf("observe runner start identity: %w", err)
+	}
+	base.HarnessStartFingerprint, err = processStartFingerprint(base.HarnessPID)
+	if err != nil {
+		if errors.Is(err, errProcessNotFound) {
+			base.HarnessStartFingerprint = "exited:" + base.StartedAt
+		} else {
+			terminateAndReport(manifestPath, base, startDescendantTracker(handle.PID, descendantPollInterval), "process_identity_observation_failed")
+			return fmt.Errorf("observe harness start identity: %w", err)
+		}
+	}
+	if base.RunnerStartFingerprint == "" || base.HarnessStartFingerprint == "" {
+		terminateAndReport(manifestPath, base, startDescendantTracker(handle.PID, descendantPollInterval), "process_identity_missing")
+		return fmt.Errorf("observe process start identity: runner or harness is missing")
+	}
 	base.State = StateRunning
 	base.LastStateChangeAt = nowRFC3339()
 	if err := writeManifestFn(manifestPath, base); err != nil {
@@ -296,6 +315,8 @@ func runAuthenticated(identity InvocationIdentity, manifestPath, controlSocketPa
 		"pgid":                      handle.PGID,
 		"harness_executable_path":   execPath,
 		"harness_executable_sha256": execHash,
+		"runner_start_fingerprint":  base.RunnerStartFingerprint,
+		"harness_start_fingerprint": base.HarnessStartFingerprint,
 		"started_at":                base.StartedAt,
 		"attempt_id":                identity.AttemptID,
 		"mission_id":                identity.MissionID,

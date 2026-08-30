@@ -28,6 +28,25 @@ defmodule Consigliere.RunnerLauncherTest do
     }
   end
 
+  test "ignores an incompatible packaged runner in favor of the source binary" do
+    packaged = Path.join(:code.priv_dir(:consigliere_daemon), "cs-runner")
+    source = Path.join(RunnerLauncher.cs_runner_source_dir(), "cs-runner")
+    backup = packaged <> ".backup-#{System.unique_integer([:positive])}"
+    had_packaged = File.exists?(packaged)
+
+    if had_packaged, do: File.rename!(packaged, backup)
+
+    on_exit(fn ->
+      File.rm(packaged)
+      if had_packaged, do: File.rename!(backup, packaged)
+    end)
+
+    File.write!(packaged, "not a native executable")
+
+    assert RunnerLauncher.cs_runner_bin_path() == source
+    assert RunnerLauncher.ensure_binary!() == source
+  end
+
   test "cancel over the control channel produces a verified, dead_verified manifest", %{
     manifest_path: manifest_path,
     control_socket_path: control_socket_path,

@@ -8,9 +8,11 @@ defmodule Consigliere.Runtime.ProcessIdentity do
     shasum: ["/usr/bin/shasum", "/bin/shasum"]
   }
 
-  def verify(pid, expected_executable \\ nil, expected_hash \\ nil)
+  alias Consigliere.Runtime.Command
 
-  def verify(pid, expected_executable, expected_hash)
+  def verify(pid, expected_executable \\ nil, expected_hash \\ nil, expected_start \\ nil)
+
+  def verify(pid, expected_executable, expected_hash, expected_start)
       when is_integer(pid) and pid > 1 do
     case actual_executable(pid) do
       {:ok, executable} ->
@@ -19,10 +21,13 @@ defmodule Consigliere.Runtime.ProcessIdentity do
             :identity_mismatch
 
           is_binary(expected_hash) and expected_hash != "" ->
-            verify_hash(executable, expected_hash)
+            case verify_hash(executable, expected_hash) do
+              :verified -> verify_start(pid, expected_start)
+              result -> result
+            end
 
           true ->
-            :verified
+            verify_start(pid, expected_start)
         end
 
       :absent ->
@@ -35,7 +40,19 @@ defmodule Consigliere.Runtime.ProcessIdentity do
     _ -> :observation_failed
   end
 
-  def verify(_pid, _expected_executable, _expected_hash), do: :identity_mismatch
+  def verify(_pid, _expected_executable, _expected_hash, _expected_start),
+    do: :identity_mismatch
+
+  def start_fingerprint(pid) when is_integer(pid) and pid > 1 do
+    case :os.type() do
+      {:unix, :linux} -> linux_start_fingerprint(pid)
+      _ -> ps_start_fingerprint(pid)
+    end
+  rescue
+    _ -> {:error, :observation_failed}
+  end
+
+  def start_fingerprint(_pid), do: {:error, :identity_mismatch}
 
   defp actual_executable(pid) do
     case :os.type() do
@@ -58,11 +75,10 @@ defmodule Consigliere.Runtime.ProcessIdentity do
         {:error, :observation_failed}
 
       lsof ->
-        case System.cmd(lsof, ["-a", "-p", Integer.to_string(pid), "-d", "txt", "-Fn"],
-               stderr_to_stdout: true
-             ) do
-          {output, 0} -> parse_lsof(output)
-          {output, _status} -> classify_command_output(output)
+        case Command.run(lsof, ["-a", "-p", Integer.to_string(pid), "-d", "txt", "-Fn"]) do
+          {:ok, output, 0} -> parse_lsof(output)
+          {:ok, output, _status} -> classify_command_output(output)
+          {:error, _reason, _output} -> {:error, :observation_failed}
         end
     end
   end
@@ -73,18 +89,19 @@ defmodule Consigliere.Runtime.ProcessIdentity do
         {:error, :observation_failed}
 
       ps ->
-        case System.cmd(ps, ["-o", "pid=,comm=", "-p", Integer.to_string(pid)],
-               stderr_to_stdout: true
-             ) do
-          {output, 0} ->
+        case Command.run(ps, ["-o", "pid=,comm=", "-p", Integer.to_string(pid)]) do
+          {:ok, output, 0} ->
             case parse_ps(output, pid) do
               {:ok, executable} -> {:ok, executable}
               :absent -> :absent
               :invalid -> {:error, :observation_failed}
             end
 
-          {output, _status} ->
+          {:ok, output, _status} ->
             classify_command_output(output)
+
+          {:error, _reason, _output} ->
+            {:error, :observation_failed}
         end
     end
   end
@@ -122,6 +139,66 @@ defmodule Consigliere.Runtime.ProcessIdentity do
 
   defp classify_file_error(_reason), do: {:error, :observation_failed}
 
+  defp verify_start(_pid, nil), do: :verified
+  defp verify_start(_pid, ""), do: :verified
+
+  defp verify_start(pid, expected) when is_binary(expected) do
+    case start_fingerprint(pid) do
+      {:ok, ^expected} -> :verified
+      {:ok, _actual} -> :identity_mismatch
+      :absent -> :absent
+      {:error, reason} -> reason
+    end
+  end
+
+  defp verify_start(_pid, _expected), do: :identity_mismatch
+
+  defp linux_start_fingerprint(pid) do
+    case File.read("/proc/#{pid}/stat") do
+      {:ok, contents} ->
+        contents = String.trim(contents)
+
+        case Regex.run(~r/\A\d+ \(.*\) (.*)\z/, contents, capture: :all_but_first) do
+          [fields] ->
+            case Enum.at(String.split(fields), 19) do
+              value when is_binary(value) and value != "" -> {:ok, "linux:" <> value}
+              _ -> {:error, :observation_failed}
+            end
+
+          _ ->
+            {:error, :observation_failed}
+        end
+
+      {:error, reason} ->
+        case classify_file_error(reason) do
+          {:error, _} = error -> error
+          result -> result
+        end
+    end
+  end
+
+  defp ps_start_fingerprint(pid) do
+    case tool_path(:ps) do
+      nil ->
+        {:error, :observation_failed}
+
+      ps ->
+        case Command.run(ps, ["-o", "lstart=", "-p", Integer.to_string(pid)]) do
+          {:ok, output, 0} ->
+            case String.trim(output) do
+              "" -> :absent
+              value -> {:ok, "ps:" <> value}
+            end
+
+          {:ok, output, _status} ->
+            classify_command_output(output)
+
+          {:error, _reason, _output} ->
+            {:error, :observation_failed}
+        end
+    end
+  end
+
   defp classify_command_output(output) do
     cond do
       String.trim(output) == "" ->
@@ -154,8 +231,8 @@ defmodule Consigliere.Runtime.ProcessIdentity do
         expanded
 
       realpath ->
-        case System.cmd(realpath, [expanded], stderr_to_stdout: true) do
-          {output, 0} -> String.trim(output)
+        case Command.run(realpath, [expanded]) do
+          {:ok, output, 0} -> String.trim(output)
           _ -> expanded
         end
     end
@@ -169,15 +246,20 @@ defmodule Consigliere.Runtime.ProcessIdentity do
         :observation_failed
 
       shasum ->
-        case System.cmd(shasum, ["-a", "256", path], stderr_to_stdout: true) do
-          {output, 0} ->
-            [actual | _] = String.split(String.trim(output))
-            if actual == expected, do: :verified, else: :identity_mismatch
+        case Command.run(shasum, ["-a", "256", path]) do
+          {:ok, output, 0} ->
+            case String.split(String.trim(output)) do
+              [actual | _] -> if actual == expected, do: :verified, else: :identity_mismatch
+              _ -> :observation_failed
+            end
 
-          {output, _status} ->
+          {:ok, output, _status} ->
             if String.contains?(String.downcase(output), "operation not permitted"),
               do: :permission_unknown,
               else: :observation_failed
+
+          {:error, _reason, _output} ->
+            :observation_failed
         end
     end
   rescue

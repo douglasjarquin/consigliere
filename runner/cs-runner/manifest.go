@@ -29,10 +29,12 @@ type Manifest struct {
 	FencingToken            string        `json:"fencing_token"`
 	RunnerPID               int           `json:"runner_pid"`
 	RunnerExecutablePath    string        `json:"runner_executable_path"`
+	RunnerStartFingerprint  string        `json:"runner_start_fingerprint"`
 	HarnessPID              int           `json:"harness_pid"`
 	PGID                    int           `json:"pgid"`
 	HarnessExecutablePath   string        `json:"harness_executable_path"`
 	HarnessExecutableSHA256 string        `json:"harness_executable_sha256"`
+	HarnessStartFingerprint string        `json:"harness_start_fingerprint"`
 	RunnerExecutableSHA256  string        `json:"runner_executable_sha256"`
 	StartedAt               string        `json:"started_at"`
 	ControlSocketPath       string        `json:"control_socket_path"`

@@ -119,6 +119,11 @@ defmodule Consigliere.PauseTest do
       JSON.encode!(%{
         "schema_version" => 1,
         "attempt_id" => attempt.id,
+        "mission_id" => mission.id,
+        "workspace_generation" => workspace.lease_id,
+        "fencing_generation" => attempt.fencing_token,
+        "runner_start_fingerprint" => "fixture-runner-start",
+        "harness_start_fingerprint" => "fixture-harness-start",
         "state" => "dead_verified",
         "pgid" => 424_242
       })

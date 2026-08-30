@@ -30,30 +30,35 @@ defmodule Consigliere.RunnerLauncher do
 
   def ensure_binary! do
     packaged = Path.join(:code.priv_dir(:consigliere_daemon), "cs-runner")
+    source_dir = cs_runner_source_dir()
+    source_binary = Path.join(source_dir, "cs-runner")
 
     cond do
-      File.exists?(packaged) ->
+      compatible_runner_binary?(packaged) ->
         packaged
 
+      File.dir?(source_dir) and
+          (not compatible_runner_binary?(source_binary) or
+             source_newer_than_binary?(source_dir, source_binary)) ->
+        {_, 0} = System.cmd("go", ["build", "-o", "cs-runner", "."], cd: source_dir)
+        ensure_compatible_binary!(source_binary)
+
+      compatible_runner_binary?(source_binary) ->
+        source_binary
+
       true ->
-        binary_path = cs_runner_bin_path()
-        source_dir = cs_runner_source_dir()
-
-        if source_newer_than_binary?(source_dir, binary_path) do
-          {_, 0} = System.cmd("go", ["build", "-o", "cs-runner", "."], cd: source_dir)
-        end
-
-        binary_path
+        raise "no compatible cs-runner binary for this host"
     end
   end
 
   def cs_runner_bin_path do
     packaged = Path.join(:code.priv_dir(:consigliere_daemon), "cs-runner")
+    source = Path.join(cs_runner_source_dir(), "cs-runner")
 
     if File.exists?(packaged) do
-      packaged
+      if compatible_runner_binary?(packaged), do: packaged, else: source
     else
-      Path.join(cs_runner_source_dir(), "cs-runner")
+      source
     end
   end
 
@@ -388,6 +393,10 @@ defmodule Consigliere.RunnerLauncher do
       message["runner_executable_sha256"] != expected_runner_hash ->
         {:error, :runner_started_executable_mismatch}
 
+      not nonempty_string?(message["runner_start_fingerprint"]) or
+          not nonempty_string?(message["harness_start_fingerprint"]) ->
+        {:error, :runner_started_process_identity_missing}
+
       not (is_binary(message["manifest_digest"]) and
                message["manifest_digest"] =~ ~r/\A[0-9a-f]{64}\z/) ->
         {:error, :runner_started_manifest_invalid}
@@ -613,6 +622,8 @@ defmodule Consigliere.RunnerLauncher do
     path |> File.read!() |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
   end
 
+  defp nonempty_string?(value), do: is_binary(value) and value != ""
+
   defp random_hex(bytes), do: Base.encode16(:crypto.strong_rand_bytes(bytes), case: :lower)
 
   defp source_newer_than_binary?(source_dir, binary_path) do
@@ -620,6 +631,88 @@ defmodule Consigliere.RunnerLauncher do
       Enum.any?(Path.wildcard(Path.join(source_dir, "*.go")), fn file ->
         File.stat!(file).mtime >= File.stat!(binary_path).mtime
       end)
+  end
+
+  defp compatible_runner_binary?(path) do
+    with true <- File.regular?(path),
+         {:ok, contents} <- File.read(path),
+         true <- byte_size(contents) >= 8 do
+      bytes = binary_part(contents, 0, min(byte_size(contents), 32))
+      compatible_binary_bytes?(bytes, host_os(), host_cpu())
+    else
+      _ -> false
+    end
+  end
+
+  defp compatible_binary_bytes?(
+         <<0xCF, 0xFA, 0xED, 0xFE, cpu::little-signed-32, _rest::binary>>,
+         :darwin,
+         cpu_name
+       ),
+       do: mach_cpu(cpu) == cpu_name
+
+  defp compatible_binary_bytes?(
+         <<0xFE, 0xED, 0xFA, 0xCF, cpu::big-signed-32, _rest::binary>>,
+         :darwin,
+         cpu_name
+       ),
+       do: mach_cpu(cpu) == cpu_name
+
+  defp compatible_binary_bytes?(<<0x7F, "ELF", _class, data, rest::binary>>, :linux, cpu_name)
+       when data in [1, 2] do
+    case rest do
+      <<_ident_tail::binary-size(12), machine::little-unsigned-16, _remaining::binary>>
+      when data == 1 ->
+        elf_cpu(machine) == cpu_name
+
+      <<_ident_tail::binary-size(12), machine::big-unsigned-16, _remaining::binary>>
+      when data == 2 ->
+        elf_cpu(machine) == cpu_name
+
+      _ ->
+        false
+    end
+  end
+
+  defp compatible_binary_bytes?(_bytes, _os, _cpu), do: false
+
+  defp mach_cpu(0x0100000C), do: :arm64
+  defp mach_cpu(0x01000007), do: :amd64
+  defp mach_cpu(_), do: :unknown
+
+  defp elf_cpu(183), do: :arm64
+  defp elf_cpu(62), do: :amd64
+  defp elf_cpu(_), do: :unknown
+
+  defp host_os do
+    case :os.type() do
+      {:unix, :darwin} -> :darwin
+      {:unix, :linux} -> :linux
+      _ -> :unknown
+    end
+  end
+
+  defp host_cpu do
+    architecture = :erlang.system_info(:system_architecture) |> to_string()
+
+    cond do
+      String.contains?(architecture, "aarch64") or String.contains?(architecture, "arm64") ->
+        :arm64
+
+      String.contains?(architecture, "x86_64") or String.contains?(architecture, "amd64") ->
+        :amd64
+
+      true ->
+        :unknown
+    end
+  end
+
+  defp ensure_compatible_binary!(path) do
+    if compatible_runner_binary?(path) do
+      path
+    else
+      raise "built cs-runner is incompatible with this host"
+    end
   end
 
   defp close_port(port) do

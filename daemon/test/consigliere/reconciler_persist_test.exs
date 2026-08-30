@@ -12,6 +12,7 @@ defmodule Consigliere.ReconcilerPersistTest do
   alias Consigliere.ProcessGroup
   alias Consigliere.Reconciler
   alias Consigliere.Repo
+  alias Consigliere.Runtime.ProcessIdentity
   alias Consigliere.Workspaces.Workspace
 
   setup do
@@ -64,15 +65,52 @@ defmodule Consigliere.ReconcilerPersistTest do
     dir = Path.join([home, "runtime", "attempts", attempt_id])
     File.mkdir_p!(dir)
 
+    attempt = Repo.get(Attempt, attempt_id)
+
+    workspace_generation =
+      case attempt && attempt.workspace_id do
+        nil -> "fixture-workspace-generation"
+        workspace_id -> Repo.get!(Workspace, workspace_id).lease_id
+      end
+
     manifest =
       Map.merge(
-        %{"schema_version" => 1, "attempt_id" => attempt_id, "pgid" => 424_242},
+        %{
+          "schema_version" => 1,
+          "attempt_id" => attempt_id,
+          "workspace_generation" => workspace_generation,
+          "fencing_generation" => (attempt && attempt.fencing_token) || "fixture-fence",
+          "pgid" => 424_242
+        },
         attrs
+      )
+
+    manifest =
+      Map.put_new(
+        manifest,
+        "runner_start_fingerprint",
+        start_fingerprint(manifest["runner_pid"], "fixture-runner-start")
+      )
+
+    manifest =
+      Map.put_new(
+        manifest,
+        "harness_start_fingerprint",
+        start_fingerprint(manifest["harness_pid"], "fixture-harness-start")
       )
 
     File.write!(Path.join(dir, "manifest.json"), JSON.encode!(manifest))
     manifest
   end
+
+  defp start_fingerprint(pid, fallback) when is_integer(pid) do
+    case ProcessIdentity.start_fingerprint(pid) do
+      {:ok, fingerprint} -> fingerprint
+      _ -> fallback
+    end
+  end
+
+  defp start_fingerprint(_pid, fallback), do: fallback
 
   test "dead_verified manifest marks a non-terminal Attempt lost without quarantining the workspace",
        %{home: home} do
@@ -255,6 +293,40 @@ defmodule Consigliere.ReconcilerPersistTest do
     assert Repo.get!(Attempt, attempt.id).status == "running"
   end
 
+  test "a terminal Attempt does not let a live RunnerProcess suppress cleanup", %{home: home} do
+    %{attempt: attempt} = starting_attempt!()
+    write_manifest!(home, attempt.id, %{"state" => "dead_verified"})
+    heartbeat = Path.join(System.tmp_dir!(), "hb-terminal-#{System.unique_integer([:positive])}")
+
+    {:ok, runner} =
+      DynamicSupervisor.start_child(
+        Consigliere.RunnerDynamicSupervisor,
+        {Consigliere.RunnerProcess,
+         attempt_id: attempt.id,
+         mission_id: attempt.mission_id,
+         fencing_token: attempt.fencing_token,
+         heartbeat_file: heartbeat}
+      )
+
+    wait_until(fn ->
+      Repo.get!(Attempt, attempt.id).status == "running" and
+        Registry.lookup(Consigliere.Registry, {:runner, attempt.id}) != []
+    end)
+
+    {:ok, _} =
+      Attempts.fail(attempt.id, Actor.system(), %{
+        process_group: :dead_verified,
+        exit_classification: "failed"
+      })
+
+    attempt_id = attempt.id
+    results = Reconciler.run(home: home)
+    assert {:skipped, ^attempt_id} = Enum.find(results, &match?({:skipped, _}, &1))
+
+    wait_until(fn -> Registry.lookup(Consigliere.Registry, {:runner, attempt_id}) == [] end)
+    refute Process.alive?(runner)
+  end
+
   test "checkpoint_requested without a durable result is lost on dead_verified",
        %{home: home} do
     %{attempt: attempt, mission: mission} = running_attempt!()
@@ -398,8 +470,10 @@ defmodule Consigliere.ReconcilerPersistTest do
     %{
       "runner_pid" => runner_pid,
       "runner_executable_path" => executable,
+      "runner_start_fingerprint" => start_fingerprint(runner_pid, "fixture-runner-start"),
       "harness_pid" => pid,
-      "harness_executable_path" => executable
+      "harness_executable_path" => executable,
+      "harness_start_fingerprint" => start_fingerprint(pid, "fixture-harness-start")
     }
   end
 
@@ -408,6 +482,23 @@ defmodule Consigliere.ReconcilerPersistTest do
       System.find_executable("sleep") || "/bin/sleep"
     else
       System.find_executable("ruby") || System.find_executable("ruby3") || "/usr/bin/ruby"
+    end
+  end
+
+  defp wait_until(fun, timeout_ms \\ 5_000) do
+    wait_until(fun, System.monotonic_time(:millisecond) + timeout_ms, true)
+  end
+
+  defp wait_until(fun, deadline, _internal) do
+    if fun.() do
+      :ok
+    else
+      if System.monotonic_time(:millisecond) >= deadline do
+        flunk("condition did not become true before timeout")
+      else
+        Process.sleep(10)
+        wait_until(fun, deadline, true)
+      end
     end
   end
 end
