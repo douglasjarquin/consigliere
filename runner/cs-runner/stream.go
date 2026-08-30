@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -9,6 +10,10 @@ import (
 
 const streamChunkBuf = 32 * 1024
 const streamQueueSize = 256
+const streamWriteTimeout = 5 * time.Second
+const streamDrainTimeout = 30 * time.Second
+
+var errStreamDrainTimeout = errors.New("stream delivery timed out")
 
 // streamForwarder drains the harness stdout/stderr pipes from the moment
 // of spawn (so a chatty harness cannot fill the kernel pipe and block)
@@ -18,13 +23,23 @@ const streamQueueSize = 256
 // the daemon connects does not lose its output. A full queue applies
 // backpressure until the daemon can receive the pending output.
 type streamForwarder struct {
-	chunks chan map[string]any
-	wg     sync.WaitGroup
-	done   chan struct{}
+	chunks    chan map[string]any
+	wg        sync.WaitGroup
+	done      chan struct{}
+	errMu     sync.Mutex
+	sendErr   error
+	inputOnce sync.Once
+	inputs    []io.Closer
 }
 
 func startStreamForwarder(stdout, stderr io.Reader, attemptID, fencingToken string) *streamForwarder {
 	f := &streamForwarder{chunks: make(chan map[string]any, streamQueueSize), done: make(chan struct{})}
+	if closer, ok := stdout.(io.Closer); ok {
+		f.inputs = append(f.inputs, closer)
+	}
+	if closer, ok := stderr.(io.Closer); ok {
+		f.inputs = append(f.inputs, closer)
+	}
 	var stdoutSeq, stderrSeq atomic.Int64
 	f.wg.Add(2)
 	go f.pump(stdout, "stdout_chunk", attemptID, fencingToken, &stdoutSeq)
@@ -68,6 +83,10 @@ func (f *streamForwarder) Attach(cc *ControlChannel) {
 		defer close(f.done)
 		for msg := range f.chunks {
 			if err := cc.SendFrame(msg); err != nil {
+				f.CloseInputs()
+				f.errMu.Lock()
+				f.sendErr = err
+				f.errMu.Unlock()
 				for range f.chunks {
 				}
 				return
@@ -76,9 +95,24 @@ func (f *streamForwarder) Attach(cc *ControlChannel) {
 	}()
 }
 
-func (f *streamForwarder) Wait(timeout time.Duration) {
+func (f *streamForwarder) CloseInputs() {
+	f.inputOnce.Do(func() {
+		for _, input := range f.inputs {
+			_ = input.Close()
+		}
+	})
+}
+
+func (f *streamForwarder) Wait(timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
 	select {
 	case <-f.done:
-	case <-time.After(timeout):
+		f.errMu.Lock()
+		defer f.errMu.Unlock()
+		return f.sendErr
+	case <-timer.C:
+		return errStreamDrainTimeout
 	}
 }

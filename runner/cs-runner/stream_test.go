@@ -56,3 +56,23 @@ func TestStreamForwarder_deliversEveryChunkWhenQueueIsFull(t *testing.T) {
 		t.Fatalf("last native sequence = %v, want %d", got, streamQueueSize+1)
 	}
 }
+
+func TestStreamForwarder_reportsDeliveryFailure(t *testing.T) {
+	forwarder := &streamForwarder{
+		chunks: make(chan map[string]any, 1),
+		done:   make(chan struct{}),
+	}
+	forwarder.chunks <- map[string]any{
+		"type":            "stdout_chunk",
+		"attempt_id":      "attempt",
+		"fencing_token":   "fence",
+		"native_sequence": int64(1),
+		"data":            "output",
+	}
+	close(forwarder.chunks)
+
+	forwarder.Attach(&ControlChannel{})
+	if err := forwarder.Wait(time.Second); err == nil {
+		t.Fatal("expected unauthenticated control channel delivery to fail")
+	}
+}

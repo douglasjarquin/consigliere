@@ -210,6 +210,11 @@ func (c *ControlChannel) SendFrame(msg map[string]any) error {
 	}
 	c.sendSeq++
 	frame := frameMessage(c.identity, c.sendSeq, msg, c.secret)
+	if err := c.conn.SetWriteDeadline(time.Now().Add(streamWriteTimeout)); err != nil {
+		c.sendSeq--
+		return fmt.Errorf("set control write deadline: %w", err)
+	}
+	defer c.conn.SetWriteDeadline(time.Time{})
 	if err := writeMessage(c.conn, frame); err != nil {
 		c.sendSeq--
 		return err

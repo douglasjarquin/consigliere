@@ -718,6 +718,66 @@ func TestRun_ForwardsHarnessStdoutOverControlChannel(t *testing.T) {
 	}
 }
 
+func TestRun_NaturalHarnessExitWaitsForBackpressuredStreams(t *testing.T) {
+	const streamBytes = 4 * 1024 * 1024
+	dir := shortSocketDir(t)
+	manifestPath := filepath.Join(dir, "manifest.json")
+	controlSocketPath := filepath.Join(dir, "control.sock")
+	harnessCommand := []string{"sh", "-c", fmt.Sprintf("yes stdout | head -c %d; yes stderr | head -c %d >&2", streamBytes, streamBytes)}
+
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- run("attempt-backpressure", "mission-backpressure", "fence-backpressure", manifestPath, controlSocketPath, harnessCommand)
+	}()
+
+	conn := dialControlSocketWithRetry(t, controlSocketPath, 3*time.Second)
+	defer conn.Close()
+	if unixConn, ok := conn.(*net.UnixConn); ok {
+		if err := unixConn.SetReadBuffer(4096); err != nil {
+			t.Fatalf("set control receive buffer: %v", err)
+		}
+	}
+	reader := bufio.NewReader(conn)
+	skipLine(t, reader)
+
+	time.Sleep(2 * time.Second)
+	_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+	var stdoutBytes, stderrBytes int
+	for {
+		line := readLine(t, reader)
+		var message map[string]any
+		if err := json.Unmarshal([]byte(line), &message); err != nil {
+			t.Fatalf("decode control frame: %v", err)
+		}
+
+		switch message["type"] {
+		case "stdout_chunk":
+			stdoutBytes += len(message["data"].(string))
+		case "stderr_chunk":
+			stderrBytes += len(message["data"].(string))
+		case "harness_exited":
+			if stdoutBytes != streamBytes || stderrBytes != streamBytes {
+				t.Fatalf("harness_exited arrived before stream drain: stdout=%d/%d stderr=%d/%d", stdoutBytes, streamBytes, stderrBytes, streamBytes)
+			}
+			break
+		default:
+			continue
+		}
+		if message["type"] == "harness_exited" {
+			break
+		}
+	}
+
+	select {
+	case err := <-runErrCh:
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("run() never returned")
+	}
+}
+
 // TestRun_ForwardsHarnessStderrOverControlChannel is the stderr twin of
 // the stdout test: the two streams must be separate messages, never
 // spliced onto one writer (docs/protocols/runner.md responsibility 5).

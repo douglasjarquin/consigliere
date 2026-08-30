@@ -114,7 +114,10 @@ func runWithAcceptTimeout(attemptID, missionID, fencingToken, manifestPath, cont
 // call (see TerminateGroupAndDescendants) and must not be reused afterward.
 func terminateAndFinalize(manifestPath string, base Manifest, tracker *descendantTracker, exitCode *int, reason *string) (verified bool, err error) {
 	verified, _ = TerminateGroupAndDescendants(base.PGID, tracker, 5*time.Second, 2*time.Second)
+	return verified, finalizeManifest(manifestPath, base, verified, exitCode, reason)
+}
 
+func finalizeManifest(manifestPath string, base Manifest, verified bool, exitCode *int, reason *string) error {
 	deadAt := nowRFC3339()
 	final := base
 	final.ExitCode = exitCode
@@ -126,7 +129,7 @@ func terminateAndFinalize(manifestPath string, base Manifest, tracker *descendan
 	} else {
 		final.State = StateDeadUnverified
 	}
-	return verified, writeManifestFn(manifestPath, final)
+	return writeManifestFn(manifestPath, final)
 }
 
 // terminateAndReport runs terminateAndFinalize and, if the final manifest
@@ -312,20 +315,47 @@ func runAuthenticated(identity InvocationIdentity, manifestPath, controlSocketPa
 
 	select {
 	case result := <-harnessExited:
-		forwarder.Wait(time.Second)
-		_ = cc.SendFrame(map[string]any{
-			"type":       "harness_exited",
-			"attempt_id": identity.AttemptID,
-			"exit_code":  result.code,
-			"signaled":   result.signaled,
-		})
-
 		// The harness itself exiting does not mean its process group is
 		// empty: it may have backgrounded a child before exiting, still
 		// alive under the same pgid. terminateAndFinalize reaps any such
 		// stragglers before trusting Wait() as proof the group is clear.
 		code := result.code
-		_, err := terminateAndFinalize(manifestPath, base, descendants, &code, nil)
+		verified, _ := TerminateGroupAndDescendants(base.PGID, descendants, 5*time.Second, 2*time.Second)
+		if !verified {
+			_ = cc.Close()
+			forwarder.CloseInputs()
+			_ = forwarder.Wait(streamWriteTimeout)
+			reason := "termination_unverified"
+			return finalizeManifest(manifestPath, base, false, &code, &reason)
+		}
+		if err := forwarder.Wait(streamDrainTimeout); err != nil {
+			_ = cc.Close()
+			forwarder.CloseInputs()
+			_ = forwarder.Wait(streamWriteTimeout)
+			failedCode := -1
+			reason := "stream_delivery_failed"
+			finalizeErr := finalizeManifest(manifestPath, base, verified, &failedCode, &reason)
+			if finalizeErr != nil {
+				return fmt.Errorf("stream delivery failed: %v; write final manifest: %w", err, finalizeErr)
+			}
+			return fmt.Errorf("stream delivery failed: %w", err)
+		}
+		if err := cc.SendFrame(map[string]any{
+			"type":       "harness_exited",
+			"attempt_id": identity.AttemptID,
+			"exit_code":  result.code,
+			"signaled":   result.signaled,
+		}); err != nil {
+			_ = cc.Close()
+			failedCode := -1
+			reason := "harness_exit_delivery_failed"
+			finalizeErr := finalizeManifest(manifestPath, base, verified, &failedCode, &reason)
+			if finalizeErr != nil {
+				return fmt.Errorf("harness exit delivery failed: %v; write final manifest: %w", err, finalizeErr)
+			}
+			return fmt.Errorf("harness exit delivery failed: %w", err)
+		}
+		err := finalizeManifest(manifestPath, base, verified, &code, nil)
 		return err
 
 	case reason := <-terminationTriggered:
@@ -340,15 +370,38 @@ func runAuthenticated(identity InvocationIdentity, manifestPath, controlSocketPa
 		reasonCopy := reason
 		verified, err := terminateAndFinalize(manifestPath, base, descendants, nil, &reasonCopy)
 		if err != nil {
+			_ = cc.Close()
+			forwarder.CloseInputs()
 			return fmt.Errorf("write final manifest: %w", err)
 		}
+		if !verified {
+			_ = cc.Close()
+			forwarder.CloseInputs()
+			_ = forwarder.Wait(streamWriteTimeout)
+			return nil
+		}
+		if err := forwarder.Wait(streamDrainTimeout); err != nil {
+			_ = cc.Close()
+			forwarder.CloseInputs()
+			_ = forwarder.Wait(streamWriteTimeout)
+			if reason == "control_eof" {
+				return nil
+			}
+			return fmt.Errorf("stream delivery failed during %s: %w", reason, err)
+		}
 
-		_ = cc.SendFrame(map[string]any{
+		if err := cc.SendFrame(map[string]any{
 			"type":               "termination_complete",
 			"attempt_id":         identity.AttemptID,
 			"verified_dead":      verified,
 			"termination_reason": reason,
-		})
+		}); err != nil {
+			_ = cc.Close()
+			if reason == "control_eof" {
+				return nil
+			}
+			return fmt.Errorf("termination completion delivery failed: %w", err)
+		}
 
 		return nil
 	}
