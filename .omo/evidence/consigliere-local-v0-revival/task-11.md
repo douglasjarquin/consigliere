@@ -115,3 +115,23 @@ GREEN proof:
 Result: 454 passed.
 
 The focused process-group suite also passed with 6 tests, including the PATH-independent real termination case.
+
+## Exact-head termination identity follow-up
+
+The exact-head security review found that termination trusted a persisted Attempt PGID before verifying that a live inventory manifest bound that PGID to the Attempt, fence, workspace, and runner identity.
+
+Commit `ef5872f87900fd387fc1f7f709939fbf7af5f0e7` makes termination consult the canonical inventory first, require a matching persisted PGID, reject a registered runner for direct signaling, and require verified live runner liveness before signaling.
+
+Tests-first RED proof:
+
+    docker run --rm -v "$PWD":/workspace -w /workspace/daemon elixir:1.20-otp-29 sh -lc 'apt-get update -qq && apt-get install -y -qq golang-go >/dev/null && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && MIX_ENV=test mix test test/consigliere/termination_test.exs test/consigliere/harness/redaction_test.exs --no-color'
+
+The new test left a real session-leader process group without an inventory manifest and observed the prior implementation return `:ok` after signaling it instead of returning `{:error, :death_unverified}`.
+
+Tests-first GREEN proof:
+
+    docker run --rm -v "$PWD":/workspace -w /workspace/daemon elixir:1.20-otp-29 sh -lc 'apt-get update -qq && apt-get install -y -qq golang-go >/dev/null && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && mix format --check-formatted && MIX_ENV=test mix test test/consigliere/termination_test.exs test/consigliere/harness/redaction_test.exs --no-color'
+
+Result: 2 passed.
+
+The process-group assertion confirmed that the unverified persisted PGID remained alive while the Attempt was quarantined as unconfirmed.

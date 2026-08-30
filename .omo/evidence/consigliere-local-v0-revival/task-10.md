@@ -67,6 +67,26 @@ The storage-fault path is intentionally limited to a disposable capture and its 
 
 Full prompt, transcript, and raw secret-bearing event retention were not added.
 
+## Exact-head structured redaction follow-up
+
+The exact-head security review found that quoted JSON credential keys such as `access_token` and the `CS_CAPABILITY` environment assignment could retain their values in redacted text.
+
+Commit `522a4675bd75ccc97fdc0d596b4030a2db05077d` extends the assignment redactor to quoted structured keys, token-like key names, and `CS_CAPABILITY` while preserving the surrounding key and separator.
+
+Tests-first RED proof:
+
+    docker run --rm -v "$PWD":/workspace -w /workspace/daemon elixir:1.20-otp-29 sh -lc 'apt-get update -qq && apt-get install -y -qq golang-go >/dev/null && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && MIX_ENV=test mix test test/consigliere/termination_test.exs test/consigliere/harness/redaction_test.exs --no-color'
+
+The new redaction test retained `synthetic-access` from a quoted `access_token` value under the prior implementation.
+
+Tests-first GREEN proof:
+
+    docker run --rm -v "$PWD":/workspace -w /workspace/daemon elixir:1.20-otp-29 sh -lc 'apt-get update -qq && apt-get install -y -qq golang-go >/dev/null && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && mix format --check-formatted && MIX_ENV=test mix test test/consigliere/termination_test.exs test/consigliere/harness/redaction_test.exs --no-color'
+
+Result: 2 passed.
+
+The test covered quoted access and refresh tokens, a quoted secret, and `CS_CAPABILITY`, and asserted that each synthetic value was absent from the redacted output.
+
 ## CI portability regression
 
 The first final CI run reproduced `CaptureTest` returning `capture_unavailable` when its disposable file lived directly under the shared system temporary directory.
