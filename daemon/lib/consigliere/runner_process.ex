@@ -534,14 +534,17 @@ defmodule Consigliere.RunnerProcess do
       {code, _} = exit_bits(reason, state)
       death = death_of(state)
       completed? = attempt.exit_classification == "completed"
-      failed? = failed_class?(attempt) or protocol_failure?(state)
+
+      failed? =
+        failed_class?(attempt) or protocol_failure?(state) or protocol_failure_reason?(reason)
 
       Attempts.classify_exit(id, %{
         process_group: death,
         exit_status: code,
         session_completed: completed?,
         session_failed: failed?,
-        exit_classification: attempt.exit_classification || protocol_failure_classification(state)
+        exit_classification:
+          attempt.exit_classification || protocol_failure_classification(state, reason)
       })
     else
       _ -> :ok
@@ -558,8 +561,11 @@ defmodule Consigliere.RunnerProcess do
   defp protocol_failure?(%{stop_reason: {:protocol_failure, _}}), do: true
   defp protocol_failure?(_), do: false
 
-  defp protocol_failure_classification(state) do
-    if protocol_failure?(state), do: "protocol_failure"
+  defp protocol_failure_reason?({:protocol_failure, _}), do: true
+  defp protocol_failure_reason?(_), do: false
+
+  defp protocol_failure_classification(state, reason) do
+    if protocol_failure?(state) or protocol_failure_reason?(reason), do: "protocol_failure"
   end
 
   defp death_of(%{session: %{pgid: pgid}}) when is_integer(pgid) and pgid > 1 do

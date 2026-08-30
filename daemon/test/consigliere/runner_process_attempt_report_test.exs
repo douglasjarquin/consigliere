@@ -42,7 +42,7 @@ defmodule Consigliere.RunnerProcessAttemptReportTest do
       )
 
     {:ok, mission} = Consigliere.Missions.submit_for_authorization(mission.id, Actor.boss())
-    {:ok, mission} = Consigliere.Missions.grant_work_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Fixtures.grant_work_quietly(mission.id, Actor.boss())
 
     {:ok, %{attempt: attempt, workspace: workspace}} =
       Consigliere.Missions.start(
@@ -51,6 +51,7 @@ defmodule Consigliere.RunnerProcessAttemptReportTest do
         %{workspace_path: Path.join(Consigliere.Home.workspaces_dir(), mission.id)}
       )
 
+    Consigliere.Projects.provision_workspace(project, mission.id, base_sha)
     File.write!(Path.join(workspace.path, "result.txt"), "result\n")
     result_sha = Git.commit_all(workspace.path, "result")
     {:ok, attempt} = Attempts.request_spawn(attempt.id, Actor.system())
@@ -136,6 +137,8 @@ defmodule Consigliere.RunnerProcessAttemptReportTest do
   end
 
   test "records a protocol failure when a completion report is rejected" do
+    Process.flag(:trap_exit, true)
+
     root =
       Path.join(
         System.tmp_dir!(),
@@ -162,7 +165,7 @@ defmodule Consigliere.RunnerProcessAttemptReportTest do
       )
 
     {:ok, mission} = Consigliere.Missions.submit_for_authorization(mission.id, Actor.boss())
-    {:ok, mission} = Consigliere.Missions.grant_work_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Fixtures.grant_work_quietly(mission.id, Actor.boss())
 
     workspace_path = Path.join(Consigliere.Home.workspaces_dir(), mission.id)
 
@@ -227,6 +230,7 @@ defmodule Consigliere.RunnerProcessAttemptReportTest do
     assert rejected.exit_classification == "protocol_failure"
     assert Repo.get!(Consigliere.Missions.Mission, mission.id).phase == "active"
     refute Process.alive?(runner)
+    assert_receive {:EXIT, ^runner, {:protocol_failure, "illegal_transition"}}
   end
 
   defp wait_until(fun, remaining \\ 120) do
