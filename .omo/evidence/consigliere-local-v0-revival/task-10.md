@@ -87,6 +87,16 @@ Result: 2 passed.
 
 The test covered quoted access and refresh tokens, a quoted secret, and `CS_CAPABILITY`, and asserted that each synthetic value was absent from the redacted output.
 
+The first exact-head full daemon gate then exposed a performance regression in that broad token-like-key expression: the existing 70,000-byte oversized context test timed out while redaction scanned a non-secret string.
+
+Commit `7e0ba5c9d68da26cb450dd9f65c623b5f2a54dda` narrows the structured-key pass to fixed credential key families and keeps the existing bare-key pass, removing the unbounded backtracking path.
+
+GREEN regression proof:
+
+    docker run --rm -v "$PWD":/workspace -w /workspace/daemon elixir:1.20-otp-29 sh -lc 'apt-get update -qq && apt-get install -y -qq golang-go >/dev/null && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && mix format --check-formatted && MIX_ENV=test mix test test/consigliere/harness/context_pack_test.exs test/consigliere/harness/redaction_test.exs --no-color'
+
+Result: 5 passed, including both oversized context tests and the structured redaction test.
+
 ## CI portability regression
 
 The first final CI run reproduced `CaptureTest` returning `capture_unavailable` when its disposable file lived directly under the shared system temporary directory.
