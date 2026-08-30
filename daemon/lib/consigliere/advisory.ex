@@ -33,6 +33,9 @@ defmodule Consigliere.Advisory do
   @max_verifications 8
   @max_text_bytes 512
   @max_id_bytes Limits.string_bytes()
+  @safe_event_types ~w(session.started turn.started progress.reported artifact.created
+                       question.requested checkpoint.created usage.updated turn.completed
+                       session.completed session.failed)
   @hidden_keys ~w(api_socket argv boss_socket capability credential database database_path
                    home lines lock path password priv_socket raw_output repository_path
                    repository_url secret sqlite_path transcript trusted_mirror_path
@@ -65,11 +68,17 @@ defmodule Consigliere.Advisory do
   def sanitize_result({:ok, value}), do: {:ok, sanitize(value)}
   def sanitize_result(other), do: other
 
-  def sanitize_logs_result({:ok, %{"attempt_id" => attempt_id, "lines" => lines}}) do
-    {:ok, %{"attempt_id" => sanitize(attempt_id), "lines" => sanitize(lines)}}
+  def sanitize_logs_result({:ok, %{"attempt_id" => attempt_id, "event_lines" => event_lines}})
+      when is_list(event_lines) do
+    {:ok, %{"attempt_id" => sanitize(attempt_id), "lines" => safe_event_lines(event_lines)}}
   end
 
-  def sanitize_logs_result(other), do: sanitize_result(other)
+  def sanitize_logs_result({:ok, %{"attempt_id" => attempt_id}}) do
+    {:ok, %{"attempt_id" => sanitize(attempt_id), "lines" => []}}
+  end
+
+  def sanitize_logs_result({:ok, _value}), do: {:ok, %{}}
+  def sanitize_logs_result(other), do: other
 
   def sanitize(value, depth \\ 0)
 
@@ -100,6 +109,24 @@ defmodule Consigliere.Advisory do
   end
 
   def sanitize(_value, _depth), do: "redacted"
+
+  defp safe_event_lines(event_lines) do
+    event_lines
+    |> Enum.take(Limits.collection_items())
+    |> Enum.map(&safe_event_line/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp safe_event_line(line) when is_binary(line) do
+    case Regex.run(~r/\A([0-9]{1,10}) ([a-z.]+)\z/, String.slice(line, 0, @max_text_bytes),
+           capture: :all_but_first
+         ) do
+      [sequence, type] when type in @safe_event_types -> "#{sequence} #{type}"
+      _ -> nil
+    end
+  end
+
+  defp safe_event_line(_line), do: nil
 
   defp normalize_filters(filters) do
     with {:ok, project_id} <-

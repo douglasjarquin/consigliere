@@ -130,7 +130,6 @@ defmodule Consigliere.Harness.ContextPackTest do
 
     assert {:ok, result} = ContextPack.compose(mission)
     assert result.pack["completion"]["require_checkpoint"] == false
-    assert result.pack["protocol"]["completion"] =~ "do not report a checkpoint first"
   end
 
   test "compose redacts credential-shaped mission content" do

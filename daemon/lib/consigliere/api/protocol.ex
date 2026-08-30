@@ -1030,8 +1030,16 @@ defmodule Consigliere.API.Protocol do
 
       attempt ->
         path = Path.join(Consigliere.Home.logs_dir(), "attempts/#{attempt.id}.log")
-        lines = log_lines(path) ++ harness_event_lines(attempt.id)
-        {:ok, %{"attempt_id" => attempt.id, "path" => path, "lines" => lines}}
+        event_lines = harness_event_lines(attempt.id)
+        lines = log_lines(path) ++ event_lines
+
+        {:ok,
+         %{
+           "attempt_id" => attempt.id,
+           "path" => path,
+           "lines" => lines,
+           "event_lines" => event_lines
+         }}
     end
   end
 
