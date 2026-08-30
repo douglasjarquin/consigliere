@@ -141,6 +141,7 @@ defmodule Consigliere.Progression do
       end
     else
       {:error, :death_not_verified} = error -> error
+      {:error, :terminal_event_missing} = error -> error
       {:error, reason} -> progression_fail(attempt, result, reason)
     end
   end

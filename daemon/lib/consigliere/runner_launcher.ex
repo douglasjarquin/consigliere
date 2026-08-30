@@ -203,7 +203,7 @@ defmodule Consigliere.RunnerLauncher do
              secret_for!(session),
              session.recv_seq + 1
            ) do
-      {:ok, message, %{session | recv_seq: next_seq}}
+      {:ok, message, %{session | recv_seq: next_seq - 1}}
     end
   end
 

@@ -45,6 +45,10 @@ defmodule Consigliere.RunnerProcess do
     fencing_token = Keyword.get(opts, :fencing_token, "fence-#{attempt_id}")
     workspace_path = Keyword.get(opts, :workspace_path, "unbound")
     workspace_generation = Keyword.get(opts, :workspace_generation, "unbound")
+    workspace_id = Keyword.get(opts, :workspace_id)
+    base_sha = Keyword.get(opts, :base_sha)
+    parent_checkpoint_sha = Keyword.get(opts, :parent_checkpoint_sha)
+    capability = Keyword.get(opts, :capability)
     harness_command = harness_command(opts)
 
     runtime = runtime_dir(attempt_id)
@@ -78,11 +82,18 @@ defmodule Consigliere.RunnerProcess do
            fencing_token: fencing_token,
            session: session,
            invocation_id: invocation_id,
+           capability: capability,
+           workspace_id: workspace_id,
+           workspace_generation: workspace_generation,
+           base_sha: base_sha,
+           parent_checkpoint_sha: parent_checkpoint_sha,
            project_id: Keyword.get(opts, :project_id),
            context_hash: Keyword.get(opts, :context_hash),
            policy: Keyword.get(opts, :policy, %{}),
            heartbeat_count: 0,
-           stop_reason: nil
+           stop_reason: nil,
+           harness_exit_received: false,
+           port_exit_status: nil
          }}
 
       {:error, reason} ->
@@ -107,18 +118,32 @@ defmodule Consigliere.RunnerProcess do
   end
 
   def handle_info({port, {:exit_status, 0}}, %{session: %{port: port}} = state) do
-    {:stop, state.stop_reason || manifest_exit_reason(state), state}
+    if state.harness_exit_received do
+      {:stop, state.stop_reason || manifest_exit_reason(state), state}
+    else
+      {:noreply, %{state | port_exit_status: 0}}
+    end
   end
 
   def handle_info({port, {:exit_status, status}}, %{session: %{port: port}} = state) do
-    {:stop, state.stop_reason || {:harness_exited, status}, state}
+    if state.harness_exit_received do
+      {:stop, state.stop_reason || {:harness_exited, status}, state}
+    else
+      {:noreply, %{state | port_exit_status: status}}
+    end
   end
 
   def handle_info({:tcp, socket, line}, %{session: %{socket: socket}} = state) do
     case RunnerLauncher.verify_frame(state.session, String.trim(line)) do
       {:ok, message, session} ->
         :ok = :inet.setopts(socket, active: :once)
-        {:noreply, handle_control(message, %{state | session: session})}
+        state = handle_control(message, %{state | session: session})
+
+        if state.harness_exit_received and not is_nil(state.port_exit_status) do
+          {:stop, state.stop_reason || manifest_exit_reason(state), state}
+        else
+          {:noreply, state}
+        end
 
       {:error, _reason} ->
         :ok = :inet.setopts(socket, active: :once)
@@ -166,11 +191,11 @@ defmodule Consigliere.RunnerProcess do
   end
 
   defp handle_control_msg(%{"type" => "harness_exited", "exit_code" => 0}, state) do
-    %{state | stop_reason: :normal}
+    %{state | stop_reason: :normal, harness_exit_received: true}
   end
 
   defp handle_control_msg(%{"type" => "harness_exited", "exit_code" => code}, state) do
-    %{state | stop_reason: {:harness_exited, code}}
+    %{state | stop_reason: {:harness_exited, code}, harness_exit_received: true}
   end
 
   defp handle_control_msg(_msg, state), do: state
@@ -196,6 +221,7 @@ defmodule Consigliere.RunnerProcess do
       {~c"CS_HOME", ~c""},
       {~c"CS_API_SOCKET", String.to_charlist(Consigliere.Home.api_socket_path())},
       {~c"CODEX_HOME", String.to_charlist(Consigliere.Home.ensure_codex_home!())},
+      {~c"CS_ATTEMPT_BRIDGE", ~c"1"},
       {~c"CS_ATTEMPT_BIN",
        String.to_charlist(Path.join(:code.priv_dir(:consigliere_daemon), "cs-attempt"))}
     ]
@@ -223,6 +249,48 @@ defmodule Consigliere.RunnerProcess do
   defp add_env(env, _key, nil), do: env
   defp add_env(env, _key, ""), do: env
   defp add_env(env, key, value), do: [{key, String.to_charlist(to_string(value))} | env]
+
+  defp report_attempt(operation, payload, state) do
+    result_kind = if operation == "complete", do: "completed", else: "checkpoint"
+
+    report =
+      %{
+        "attempt_id" => state.attempt_id,
+        "mission_id" => state.mission_id,
+        "project_id" => state.project_id,
+        "workspace_id" => state.workspace_id,
+        "workspace_generation" => state.workspace_generation,
+        "base_sha" => state.base_sha,
+        "fencing_generation" => state.fencing_token,
+        "result_sha" => Map.get(payload, "result_sha"),
+        "result_kind" => result_kind,
+        "terminal_sequence" => "latest"
+      }
+      |> maybe_put_report_parent(state.parent_checkpoint_sha)
+
+    idempotency_key = "attempt:#{state.attempt_id}:#{operation}"
+
+    request = %{
+      "v" => 1,
+      "id" => idempotency_key,
+      "op" => "attempt.#{operation}",
+      "actor" => %{"principal" => "attempt"},
+      "capability" => state.capability,
+      "idempotency_key" => idempotency_key,
+      "operation_version" => 1,
+      "payload" => report
+    }
+
+    _ = Consigliere.API.Protocol.handle(JSON.encode!(request), :capability)
+    state
+  rescue
+    _ -> state
+  end
+
+  defp maybe_put_report_parent(report, nil), do: report
+
+  defp maybe_put_report_parent(report, parent),
+    do: Map.put(report, "parent_checkpoint_sha", parent)
 
   defp ingest_stdout(data, state) do
     append_attempt_log(state.attempt_id, data)
@@ -265,6 +333,11 @@ defmodule Consigliere.RunnerProcess do
     end
   rescue
     _ -> state
+  end
+
+  defp ingest_decoded({:attempt_report, operation, payload}, state)
+       when operation in ["complete", "checkpoint"] do
+    report_attempt(operation, payload, state)
   end
 
   defp ingest_decoded(_, state), do: state

@@ -43,6 +43,9 @@ func RunAttempt(args []string, stdout, stderr io.Writer) int {
 	if identity.parentCheckpointSHA != "" {
 		payload["parent_checkpoint_sha"] = identity.parentCheckpointSHA
 	}
+	if os.Getenv("CS_ATTEMPT_BRIDGE") == "1" {
+		return writeAttemptMarker(operation, payload, stdout, stderr)
+	}
 
 	op := "attempt." + operation
 	idem := "attempt:" + identity.attemptID + ":" + operation
@@ -61,6 +64,19 @@ func RunAttempt(args []string, stdout, stderr io.Writer) int {
 		PrintError(stderr, nil, response)
 		return ExitError
 	}
+	return ExitOK
+}
+
+func writeAttemptMarker(operation string, payload map[string]any, stdout, stderr io.Writer) int {
+	report, err := json.Marshal(map[string]any{
+		"operation": operation,
+		"payload":   payload,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, "attempt report: cannot encode bound report")
+		return ExitError
+	}
+	fmt.Fprintf(stdout, "CS_ATTEMPT_REPORT_V1:%s\n", hex.EncodeToString(report))
 	return ExitOK
 }
 

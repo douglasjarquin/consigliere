@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -134,5 +135,52 @@ func TestRunAttemptRejectsMissingBoundIdentity(t *testing.T) {
 				t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 			}
 		})
+	}
+}
+
+func TestRunAttemptBridgeEmitsBoundReportWithoutSocketAccess(t *testing.T) {
+	const resultSHA = "fedcba9876543210fedcba9876543210fedcba98"
+	for key, value := range map[string]string{
+		"CS_API_SOCKET":            "/private/daemon/api.sock",
+		"CS_CAPABILITY":            "capability-secret",
+		"CS_ATTEMPT_ID":            "attempt-1",
+		"CS_MISSION_ID":            "mission-1",
+		"CS_PROJECT_ID":            "project-1",
+		"CS_WORKSPACE_ID":          "workspace-1",
+		"CS_WORKSPACE_GENERATION":  "workspace-generation-1",
+		"CS_BASE_SHA":              "0123456789012345678901234567890123456789",
+		"CS_FENCING_GENERATION":    "fence-1",
+		"CS_CAPABILITY_ID":         "capability-1",
+		"CS_CAPABILITY_GENERATION": "7",
+		"CS_ATTEMPT_BRIDGE":        "1",
+	} {
+		t.Setenv(key, value)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := RunAttempt([]string{"complete", "--sha", resultSHA}, &out, &errOut); code != ExitOK {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if strings.Contains(out.String()+errOut.String(), "capability-secret") {
+		t.Fatalf("capability leaked in bridge output: %q %q", out.String(), errOut.String())
+	}
+	line := strings.TrimSpace(out.String())
+	const prefix = "CS_ATTEMPT_REPORT_V1:"
+	if !strings.HasPrefix(line, prefix) {
+		t.Fatalf("marker=%q", line)
+	}
+	decoded, err := hex.DecodeString(strings.TrimPrefix(line, prefix))
+	if err != nil {
+		t.Fatalf("marker hex: %v", err)
+	}
+	var report struct {
+		Operation string         `json:"operation"`
+		Payload   map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal(decoded, &report); err != nil {
+		t.Fatalf("marker json: %v", err)
+	}
+	if report.Operation != "complete" || report.Payload["result_sha"] != resultSHA {
+		t.Fatalf("report=%v", report)
 	}
 }

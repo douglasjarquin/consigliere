@@ -9,6 +9,7 @@ defmodule Consigliere.Harness.Codex do
   @max_text Consigliere.V0.Limits.final_text_bytes()
   @max_version_output 1_024
   @version_timeout_ms 2_000
+  @attempt_report_marker "CS_ATTEMPT_REPORT_V1:"
 
   @impl true
   def capabilities do
@@ -181,6 +182,14 @@ defmodule Consigliere.Harness.Codex do
     {:event, "progress.reported", %{"text" => bound_text(item["text"] || "")}}
   end
 
+  defp item_event(%{"type" => "command_execution", "aggregated_output" => output} = item)
+       when is_binary(output) do
+    case attempt_report(output) do
+      {:ok, operation, payload} -> {:attempt_report, operation, payload}
+      :ignore -> {:event, "artifact.created", item}
+    end
+  end
+
   defp item_event(%{"type" => "error"} = item) do
     {:event, "progress.reported", %{"text" => bound_text(item["text"] || "item error")}}
   end
@@ -190,6 +199,26 @@ defmodule Consigliere.Harness.Codex do
   end
 
   defp item_event(_), do: :ignore
+
+  defp attempt_report(output) do
+    marker =
+      output
+      |> String.split("\n", trim: true)
+      |> Enum.find(&String.starts_with?(&1, @attempt_report_marker))
+
+    with line when is_binary(line) <- marker,
+         encoded <- String.replace_prefix(line, @attempt_report_marker, "") |> String.trim(),
+         true <- byte_size(encoded) <= Consigliere.V0.Limits.semantic_payload_bytes() * 2,
+         {:ok, report} <- Base.decode16(encoded, case: :mixed),
+         true <- byte_size(report) <= Consigliere.V0.Limits.semantic_payload_bytes(),
+         {:ok, %{"operation" => operation, "payload" => payload}} <- JSON.decode(report),
+         true <- operation in ["complete", "checkpoint"],
+         true <- is_map(payload) do
+      {:ok, operation, payload}
+    else
+      _ -> :ignore
+    end
+  end
 
   defp failed_reason(map) do
     case map do

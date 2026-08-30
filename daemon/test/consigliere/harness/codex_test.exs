@@ -120,6 +120,29 @@ defmodule Consigliere.Harness.CodexTest do
     assert Codex.decode_line(~s({"type":"thread.completed"})) == :ignore
   end
 
+  test "decodes the private Attempt reporter marker from a command result" do
+    sha = String.duplicate("a", 40)
+
+    marker =
+      "CS_ATTEMPT_REPORT_V1:" <>
+        (JSON.encode!(%{
+           "operation" => "complete",
+           "payload" => %{"result_sha" => sha}
+         })
+         |> Base.encode16(case: :lower))
+
+    assert {:attempt_report, "complete", %{"result_sha" => ^sha}} =
+             Codex.decode_line(
+               JSON.encode!(%{
+                 "type" => "item.completed",
+                 "item" => %{
+                   "type" => "command_execution",
+                   "aggregated_output" => marker <> "\n"
+                 }
+               })
+             )
+  end
+
   test "version reports a bounded configured CLI version" do
     script = Path.join(System.tmp_dir!(), "codex-version-#{System.unique_integer([:positive])}")
     File.write!(script, "#!/bin/sh\necho 'codex 1.2.3'\n")

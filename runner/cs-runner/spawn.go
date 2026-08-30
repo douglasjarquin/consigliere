@@ -91,6 +91,7 @@ func scrubbedHarnessEnv() []string {
 	}
 	for _, key := range []string{
 		"CS_ATTEMPT_BIN",
+		"CS_ATTEMPT_BRIDGE",
 		"CS_ATTEMPT_ID",
 		"CS_MISSION_ID",
 		"CS_PROJECT_ID",

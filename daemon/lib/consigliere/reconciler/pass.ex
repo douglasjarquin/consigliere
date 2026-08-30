@@ -165,7 +165,7 @@ defmodule Consigliere.Reconciler.Pass do
   end
 
   defp failed_intent?(attempt) do
-    attempt.exit_classification not in [nil, "completed"] or
+    attempt.exit_classification not in [nil, "completed", "completion_reported"] or
       last_harness_type(attempt.id) == "session.failed"
   end
 

@@ -40,6 +40,7 @@ func TestScrubbedHarnessEnv_ForwardsCodexHomeNotSecrets(t *testing.T) {
 	t.Setenv("CS_ATTEMPT_ID", "attempt-1")
 	t.Setenv("CS_CAPABILITY_ID", "capability-1")
 	t.Setenv("CS_CAPABILITY_GENERATION", "7")
+	t.Setenv("CS_ATTEMPT_BRIDGE", "1")
 	env := strings.Join(scrubbedHarnessEnv(), "\n")
 	if !strings.Contains(env, "CODEX_HOME=/safe/codex-home") {
 		t.Fatalf("missing CODEX_HOME: %s", env)
@@ -54,6 +55,9 @@ func TestScrubbedHarnessEnv_ForwardsCodexHomeNotSecrets(t *testing.T) {
 		!strings.Contains(env, "CS_CAPABILITY_ID=capability-1") ||
 		!strings.Contains(env, "CS_CAPABILITY_GENERATION=7") {
 		t.Fatalf("missing bound attempt identity: %s", env)
+	}
+	if !strings.Contains(env, "CS_ATTEMPT_BRIDGE=1") {
+		t.Fatalf("missing runner bridge mode: %s", env)
 	}
 	if strings.Contains(env, "CS_HOME=") && strings.Contains(env, "/secret/cs-home") {
 		t.Fatalf("CS_HOME leaked: %s", env)
