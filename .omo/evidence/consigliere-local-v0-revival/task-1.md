@@ -84,12 +84,16 @@ The temporary archive, package prefix, installed home, container, and restarted 
 
 ## Final head closure
 
-The final runtime head is `bf2dce60b52447e9075f05f135c4c36ccb2722ae`.
+The final runtime head is `95ea4e5e38c6350f6560339708bbc33b985010b8`.
 
 The CI-shaped Linux daemon command used Elixir `1.20`, OTP `29`, Go `1.26.6`, `mix format --check-formatted`, `MIX_ENV=test mix compile --warnings-as-errors`, and three seed-0 full-suite runs.
 
-Each run passed `473 tests` including one doctest.
+Each run passed `476 tests` including one doctest.
 
 The final native package and installed lifecycle are recorded in `F3.md` with exact artifact hashes and stop cleanup receipts.
 
 The final source, Go, package, and lifecycle gates were run after the runtime audit commits and before the replacement PR is updated.
+
+The final native package was `.tmp/package-95ea4e5-Gfnr21` with `cs` hash `4b977c4361239244630749d331837c58d5aad99e1d197103d4847c628a433815`, `csd` hash `49074f20047840f485d110190da0fd20fbd52646969dc5f1d920f778cb584bed`, `cs-runner` hash `a188c50b3c0fa578dc7606a38bec41eeafa1889cd2ca41b553f9ec016481c5a8`, and `cs-attempt` hash `c6c0a480facfafdb45c7b37e36d41fd6fc17605da576c6b0e7633cb5776702a9`.
+
+The package and installed lifecycle details are recorded in the final F1 through F3 evidence records.

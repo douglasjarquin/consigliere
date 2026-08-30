@@ -118,6 +118,10 @@ No later queue item authorizes bypassing an earlier item.
 
 The daemon treats the local filesystem, local processes, runner input, Codex output, repository content, and model-generated text as untrusted at their boundaries.
 
+The trusted-local deployment boundary does not claim OS-level isolation against a same-UID host compromise; that is the deliberate Spike D descope recorded in `docs/phase0-report.md`.
+
+V0 still rejects malformed or scope-mismatched application inputs at its authenticated boundaries.
+
 The boss credential is restricted to the explicit human channel and is never copied into a worker environment, advisory process, context pack, log, event, or durable record.
 
 Attempt capabilities are short-lived, revocable, exact-Attempt credentials with an explicit closed operation allowlist and exact Mission, workspace, lease, and fence scope.

@@ -215,3 +215,25 @@ The GREEN fix in `bf2dce60b52447e9075f05f135c4c36ccb2722ae` records one bounded 
 The same runtime follow-up releases the global scheduler slot after every terminal Attempt classification, including protocol failure.
 
 The focused pause and progression tests passed, and the final Linux daemon suite passed `473 tests` in each of three consecutive seed-0 runs.
+
+## Post-audit recovery and dispatch race closure
+
+The next runtime audit reproduced three additional recovery defects before the fixes: unverified death released the scheduler slot, a later harness-exit frame could overwrite a persisted protocol failure, and repeated native stream gaps could append repeated failure events.
+
+Commit `39f342e7f8003ffd1b4c585a05a036ebcdc48fb7` holds unresolved dispatch slots durably as `unknown`, retains the first protocol-failure reason, and suppresses repeated protocol-failure persistence.
+
+The focused local recovery command passed `6` tests, and the Linux focused recovery slice passed `20` tests including classification, reconciliation persistence, and authenticated runner recovery.
+
+The clean full Linux suite then reproduced a stale `planned` Attempt race in `Dispatch.continue/4`, where a concurrent state change caused a MissionCoordinator `MatchError`.
+
+Tests-first GREEN commit `f840893055303ab1802bbec5ee33861ece1b5853` re-reads the Attempt after the illegal transition, attaches an existing runner, holds unknown liveness, or releases a terminal slot without creating a duplicate Attempt.
+
+The focused dispatch recovery suite passed `8` tests after that fix.
+
+Commit `95ea4e5e38c6350f6560339708bbc33b985010b8` classifies a protocol-failure stop reason as a failed Attempt even when the durable failure marker races with runner termination, and serializes the non-sandboxed shared-home test suite at one case at a time.
+
+The process-level report suite passed `2` tests, and the authoritative Linux daemon gate passed `476 passed (1 doctest, 475 tests)` in three consecutive seed-0 runs.
+
+The native macOS full suite passed `467/476` with nine host-specific socket, path, and reconciler-fixture observations; the packaged macOS lifecycle passed independently with exact owner identity change, repeated stop, restart, and zero residual package processes.
+
+Failure classes exercised or ruled out here were stale state, repeated interruption, malformed protocol completion, misleading process exit status, and flaky shared-test timing.
