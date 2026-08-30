@@ -10,7 +10,7 @@ The selected source was a clean `dotfiles` clone at its `main` tip, with base SH
 
 No Project was preselected by the product, no paired duplicate work was started, and no fixed duration or Continue limit was used.
 
-The FirstMate configuration inputs were read from the three operator-provided paths.
+The FirstMate configuration inputs were read from `/Users/douglasjarquin/github/douglasjarquin/dotfiles/files/firstmate/agent/config/crew-dispatch.json`, `/Users/douglasjarquin/github/douglasjarquin/dotfiles/files/firstmate/main/config/crew-dispatch.json`, and `/Users/douglasjarquin/github/douglasjarquin/dotfiles/files/firstmate/runner/config/crew-dispatch.json`.
 
 All three resolved to harness `codex`, model `gpt-5.6-luna`, and reasoning effort `high`.
 

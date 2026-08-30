@@ -10,7 +10,7 @@ No Project was preselected by the product, no paired duplicate work was run, and
 
 ## Configuration
 
-FirstMate used the operator-provided optimized agent, main, and runner configurations.
+FirstMate used the operator-provided optimized configurations at `/Users/douglasjarquin/github/douglasjarquin/dotfiles/files/firstmate/agent/config/crew-dispatch.json`, `/Users/douglasjarquin/github/douglasjarquin/dotfiles/files/firstmate/main/config/crew-dispatch.json`, and `/Users/douglasjarquin/github/douglasjarquin/dotfiles/files/firstmate/runner/config/crew-dispatch.json`.
 
 All three resolved to the Codex harness, model `gpt-5.6-luna`, and reasoning effort `high`.
 
