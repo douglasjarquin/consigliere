@@ -387,11 +387,27 @@ defmodule Consigliere.ReconcilerPersistTest do
   end
 
   defp live_process_attrs(pid) do
+    {runner_port, runner_pid} = Consigliere.ProcessHelpers.spawn_session_leader()
+    executable = session_leader_executable()
+
+    on_exit(fn ->
+      _ = ProcessGroup.terminate(runner_pid, term_timeout_ms: 100, kill_timeout_ms: 100)
+      if Port.info(runner_port), do: Port.close(runner_port)
+    end)
+
     %{
-      "runner_pid" => pid,
-      "runner_executable_path" => System.find_executable("sleep") || "/bin/sleep",
+      "runner_pid" => runner_pid,
+      "runner_executable_path" => executable,
       "harness_pid" => pid,
-      "harness_executable_path" => System.find_executable("sleep") || "/bin/sleep"
+      "harness_executable_path" => executable
     }
+  end
+
+  defp session_leader_executable do
+    if System.find_executable("setsid") do
+      System.find_executable("sleep") || "/bin/sleep"
+    else
+      System.find_executable("ruby") || System.find_executable("ruby3") || "/usr/bin/ruby"
+    end
   end
 end

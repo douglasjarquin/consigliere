@@ -65,8 +65,13 @@ func main() {
 			fmt.Fprintln(os.Stderr, "cs-runner:", "resolve runner executable:", err)
 			os.Exit(1)
 		}
-		if err := startDetachedRunner(executable, os.Args[1:], bootstrap); err != nil {
+		detached, err := startDetachedRunner(executable, os.Args[1:], bootstrap)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "cs-runner:", err)
+			os.Exit(1)
+		}
+		if err := detached.Wait(); err != nil {
+			fmt.Fprintln(os.Stderr, "cs-runner: detached runner:", err)
 			os.Exit(1)
 		}
 		return
@@ -352,6 +357,10 @@ func runAuthenticated(identity InvocationIdentity, manifestPath, controlSocketPa
 			}
 			return fmt.Errorf("stream delivery failed: %w", err)
 		}
+		if err := finalizeManifest(manifestPath, base, verified, &code, nil); err != nil {
+			_ = cc.Close()
+			return err
+		}
 		if err := cc.SendFrame(map[string]any{
 			"type":       "harness_exited",
 			"attempt_id": identity.AttemptID,
@@ -367,8 +376,7 @@ func runAuthenticated(identity InvocationIdentity, manifestPath, controlSocketPa
 			}
 			return fmt.Errorf("harness exit delivery failed: %w", err)
 		}
-		err := finalizeManifest(manifestPath, base, verified, &code, nil)
-		return err
+		return nil
 
 	case reason := <-terminationTriggered:
 		terminating := base

@@ -54,7 +54,7 @@ func TestMain(m *testing.M) {
 			},
 		}
 		_ = os.Setenv("CS_RUNNER_TEST_HELPER", "detached-bootstrap-child")
-		if err := startDetachedRunner(os.Args[0], []string{os.Args[1]}, bootstrap); err != nil {
+		if _, err := startDetachedRunner(os.Args[0], []string{os.Args[1]}, bootstrap); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
