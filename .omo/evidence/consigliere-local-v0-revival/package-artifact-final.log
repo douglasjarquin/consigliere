@@ -1,16 +1,16 @@
 surface: exact-SHA package artifact
-source_runtime_commit: bc7e980c90aa54e165d5aed3dae060f3a2c9e584
-invocation: PATH=/opt/homebrew/opt/erlang/bin:$PATH scripts/package.sh /Users/douglasjarquin/.herdr/worktrees/consigliere/cs-consigliere-local-v0-revival/.tmp/package-bc7e980-AR4rQ1
+source_runtime_commit: 42933d103da9171c76b1564888e0d6557291fb5d
+invocation: PATH=/opt/homebrew/opt/erlang/bin:$PATH scripts/package.sh /Users/douglasjarquin/.herdr/worktrees/consigliere/cs-consigliere-local-v0-revival/.tmp/package-42933d1.mZakYT
 package_exit: 0
-package_prefix: .tmp/package-bc7e980-AR4rQ1
+package_prefix: .tmp/package-42933d1.mZakYT
 cs_type: Mach-O 64-bit executable arm64
 csd_type: Mach-O 64-bit executable arm64
 cs_runner_type: Mach-O 64-bit executable arm64
 cs_attempt_type: Mach-O 64-bit executable arm64
-cs_sha256: fc5fad8d9fbef0ef2acfe24b5901e3d6d6cc7fc204819ecb5f5aea7de50f55cf
-csd_sha256: bfd4baaa32c8b2dac5b1578f726652638f72464cf2a3f36dd1f137581e0d8444
-cs_runner_sha256: c719337bf4ec474260cafb2de9d3e9abf1399b43fc3e1cffe7adccb656223f26
-cs_attempt_sha256: 9163ce551c9ecd078e8018804351d4666e99b9253d67a2e30bcb120909d3c6f1
+cs_sha256: 4b3891c4a27c3c21b10c8324627f2701288cdf83842f8a02619da61df2dd4a2c
+csd_sha256: 400d29f584f7ceacf225608cb28c25ddaf3c9846b19e8e8aa890496afa020b48
+cs_runner_sha256: fa583582034b6c3aa1c1831f387fe578519172990876c6cf4774c28b7b12a382
+cs_attempt_sha256: 9393d8fecbadaf680caec85f260443fed17c9a5bdaa76a3ad408d683d95b2acb
 package_only_version: {"cs":"0.1.0","protocol":1}
 package_only_runner_help_exit: 0
 package_only_attempt_help_exit: 2

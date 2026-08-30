@@ -230,19 +230,19 @@ No duplicate implementation, push, pull request, merge, fixed allocation, hard d
 
 ## Post-canary runtime and package closure
 
-The final runtime head after the audit fixes is `bc7e980c90aa54e165d5aed3dae060f3a2c9e584`.
+The final runtime head after the audit fixes is `42933d103da9171c76b1564888e0d6557291fb5d`.
 
 The exact selected Mission was not rerun after these fixes because the operator-controlled canary forbids duplicate implementation work.
 
-The final package was built from that runtime head at `.tmp/package-bc7e980-AR4rQ1`.
+The final package was built from that runtime head at `.tmp/package-42933d1.mZakYT`.
 
-Its native arm64 artifact hashes were `cs` `fc5fad8d9fbef0ef2acfe24b5901e3d6d6cc7fc204819ecb5f5aea7de50f55cf`, `csd` `bfd4baaa32c8b2dac5b1578f726652638f72464cf2a3f36dd1f137581e0d8444`, `cs-runner` `c719337bf4ec474260cafb2de9d3e9abf1399b43fc3e1cffe7adccb656223f26`, and `cs-attempt` `9163ce551c9ecd078e8018804351d4666e99b9253d67a2e30bcb120909d3c6f1`.
+Its native arm64 artifact hashes were `cs` `4b3891c4a27c3c21b10c8324627f2701288cdf83842f8a02619da61df2dd4a2c`, `csd` `400d29f584f7ceacf225608cb28c25ddaf3c9846b19e8e8aa890496afa020b48`, `cs-runner` `fa583582034b6c3aa1c1831f387fe578519172990876c6cf4774c28b7b12a382`, and `cs-attempt` `9393d8fecbadaf680caec85f260443fed17c9a5bdaa76a3ad408d683d95b2acb`.
 
 The installed-only lifecycle ran from `/tmp` with `env -i`, passed migration, start, ping, health, doctor, status, repeated stop, restart, and final stop, and left zero package processes, sockets, PID files, owner files, and notification logs.
 
-The cleanup receipt was `CLEANUP=trashed:/tmp/cs-final-bc7e980-home.4rOEpA`; the isolated environment home `/tmp/cs-final-bc7e980-env.f3TM5S` was also moved to Trash.
+The cleanup receipt was `CLEANUP=trashed:/tmp/cs-final-42933d1-home.e7matc`; the isolated environment home `/tmp/cs-final-42933d1-env.C2tGuR` was also moved to Trash.
 
-The CI-shaped Linux daemon gate used actual Go `1.26.6` and passed format, warnings-as-errors compilation, and `479 tests` including one doctest in each of three consecutive seed-0 runs.
+The CI-shaped Linux daemon gate used actual Go `1.26.6` and passed format, warnings-as-errors compilation, and `482 tests` including one doctest in each of three consecutive seed-0 runs.
 
 The CLI and runner Go gates passed formatting, vet, ordinary tests, race and shuffle tests, and builds.
 

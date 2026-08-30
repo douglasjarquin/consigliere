@@ -1,8 +1,8 @@
 surface: installed-only package lifecycle
-source_runtime_commit: bc7e980c90aa54e165d5aed3dae060f3a2c9e584
+source_runtime_commit: 42933d103da9171c76b1564888e0d6557291fb5d
 invocation: cd /tmp; env -i PATH=<package>/bin:/usr/bin:/bin HOME=<fresh-temp-home> CS_HOME=<fresh-temp-cs-home> CS_RELEASE=<package>/libexec/consigliere_daemon CS_CSD_FORCE_BACKGROUND=1
-package_prefix: .tmp/package-bc7e980-AR4rQ1
-raw_transcript: .tmp/installed-lifecycle-bc7e980.log
+package_prefix: .tmp/package-42933d1.mZakYT
+raw_transcript: .tmp/installed-lifecycle-42933d1.log
 commands: cs version --json; csd migrate; csd start; cs ping; cs health; cs doctor; csd status; cs projects; csd stop; csd stop; csd restart; cs ping; cs health; cs doctor; csd status; csd stop; csd stop
 all_command_exit_codes: 0
 version_output: {"cs":"0.1.0","protocol":1}
@@ -10,6 +10,6 @@ initial_owner: verified
 restart_owner: verified
 restart_identity: PID and start timestamp changed
 final_receipt: F3_INSTALLED_LIFECYCLE stop=verified sockets=0 pid_files=0 owner_files=0 notifications=0 package_processes=0
-cleanup_receipt: CLEANUP=trashed:/tmp/cs-final-bc7e980-home.4rOEpA
-environment_home_cleanup: trashed:/tmp/cs-final-bc7e980-env.f3TM5S
+cleanup_receipt: CLEANUP=trashed:/tmp/cs-final-42933d1-home.e7matc
+environment_home_cleanup: trashed:/tmp/cs-final-42933d1-env.C2tGuR
 redaction: temporary home, process identifiers, and package absolute paths normalized or omitted

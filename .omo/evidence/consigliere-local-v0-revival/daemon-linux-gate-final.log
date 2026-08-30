@@ -1,14 +1,14 @@
 surface: authoritative Linux daemon gate
-source_runtime_commit: bc7e980c90aa54e165d5aed3dae060f3a2c9e584
+source_runtime_commit: 42933d103da9171c76b1564888e0d6557291fb5d
 invocation: docker run --rm -v "$PWD":/workspace -w /workspace/runner/cs-runner elixir:1.20-otp-29 sh -lc 'apt-get update -qq && apt-get install -y -qq golang-go >/dev/null && go version && go build -o /workspace/daemon/priv/cs-runner . && cd /workspace/daemon && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && mix format --check-formatted && MIX_ENV=test mix compile --warnings-as-errors && MIX_ENV=test mix test --no-color --seed 0'
 container_go_version: go1.26.6 linux/arm64
 format_exit: 0
 compile_warnings_as_errors_exit: 0
-mix_test_seed_0_run_1: Result: 479 passed (1 doctest, 478 tests)
-mix_test_seed_0_run_2: Result: 479 passed (1 doctest, 478 tests)
-mix_test_seed_0_run_3: Result: 479 passed (1 doctest, 478 tests)
+mix_test_seed_0_run_1: Result: 482 passed (1 doctest, 481 tests)
+mix_test_seed_0_run_2: Result: 482 passed (1 doctest, 481 tests)
+mix_test_seed_0_run_3: Result: 482 passed (1 doctest, 481 tests)
 exit_code: 0
-raw_run_1: .tmp/daemon-linux-bc7e980/pass-1.log
-raw_run_2: .tmp/daemon-linux-bc7e980/pass-2.log
-raw_run_3: .tmp/daemon-linux-bc7e980/pass-3.log
+raw_run_1: .tmp/daemon-linux-recoverable-final/pass-1.log
+raw_run_2: .tmp/daemon-linux-recoverable-final/pass-2.log
+raw_run_3: .tmp/daemon-linux-recoverable-final/pass-3.log
 redaction: debug SQL, test UUIDs, and transient container output omitted from this bounded record

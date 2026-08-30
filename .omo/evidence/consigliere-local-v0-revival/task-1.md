@@ -84,16 +84,16 @@ The temporary archive, package prefix, installed home, container, and restarted 
 
 ## Final head closure
 
-The final runtime head is `bc7e980c90aa54e165d5aed3dae060f3a2c9e584`.
+The final runtime head is `42933d103da9171c76b1564888e0d6557291fb5d`.
 
 The CI-shaped Linux daemon command used Elixir `1.20`, OTP `29`, Go `1.26.6`, `mix format --check-formatted`, `MIX_ENV=test mix compile --warnings-as-errors`, and three seed-0 full-suite runs.
 
-Each run passed `479 tests` including one doctest.
+Each run passed `482 tests` including one doctest.
 
 The final native package and installed lifecycle are recorded in `F3.md` with exact artifact hashes and stop cleanup receipts.
 
 The final source, Go, package, and lifecycle gates were run after the runtime audit commits and before the replacement PR is updated.
 
-The final native package was `.tmp/package-bc7e980-AR4rQ1` with `cs` hash `fc5fad8d9fbef0ef2acfe24b5901e3d6d6cc7fc204819ecb5f5aea7de50f55cf`, `csd` hash `bfd4baaa32c8b2dac5b1578f726652638f72464cf2a3f36dd1f137581e0d8444`, `cs-runner` hash `c719337bf4ec474260cafb2de9d3e9abf1399b43fc3e1cffe7adccb656223f26`, and `cs-attempt` hash `9163ce551c9ecd078e8018804351d4666e99b9253d67a2e30bcb120909d3c6f1`.
+The final native package was `.tmp/package-42933d1.mZakYT` with `cs` hash `4b3891c4a27c3c21b10c8324627f2701288cdf83842f8a02619da61df2dd4a2c`, `csd` hash `400d29f584f7ceacf225608cb28c25ddaf3c9846b19e8e8aa890496afa020b48`, `cs-runner` hash `fa583582034b6c3aa1c1831f387fe578519172990876c6cf4774c28b7b12a382`, and `cs-attempt` hash `9393d8fecbadaf680caec85f260443fed17c9a5bdaa76a3ad408d683d95b2acb`.
 
 The package and installed lifecycle details are recorded in the final F1 through F3 evidence records.

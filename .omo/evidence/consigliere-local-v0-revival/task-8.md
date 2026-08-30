@@ -98,3 +98,19 @@ Repeated interruption was exercised through duplicate command requests, duplicat
 No second dispatcher, hidden spawn retry, worker before authorization, native transcript resume, legacy supervisor dependency, Made action, GitHub action, PR action, merge action, credential, secret, or unbounded output was added.
 
 `git diff --check` was clean, and the temporary driver, Go wrapper, and generated runner binaries were moved to Trash rather than permanently deleted.
+
+## Post-audit invariant closure
+
+The final audit reproduced a recovery leak where canceling a planned Attempt left its durable dispatch slot pending and a scheduler rebuild remained busy.
+
+The RED regression was `MIX_ENV=test mix test test/consigliere/global_scheduler_test.exs --no-color --seed 0`, which returned `3/4 passed` because the canceled operation remained `pending`.
+
+The fix is committed in `49db8626a1a2113f8d7faac1521f4ea4305c0b19` and releases the planned operation inside the same transaction that marks the Attempt canceled.
+
+The final invariant audit also added the SQLite partial unique index `attempts_one_recoverable_per_mission` for `planned` and `starting` rows, preflight checks in every Attempt-creation path, and a planned supersession regression.
+
+The GREEN command `MIX_ENV=test mix test test/consigliere/attempts/attempt_test.exs test/consigliere/exact_sha_progression_test.exs test/consigliere/global_scheduler_test.exs test/consigliere/attempts/transitions_test.exs --no-color --seed 0` returned `22 passed` with formatting and warnings-as-errors compilation clean.
+
+The authoritative Linux daemon gate on the committed follow-up returned `482 passed (1 doctest, 481 tests)` in each of three consecutive seed-0 runs.
+
+The failure classes covered here were stale planned slots, duplicate recoverable continuation, direct SQLite uniqueness violation, planned replacement, restart rebuild, and repeated cancellation.
