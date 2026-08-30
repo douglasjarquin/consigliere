@@ -34,9 +34,13 @@ defmodule Consigliere.ProcessHelpers do
               raise("ruby is required to spawn a setsid process group")
 
           script = """
-          Process.daemon(true, false)
-          File.write(ARGV.fetch(0), Process.pid.to_s)
-          sleep 60
+          child = fork do
+            Process.setsid
+            File.write(ARGV.fetch(0), Process.pid.to_s)
+            sleep 60
+          end
+
+          Process.wait(child)
           """
 
           {ruby, ["-e", script, pid_path]}
