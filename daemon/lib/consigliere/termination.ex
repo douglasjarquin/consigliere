@@ -167,32 +167,34 @@ defmodule Consigliere.Termination do
   end
 
   defp resolve_pgid(attempt) do
-    cond do
-      is_integer(attempt.pgid) and attempt.pgid > 1 ->
-        {:ok, attempt.pgid}
+    home = Home.dir()
 
-      runner_registered?(attempt.id) ->
-        :unknown
+    case Inventory.verify(Inventory.path_for(home, attempt.id), home) do
+      {:valid_live, %{"pgid" => pgid} = manifest, _}
+      when is_integer(pgid) and pgid > 1 and
+             (is_nil(attempt.pgid) or attempt.pgid == pgid) ->
+        case {runner_registered?(attempt.id), Inventory.liveness(manifest)} do
+          {true, _liveness} ->
+            :unknown
 
-      true ->
-        home = Home.dir()
-
-        case Inventory.verify(Inventory.path_for(home, attempt.id), home) do
-          {:valid_live, %{"pgid" => pgid}, _} when is_integer(pgid) and pgid > 1 ->
+          {false, :verified} ->
             {:ok, pgid}
 
-          {:valid_terminal, _, _} ->
+          {false, :absent} ->
             :none
-
-          :missing when attempt.status == "planned" ->
-            :none
-
-          :missing ->
-            :unknown
 
           _ ->
             :unknown
         end
+
+      {:valid_terminal, _, _} ->
+        :none
+
+      :missing when attempt.status == "planned" ->
+        :none
+
+      _ ->
+        :unknown
     end
   end
 
