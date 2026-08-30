@@ -139,3 +139,23 @@ The package contained no Go, Elixir, Mix, or module source files, all inspected 
 The selected real canary was not rerun against the final package because the operator-controlled rule forbids duplicate implementation work.
 
 The public canary remains one completed Consigliere Mission with two Attempts, zero FirstMate Missions, and insufficient evidence for Promote.
+
+## Closing delivery-head evidence
+
+The runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339`.
+
+The pushed evidence delivery head is `85f02c5b739116d7de0d3f04a372f463bbb913e6`.
+
+The tracked diff from the runtime source head to the delivery head changes only documentation and evidence files.
+
+The exact command `git diff --exit-code 7c54c782552f3ee5a09ddee35735e90cba1b9339 HEAD -- daemon cli runner scripts .github` exited `0`.
+
+PR #141 remains open and draft at the delivery head, with base `rewrite-in-elixer`.
+
+Remote CI run `33322422318` for the delivery head completed successfully with `5 passed, 0 failed, 5 total`.
+
+PR #101 remains historical and unchanged, and neither PR is merged.
+
+The final gate review is `gate-review-final-85f02c5.md` and reports PASS with no blockers.
+
+The selected real canary was not rerun after runtime hardening because the no-duplicate rule forbids another implementation record.

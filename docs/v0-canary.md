@@ -101,3 +101,13 @@ The selected real canary remains the one naturally occurring dotfiles Mission wi
 It was not rerun after runtime hardening because the operator-controlled canary forbids duplicate implementation work.
 
 The comparable sample remains below 20, so the public evidence is insufficient for Promote and the operator retains Continue or Stop.
+
+## Delivery record
+
+The runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339` and the pushed evidence delivery head is `85f02c5b739116d7de0d3f04a372f463bbb913e6`.
+
+PR #141 is the separate open draft replacement against `rewrite-in-elixer`.
+
+Remote CI run `33322422318` passed all five checks for the pushed head.
+
+This delivery record does not change the canary result, create a duplicate Mission, or make a Promote claim.

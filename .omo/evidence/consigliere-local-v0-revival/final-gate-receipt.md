@@ -62,6 +62,22 @@ The final runtime audit follow-up and fresh review reports are bound to this exa
 
 The selected real canary was not rerun because the operator-controlled no-duplicate rule forbids duplicate implementation work.
 
+## Closing delivery-head gate
+
+The runtime source gates are bound to `7c54c782552f3ee5a09ddee35735e90cba1b9339`.
+
+The pushed evidence delivery head is `85f02c5b739116d7de0d3f04a372f463bbb913e6`.
+
+The delivery-head runtime diff check against `daemon`, `cli`, `runner`, `scripts`, and `.github` exited `0`, proving that the evidence commit added no product-input changes.
+
+Remote CI run `33322422318` completed successfully with all five checks passing at the exact pushed PR head.
+
+PR #141 is open and draft against `rewrite-in-elixer`, and PR #101 remains unchanged and unmerged.
+
+The final gate verdict is PASS for plan compliance, source quality, package/manual QA, remote CI, and scope fidelity, with the canary correctly recorded as insufficient for Promote.
+
+The supporting final gate review is `gate-review-final-85f02c5.md`.
+
 ## Current exact-head closure
 
 The current runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
