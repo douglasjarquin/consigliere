@@ -209,7 +209,8 @@ defmodule Consigliere.Runtime.Inventory do
       pid,
       manifest["pgid"],
       manifest["runner_executable_path"],
-      manifest["runner_executable_sha256"]
+      manifest["runner_executable_sha256"],
+      :runner
     )
   end
 
@@ -220,16 +221,21 @@ defmodule Consigliere.Runtime.Inventory do
       pid,
       manifest["pgid"],
       manifest["harness_executable_path"],
-      manifest["harness_executable_sha256"]
+      manifest["harness_executable_sha256"],
+      :harness
     )
   end
 
   defp harness_identity(_), do: {:ok, :missing}
 
-  defp identity_state(pid, pgid, executable_path, executable_sha256) do
+  defp identity_state(pid, pgid, executable_path, executable_sha256, role) do
     case ProcessIdentity.verify(pid, executable_path, executable_sha256) do
       :verified ->
-        if ProcessGroup.member?(pid, pgid), do: {:ok, :verified}, else: {:error, :identity}
+        case {role, ProcessGroup.member?(pid, pgid)} do
+          {:runner, false} -> {:ok, :verified}
+          {:harness, true} -> {:ok, :verified}
+          _ -> {:error, :identity}
+        end
 
       :absent ->
         {:ok, :absent}

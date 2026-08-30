@@ -59,6 +59,18 @@ func main() {
 		os.Exit(2)
 	}
 	bootstrap.CloseStdin = true
+	if os.Getenv("CS_RUNNER_DETACHED") != "1" {
+		executable, err := os.Executable()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "cs-runner:", "resolve runner executable:", err)
+			os.Exit(1)
+		}
+		if err := startDetachedRunner(executable, os.Args[1:], bootstrap); err != nil {
+			fmt.Fprintln(os.Stderr, "cs-runner:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	defer os.Stdin.Close()
 
 	if err := runAuthenticated(identity, *manifestPath, *controlSocketPath, bootstrap, harnessCommand, 30*time.Second); err != nil {
