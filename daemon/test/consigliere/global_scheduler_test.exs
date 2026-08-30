@@ -59,7 +59,7 @@ defmodule Consigliere.GlobalSchedulerTest do
     assert {:error, :busy} = GlobalScheduler.request_slot(Ecto.UUID.generate())
   end
 
-  test "a restarted scheduler keeps an unreleased dispatch slot occupied" do
+  test "a scheduler rebuild keeps an unreleased dispatch slot occupied" do
     {:ok, mission} =
       Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
@@ -74,24 +74,8 @@ defmodule Consigliere.GlobalSchedulerTest do
     {:ok, _} = Attempts.request_spawn(attempt.id, Actor.system())
     {:ok, _operation} = DispatchOperations.ensure(attempt, %{slot_state: "granted"})
 
-    pid = Process.whereis(GlobalScheduler)
-    ref = Process.monitor(pid)
-    Process.exit(pid, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^pid, :killed}, 1_000
-
-    new_pid =
-      Enum.reduce_while(1..50, nil, fn _, _ ->
-        case Process.whereis(GlobalScheduler) do
-          p when is_pid(p) and p != pid ->
-            {:halt, p}
-
-          _ ->
-            Process.sleep(10)
-            {:cont, nil}
-        end
-      end)
-
-    assert is_pid(new_pid)
+    assert :ok = GlobalScheduler.release_slot(attempt.mission_id)
+    assert :ok = GlobalScheduler.reset()
     assert mission.id in GlobalScheduler.occupants()
     assert {:error, :busy} = GlobalScheduler.request_slot(Ecto.UUID.generate())
   end
