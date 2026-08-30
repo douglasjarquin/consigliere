@@ -19,7 +19,7 @@ defmodule Consigliere.API.SocketTest do
   end
 
   test "boss.sock remains the lock probe and is still live" do
-    home = Path.join(System.tmp_dir!(), "consigliere-daemon-test-home")
+    home = "/tmp/consigliere-daemon-test-home"
     assert Home.socket_status(home) == :live
     refute Listener.socket_path() == Home.boss_socket_path(home)
   end

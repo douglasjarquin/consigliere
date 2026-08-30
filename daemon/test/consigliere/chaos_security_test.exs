@@ -220,7 +220,7 @@ defmodule Consigliere.ChaosSecurityTest do
   end
 
   test "boss.sock is a lock probe, not a protocol channel" do
-    home = Path.join(System.tmp_dir!(), "consigliere-daemon-test-home")
+    home = "/tmp/consigliere-daemon-test-home"
     path = Home.boss_socket_path(home)
     assert Home.socket_status(home) == :live
     refute path == Listener.socket_path()
