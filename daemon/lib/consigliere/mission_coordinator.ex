@@ -85,7 +85,9 @@ defmodule Consigliere.MissionCoordinator do
   end
 
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{runner_ref: ref} = state) do
-    {:noreply, refresh_and_request_schedule(%{state | runner_pid: :not_found, runner_ref: nil})}
+    state = %{state | runner_pid: :not_found, runner_ref: nil}
+    settle_pause(state)
+    {:noreply, refresh_and_request_schedule(state)}
   end
 
   def handle_info(:tick, state) do
@@ -104,6 +106,20 @@ defmodule Consigliere.MissionCoordinator do
     state = refresh_and_request_schedule(state)
     schedule_tick(state.poll_interval_ms)
     state
+  end
+
+  defp settle_pause(state) do
+    case Repo.get(Mission, state.mission_id) do
+      %Mission{} ->
+        if Enum.any?(open_blockers(state.mission_id), &(&1.kind == "pausing")) do
+          _ = Consigliere.Pause.settle(state.mission_id)
+        end
+
+      _ ->
+        :ok
+    end
+
+    :ok
   end
 
   defp refresh_and_request_schedule(state) do

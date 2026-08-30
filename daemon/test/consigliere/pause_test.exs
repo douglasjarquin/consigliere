@@ -74,6 +74,21 @@ defmodule Consigliere.PauseTest do
     assert updated_attempt.fencing_token == manifest["fencing_token"]
   end
 
+  test "pause settles after the runner exits asynchronously" do
+    {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
+    {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
+    {:ok, mission} = Missions.grant_work_authorization(mission.id, Actor.boss())
+
+    [{coord, _}] = wait_coord(mission.id)
+    _ = await_runner(coord)
+    attempt = Repo.get_by!(Attempt, mission_id: mission.id)
+
+    assert {:ok, %{status: :pausing}} = Missions.pause(mission.id, Actor.boss())
+    wait_for_runner_exit(attempt.id)
+
+    assert_eventually(fn -> Repo.get!(Mission, mission.id).phase == "paused" end)
+  end
+
   test "pause does not signal a persisted pgid without verified inventory" do
     {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
     {:ok, mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
@@ -146,6 +161,33 @@ defmodule Consigliere.PauseTest do
       true ->
         Process.sleep(50)
         await_runner(coord, n - 1)
+    end
+  end
+
+  defp wait_for_runner_exit(attempt_id, n \\ 100) do
+    case Registry.lookup(Consigliere.Registry, {:runner, attempt_id}) do
+      [] ->
+        :ok
+
+      _ when n > 0 ->
+        Process.sleep(50)
+        wait_for_runner_exit(attempt_id, n - 1)
+
+      _ ->
+        flunk("runner did not exit")
+    end
+  end
+
+  defp assert_eventually(fun, n \\ 100) do
+    if fun.() do
+      :ok
+    else
+      if n > 0 do
+        Process.sleep(50)
+        assert_eventually(fun, n - 1)
+      else
+        flunk("condition did not become true")
+      end
     end
   end
 end
