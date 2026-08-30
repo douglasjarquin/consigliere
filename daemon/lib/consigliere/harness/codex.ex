@@ -24,7 +24,7 @@ defmodule Consigliere.Harness.Codex do
     dp = (project && project.dispatch_policy) || %{}
 
     %{
-      "model" => dp["model"] || "gpt-5",
+      "model" => dp["model"] || "gpt-5.6-luna",
       "effort" => dp["effort"] || dp["reasoning_effort"] || "high",
       "sandbox" => dp["sandbox"] || "workspace-write",
       "approval" => dp["approval"] || dp["ask_for_approval"] || "never"
@@ -43,11 +43,11 @@ defmodule Consigliere.Harness.Codex do
       "--json",
       "--skip-git-repo-check",
       "--model",
-      to_string(Map.get(policy, "model", "gpt-5")),
+      to_string(Map.get(policy, "model", "gpt-5.6-luna")),
       "--sandbox",
       to_string(Map.get(policy, "sandbox", "workspace-write")),
-      "--ask-for-approval",
-      to_string(Map.get(policy, "approval", "never")),
+      "-c",
+      "approval_policy=#{Map.get(policy, "approval", "never")}",
       "-c",
       "model_reasoning_effort=#{Map.get(policy, "effort", "high")}",
       "-C",

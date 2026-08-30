@@ -33,7 +33,7 @@ defmodule Consigliere.MissionGrantDispatchTest do
     assert is_binary(attempt.input_context_hash)
     assert byte_size(attempt.input_context_hash) == 64
     assert is_binary(attempt.invocation_id)
-    assert attempt.model == "gpt-5"
+    assert attempt.model == "gpt-5.6-luna"
     assert attempt.reasoning_effort == "high"
     assert attempt.sandbox == "workspace-write"
     assert attempt.approval == "never"

@@ -7,6 +7,8 @@ ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 PREFIX=${1:-"$ROOT/prefix"}
 export PATH="/opt/homebrew/opt/erlang/bin:/usr/bin:/bin:/usr/local/bin:${PATH:-}"
 
+mkdir -p "$PREFIX"
+PREFIX=$(CDPATH= cd -- "$PREFIX" && pwd)
 mkdir -p "$PREFIX/bin" "$PREFIX/libexec" "$PREFIX/share/consigliere"
 
 (cd "$ROOT/runner/cs-runner" && go build -o "$ROOT/daemon/priv/cs-runner" .)
@@ -15,6 +17,8 @@ mkdir -p "$PREFIX/bin" "$PREFIX/libexec" "$PREFIX/share/consigliere"
 (
   cd "$ROOT/daemon"
   mix deps.get
+  MIX_ENV=prod mix clean
+  rm -rf "$ROOT/daemon/_build/prod/rel/consigliere_daemon"
   MIX_ENV=prod mix compile --warnings-as-errors
   MIX_ENV=prod mix release --overwrite
 )

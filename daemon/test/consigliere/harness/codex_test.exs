@@ -31,6 +31,10 @@ defmodule Consigliere.Harness.CodexTest do
     assert caps["harness_name"] == "codex"
   end
 
+  test "default policy uses the installed ChatGPT Codex model" do
+    assert Codex.policy(nil)["model"] == "gpt-5.6-luna"
+  end
+
   test "argv uses the context pack as the prompt and pins dispatch policy" do
     {:ok, mission} =
       Missions.create(
@@ -63,8 +67,8 @@ defmodule Consigliere.Harness.CodexTest do
     assert "gpt-5" in argv
     assert "--sandbox" in argv
     assert "workspace-write" in argv
-    assert "--ask-for-approval" in argv
-    assert "never" in argv
+    refute "--ask-for-approval" in argv
+    assert "approval_policy=never" in argv
   end
 
   test "decode_line maps a successful exec JSONL stream to session.completed" do
