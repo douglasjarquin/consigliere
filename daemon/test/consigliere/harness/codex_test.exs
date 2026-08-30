@@ -67,6 +67,8 @@ defmodule Consigliere.Harness.CodexTest do
     assert "gpt-5" in argv
     assert "--sandbox" in argv
     assert "workspace-write" in argv
+    assert "--add-dir" in argv
+    assert Path.join("/tmp/ws", ".git") in argv
     refute "--ask-for-approval" in argv
     assert "approval_policy=never" in argv
   end

@@ -46,6 +46,8 @@ defmodule Consigliere.Harness.Codex do
       to_string(Map.get(policy, "model", "gpt-5.6-luna")),
       "--sandbox",
       to_string(Map.get(policy, "sandbox", "workspace-write")),
+      "--add-dir",
+      Path.join(workspace, ".git"),
       "-c",
       "approval_policy=#{Map.get(policy, "approval", "never")}",
       "-c",
