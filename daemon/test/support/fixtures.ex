@@ -131,6 +131,11 @@ defmodule Consigliere.Fixtures do
     attempt
   end
 
+  def starting_attempt!(attrs \\ %{}) do
+    mission = mission!()
+    {mission, attempt!(mission, Map.merge(%{status: "starting"}, attrs))}
+  end
+
   def events(subject_id) do
     DomainEvent
     |> where([e], e.subject_id == ^subject_id)

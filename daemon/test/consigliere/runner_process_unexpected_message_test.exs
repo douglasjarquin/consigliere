@@ -1,15 +1,23 @@
 defmodule Consigliere.RunnerProcessUnexpectedMessageTest do
   use ExUnit.Case, async: false
 
+  alias Consigliere.Fixtures
   alias Consigliere.RunnerProcess
 
   test "an unexpected message does not crash the runner" do
     heartbeat_file =
       Path.join(System.tmp_dir!(), "unexpected-msg-#{System.unique_integer([:positive])}.hb")
 
-    attempt_id = "unexpected-msg-#{System.unique_integer([:positive])}"
+    {mission, attempt} = Fixtures.starting_attempt!()
+    attempt_id = attempt.id
 
-    {:ok, pid} = RunnerProcess.start_link(attempt_id: attempt_id, heartbeat_file: heartbeat_file)
+    {:ok, pid} =
+      RunnerProcess.start_link(
+        attempt_id: attempt_id,
+        mission_id: mission.id,
+        fencing_token: attempt.fencing_token,
+        heartbeat_file: heartbeat_file
+      )
 
     on_exit(fn ->
       if Process.alive?(pid) do

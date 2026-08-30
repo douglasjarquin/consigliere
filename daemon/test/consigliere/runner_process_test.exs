@@ -1,6 +1,7 @@
 defmodule Consigliere.RunnerProcessTest do
   use ExUnit.Case, async: false
 
+  alias Consigliere.Fixtures
   alias Consigliere.RunnerProcess
 
   setup do
@@ -14,8 +15,15 @@ defmodule Consigliere.RunnerProcessTest do
   test "spawns a fake harness process and heartbeats keep flowing", %{
     heartbeat_file: heartbeat_file
   } do
-    attempt_id = "attempt-runner-#{System.unique_integer([:positive])}"
-    {:ok, pid} = RunnerProcess.start_link(attempt_id: attempt_id, heartbeat_file: heartbeat_file)
+    {mission, attempt} = Fixtures.starting_attempt!()
+
+    {:ok, pid} =
+      RunnerProcess.start_link(
+        attempt_id: attempt.id,
+        mission_id: mission.id,
+        fencing_token: attempt.fencing_token,
+        heartbeat_file: heartbeat_file
+      )
 
     os_pid = RunnerProcess.os_pid(pid)
     on_exit(fn -> Consigliere.ProcessHelpers.kill_and_verify_dead(os_pid) end)
@@ -33,12 +41,14 @@ defmodule Consigliere.RunnerProcessTest do
   end
 
   test "captures authenticated harness stderr frames", %{heartbeat_file: heartbeat_file} do
-    attempt_id = "attempt-stderr-#{System.unique_integer([:positive])}"
-    log_path = Path.join(Consigliere.Home.logs_dir(), "attempts/#{attempt_id}.log")
+    {mission, attempt} = Fixtures.starting_attempt!()
+    log_path = Path.join(Consigliere.Home.logs_dir(), "attempts/#{attempt.id}.log")
 
     {:ok, pid} =
       RunnerProcess.start_link(
-        attempt_id: attempt_id,
+        attempt_id: attempt.id,
+        mission_id: mission.id,
+        fencing_token: attempt.fencing_token,
         heartbeat_file: heartbeat_file,
         harness_command: ["sh", "-c", "printf 'stderr-from-harness\\n' >&2; sleep 5"]
       )

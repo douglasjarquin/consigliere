@@ -2,23 +2,28 @@ defmodule Consigliere.RunnerIsolationTest do
   use ExUnit.Case, async: false
 
   alias Consigliere.{RunnerDynamicSupervisor, RunnerProcess}
+  alias Consigliere.Fixtures
   alias Consigliere.ProcessHelpers
 
-  defp start_runner(attempt_id) do
-    heartbeat_file =
-      Path.join(System.tmp_dir!(), "runner-isolation-#{attempt_id}.hb")
+  defp start_runner(label) do
+    {mission, attempt} = Fixtures.starting_attempt!()
+    heartbeat_file = Path.join(System.tmp_dir!(), "runner-isolation-#{label}.hb")
 
     {:ok, pid} =
       DynamicSupervisor.start_child(
         RunnerDynamicSupervisor,
-        {RunnerProcess, attempt_id: attempt_id, heartbeat_file: heartbeat_file}
+        {RunnerProcess,
+         attempt_id: attempt.id,
+         mission_id: mission.id,
+         fencing_token: attempt.fencing_token,
+         heartbeat_file: heartbeat_file}
       )
 
-    {pid, heartbeat_file}
+    {pid, heartbeat_file, attempt.id}
   end
 
   test "repeatedly crashing one runner's OS harness does not kill an unrelated runner" do
-    {innocent_pid, innocent_heartbeat_file} = start_runner("isolation-innocent")
+    {innocent_pid, innocent_heartbeat_file, _innocent_attempt_id} = start_runner("innocent")
     innocent_os_pid = RunnerProcess.os_pid(innocent_pid)
 
     on_exit(fn ->
@@ -30,7 +35,7 @@ defmodule Consigliere.RunnerIsolationTest do
       File.rm(innocent_heartbeat_file)
     end)
 
-    {victim_pid, victim_heartbeat_file} = start_runner("isolation-victim")
+    {victim_pid, victim_heartbeat_file, victim_attempt_id} = start_runner("victim")
     victim_os_pid = RunnerProcess.os_pid(victim_pid)
 
     on_exit(fn -> File.rm(victim_heartbeat_file) end)
@@ -48,7 +53,7 @@ defmodule Consigliere.RunnerIsolationTest do
       # so the call itself must be allowed to fail with :exit if the
       # process finishes terminating in between -- that is functionally
       # the same outcome as the [] (already gone) branch, not a real error.
-      case Registry.lookup(Consigliere.Registry, {:runner, "isolation-victim"}) do
+      case Registry.lookup(Consigliere.Registry, {:runner, victim_attempt_id}) do
         [{pid, _}] ->
           try do
             ProcessHelpers.kill_and_verify_dead(RunnerProcess.os_pid(pid))
@@ -63,7 +68,7 @@ defmodule Consigliere.RunnerIsolationTest do
       Process.sleep(100)
     end
 
-    assert Registry.lookup(Consigliere.Registry, {:runner, "isolation-victim"}) == [],
+    assert Registry.lookup(Consigliere.Registry, {:runner, victim_attempt_id}) == [],
            "a :temporary RunnerProcess must not silently respawn under its own attempt_id after crashing"
 
     assert Process.alive?(innocent_pid),

@@ -636,20 +636,30 @@ defmodule Consigliere.RunnerProcess do
   end
 
   defp maybe_persist_started(attempt_id, session, fencing_token, invocation_id) do
-    with {:ok, id} <- Ecto.UUID.cast(attempt_id),
-         %Attempt{status: "starting"} <- Repo.get(Attempt, id) do
-      case Attempts.mark_running(id, Actor.system(), %{
-             fencing_token: fencing_token,
-             runner_pid: session.runner_os_pid,
-             harness_pid: session.harness_pid,
-             pgid: session.pgid,
-             invocation_id: invocation_id
-           }) do
-        {:ok, _attempt} -> :ok
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      _ -> :ok
+    case Ecto.UUID.cast(attempt_id) do
+      {:ok, id} ->
+        case Repo.get(Attempt, id) do
+          %Attempt{status: "starting"} ->
+            case Attempts.mark_running(id, Actor.system(), %{
+                   fencing_token: fencing_token,
+                   runner_pid: session.runner_os_pid,
+                   harness_pid: session.harness_pid,
+                   pgid: session.pgid,
+                   invocation_id: invocation_id
+                 }) do
+              {:ok, _attempt} -> :ok
+              {:error, reason} -> {:error, reason}
+            end
+
+          %Attempt{status: status} ->
+            {:error, {:attempt_not_starting, status}}
+
+          nil ->
+            {:error, :attempt_not_found}
+        end
+
+      :error ->
+        {:error, :invalid_attempt_id}
     end
   end
 

@@ -1,6 +1,7 @@
 defmodule Consigliere.RunnerProcessExitStatusTest do
   use ExUnit.Case, async: false
 
+  alias Consigliere.Fixtures
   alias Consigliere.RunnerProcess
 
   test "a clean exit (exit_status 0) stops the runner with reason :normal and deregisters it" do
@@ -9,11 +10,14 @@ defmodule Consigliere.RunnerProcessExitStatusTest do
     heartbeat_file =
       Path.join(System.tmp_dir!(), "exit-status-clean-#{System.unique_integer([:positive])}.hb")
 
-    attempt_id = "exit-status-clean-#{System.unique_integer([:positive])}"
+    {mission, attempt} = Fixtures.starting_attempt!()
+    attempt_id = attempt.id
 
     {:ok, pid} =
       RunnerProcess.start_link(
         attempt_id: attempt_id,
+        mission_id: mission.id,
+        fencing_token: attempt.fencing_token,
         heartbeat_file: heartbeat_file,
         max_iterations: 2
       )
@@ -45,10 +49,16 @@ defmodule Consigliere.RunnerProcessExitStatusTest do
     heartbeat_file =
       Path.join(System.tmp_dir!(), "exit-status-crash-#{System.unique_integer([:positive])}.hb")
 
-    attempt_id = "exit-status-crash-#{System.unique_integer([:positive])}"
+    {mission, attempt} = Fixtures.starting_attempt!()
+    attempt_id = attempt.id
 
     {:ok, pid} =
-      RunnerProcess.start_link(attempt_id: attempt_id, heartbeat_file: heartbeat_file)
+      RunnerProcess.start_link(
+        attempt_id: attempt_id,
+        mission_id: mission.id,
+        fencing_token: attempt.fencing_token,
+        heartbeat_file: heartbeat_file
+      )
 
     on_exit(fn -> File.rm(heartbeat_file) end)
 

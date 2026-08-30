@@ -4,19 +4,25 @@ defmodule Consigliere.SpikeBCoordinatorIndependenceTest do
   alias Consigliere.RunnerDynamicSupervisor
   alias Consigliere.MissionDynamicSupervisor
   alias Consigliere.MissionCoordinator
+  alias Consigliere.Fixtures
   alias Consigliere.RunnerProcess
 
   setup do
     heartbeat_file =
       Path.join(System.tmp_dir!(), "spike-b-#{System.unique_integer([:positive])}.hb")
 
-    attempt_id = "spike-b-attempt-#{System.unique_integer([:positive])}"
+    {mission, attempt} = Fixtures.starting_attempt!()
+    attempt_id = attempt.id
     mission_id = "spike-b-mission-#{System.unique_integer([:positive])}"
 
     {:ok, _runner_pid} =
       DynamicSupervisor.start_child(
         RunnerDynamicSupervisor,
-        {RunnerProcess, attempt_id: attempt_id, heartbeat_file: heartbeat_file}
+        {RunnerProcess,
+         attempt_id: attempt_id,
+         mission_id: mission.id,
+         fencing_token: attempt.fencing_token,
+         heartbeat_file: heartbeat_file}
       )
 
     {:ok, mission_supervisor_pid} =

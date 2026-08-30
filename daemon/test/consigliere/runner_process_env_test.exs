@@ -1,6 +1,7 @@
 defmodule Consigliere.RunnerProcessEnvTest do
   use ExUnit.Case, async: false
 
+  alias Consigliere.Fixtures
   alias Consigliere.RunnerProcess
 
   test "the harness environment does not include CS_HOME or adapter credentials" do
@@ -29,10 +30,13 @@ defmodule Consigliere.RunnerProcessEnvTest do
 
     out = Path.join(System.tmp_dir!(), "env-#{System.unique_integer([:positive])}.out")
     heartbeat_file = Path.join(System.tmp_dir!(), "env-#{System.unique_integer([:positive])}.hb")
+    {mission, attempt} = Fixtures.starting_attempt!()
 
     {:ok, pid} =
       RunnerProcess.start_link(
-        attempt_id: "env-#{System.unique_integer([:positive])}",
+        attempt_id: attempt.id,
+        mission_id: mission.id,
+        fencing_token: attempt.fencing_token,
         heartbeat_file: heartbeat_file,
         harness_command: [
           "sh",
@@ -79,9 +83,13 @@ defmodule Consigliere.RunnerProcessEnvTest do
     heartbeat_file =
       Path.join(System.tmp_dir!(), "codex-env-#{System.unique_integer([:positive])}.hb")
 
+    {mission, attempt} = Fixtures.starting_attempt!()
+
     {:ok, pid} =
       RunnerProcess.start_link(
-        attempt_id: "env-#{System.unique_integer([:positive])}",
+        attempt_id: attempt.id,
+        mission_id: mission.id,
+        fencing_token: attempt.fencing_token,
         heartbeat_file: heartbeat_file,
         harness_command: [
           "sh",
@@ -110,9 +118,13 @@ defmodule Consigliere.RunnerProcessEnvTest do
     heartbeat_file =
       Path.join(System.tmp_dir!(), "transport-env-#{System.unique_integer([:positive])}.hb")
 
+    {mission, attempt} = Fixtures.starting_attempt!()
+
     {:ok, pid} =
       RunnerProcess.start_link(
-        attempt_id: "env-#{System.unique_integer([:positive])}",
+        attempt_id: attempt.id,
+        mission_id: mission.id,
+        fencing_token: attempt.fencing_token,
         capability: "capability-secret",
         heartbeat_file: heartbeat_file,
         harness_command: [

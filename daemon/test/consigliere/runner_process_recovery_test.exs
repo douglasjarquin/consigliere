@@ -23,12 +23,15 @@ defmodule Consigliere.RunnerProcessRecoveryTest do
   end
 
   test "a harness exit cannot overwrite a protocol-failure persistence marker" do
-    attempt_id = "recovery-#{System.unique_integer([:positive])}"
+    {mission, attempt} = Fixtures.starting_attempt!()
+    attempt_id = attempt.id
     heartbeat_file = Path.join(System.tmp_dir!(), "#{attempt_id}.hb")
 
     {:ok, pid} =
       RunnerProcess.start_link(
         attempt_id: attempt_id,
+        mission_id: mission.id,
+        fencing_token: attempt.fencing_token,
         heartbeat_file: heartbeat_file,
         harness_command: ["sleep", "5"]
       )
@@ -93,6 +96,91 @@ defmodule Consigliere.RunnerProcessRecoveryTest do
 
     manifest_path = Inventory.path_for(Home.dir(), attempt.id)
 
+    assert eventually(fn -> terminal_manifest?(manifest_path) end)
+  end
+
+  test "a missing Attempt cannot accept a handshaken runner" do
+    previous_trap_exit = Process.flag(:trap_exit, true)
+    on_exit(fn -> Process.flag(:trap_exit, previous_trap_exit) end)
+
+    attempt_id = Ecto.UUID.generate()
+    mission_id = Ecto.UUID.generate()
+
+    result =
+      RunnerProcess.start_link(
+        attempt_id: attempt_id,
+        mission_id: mission_id,
+        fencing_token: "missing-attempt-fence",
+        harness_command: ["sleep", "30"]
+      )
+
+    case result do
+      {:error, {:runner_identity_persist_failed, :attempt_not_found}} ->
+        :ok
+
+      {:ok, pid} ->
+        os_pid = RunnerProcess.os_pid(pid)
+
+        on_exit(fn ->
+          if Process.alive?(pid), do: RunnerProcess.cancel(pid)
+          Consigliere.ProcessHelpers.kill_and_verify_dead(os_pid)
+        end)
+
+        flunk("a runner started without a durable Attempt")
+
+      other ->
+        flunk("unexpected startup result: #{inspect(other)}")
+    end
+
+    assert Registry.lookup(Consigliere.Registry, {:runner, attempt_id}) == []
+
+    manifest_path = Inventory.path_for(Home.dir(), attempt_id)
+    assert eventually(fn -> terminal_manifest?(manifest_path) end)
+  end
+
+  test "an Attempt outside starting cannot accept a handshaken runner" do
+    previous_trap_exit = Process.flag(:trap_exit, true)
+    on_exit(fn -> Process.flag(:trap_exit, previous_trap_exit) end)
+
+    mission = Fixtures.mission!()
+    attempt = Fixtures.attempt!(mission, %{status: "completed"})
+
+    result =
+      RunnerProcess.start_link(
+        attempt_id: attempt.id,
+        mission_id: mission.id,
+        fencing_token: attempt.fencing_token,
+        harness_command: ["sleep", "30"]
+      )
+
+    assert {:error, {:runner_identity_persist_failed, {:attempt_not_starting, "completed"}}} =
+             result
+
+    assert Registry.lookup(Consigliere.Registry, {:runner, attempt.id}) == []
+
+    manifest_path = Inventory.path_for(Home.dir(), attempt.id)
+    assert eventually(fn -> terminal_manifest?(manifest_path) end)
+  end
+
+  test "an invalid Attempt identifier cannot accept a handshaken runner" do
+    previous_trap_exit = Process.flag(:trap_exit, true)
+    on_exit(fn -> Process.flag(:trap_exit, previous_trap_exit) end)
+
+    attempt_id = "not-an-attempt-id"
+    mission_id = Ecto.UUID.generate()
+
+    result =
+      RunnerProcess.start_link(
+        attempt_id: attempt_id,
+        mission_id: mission_id,
+        fencing_token: "invalid-attempt-fence",
+        harness_command: ["sleep", "30"]
+      )
+
+    assert {:error, {:runner_identity_persist_failed, :invalid_attempt_id}} = result
+    assert Registry.lookup(Consigliere.Registry, {:runner, attempt_id}) == []
+
+    manifest_path = Inventory.path_for(Home.dir(), attempt_id)
     assert eventually(fn -> terminal_manifest?(manifest_path) end)
   end
 
@@ -209,9 +297,6 @@ defmodule Consigliere.RunnerProcessRecoveryTest do
       })
 
     {:ok, attempt} = Attempts.request_spawn(attempt.id, Actor.system())
-
-    {:ok, attempt} =
-      Attempts.mark_running(attempt.id, Actor.system(), %{fencing_token: attempt.fencing_token})
 
     {:ok, capability} = Consigliere.Capabilities.mint(attempt)
     {:ok, capability_record} = Consigliere.Capabilities.authenticate(capability)

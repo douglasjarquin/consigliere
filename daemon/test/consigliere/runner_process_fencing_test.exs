@@ -1,6 +1,7 @@
 defmodule Consigliere.RunnerProcessFencingTest do
   use ExUnit.Case, async: false
 
+  alias Consigliere.Fixtures
   alias Consigliere.RunnerProcess
   alias Consigliere.RunnerLauncher
 
@@ -8,12 +9,14 @@ defmodule Consigliere.RunnerProcessFencingTest do
     heartbeat_file =
       Path.join(System.tmp_dir!(), "fence-#{System.unique_integer([:positive])}.hb")
 
-    attempt_id = "fence-#{System.unique_integer([:positive])}"
-    token = "live-#{attempt_id}"
+    {mission, attempt} = Fixtures.starting_attempt!()
+    attempt_id = attempt.id
+    token = attempt.fencing_token
 
     {:ok, pid} =
       RunnerProcess.start_link(
         attempt_id: attempt_id,
+        mission_id: mission.id,
         heartbeat_file: heartbeat_file,
         fencing_token: token
       )
@@ -75,13 +78,15 @@ defmodule Consigliere.RunnerProcessFencingTest do
   end
 
   test "a gapped native stream sequence records a protocol failure" do
-    attempt_id = "stream-sequence-#{System.unique_integer([:positive])}"
+    {mission, attempt} = Fixtures.starting_attempt!()
+    attempt_id = attempt.id
     heartbeat_file = Path.join(System.tmp_dir!(), "#{attempt_id}.hb")
-    token = "live-#{attempt_id}"
+    token = attempt.fencing_token
 
     {:ok, pid} =
       RunnerProcess.start_link(
         attempt_id: attempt_id,
+        mission_id: mission.id,
         heartbeat_file: heartbeat_file,
         fencing_token: token,
         harness_command: ["sleep", "5"]
