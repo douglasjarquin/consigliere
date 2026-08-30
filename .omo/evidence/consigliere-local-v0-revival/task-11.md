@@ -72,3 +72,30 @@ The generated runner binary, temporary Go wrapper, and temporary debug journal w
 No credentials, raw logs, transcripts, or secrets were written to this evidence record.
 
 `git diff --check` passed before the implementation commit.
+
+## Exact-head hardening follow-up
+
+The exact-head review found that the prior verifier accepted a same-basename executable and hashed the configured path rather than the executable belonging to the observed PID.
+
+Commit `71265e859e0eaf819872985d0f2f32f28994244f` closes that gap.
+
+Linux now reads `/proc/<pid>/exe`, macOS now obtains the executable from `lsof`, and the fallback observer no longer treats a basename as an exact identity.
+
+The verifier canonicalizes both observed and expected paths when `realpath` is available and hashes the observed executable path.
+
+Tests-first RED proof:
+
+    export PATH="/opt/homebrew/opt/erlang/bin:/opt/homebrew/bin:/Users/douglasjarquin/.local/bin:$PATH"
+    MIX_ENV=test mix test test/consigliere/runtime/process_identity_test.exs --seed 0
+
+The new same-basename fixture returned `:verified` under the old implementation, while the test required `:identity_mismatch`.
+
+Tests-first GREEN proof:
+
+    MIX_ENV=test mix test test/consigliere/runtime/process_identity_test.exs --seed 0
+
+Result: 2 passed.
+
+The two tests observed a real live `sleep` process, rejected a different executable with the same basename, and verified the exact executable path and SHA-256 hash.
+
+The later affected reconciliation suite retained its known macOS-only process-fixture observations and is covered by the authoritative Linux container gate recorded in the final verification lanes.
