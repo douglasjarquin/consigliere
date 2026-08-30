@@ -18,13 +18,17 @@ Consigliere used its packaged native macOS arm64 `cs`, `csd`, `cs-runner`, and O
 
 The final run supplied only a temporary auth file through `CS_CODEX_AUTH_HOME`, so unrelated host Codex configuration, plugins, and hooks were not part of the measurement.
 
+The package was rebuilt from committed revival head `e2b7fe445e96c356354f31f849e9756b265ecec8`.
+
 The private ledger captured bounded per-turn token counters and ContextPack byte and input-token measurements without retaining full prompts or transcripts.
 
 ## Observed result
 
-The real packaged Codex run made the exact one-line deletion and committed SHA `2c5579a09572c4008560c18dde7c194f9920335a` from the trusted base.
+The first real packaged Codex Attempt imported checkpoint SHA `861c2932c6f3a868560913b630bafddcceb8e8d8` from the trusted base and ended `dead_verified`.
 
-The final Attempt imported exact result SHA `053257f093a6e6c7937e8c9fad49f272870cef6c` from the trusted base and verified runner death.
+The operator then continued the same Mission from that exact checkpoint, creating one fresh Attempt with a new workspace generation, fence, and runner identity.
+
+The continuation Attempt imported the same exact result SHA `861c2932c6f3a868560913b630bafddcceb8e8d8` from the trusted base and verified runner death.
 
 The Mission reached `ready_for_review` only after the bounded review verification passed against that exact SHA.
 
@@ -34,9 +38,9 @@ Packaged `csd stop` completed successfully, and the temporary daemon, runner, an
 
 ## Decision and limits
 
-Human decision: Continue the same task after the earlier no-result Attempt.
+Human decision: Continue the same Mission from the imported checkpoint after the first packaged Attempt.
 
-There is one completed Consigliere record and no FirstMate record, which is fewer than 20 naturally occurring comparable Missions.
+There is one completed Consigliere Mission with two Attempts and no FirstMate record, which is fewer than 20 naturally occurring comparable Missions.
 
 The evidence is insufficient for Promote and makes no economic superiority claim.
 

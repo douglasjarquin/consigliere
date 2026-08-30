@@ -171,3 +171,47 @@ The final run is one completed Consigliere record and zero FirstMate records, so
 - Network delivery, GitHub mutation, pull request creation, push, and merge were not attempted by the canary.
 
 No credentials, raw Codex configuration, full prompt, transcript, or unredacted logs are included here.
+
+## Final committed-head same-task retry
+
+After the fencing-test race fix, the operator-selected same task was rerun from a fresh private `/tmp` home with the package built from committed head `e2b7fe445e96c356354f31f849e9756b265ecec8`.
+
+The package artifact hashes were `cs` `2c77e2b0ed1f87a78d38c966d702ac17c7c9bd8ee9053f813642c50bb0c601d3`, `csd` `919e3f9bf7e096ec6935c9515f8946db3c40e748d520de30a802943a742ab5c6`, `cs-runner` `a111504562104299ba4feda9bf2e52eb4f6937c8283c09798d8a5d04ead366b3`, and `cs-attempt` `1aef556b30e2e6fe65f56deb05b224afdcdd117bfb582d9f0cc5c4cd6837a379`.
+
+The packaged `cs version --json` response was `{"cs":"0.1.0","protocol":1}` and all four artifacts were native macOS arm64 Mach-O executables.
+
+The selected Project was `c3921ef4-41f8-4e13-9206-a6f325d977c9`, the Mission was `aac827b7-a6dd-490a-afbd-99aa79dd1859`, and the trusted base SHA was `ed12af8b7e630d47a0384d42362b2fa53ab932d7`.
+
+The first Attempt was `077036c7-ef27-4ef2-9b56-27ca28918e50`.
+
+It committed and imported checkpoint SHA `861c2932c6f3a868560913b630bafddcceb8e8d8`, ended with a `dead_verified` manifest, and left the Mission active with an explicit recoverable checkpoint.
+
+The operator then authorized one continuation from that exact checkpoint.
+
+The continuation Attempt was `5d3af514-de9c-4679-963a-2707b4714d43` with parent checkpoint SHA `861c2932c6f3a868560913b630bafddcceb8e8d8`.
+
+It imported the same exact result SHA, ended with a `dead_verified` manifest, and moved the Mission to `ready_for_review` only after the literal review verification passed.
+
+The verification input SHA was `861c2932c6f3a868560913b630bafddcceb8e8d8`, the output digest was `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`, and the bounded output size was zero bytes.
+
+The private usage ledger recorded one bounded row per Attempt.
+
+The first row recorded sequence 13 with input 131730, cached input 118784, and output 2227 tokens, with a 3083-byte ContextPack and 771 estimated input tokens.
+
+The continuation row recorded sequence 13 with input 263670, cached input 238080, and output 2669 tokens, with a 3230-byte ContextPack and 808 estimated input tokens.
+
+Both rows recorded `codex-cli 0.151.0`, harness `codex`, model `gpt-5.6-luna`, reasoning effort `high`, `workspace-write` sandbox, and `never` approval.
+
+The post-run packaged manual path executed `csd restart`, `cs status`, `cs why`, `cs review`, `cs doctor`, `csd status`, and `csd stop`.
+
+The status, why, and review surfaces exposed the exact imported SHA and passed verification, doctor reported live sockets and verified lock ownership before stop, and stop removed the PID file.
+
+The workspace commit was `861c2932c6f3a868560913b630bafddcceb8e8d8` with parent `ed12af8b7e630d47a0384d42362b2fa53ab932d7` and exactly one deletion from `mise.main.toml`.
+
+The two Attempt manifests were `dead_verified`, all recorded runner and harness PIDs were absent, and the API, privileged, boss, and PID paths were absent after stop.
+
+This retry adds one completed Consigliere Mission and zero FirstMate Missions.
+
+The natural comparable sample remains below 20, so the evidence is insufficient for Promote and makes no economic superiority claim.
+
+No duplicate implementation, push, pull request, merge, fixed allocation, hard duration, fixed Continue limit, or telemetry service was introduced.
