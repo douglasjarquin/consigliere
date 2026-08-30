@@ -41,11 +41,38 @@ defmodule Consigliere.CheckpointsTest do
     Git.init_workspace(workspace)
     File.write!(Path.join(workspace, "work.txt"), "done\n")
     sha = Git.commit_all(workspace, "work")
+    :ok = Git.tighten_workspace_permissions(workspace)
+
+    {_, 0} =
+      System.cmd("git", ["config", "--local", "core.hooksPath", Git.empty_hooks_dir()],
+        cd: workspace
+      )
 
     {:ok, attempt} =
       Attempts.request_checkpoint(attempt.id, Actor.system(), %{reported_checkpoint_sha: sha})
 
     %{mission: mission, attempt: attempt, workspace: ws, sha: sha}
+  end
+
+  test "refuses checkpoint import from a workspace with Git alternates", %{
+    workspace: workspace,
+    mirror: mirror
+  } do
+    %{attempt: attempt, mission: mission, sha: sha} = checkpoint_ready!(workspace)
+    alternates = Path.join(workspace, ".git/objects/info/alternates")
+    File.mkdir_p!(Path.dirname(alternates))
+    File.write!(alternates, "/tmp/untrusted-objects\n")
+
+    assert {:error, :alternates_present} =
+             Checkpoints.import_after_death(attempt.id,
+               process_group: :dead_verified,
+               workspace_path: workspace,
+               mirror_path: mirror,
+               sha: sha
+             )
+
+    assert Repo.get!(Mission, mission.id).current_checkpoint_sha == nil
+    assert Repo.get!(Consigliere.Attempts.Attempt, attempt.id).status == "checkpoint_requested"
   end
 
   test "import_after_death writes the SHA only after git import, never without verified death",

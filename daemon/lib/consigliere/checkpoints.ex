@@ -18,7 +18,8 @@ defmodule Consigliere.Checkpoints do
       sha = Keyword.fetch!(opts, :sha)
       base = Keyword.get(opts, :base_sha)
 
-      with {:ok, sha} <- Git.import_sha(workspace, mirror, sha, base) do
+      with :ok <- Git.verify_workspace(workspace, sha, mirror),
+           {:ok, sha} <- Git.import_sha(workspace, mirror, sha, base) do
         Attempts.record_checkpointed(attempt_id, Actor.system(), %{
           imported_sha: sha,
           process_group: :dead_verified
