@@ -20,7 +20,7 @@ The final run supplied only a temporary auth file through `CS_CODEX_AUTH_HOME`, 
 
 The real canary execution package was built from committed revival head `e2b7fe445e96c356354f31f849e9756b265ecec8`.
 
-The final exact-runtime-head package was rebuilt from `dd48a6ff54fc48d557b127503c95098f6dcca6a0` for the installed lifecycle and scope gates recorded in F3.
+The final exact-runtime-head package was rebuilt from `98fc4d3ebbe78e0b73e7bba9c19d3861ff966565` for the installed lifecycle and scope gates recorded in F3.
 
 That final package was not used to rerun the same Mission because the operator-controlled canary forbids duplicate implementation work.
 

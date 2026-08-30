@@ -148,3 +148,29 @@ Result: 2 passed.
 The follow-up implementation commit is `73dfccbb26440fac2ccf9f103f76e4c50762adcc`.
 
 Remote CI run `33295009901` then passed the full Elixir daemon job with 450 tests, including the capture regression, and all four companion jobs.
+
+## Exact-head authenticated stderr and provider-key redaction follow-up
+
+The exact-head review found that provider-prefixed API-key assignments were not covered by the bounded redactor and that authenticated `stderr_chunk` runner frames were ignored by the daemon.
+
+Tests-first RED proof retained synthetic `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` values in redacted text and observed that a harness stderr frame produced no Attempt log.
+
+Commit `e0e3fb3b7f8f8ff5b180f404ff11a5a8efdfe8f6` adds both provider key families to the fixed assignment redaction patterns.
+
+Commit `a2636f70b104988f5c676c2012543a0299064be3` appends authenticated stderr chunks to the bounded Attempt log and advances the heartbeat.
+
+Tests-first GREEN proof passed the focused redaction, runner-process, and runner frame slice with 6 tests.
+
+The redactor remains fixed-family and bounded, and stderr is accepted only after the existing runner identity, fence, sequence, and MAC checks.
+
+## Exact-head fragmented stdout follow-up
+
+The full Linux suite exposed a timing-sensitive failure where a short-lived harness split one Codex JSONL event across runner stdout chunks and the daemon decoded each chunk independently.
+
+The deterministic RED regression split the authenticated completion event across two writes and the prior implementation timed out without reaching `ready_for_review`.
+
+Commit `f1d1dfa02f39bf88b682855a440d8dc6d5214ebf` adds a bounded stdout line buffer owned by `RunnerProcess`, discards oversized unterminated lines without unbounded growth, and preserves complete-line decoding across runner chunks.
+
+Tests-first GREEN proof passed the split completion and fencing regressions with 6 tests.
+
+The final Linux suite then passed three consecutive seed-0 runs with `468 passed (1 doctest, 467 tests)` each.

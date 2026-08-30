@@ -2,17 +2,17 @@
 
 Target branch: `revival/v0-local-codex`.
 
-Target commit: `dd48a6ff54fc48d557b127503c95098f6dcca6a0`.
+Target runtime commit: `98fc4d3ebbe78e0b73e7bba9c19d3861ff966565`.
 
 Base commit: `24ffea8fa1f5bc983fb5965efab0a89b6116f05b` from `origin/rewrite-in-elixer`.
 
-The runtime source commits included at this exact head are `c71bee7a6706b7279beafba0a951795124ad7ed4` for bounded secret redaction and `dd48a6ff54fc48d557b127503c95098f6dcca6a0` for durable asynchronous pause settlement.
+The runtime source commits included at this exact head are `e0e3fb3b7f8f8ff5b180f404ff11a5a8efdfe8f6` for provider-key redaction, `a2636f70b104988f5c676c2012543a0299064be3` for authenticated stderr retention, `f1d1dfa02f39bf88b682855a440d8dc6d5214ebf` for fragmented runner stdout buffering, and `98fc4d3ebbe78e0b73e7bba9c19d3861ff966565` for terminal-sequence-safe result replay.
 
-The documentation-only delta from runtime commit `dd48a6ff54fc48d557b127503c95098f6dcca6a0` to the target head contains only task evidence records.
+The documentation-only delta from runtime commit `98fc4d3ebbe78e0b73e7bba9c19d3861ff966565` to the final evidence head contains only task evidence records and `docs/v0-canary.md`.
 
 Command:
 
-    git diff --exit-code dd48a6ff54fc48d557b127503c95098f6dcca6a0 HEAD -- daemon cli runner scripts .github
+    git diff --exit-code 98fc4d3ebbe78e0b73e7bba9c19d3861ff966565 HEAD -- daemon cli runner scripts .github
 
 Result: exit 0 with no runtime, package, workflow, CLI, or runner input changes in that documentation-only delta.
 
@@ -22,7 +22,9 @@ Command:
 
     docker run --rm -v "$PWD":/workspace -w /workspace/runner/cs-runner elixir:1.20-otp-29 sh -lc 'set -o pipefail; apt-get update -qq && apt-get install -y -qq golang-go >/dev/null && go build -o /workspace/daemon/priv/cs-runner . && cd /workspace/daemon && mix local.hex --force >/dev/null && mix local.rebar --force >/dev/null && mix deps.get >/dev/null && mix format --check-formatted && MIX_ENV=test mix compile --warnings-as-errors && MIX_ENV=test mix test --no-color'
 
-Result: format passed, compile with warnings as errors passed, and `466 passed (1 doctest, 465 tests)`.
+Result: format passed, compile with warnings as errors passed, and `468 passed (1 doctest, 467 tests)`.
+
+The complete daemon suite passed three consecutive seed-0 runs after the final hardening.
 
 The suite includes the persisted-PGID termination, structured event redaction, oversized ContextPack, PATH-independent process observation, and pause identity regressions.
 
@@ -44,25 +46,27 @@ Runner result: format, vet, ordinary tests, race and shuffle tests, and build pa
 
 Package command:
 
-    set -e; package_prefix=$(mktemp -d "$PWD/.tmp/package-final-dd48a6f.XXXXXX"); scripts/package.sh "$package_prefix"
+    set -e; package_prefix=$(mktemp -d "$PWD/.tmp/package-final-98fc4d3.XXXXXX"); scripts/package.sh "$package_prefix"
 
-Package prefix: `.tmp/package-final-dd48a6f.493EIB`.
+Package prefix: `.tmp/package-final-98fc4d3.AuR9NG`.
 
-Package hashes: `cs` `d82be15073424728f8cb4d71015489155355635134e50f038a0b8b6d7db13087`, `csd` `52f1fa06857570d8ed78f6c584392ef5801a42e134e7798f3e9edf5ba2d335cd`, `cs-runner` `a5f1752480005a074dc3f33f8e8c61f0acfd63abfc2b2d7a65e80a143bc17398`, and `cs-attempt` `6f09ed5c7de9f532cf42ace501a664b5d4a350ad54dbb4713202852cac7d4fad`.
+Package hashes: `cs` `d49af9343e7df1012d934460200a07dee8db663b11398cd287781e4078dc9b4f`, `csd` `299ab54b56a4c7d212b0226f9c0ef62eaa26dd8b285fe89f29a59a476bcbd0dc`, `cs-runner` `c2a25413583308309e85395c8fef5c0be88bed38cbeff8f4c26de9cfa2777155`, and `cs-attempt` `b9dccb7c04fbff4406d8cae209d51e97730a52f653726f5d2257a61b431794a7`.
 
 `file` reported native arm64 Mach-O for all four inspected executables.
 
+The package tree contained zero `.go`, `.ex`, `mix.exs`, `mix.lock`, or `go.mod` source-like files.
+
 `cs version --json` returned `{"cs":"0.1.0","protocol":1}`.
 
-The installed lifecycle used fresh `/tmp/cs-final-dd48a6f.K7b3jH`, `env -i`, the exact package prefix, and a working directory of `/tmp`.
+The installed lifecycle used fresh `/tmp/cs-final-98fc4d3.5MFJpk`, `env -i`, the exact package prefix, and a working directory of `/tmp`.
 
 The commands were `csd migrate`, `csd start`, `cs ping`, `cs health`, `cs doctor`, `csd status`, `cs projects`, absence of `notifications.log`, `csd stop`, repeated `csd stop`, `csd restart`, `cs ping`, `cs doctor`, `csd status`, absence of `notifications.log`, final `csd stop`, PID absence, and Unix-socket absence.
 
-Result: `F3_INSTALLED_LIFECYCLE stop=verified sockets=absent pid=absent notifications=absent package=/Users/douglasjarquin/.herdr/worktrees/consigliere/cs-consigliere-local-v0-revival/.tmp/package-final-dd48a6f.493EIB runner=a5f1752480005a074dc3f33f8e8c61f0acfd63abfc2b2d7a65e80a143bc17398 attempt=6f09ed5c7de9f532cf42ace501a664b5d4a350ad54dbb4713202852cac7d4fad`.
+Result: `F3_INSTALLED_LIFECYCLE stop=verified sockets=absent pid=absent notifications=absent package=/Users/douglasjarquin/.herdr/worktrees/consigliere/cs-consigliere-local-v0-revival/.tmp/package-final-98fc4d3.AuR9NG runner=c2a25413583308309e85395c8fef5c0be88bed38cbeff8f4c26de9cfa2777155 attempt=b9dccb7c04fbff4406d8cae209d51e97730a52f653726f5d2257a61b431794a7`.
 
-The fresh migration completed without a user-visible SQLite lock failure, and all lifecycle commands returned success.
+The fresh migration emitted one transient SQLite `database is locked` connection log while the schema lock initialized, then completed successfully and all lifecycle commands returned success.
 
-Cleanup receipt: `CLEANUP=trashed:/tmp/cs-final-dd48a6f.K7b3jH`.
+Cleanup receipt: `CLEANUP=trashed:/tmp/cs-final-98fc4d3.5MFJpk`.
 
 ## Canary custody
 

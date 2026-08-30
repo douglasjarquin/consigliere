@@ -117,6 +117,18 @@ No credentials, raw logs, or transcripts were written to this evidence record.
 
 `git diff --check` passed before the implementation commit.
 
+## Exact-head result replay identity follow-up
+
+The exact-head review found that the idempotency comparator mapped `terminal_sequence` to a nonexistent struct field, allowing a same-SHA report with a different accepted terminal sequence to replay as a duplicate.
+
+Tests-first RED proof added a later accepted terminal event and the prior implementation returned `{:ok, :duplicate}` instead of a result conflict.
+
+Commit `98fc4d3ebbe78e0b73e7bba9c19d3861ff966565` maps `terminal_sequence` to the persisted `accepted_terminal_sequence` field.
+
+Tests-first GREEN proof passed the exact-SHA, fragmented runner output, and fencing regressions with 6 tests.
+
+The result row now treats a changed terminal event identity as a conflict while preserving idempotent replay for the complete original report.
+
 ## Durable progression checkpoint regression
 
 The RED test installed a SQLite trigger that rejects the durable `AttemptResult` status update during progression.
