@@ -144,3 +144,13 @@ The GREEN recovery suite passed six tests after startup now fails closed for mis
 The complete Linux daemon gate then passed `486 passed (1 doctest, 485 tests)` in three consecutive seed-0 runs.
 
 The bounded receipt is `.omo/evidence/consigliere-local-v0-revival/runner-startup-boundary-bf22b5d.log`.
+
+## Current exact-head closure
+
+The final runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03`.
+
+The current Linux daemon gate passed `491 passed (1 doctest, 490 tests)` in three consecutive seed-0 runs, and the packaged lifecycle proved one verified owner, identity-safe restart, repeated-stop idempotence, and zero residual processes.
+
+The current Go, package, and native macOS receipts are `go-gates-7159373.md`, `package-artifact-7159373.md`, `installed-lifecycle-7159373.md`, and `macos-native-gate-7159373.md`.
+
+The selected real canary was not rerun after this runtime closure because duplicate implementation work is forbidden.

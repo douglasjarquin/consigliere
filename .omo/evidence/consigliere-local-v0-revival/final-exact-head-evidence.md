@@ -107,3 +107,15 @@ The selected real canary remains the single naturally occurring Mission with one
 The canary was not rerun against the final package because the operator-controlled no-duplicate rule forbids duplicate implementation work.
 
 The natural comparable sample remains below 20, so the evidence is insufficient for Promote and the operator retains Continue or Stop.
+
+## Current exact-head closure
+
+The current runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
+
+The exact-head package and lifecycle receipts are `package-artifact-7159373.md` and `installed-lifecycle-7159373.md`.
+
+The Linux daemon gate passed `491 passed (1 doctest, 490 tests)` three times, the CLI and runner Go gates exited `0`, and the native macOS daemon gate passed `491 passed (1 doctest, 490 tests)`.
+
+The selected canary was not rerun against this package because the operator-controlled rule forbids duplicate implementation work.
+
+The public canary result remains one completed Consigliere Mission with two Attempts, zero FirstMate Missions, and insufficient evidence for Promote.

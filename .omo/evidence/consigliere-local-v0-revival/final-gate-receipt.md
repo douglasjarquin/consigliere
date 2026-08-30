@@ -42,6 +42,16 @@ The native macOS daemon command passed formatting and compilation and reported `
 
 The selected canary was not rerun against this final package because the operator-controlled canary forbids duplicate implementation work.
 
+## Current exact-head closure
+
+The current runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
+
+The exact-head bounded receipts are `daemon-linux-gate-7159373.md`, `go-gates-7159373.md`, `package-artifact-7159373.md`, `installed-lifecycle-7159373.md`, and `macos-native-gate-7159373.md`.
+
+The Linux daemon gate passed `491 passed (1 doctest, 490 tests)` in three consecutive seed-0 runs.
+
+The package-only lifecycle and Go gates exited `0`, and the selected canary was not rerun because doing so would create duplicate implementation work.
+
 The selected canary remains one completed Consigliere Mission with one operator-authorized continuation, zero FirstMate Missions, and insufficient evidence for Promote.
 
 ## Current final exact-head gate receipt

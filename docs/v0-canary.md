@@ -71,3 +71,17 @@ The evidence is insufficient for Promote and makes no economic superiority claim
 The operator retains the next Continue or Stop decision.
 
 No FirstMate duplicate Mission, automatic delivery, push, pull request, merge, fixed allocation, fixed duration, or telemetry service was introduced.
+
+## Final runtime closure
+
+The final runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
+
+The exact-head package, installed lifecycle, Linux daemon gate, Go gates, and native macOS gate are recorded in the `*-7159373.md` receipts under `.omo/evidence/consigliere-local-v0-revival/`.
+
+The package-only lifecycle passed from a fresh temporary home with `env -i`, identity-safe stop and restart, and zero residual package processes.
+
+This is runtime and packaging closure, not a new canary execution.
+
+The selected real Mission and its one operator-authorized continuation were not rerun after the final hardening because the operator-controlled canary forbids duplicate implementation work.
+
+The public result therefore remains one completed Consigliere Mission with two Attempts, zero FirstMate Missions, and insufficient evidence for Promote.

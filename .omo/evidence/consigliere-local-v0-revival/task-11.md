@@ -261,3 +261,13 @@ The final Linux daemon suite passed `486 passed (1 doctest, 485 tests)` in three
 The final package and installed lifecycle receipts are `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`.
 
 The selected real canary was not rerun after this runtime hardening because the operator-controlled rule forbids duplicate implementation work.
+
+## Current exact-head closure
+
+The final runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03`.
+
+The fail-closed runner identity and short-lived harness recovery fixes are included in this head.
+
+The Linux daemon gate passed `491 passed (1 doctest, 490 tests)` in three consecutive seed-0 runs, and the installed package lifecycle verified owner identity, restart generation change, terminal runner absence, repeated stop, and cleanup.
+
+The exact current receipts are `daemon-linux-gate-7159373.md`, `package-artifact-7159373.md`, and `installed-lifecycle-7159373.md`.
