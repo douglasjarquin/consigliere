@@ -20,11 +20,15 @@ The final run supplied only a temporary auth file through `CS_CODEX_AUTH_HOME`, 
 
 The real canary execution package was built from committed revival head `e2b7fe445e96c356354f31f849e9756b265ecec8`.
 
-The final exact-runtime-head package was rebuilt from `98fc4d3ebbe78e0b73e7bba9c19d3861ff966565` for the installed lifecycle and scope gates recorded in F3.
+The final exact-runtime-head package was rebuilt from `bf2dce60b52447e9075f05f135c4c36ccb2722ae` for the installed lifecycle and scope gates recorded in F3.
 
 That final package was not used to rerun the same Mission because the operator-controlled canary forbids duplicate implementation work.
 
 The private ledger captured bounded per-turn token counters and ContextPack byte and input-token measurements without retaining full prompts or transcripts.
+
+An earlier qualification Mission for the same task reached review-ready before the selected final package and is disclosed in the private evidence record but excluded from this selected aggregate.
+
+No FirstMate Mission was created for that qualification run or for the selected final record.
 
 ## Observed result
 

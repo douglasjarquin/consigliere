@@ -81,3 +81,15 @@ Repeated interruption, response loss, hung external work, and exact-SHA recovery
 ## Cleanup receipt
 
 The temporary archive, package prefix, installed home, container, and restarted daemon were all cleaned within the QA command, and the final `csd stop` returned success.
+
+## Final head closure
+
+The final runtime head is `bf2dce60b52447e9075f05f135c4c36ccb2722ae`.
+
+The CI-shaped Linux daemon command used Elixir `1.20`, OTP `29`, Go `1.26.6`, `mix format --check-formatted`, `MIX_ENV=test mix compile --warnings-as-errors`, and three seed-0 full-suite runs.
+
+Each run passed `473 tests` including one doctest.
+
+The final native package and installed lifecycle are recorded in `F3.md` with exact artifact hashes and stop cleanup receipts.
+
+The final source, Go, package, and lifecycle gates were run after the runtime audit commits and before the replacement PR is updated.

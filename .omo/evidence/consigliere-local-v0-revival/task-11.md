@@ -205,3 +205,13 @@ Commit `2109e957a79e07f7941dcb61b0a911515512561c` adds that regression and settl
 Tests-first GREEN proof passed the real asynchronous pause test and the full Linux daemon suite passed `466 passed (1 doctest, 465 tests)` on the source head.
 
 The guard checks the durable `pausing` blocker, so ordinary runner completion and active Missions are not paused as a side effect.
+
+## Final runtime audit follow-up
+
+The RED pause regression showed that a failed checkpoint import could still settle the Mission as paused after verified runner death.
+
+The GREEN fix in `bf2dce60b52447e9075f05f135c4c36ccb2722ae` records one bounded checkpoint-import Incident and keeps the Mission in `pausing` until import succeeds.
+
+The same runtime follow-up releases the global scheduler slot after every terminal Attempt classification, including protocol failure.
+
+The focused pause and progression tests passed, and the final Linux daemon suite passed `473 tests` in each of three consecutive seed-0 runs.

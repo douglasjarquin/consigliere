@@ -166,3 +166,15 @@ Result: 30 tests passed.
 The rejected checkpoint left the Mission checkpoint SHA unset and the Attempt in `checkpoint_requested`, proving that no external import or durable progression occurred after the hygiene failure.
 
 The test helper explicitly hardened Git permissions and configured the empty hooks directory so the positive checkpoint-import cases continue to exercise the complete verifier.
+
+## Final runner protocol follow-up
+
+The RED bridge regression showed that a rejected authenticated completion report could leave the Attempt nonterminal after the runner exited.
+
+The GREEN runner path now decodes the bridge response, records a bounded `protocol_failure`, carries that classification through verified death, and releases the scheduler slot during terminal classification.
+
+The native stream regression also showed that a gapped stdout sequence was accepted and could advance heartbeat state.
+
+The final GREEN suite rejects missing, duplicate, and gapped native stream sequences while retaining exact result replay and exact-SHA progression behavior.
+
+The final Linux daemon gate passed `473 tests` in three consecutive seed-0 runs after these changes.

@@ -109,6 +109,16 @@ GREEN regression proof:
 
 Result: 5 passed, including both oversized context tests and the structured redaction test.
 
+## Final runtime audit follow-up
+
+The RED characterization for camel-case keys showed that `apiKey` and `privateKey` values survived the structured redaction pass.
+
+Commit `a3951ec73989f236a075973c373c9c57b2672af9` normalizes separator-free key forms and adds the regression test.
+
+GREEN proof passed the redaction test with both camel-case values replaced by `[REDACTED]`.
+
+The final Linux daemon gate then passed `473 tests` in each of three seed-0 runs, including oversized ContextPack, structured event, fragmented output, and native stream-boundary coverage.
+
 ## Structured payload redaction follow-up
 
 The exact-head review then found that `Redaction.value/1` sanitized nested strings but did not redact values selected by sensitive map keys before harness-event persistence.

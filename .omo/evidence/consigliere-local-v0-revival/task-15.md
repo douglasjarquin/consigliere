@@ -172,7 +172,19 @@ The final run is one completed Consigliere record and zero FirstMate records, so
 
 No credentials, raw Codex configuration, full prompt, transcript, or unredacted logs are included here.
 
-## Final committed-head same-task retry
+## Record accounting
+
+This evidence record intentionally preserves the earlier package qualification and failure-probe records instead of collapsing their Mission and Attempt identifiers.
+
+The initial package starts failed before a completed comparable Mission because of the removed Codex flag, unsupported model, or lost protocol completion.
+
+The recovery measurement recorded checkpoint-only Attempts and no completed comparable Mission.
+
+Mission `9fd5ddb4-508d-4d5b-a8c6-b4d8811f995f` is disclosed as a pre-final-package qualification run that reached `ready_for_review` for the same operator-selected task, but it is excluded from the selected final canary aggregate and was not paired with a FirstMate run.
+
+The selected final canary record is Mission `aac827b7-a6dd-490a-afbd-99aa79dd1859` below, using the committed-head package and one checkpoint Attempt followed by one operator-authorized continuation Attempt.
+
+Only that selected final record is summarized as the public canary result, and no FirstMate Mission was created for either Consigliere qualification run.
 
 After the fencing-test race fix, the operator-selected same task was rerun from a fresh private `/tmp` home with the package built from committed head `e2b7fe445e96c356354f31f849e9756b265ecec8`.
 
@@ -210,8 +222,28 @@ The workspace commit was `861c2932c6f3a868560913b630bafddcceb8e8d8` with parent 
 
 The two Attempt manifests were `dead_verified`, all recorded runner and harness PIDs were absent, and the API, privileged, boss, and PID paths were absent after stop.
 
-This retry adds one completed Consigliere Mission and zero FirstMate Missions.
+This committed-head retry is the selected final canary record with one completed Consigliere Mission and zero FirstMate Missions.
 
 The natural comparable sample remains below 20, so the evidence is insufficient for Promote and makes no economic superiority claim.
 
 No duplicate implementation, push, pull request, merge, fixed allocation, hard duration, fixed Continue limit, or telemetry service was introduced.
+
+## Post-canary runtime and package closure
+
+The final runtime head after the audit fixes is `bf2dce60b52447e9075f05f135c4c36ccb2722ae`.
+
+The exact selected Mission was not rerun after these fixes because the operator-controlled canary forbids duplicate implementation work.
+
+The final package was built from that runtime head at `.tmp/package-final-bf2dce6.6EI4af/prefix`.
+
+Its native arm64 artifact hashes were `cs` `398301389edef592b10c44773361ee06ef6b9a08ecf59dbe8118f902e2e459c1`, `csd` `dd2b51157bf38b36b369c3cd3252c85e5ac56d25200e723b2f1fe22811a50e0c`, `cs-runner` `00c9b9682ab43f9d036207fc9c748b9ce337ecb079f0c7601a2468a88440c70b`, and `cs-attempt` `dc63e484f83af7030a7ce82b9a9519fca5d196e82653035af51dc98b9855147b`.
+
+The installed-only lifecycle ran from `/tmp` with `env -i`, passed migration, start, ping, health, doctor, status, repeated stop, restart, and final stop, and left zero package processes, sockets, PID files, owner files, and notification logs.
+
+The cleanup receipt was `CLEANUP=trashed:/tmp/cs-final-bf2dce6-home.9VY8qB,/tmp/cs-final-bf2dce6-user.G5bxoj`.
+
+The CI-shaped Linux daemon gate used actual Go `1.26.6` and passed format, warnings-as-errors compilation, and `473 tests` including one doctest in each of three consecutive seed-0 runs.
+
+The CLI and runner Go gates passed formatting, vet, ordinary tests, race and shuffle tests, and builds.
+
+The final result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.

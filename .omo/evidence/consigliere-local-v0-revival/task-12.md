@@ -84,3 +84,11 @@ The invalid first cross-platform package prefix, final package prefixes, Linux p
 No credentials, raw logs, or transcripts were written to this evidence record.
 
 `git diff --check` passed before the implementation commit.
+
+## Final runtime audit follow-up
+
+The macOS test helper's Ruby fallback was RED because a port-launched `Process.daemon` child retained the inherited process group and could not satisfy the session-leader assertion.
+
+Commit `5146156a8e6a7f3004f596e54f9f4000fe310b85` forks an explicit child before `Process.setsid`, preserving the test's process-group contract without changing installed daemon lifecycle behavior.
+
+The corrected helper passed the session-leader pause test and the final packaged lifecycle passed repeated stop, restart, identity checks, and final socket and PID absence.
