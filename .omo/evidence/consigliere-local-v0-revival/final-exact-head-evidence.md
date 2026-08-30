@@ -159,3 +159,13 @@ PR #101 remains historical and unchanged, and neither PR is merged.
 The final gate review is `gate-review-final-85f02c5.md` and reports PASS with no blockers.
 
 The selected real canary was not rerun after runtime hardening because the no-duplicate rule forbids another implementation record.
+
+## Final pushed-head attestation
+
+The final pushed head is `c060b88035128bbdbf361f1bcab9a100521965e9`.
+
+It is a documentation/evidence-only child of runtime source `7c54c782552f3ee5a09ddee35735e90cba1b9339`.
+
+The final runtime diff check exited `0`, remote CI run `33322804969` passed all five checks, and PR #141 is open and draft at the exact pushed head.
+
+The complete final delivery attestation is `final-delivery-attestation-c060b88.md`.

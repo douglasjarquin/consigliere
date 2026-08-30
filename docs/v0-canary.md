@@ -111,3 +111,7 @@ PR #141 is the separate open draft replacement against `rewrite-in-elixer`.
 Remote CI run `33322422318` passed all five checks for the pushed head.
 
 This delivery record does not change the canary result, create a duplicate Mission, or make a Promote claim.
+
+The final pushed evidence head is `c060b88035128bbdbf361f1bcab9a100521965e9`, with remote CI run `33322804969` passing all five checks.
+
+The canary remains insufficient for Promote and the operator retains Continue or Stop.

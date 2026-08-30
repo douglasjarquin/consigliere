@@ -78,6 +78,18 @@ The final gate verdict is PASS for plan compliance, source quality, package/manu
 
 The supporting final gate review is `gate-review-final-85f02c5.md`.
 
+## Final pushed-head attestation
+
+The final pushed head is `c060b88035128bbdbf361f1bcab9a100521965e9`.
+
+Its runtime source ancestor is `7c54c782552f3ee5a09ddee35735e90cba1b9339`, and the final delivery delta is documentation/evidence-only.
+
+Remote CI run `33322804969` completed successfully with all five jobs passing at the exact PR head.
+
+PR #141 is open and draft, PR #101 is unchanged and unmerged, and no canary rerun occurred.
+
+The complete final delivery attestation is `final-delivery-attestation-c060b88.md`.
+
 ## Current exact-head closure
 
 The current runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
