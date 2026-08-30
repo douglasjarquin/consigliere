@@ -6,8 +6,10 @@ defmodule Consigliere.Harness.EventsTest do
   alias Consigliere.Attempts.Attempt
   alias Consigliere.Fixtures
   alias Consigliere.Harness.Events
+  alias Consigliere.HarnessEvents.HarnessEvent
   alias Consigliere.Missions
   alias Consigliere.Repo
+  alias Consigliere.DomainEvents.DomainEvent
 
   setup do
     Fixtures.reset_phase1_tables!()
@@ -110,6 +112,33 @@ defmodule Consigliere.Harness.EventsTest do
 
     assert {:ok, :accepted} = Events.ingest(event, actor)
     assert Repo.get!(Attempt, attempt.id).native_session_id == "sess-abc"
+  end
+
+  test "redacts sensitive event map values before database persistence" do
+    attempt = running_attempt!()
+    actor = Actor.attempt(attempt.id, attempt.fencing_token)
+    access_secret = "synthetic-event-access"
+    capability_secret = "synthetic-event-capability"
+
+    event =
+      envelope(attempt, %{
+        "event_id" => "event-secret",
+        "payload" => %{
+          "access_token" => access_secret,
+          "nested" => %{"CS_CAPABILITY" => capability_secret},
+          "visible" => "retained"
+        }
+      })
+
+    assert {:ok, :accepted} = Events.ingest(event, actor)
+
+    harness_event = Repo.get_by!(HarnessEvent, event_id: "event-secret")
+    domain_event = Repo.get_by!(DomainEvent, type: "progress.reported", subject_id: attempt.id)
+    assert harness_event.payload["access_token"] == "[REDACTED]"
+    assert harness_event.payload["nested"]["CS_CAPABILITY"] == "[REDACTED]"
+    assert harness_event.payload["visible"] == "retained"
+    refute JSON.encode!(harness_event.payload) =~ access_secret
+    refute JSON.encode!(domain_event.payload) =~ capability_secret
   end
 
   test "a truncated event missing event_id is malformed, not a silent success" do

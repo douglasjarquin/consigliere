@@ -12,6 +12,8 @@ defmodule Consigliere.Harness.Redaction do
 
   @quoted_sensitive_assignment_pattern ~r/(?i)(["'](?:access_token|refresh_token|id_token|oauth_token|token|password|secret|api[_-]?key|credential|CS_CAPABILITY)["']\s*[:=]\s*)["']?[^\s,"'}]+/
   @bare_sensitive_assignment_pattern ~r/(?i)(\b(?:CS_CAPABILITY|token|password|secret|api[_-]?key|credential)\b\s*[:=]\s*)["']?[^\s,"'}]+/
+  @sensitive_key_names ~w(auth authorization capability cs_capability attempt_capability)
+  @sensitive_key_fragments ~w(token password secret credential api_key api-key)
 
   def text(value) when is_binary(value) do
     value
@@ -22,7 +24,9 @@ defmodule Consigliere.Harness.Redaction do
   def text(value), do: to_string(value)
 
   def value(value) when is_map(value) do
-    Map.new(value, fn {key, nested} -> {key, value(nested)} end)
+    Map.new(value, fn {key, nested} ->
+      if sensitive_key?(key), do: {key, "[REDACTED]"}, else: {key, value(nested)}
+    end)
   end
 
   def value(value) when is_list(value), do: Enum.map(value, &value/1)
@@ -41,4 +45,13 @@ defmodule Consigliere.Harness.Redaction do
       Regex.replace(pattern, acc, "[REDACTED]")
     end)
   end
+
+  defp sensitive_key?(key) when is_binary(key) or is_atom(key) do
+    normalized = key |> to_string() |> String.downcase()
+
+    normalized in @sensitive_key_names or
+      Enum.any?(@sensitive_key_fragments, &String.contains?(normalized, &1))
+  end
+
+  defp sensitive_key?(_key), do: false
 end
