@@ -1,0 +1,114 @@
+# Task 13 evidence
+
+## Scope
+
+Task #13 is the plan's issue #123, exact-SHA import and review-ready progression.
+
+The implementation commit is 20c5f59d3db1f46cd8251f222f5f507d0b07edee.
+
+The implementation records one strict Attempt result with Project, Mission, Attempt, Workspace, lease, base or parent, fence, exact SHA, result kind, and accepted terminal sequence identity.
+
+It verifies runner death before external Git work, validates the exact commit and ancestry in the bound Workspace, hardens Workspace permissions, imports the exact object once to the daemon-owned result ref, and persists the durable progression phases.
+
+It runs only bounded literal local Project commands with scrubbed environment, per-command and total time limits, bounded output, typed outcomes, and durable verification rows.
+
+Successful completion stops at `ready_for_review` and exposes the Project, base, checkpoint, result ref, Workspace, and verification identity through `cs mission`, `cs review`, and `cs why`.
+
+Checkpoint continuation requires the exact current SHA and creates a fresh Attempt, Workspace generation, fence, and capability without native Codex resume.
+
+## Tests-first record
+
+The initial exact-SHA RED characterization ran before the progression implementation.
+
+It failed all three new scenarios because result refs and continuation were absent and the real Git fixture did not yet have a local commit identity.
+
+The implementation then made those cases green and added regression coverage for conflicting SHA reports, missing death proof, identity mismatch, foreign ancestry, dirty or unsafe Workspace configuration, idempotent import, checkpoint continuation, and review-surface evidence.
+
+## Automated verification
+
+Command:
+
+    docker run --rm -v "$PWD:/workspace" -v "$PWD/.tmp/task13-package/go-wrapper:/usr/local/bin/go:ro" -v "$PWD/.tmp/task13-package/cs-runner-linux:/tmp/cs-runner-linux:ro" -w /workspace/daemon elixir:1.20-otp-29 sh -c 'mix deps.get >/dev/null && mix format --check-formatted && MIX_ENV=test mix compile --warnings-as-errors && MIX_ENV=test mix test'
+
+Result: 439 passed, including one doctest and 438 tests.
+
+The daemon compiled with warnings treated as errors.
+
+Command:
+
+    MIX_ENV=test mix test test/consigliere/progression_test.exs test/consigliere/git_test.exs test/consigliere/checkpoints_test.exs test/consigliere/gates/gate_test.exs test/consigliere/gates/transitions_test.exs test/consigliere/reconciler_persist_test.exs
+
+Result: 55 passed.
+
+Command:
+
+    MIX_ENV=test mix test test/consigliere/project_verifications_command_test.exs test/consigliere/exact_sha_progression_test.exs
+
+Result: 6 passed.
+
+The direct command tests proved shell interpolation is not executed, timeout results are typed and bounded, and output is capped at 65,536 bytes.
+
+Command:
+
+    test -z "$(gofmt -l cli)" && (cd cli && go vet ./... && go test -race -shuffle=on -count=1 ./...)
+
+Result: Go formatting, vet, and race suites passed for `cli/client` and `cli/service` on the macOS host.
+
+A root Linux container attempt was not counted as a pass because its test process was PID 1 with process group 1, which correctly exercised the lifecycle identity guard and caused the process-group test to reject the synthetic owner.
+
+The same Go gate passed on the host with `cli/client` in 1.471 seconds and `cli/service` in 1.757 seconds.
+
+## Packaged terminal QA
+
+Command:
+
+    docker run --rm -v "$PWD:/workspace" -v "$PWD/.tmp/task13-package/go-wrapper:/usr/local/bin/go:ro" -v "$PWD/.tmp/task13-package/cs-runner-linux:/tmp/cs-runner-linux:ro" -v "$PWD/.tmp/task13-package/cs-linux:/tmp/cs-linux:ro" -v "$PWD/.tmp/task13-package/csd-linux:/tmp/csd-linux:ro" -w /workspace elixir:1.20-otp-29 sh -c './scripts/package.sh /workspace/.tmp/task13-package/prefix3'
+
+Result: package assembly completed successfully.
+
+The corrected artifact probe confirmed Linux ELF binaries at `prefix3/bin/cs`, `prefix3/bin/csd`, and `prefix3/libexec/consigliere_daemon/lib/consigliere_daemon-0.1.0/priv/cs-runner`.
+
+The installed-only driver mounted only the package prefix and a fresh temporary `CS_HOME`, ran as UID 1000, used `/opt/consigliere/bin` plus system tools on `PATH`, set `CS_RELEASE` to the installed OTP release, set a fixture `CS_CODEX_BIN`, and ran from `/tmp` without a source checkout.
+
+The driver invoked installed `csd migrate`, `csd start`, `cs project add`, `cs mission create`, `cs mission submit`, and `cs mission authorize`.
+
+The real fixture Codex session wrote a bounded result, emitted JSONL lifecycle and usage events, committed the Workspace, and reported the exact result SHA through the authenticated Attempt channel.
+
+The driver observed `phase=ready_for_review`, a 40-character lowercase result SHA, `status=imported`, `kind=completed`, the daemon-owned result ref, a nonempty Workspace identity, and a passed review verification row.
+
+Bounded observed output included:
+
+    mission 766d53da-b590-4525-ad8d-ae57019c13cf phase=ready_for_review project=ec849423-eec3-4c20-9469-2b3299c63921 base_sha=1ba883488a24b477d1180163041870c6e408eed5 checkpoint_sha=20ca83de704a5cdee2fdf16fb5322c58e1eeccb2
+    result: sha=20ca83de704a5cdee2fdf16fb5322c58e1eeccb2 status=imported kind=completed ref=refs/consigliere/projects/ec849423-eec3-4c20-9469-2b3299c63921/attempts/f92af2ea-c4f6-408f-9c2d-fb3413a55858/result
+    workspace: id=85325308-e619-4df5-bf2d-c0784c651d29 attempt=f92af2ea-c4f6-408f-9c2d-fb3413a55858 generation=876c3eee2cce1c833d5dcdedce1bd31f status=daemon_exclusive
+    verification: gate=review ordinal=1 outcome=passed input_sha=20ca83de704a5cdee2fdf16fb5322c58e1eeccb2 output_digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    TASK13_PACKAGE stop=verified result=exact_sha_ready review_surface=verified
+
+The installed human `cs mission`, `cs review`, and `cs why` surfaces all retained the full result SHA, daemon-owned ref, Workspace ID, and verification identity without `truncated` fields.
+
+The installed `csd stop` completed and the driver asserted that `priv.sock`, `api.sock`, and `boss.sock` were absent afterward.
+
+No push, pull request, merge, Made operation, legacy supervisor, native resume, or automatic delivery occurred.
+
+## Adversarial coverage
+
+- Short, non-hex, foreign, non-commit, non-ancestor, and conflicting result SHAs fail closed.
+- Missing or unverified runner death prevents import and leaves the daemon-owned result ref absent.
+- Wrong Project, Mission, Attempt, Workspace, lease, base, parent, fence, or terminal sequence identity is rejected before progression.
+- Dirty or unsafe Workspace configuration, symlinked Git metadata, remotes, alternates, credential helpers, inherited hooks, and unsafe permissions are rejected or normalized before exact verification.
+- A second import of the same exact result is idempotent, while a different object at the same daemon-owned ref is rejected.
+- Exit zero without the strict result report cannot complete an Attempt.
+- Duplicate terminal or result reports replay only the original bounded envelope and cannot replace the stored identity.
+- Checkpoint continuation accepts only the exact current checkpoint SHA and produces fresh bound state rather than native transcript resume.
+- Literal argv containing shell metacharacters remains data and cannot create a filesystem marker.
+- Malformed policies, empty commands, non-literal argv, more than eight commands, missing executables, hung commands, canceled commands, and output above 65,536 bytes produce typed bounded failures.
+- Project policy and mission policy are overlaid deterministically, so a mission gate selection cannot discard Project-configured verification commands.
+- Prompt injection and misleading Codex prose cannot authorize progression because only the authenticated strict result payload, accepted terminal event, exact Git object, and typed verification outcome are authoritative.
+- Repeated interruption and stale state are handled by durable result and verification rows and idempotent progression reconciliation.
+- No full prompt, transcript, credential, raw command output, GitHub mutation, automatic PR, merge, telemetry platform, or fixed canary allocation was added.
+
+The temporary package prefix, Linux build fixtures, wrapper, fake Codex executable, generated runner, and manual QA script remain disposable validation artifacts and are scheduled for macOS Trash cleanup before the next delivery phase.
+
+No credentials, raw logs, or transcripts were written to this evidence record.
+
+`git diff --check` passed before the implementation commit.
