@@ -119,3 +119,23 @@ The Linux daemon gate passed `491 passed (1 doctest, 490 tests)` three times, th
 The selected canary was not rerun against this package because the operator-controlled rule forbids duplicate implementation work.
 
 The public canary result remains one completed Consigliere Mission with two Attempts, zero FirstMate Missions, and insufficient evidence for Promote.
+
+## Current exact runtime source closure
+
+The current runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339` on `revival/v0-local-codex`.
+
+The preceding runtime audit blockers are closed by `runtime-audit-followup-7c54c78.md`.
+
+The authoritative Linux daemon gate passed `496 passed (1 doctest, 495 tests)` in three consecutive seed-0 runs.
+
+The native macOS daemon gate passed the complete `496`-test suite.
+
+The CLI and runner Go gates passed formatting, vet, ordinary tests, race and shuffle tests, and builds.
+
+The exact package and installed lifecycle receipts are `package-artifact-7c54c78.md` and `installed-lifecycle-7c54c78.md`.
+
+The package contained no Go, Elixir, Mix, or module source files, all inspected binaries were native arm64 Mach-O, and `cs version --json` returned `{"cs":"0.1.0","protocol":1}`.
+
+The selected real canary was not rerun against the final package because the operator-controlled rule forbids duplicate implementation work.
+
+The public canary remains one completed Consigliere Mission with two Attempts, zero FirstMate Missions, and insufficient evidence for Promote.

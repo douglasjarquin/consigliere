@@ -85,3 +85,19 @@ This is runtime and packaging closure, not a new canary execution.
 The selected real Mission and its one operator-authorized continuation were not rerun after the final hardening because the operator-controlled canary forbids duplicate implementation work.
 
 The public result therefore remains one completed Consigliere Mission with two Attempts, zero FirstMate Missions, and insufficient evidence for Promote.
+
+## Final runtime-hardening custody
+
+The current runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339` on `revival/v0-local-codex`.
+
+The exact package and installed lifecycle receipts are `.omo/evidence/consigliere-local-v0-revival/package-artifact-7c54c78.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-7c54c78.md`.
+
+The full Linux and native macOS daemon suites each passed `496` tests, and the CLI and runner Go gates passed at this source head.
+
+The final package-only lifecycle verified owner identity, restart, repeated stop, and cleanup without creating a Mission, Attempt, Codex process, FirstMate duplicate, PR, merge, or Made-daemon action.
+
+The selected real canary remains the one naturally occurring dotfiles Mission with one human-authorized continuation.
+
+It was not rerun after runtime hardening because the operator-controlled canary forbids duplicate implementation work.
+
+The comparable sample remains below 20, so the public evidence is insufficient for Promote and the operator retains Continue or Stop.

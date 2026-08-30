@@ -271,3 +271,21 @@ The fail-closed runner identity and short-lived harness recovery fixes are inclu
 The Linux daemon gate passed `491 passed (1 doctest, 490 tests)` in three consecutive seed-0 runs, and the installed package lifecycle verified owner identity, restart generation change, terminal runner absence, repeated stop, and cleanup.
 
 The exact current receipts are `daemon-linux-gate-7159373.md`, `package-artifact-7159373.md`, and `installed-lifecycle-7159373.md`.
+
+## Exact-head runtime audit follow-up
+
+The final runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339`.
+
+The preceding runtime audit blockers at source head `71593738cf6aae723c9208743405fa12a9dc7a03` are recorded with their RED-to-GREEN closure in `runtime-audit-followup-7c54c78.md`.
+
+The focused boundary slice passed `35` daemon tests.
+
+The full authoritative Linux gate passed `496 passed (1 doctest, 495 tests)` in three consecutive seed-0 runs.
+
+The native macOS daemon gate passed the complete `496`-test suite.
+
+The package and installed lifecycle receipts are `package-artifact-7c54c78.md` and `installed-lifecycle-7c54c78.md`.
+
+The current process identity boundary requires exact executable identity, platform start fingerprint, process-group membership, workspace generation, fencing generation, and runner and harness fingerprints before verified liveness or termination.
+
+The selected canary was not rerun after this hardening because the operator-controlled rule forbids duplicate implementation work.

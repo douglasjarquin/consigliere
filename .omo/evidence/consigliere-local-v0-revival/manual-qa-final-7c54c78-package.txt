@@ -1,0 +1,14 @@
+Manual QA package identity evidence.
+
+Exact invocation:
+git rev-parse HEAD
+
+Observed output:
+7c54c782552f3ee5a09ddee35735e90cba1b9339
+
+Exact retained package:
+.tmp/package-7c54c78.YzUATZ
+
+The package directory was present.
+The package bin surface contained only cs and csd.
+The package tree contained zero .go, .ex, mix.exs, mix.lock, or go.mod files.

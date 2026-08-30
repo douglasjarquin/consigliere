@@ -1,0 +1,125 @@
+Manual QA transcript summary for exact source head 7c54c782552f3ee5a09ddee35735e90cba1b9339.
+
+The retained package was .tmp/package-7c54c78.YzUATZ.
+The product working directory was /tmp.
+The lifecycle used a fresh disposable HOME and CS_HOME below /tmp.
+The product environment was env -i with PATH=<PACKAGE_ROOT>/bin:/usr/bin:/bin, HOME=<QA_ROOT>/home, CS_HOME=<QA_ROOT>/cs, CS_RELEASE=<PACKAGE_ROOT>/libexec/consigliere_daemon, CS_CSD_FORCE_BACKGROUND=1, and LANG=C.
+
+CASE version
+INVOCATION cs version --json
+OUTPUT {"cs":"0.1.0","protocol":1}
+RC 0
+
+CASE migrate
+INVOCATION csd migrate
+OUTPUT migration progress completed and migrated <QA_ROOT>/cs/consigliere.db
+RC 0
+
+CASE start
+INVOCATION csd start
+OUTPUT started home=<QA_ROOT>/cs
+RC 0
+
+CASE ping-1
+INVOCATION cs ping
+OUTPUT pong
+RC 0
+
+CASE health-1
+INVOCATION cs health
+OUTPUT status=ok protocol=1 release=0.1.0 schema=2.026083012e+13 harness=Consigliere.Harness.Codex
+RC 0
+
+CASE doctor-1
+INVOCATION cs doctor
+OUTPUT home, database, lock, credential, probe socket, priv socket, api socket, release, schema, harness, and runner checks completed successfully.
+RC 0
+
+CASE status-1
+INVOCATION csd status
+OUTPUT priv=live api=live boss=live lock=held holder=<PID-A> owner=verified
+RC 0
+
+CASE active-processes-1
+INVOCATION /bin/ps -axo pid=,command=
+OUTPUT one package-owned beam.smp process under <PACKAGE_ROOT>/libexec/consigliere_daemon; no legacy supervisor or shared Made process.
+RC 0
+
+CASE stop-1
+INVOCATION csd stop
+RC 0
+
+CASE stop-2
+INVOCATION csd stop
+RC 0
+
+CASE boundary-after-stop
+INVOCATION /usr/bin/find <QA_ROOT>/cs \( -type s -o -name '*.pid' -o -name '*.owner' \) -print
+OUTPUT empty
+RC 0
+
+CASE package-processes-after-stop
+INVOCATION /bin/ps -axo pid=,command=
+OUTPUT no package-owned daemon process.
+RC 0
+
+CASE restart
+INVOCATION csd restart
+OUTPUT restart completed.
+RC 0
+
+CASE ping-2
+INVOCATION cs ping
+OUTPUT pong
+RC 0
+
+CASE health-2
+INVOCATION cs health
+OUTPUT status=ok protocol=1 release=0.1.0 schema=2.026083012e+13 harness=Consigliere.Harness.Codex
+RC 0
+
+CASE doctor-2
+INVOCATION cs doctor
+OUTPUT home, database, lock, credential, probe socket, priv socket, api socket, release, schema, harness, and runner checks completed successfully.
+RC 0
+
+CASE status-2
+INVOCATION csd status
+OUTPUT priv=live api=live boss=live lock=held holder=<PID-B> owner=verified
+RC 0
+
+DERIVED owner_before=<PID-A> owner_after=<PID-B> owner_changed=YES; both owners were verified and the captured numeric holders differed.
+
+CASE active-processes-2
+INVOCATION /bin/ps -axo pid=,command=
+OUTPUT one package-owned beam.smp process under <PACKAGE_ROOT>/libexec/consigliere_daemon; no legacy supervisor or shared Made process.
+RC 0
+
+CASE final-stop-1
+INVOCATION csd stop
+RC 0
+
+CASE final-stop-2
+INVOCATION csd stop
+RC 0
+
+CASE final-boundary
+INVOCATION /usr/bin/find <QA_ROOT>/cs \( -type s -o -name '*.pid' -o -name '*.owner' \) -print
+OUTPUT empty
+RC 0
+
+CASE final-package-processes
+INVOCATION /bin/ps -axo pid=,command=
+OUTPUT no package-owned daemon process.
+RC 0
+
+CLEANUP homes_before home=present cs_home=present
+CLEANUP /usr/bin/trash exact HOME and CS_HOME paths returned 0
+CLEANUP homes_after home=absent cs_home=absent
+CLEANUP /usr/bin/trash exact empty QA root returned 0
+CLEANUP qa root after trash absent
+
+FORBIDDEN INVOCATION SCAN
+No lifecycle invocation contained Mission, Attempt, canary, Made, legacy, supervisor, cs-watch, cs-monitor, or fm-.
+
+No Mission, Attempt, duplicate canary, PR, merge, or shared Made operation was invoked.

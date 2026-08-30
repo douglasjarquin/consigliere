@@ -42,6 +42,26 @@ The native macOS daemon command passed formatting and compilation and reported `
 
 The selected canary was not rerun against this final package because the operator-controlled canary forbids duplicate implementation work.
 
+## Current exact runtime source gate
+
+The current runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339` on `revival/v0-local-codex`.
+
+The Linux daemon command passed formatting, warnings-as-errors compilation, and `496 passed (1 doctest, 495 tests)` in each of three consecutive seed-0 runs.
+
+The native macOS daemon command passed formatting, warnings-as-errors compilation, and the complete `496`-test suite.
+
+The CLI and runner Go commands exited `0` after format, vet, ordinary tests, race and shuffle tests, and builds.
+
+The package command exited `0` and produced native arm64 `cs`, `csd`, `cs-runner`, `cs-attempt`, and `erlexec` identities recorded in `package-artifact-7c54c78.md`.
+
+The installed package lifecycle exited `0` for every product command, changed the verified owner PID across restart, converged repeated stop, and ended with zero sockets, PID files, owner files, and package processes.
+
+The package-only lifecycle cleanup receipt was `CLEANUP=trashed:/tmp/cs-final-7c54c78-env.lWqmiv,/tmp/cs-final-7c54c78-home.1fzjUd`.
+
+The final runtime audit follow-up and fresh review reports are bound to this exact source head.
+
+The selected real canary was not rerun because the operator-controlled no-duplicate rule forbids duplicate implementation work.
+
 ## Current exact-head closure
 
 The current runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.

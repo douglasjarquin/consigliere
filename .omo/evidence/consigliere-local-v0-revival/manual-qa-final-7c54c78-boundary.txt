@@ -1,0 +1,17 @@
+Manual QA package boundary evidence for exact source head 7c54c782552f3ee5a09ddee35735e90cba1b9339.
+
+Exact boundary invocation:
+cd /tmp; env -i PATH=<PACKAGE_ROOT>/bin:/usr/bin:/bin HOME=/tmp/cs-final-boundary-home CS_HOME=/tmp/cs-final-boundary-cs LANG=C /bin/bash -s
+
+PACKAGE_PRESENT=yes
+SOURCE_MIX_FILE_COUNT=0
+LEGACY_SUPERVISOR_FILE_COUNT=0
+CANARY_NAMED_FILE_COUNT=0
+PACKAGE_PRODUCT_PROCESSES_AFTER_FINAL_STOP=empty
+PACKAGE_LEGACY_OR_SHARED_MADE_PROCESSES_AFTER_FINAL_STOP=empty
+FORBIDDEN_LIFECYCLE_INVOCATIONS=empty
+STATIC_CHECK_RC=0
+
+The package contains six application-owned files whose names include Made, including Consigliere.Made.* BEAM modules and priv/fake_made.sh.
+This is not counted as a shared Made daemon usage.
+The runtime process scan found no separate Made process, and the lifecycle invocation scan found no Made operation.

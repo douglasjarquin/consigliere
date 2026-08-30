@@ -252,6 +252,22 @@ The installed-only lifecycle ran from `/tmp` with `env -i`, passed migration, st
 
 The cleanup receipt was `CLEANUP=trashed:/tmp/cs-final-42933d1-home.e7matc`; the isolated environment home `/tmp/cs-final-42933d1-env.C2tGuR` was also moved to Trash.
 
+## Final runtime-hardening package custody
+
+The final runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339`.
+
+Its package artifact and installed lifecycle passed in `package-artifact-7c54c78.md` and `installed-lifecycle-7c54c78.md`.
+
+The package-only lifecycle verified version `0.1.0`, protocol `1`, live health and ping, identity-safe stop, restart with a new verified owner, repeated-stop idempotence, and zero final sockets, PID files, owner files, or package processes.
+
+The final runtime hardening was exercised through full daemon, CLI, runner, package, and lifecycle gates.
+
+The completed real canary was not rerun against this package because doing so would create duplicate implementation work for the same operator-selected Mission.
+
+The canary remains one naturally occurring Consigliere Mission with one human-authorized continuation, zero FirstMate duplicate Missions, and fewer than 20 comparable natural Mission records.
+
+The public result therefore remains insufficient for Promote, and Continue or Stop remains an operator decision.
+
 The CI-shaped Linux daemon gate used actual Go `1.26.6` and passed format, warnings-as-errors compilation, and `482 tests` including one doctest in each of three consecutive seed-0 runs.
 
 The CLI and runner Go gates passed formatting, vet, ordinary tests, race and shuffle tests, and builds.
