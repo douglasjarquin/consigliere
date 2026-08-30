@@ -131,3 +131,11 @@ The advisory allowlist remains fail-closed for logs and every authority-bearing 
 The current package and lifecycle receipts are `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`.
 
 The advisory surface was not broadened during the runner recovery hardening, and no canary duplicate or product delivery action was introduced.
+
+## Watcher follow-up: default Attempt log read
+
+The packaged regression reproduced the documented default CLI failure: `cs attempt logs <attempt-id>` returned exit 5 with `unauthorized: advisory_operation_forbidden` for an authenticated default socket caller.
+
+The exact-head fix restores only the bounded `attempt.logs` read operation to the model advisory allowlist and routes it through a dedicated sanitizer that preserves the bounded Attempt identifier and redacted lines while omitting the private log path.
+
+The existing advisory mutation and authority-bearing operation restrictions remain fail-closed, with the RED/GREEN authorization regression and exact packaged CLI proof recorded in `watcher-followup-c727e94.md`.

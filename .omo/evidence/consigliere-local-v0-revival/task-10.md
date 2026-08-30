@@ -119,6 +119,16 @@ GREEN proof passed the redaction test with both camel-case values replaced by `[
 
 The final Linux daemon gate then passed `473 tests` in each of three seed-0 runs, including oversized ContextPack, structured event, fragmented output, and native stream-boundary coverage.
 
+## Watcher follow-up: verifier output bound
+
+At source head `c727e94ae2bac1be0d3d33fc0005258e5fd850cd`, the verifier now checks the accumulated and received byte sizes before concatenating command output.
+
+The RED regression ran one `head -c 200000 /dev/zero` output stream under a bounded process heap and the pre-fix process was killed before returning a bounded result.
+
+The GREEN regression returned `output_too_large` with exactly `65,536` output bytes, and the complete daemon gate passed `499` tests.
+
+The exact RED/GREEN command and bounded output are recorded in `watcher-followup-c727e94.md`.
+
 ## Structured payload redaction follow-up
 
 The exact-head review then found that `Redaction.value/1` sanitized nested strings but did not redact values selected by sensitive map keys before harness-event persistence.

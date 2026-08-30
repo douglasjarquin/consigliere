@@ -178,3 +178,13 @@ The native stream regression also showed that a gapped stdout sequence was accep
 The final GREEN suite rejects missing, duplicate, and gapped native stream sequences while retaining exact result replay and exact-SHA progression behavior.
 
 The final Linux daemon gate passed `473 tests` in three consecutive seed-0 runs after these changes.
+
+## Watcher follow-up: packaged completion projection
+
+The packaged real-Codex regression reproduced the prior runtime contract failure at the inherited head: the generated ContextPack required a checkpoint, so the real Codex process reported a checkpoint before completion and the Attempt became `checkpointed` while the Mission remained active with next action `validate`.
+
+The ContextPack completion contract now requires exactly one terminal result and instructs the runner to complete without reporting a checkpoint first.
+
+The exact-head packaged run used real `codex-cli 0.151.0` and reached `ready_for_review` with Attempt `c715dd59-64f4-413d-9697-60e58356ca9d`, Mission `a41140e2-2b15-446d-a881-3dbdfc1f43f6`, and imported result SHA `7669f9dc389db903835ca99aab4fc21187c94a52`.
+
+The exact commands, bounded output, and cleanup receipt are recorded in `watcher-followup-c727e94.md`.
