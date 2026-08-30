@@ -139,3 +139,13 @@ The packaged regression reproduced the documented default CLI failure: `cs attem
 The exact-head fix restores only the bounded `attempt.logs` read operation to the model advisory allowlist and routes it through a dedicated sanitizer that preserves the bounded Attempt identifier and redacted lines while omitting the private log path.
 
 The existing advisory mutation and authority-bearing operation restrictions remain fail-closed, with the RED/GREEN authorization regression and exact packaged CLI proof recorded in `watcher-followup-c727e94.md`.
+
+## Watcher follow-up security closure
+
+The first watcher fix authorized bounded redacted Attempt lines but was rejected by the security audit because arbitrary prompt-bearing log text remained model-visible.
+
+The corrected source head `2c7f5b6c9c3f07f85aa4f4a9173e899ed78c0aa4` keeps `attempt.logs` authorized on the default advisory channel while returning only allowlisted durable harness-event summaries.
+
+The advisory regression covers prompt injection, bearer-shaped secrets, private-path omission, bounded output, and preservation of Boss-only mutation denials.
+
+The exact package/manual proof returned exit `0` for the default `cs attempt logs` command and exposed structured event summaries only.

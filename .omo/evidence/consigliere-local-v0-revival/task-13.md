@@ -188,3 +188,13 @@ The ContextPack completion contract now requires exactly one terminal result and
 The exact-head packaged run used real `codex-cli 0.151.0` and reached `ready_for_review` with Attempt `c715dd59-64f4-413d-9697-60e58356ca9d`, Mission `a41140e2-2b15-446d-a881-3dbdfc1f43f6`, and imported result SHA `7669f9dc389db903835ca99aab4fc21187c94a52`.
 
 The exact commands, bounded output, and cleanup receipt are recorded in `watcher-followup-c727e94.md`.
+
+## Watcher follow-up security-aligned log read
+
+The exact corrected package at source head `2c7f5b6c9c3f07f85aa4f4a9173e899ed78c0aa4` completed a real Codex Attempt through `ready_for_review` and returned `ATTEMPT_LOGS_EXIT=0`.
+
+The default advisory log response contained only allowlisted durable event summaries such as `1 session.started` and no captured log text or private path.
+
+The source-level adversarial regression supplied prompt-injection text and a bearer-shaped secret in the Attempt log, then verified that neither appeared in the advisory response.
+
+The exact package identifiers, result SHA, artifact hashes, gate commands, and cleanup receipt are in `watcher-followup-c727e94.md` with the current-head addendum below.

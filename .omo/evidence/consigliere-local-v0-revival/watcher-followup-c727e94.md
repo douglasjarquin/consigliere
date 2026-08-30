@@ -123,3 +123,37 @@ The exact worktree cleanup command was `trash "$PWD/.tmp/watcher-followup"; tras
 The command returned `watcher_trash_rc=0 crash_trash_rc=0` and verified `watcher-followup absent` and `erl_crash.dump absent`.
 
 The unrelated `.tmp/attempt-report-*`, `cli/.tmp`, `_build`, and runner scratch artifacts were preserved.
+
+## Current-head security-aligned addendum
+
+The source head advanced to `2c7f5b6c9c3f07f85aa4f4a9173e899ed78c0aa4` for the security-aligned advisory projection and the ContextPack test-quality cleanup.
+
+Tests-first RED changed the advisory regression to include prompt-injection text and a bearer-shaped secret while requiring only structured event summaries in the response.
+
+The GREEN focused command was `PATH="/opt/homebrew/opt/erlang/bin:$PATH" mix format --check-formatted && PATH="/opt/homebrew/opt/erlang/bin:$PATH" MIX_ENV=test mix test test/consigliere/advisory_test.exs test/consigliere/api_cli_ops_test.exs test/consigliere/api_protocol_test.exs test/consigliere/harness/context_pack_test.exs test/consigliere/project_verifications_command_test.exs --seed 0 --no-color`.
+
+The result was `31 passed` with exit `0`.
+
+The prescribed daemon gate was rerun serially after the earlier concurrent review clone released the shared test fixture home.
+
+The daemon result was `499 passed (1 doctest, 498 tests)` with exit `0`.
+
+The runner race gate returned `ok consigliere/cs-runner 45.162s` with exit `0`.
+
+The CLI race gate passed `cli/client` and `cli/service` with exit `0`.
+
+The package was rebuilt from this head and produced native arm64 Mach-O artifacts with SHA-256 values `cs=80ea4c4b0f4f34ea3a1f43d2c79eb84f38ad71c0a1d6c603bb1d1be4555ef712`, `csd=fe5974be3d56860d56de0ea633bc2b5f030877aaaec32e5aeaba618a2a25b692`, `cs-runner=36db0deb9d9d71585296f1dd8bfe3eeb4288386991f81c232141b869cde62345`, and `cs-attempt=51050042a4c3d8402c02dc85fad7cf2fb069cdfbf20f5213f4599ec14ef4eb0b`.
+
+The package contains 15 required release migration `.exs` files and no checkout `go.mod` or `mix.exs`.
+
+The packaged real Codex run used `codex-cli 0.151.0`, reached `ready_for_review` at poll 44, and ended with Attempt `ae033bd4-58cb-43ff-ad57-c424d53e2ccd`, Mission `3f7e0877-2b87-4bf9-b146-d08f330a97d0`, and imported result SHA `de807e26860bcd67eb81f0f2e82570015ffd3563`.
+
+Its default `cs attempt logs` call returned `ATTEMPT_LOGS_EXIT=0` and exposed only structured event summaries.
+
+The same package passed repeated stop, restart, status, why, review, doctor, and final stop checks with `LIFECYCLE=stopped sockets=0 pid_files=0`.
+
+The current package cleanup command was `trash /tmp/cs-p0-real.DH2BRL; trash "$PWD/.tmp/watcher-followup"`.
+
+It returned `home_present=0 watcher_present=0 home_trash_rc=0 watcher_trash_rc=0` and verified `cs-p0-real.DH2BRL absent` and `watcher-followup absent`.
+
+The unrelated taskwork scratch remains preserved.
