@@ -144,7 +144,7 @@ The existing advisory mutation and authority-bearing operation restrictions rema
 
 The first watcher fix authorized bounded redacted Attempt lines but was rejected by the security audit because arbitrary prompt-bearing log text remained model-visible.
 
-The corrected source head `2c7f5b6c9c3f07f85aa4f4a9173e899ed78c0aa4` keeps `attempt.logs` authorized on the default advisory channel while returning only allowlisted durable harness-event summaries.
+The corrected source head `2c7f5b67c8d37737d8f2dd3e0f7110687a800748` keeps `attempt.logs` authorized on the default advisory channel while returning only allowlisted durable harness-event summaries.
 
 The advisory regression covers prompt injection, bearer-shaped secrets, private-path omission, bounded output, and preservation of Boss-only mutation denials.
 

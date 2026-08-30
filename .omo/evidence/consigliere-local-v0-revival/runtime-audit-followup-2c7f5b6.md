@@ -1,6 +1,6 @@
 # Runtime audit: security-aligned watcher follow-up
 
-Reviewed source head: `2c7f5b6c9c3f07f85aa4f4a9173e899ed78c0aa4`.
+Reviewed source head: `2c7f5b67c8d37737d8f2dd3e0f7110687a800748`.
 
 ## Boundary audit
 
@@ -16,7 +16,7 @@ Authority-bearing advisory mutations remain denied before mutation.
 
 ## Independent checks
 
-`git rev-parse --verify HEAD` returned `2c7f5b6c9c3f07f85aa4f4a9173e899ed78c0aa4`.
+`git rev-parse --verify HEAD` returned `2c7f5b67c8d37737d8f2dd3e0f7110687a800748`.
 
 `git branch --show-current` returned `revival/v0-local-codex`.
 
@@ -40,4 +40,4 @@ No raw log, transcript, Boss credential, capability, mirror path, retry, resume,
 
 ## Verdict
 
-PASS for runtime source head `2c7f5b6c9c3f07f85aa4f4a9173e899ed78c0aa4`.
+PASS for runtime source head `2c7f5b67c8d37737d8f2dd3e0f7110687a800748`.

@@ -191,7 +191,7 @@ The exact commands, bounded output, and cleanup receipt are recorded in `watcher
 
 ## Watcher follow-up security-aligned log read
 
-The exact corrected package at source head `2c7f5b6c9c3f07f85aa4f4a9173e899ed78c0aa4` completed a real Codex Attempt through `ready_for_review` and returned `ATTEMPT_LOGS_EXIT=0`.
+The exact corrected package at source head `2c7f5b67c8d37737d8f2dd3e0f7110687a800748` completed a real Codex Attempt through `ready_for_review` and returned `ATTEMPT_LOGS_EXIT=0`.
 
 The default advisory log response contained only allowlisted durable event summaries such as `1 session.started` and no captured log text or private path.
 

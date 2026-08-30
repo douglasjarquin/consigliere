@@ -126,7 +126,7 @@ The unrelated `.tmp/attempt-report-*`, `cli/.tmp`, `_build`, and runner scratch 
 
 ## Current-head security-aligned addendum
 
-The source head advanced to `2c7f5b6c9c3f07f85aa4f4a9173e899ed78c0aa4` for the security-aligned advisory projection and the ContextPack test-quality cleanup.
+The source head advanced to `2c7f5b67c8d37737d8f2dd3e0f7110687a800748` for the security-aligned advisory projection and the ContextPack test-quality cleanup.
 
 Tests-first RED changed the advisory regression to include prompt-injection text and a bearer-shaped secret while requiring only structured event summaries in the response.
 
