@@ -34,6 +34,15 @@ defmodule Consigliere.Harness.RedactionTest do
     assert redacted =~ "[REDACTED]"
   end
 
+  test "redacts provider API key assignments" do
+    value = "OPENAI_API_KEY=openai-secret\nANTHROPIC_API_KEY=anthropic-secret"
+    redacted = Redaction.text(value)
+
+    refute redacted =~ "openai-secret"
+    refute redacted =~ "anthropic-secret"
+    assert redacted =~ "[REDACTED]"
+  end
+
   test "redacts private key values in structured events" do
     assert Redaction.value(%{"private_key" => "private-secret"}) == %{
              "private_key" => "[REDACTED]"

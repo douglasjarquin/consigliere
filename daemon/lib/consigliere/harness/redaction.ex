@@ -10,9 +10,9 @@ defmodule Consigliere.Harness.Redaction do
 
   @sensitive_path_pattern ~r{(?i)(?:/Users|/home|/private/tmp|/tmp)/[^\s"']*(?:\.codex|\.ssh|credentials?|auth\.json)[^\s"']*}
 
-  @quoted_sensitive_assignment_pattern ~r/(?i)(["'](?:access_token|refresh_token|id_token|oauth_token|token|password|secret|api[_-]?key|credential|CS_CAPABILITY)["']\s*[:=]\s*)["']?[^\s,"'}]+/
-  @bare_sensitive_assignment_pattern ~r/(?i)(\b(?:CS_CAPABILITY|token|password|secret|private[_-]?key|api[_-]?key|credential)\b\s*[:=]\s*)["']?[^\s,"'}]+/
-  @compound_sensitive_assignment_pattern ~r/(?i)(\b(?:AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|PRIVATE_KEY|PRIVATE_KEY_PEM)\b\s*=\s*)["']?[^\s,"'}]+/
+  @quoted_sensitive_assignment_pattern ~r/(?i)(["'](?:access_token|refresh_token|id_token|oauth_token|token|password|secret|api[_-]?key|credential|CS_CAPABILITY|OPENAI_API_KEY|ANTHROPIC_API_KEY)["']\s*[:=]\s*)["']?[^\s,"'}]+/
+  @bare_sensitive_assignment_pattern ~r/(?i)(\b(?:CS_CAPABILITY|token|password|secret|private[_-]?key|api[_-]?key|credential|OPENAI_API_KEY|ANTHROPIC_API_KEY)\b\s*[:=]\s*)["']?[^\s,"'}]+/
+  @compound_sensitive_assignment_pattern ~r/(?i)(\b(?:AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|PRIVATE_KEY|PRIVATE_KEY_PEM|OPENAI_API_KEY|ANTHROPIC_API_KEY)\b\s*=\s*)["']?[^\s,"'}]+/
   @sensitive_key_names ~w(auth authorization capability cs_capability attempt_capability)
   @sensitive_key_fragments ~w(token password secret credential api_key api-key private_key private-key)
 
