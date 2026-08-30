@@ -164,7 +164,13 @@ Scope expands only after the canary evidence is complete, defensible, and review
 
 The canary decision is exactly one human-authored `Promote`, `Continue`, or `Stop` decision.
 
-An absent boss-selected Project, task sample, duration, FirstMate configuration, Consigliere configuration, or evidence sufficiency decision is a decision hold, not permission to guess.
+The operator selects a noncritical Project and naturally occurring comparable Mission sample at measurement start.
+
+The canary has no fixed duration or Continue limit; the operator decides whether to continue or stop.
+
+The selected FirstMate and Consigliere package, daemon, CLI, runner, Codex harness, model, reasoning, and bounded per-turn counters are recorded at measurement start.
+
+An absent operator-selected Project, task sample, FirstMate configuration, Consigliere configuration, or evidence sufficiency decision is a decision hold, not permission to guess.
 
 ## Exclusions
 
