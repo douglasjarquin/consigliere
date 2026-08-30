@@ -119,6 +119,7 @@ defmodule Consigliere.Progression do
 
   defp do_run(attempt, mission, result, opts) do
     with :ok <- require_death(result, opts),
+         :ok <- AttemptResults.bind_terminal_sequence(result),
          :ok <- mark_death(result),
          :ok <- verify_result(attempt, mission, result),
          :ok <- mark_commit_verified(result),

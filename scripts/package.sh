@@ -12,7 +12,7 @@ PREFIX=$(CDPATH= cd -- "$PREFIX" && pwd)
 mkdir -p "$PREFIX/bin" "$PREFIX/libexec" "$PREFIX/share/consigliere"
 
 (cd "$ROOT/runner/cs-runner" && go build -o "$ROOT/daemon/priv/cs-runner" .)
-(cd "$ROOT/cli" && go build -o "$PREFIX/bin/cs" ./cmd/cs && go build -o "$PREFIX/bin/csd" ./cmd/csd)
+(cd "$ROOT/cli" && go build -o "$PREFIX/bin/cs" ./cmd/cs && go build -o "$PREFIX/bin/csd" ./cmd/csd && go build -o "$ROOT/daemon/priv/cs-attempt" ./cmd/cs-attempt)
 
 (
   cd "$ROOT/daemon"

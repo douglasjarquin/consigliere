@@ -22,6 +22,7 @@ __pycache__/
 
 # Packaged runner, client, and install prefix — built, never tracked.
 daemon/priv/cs-runner
+daemon/priv/cs-attempt
 daemon/cs
 daemon/csd
 prefix/

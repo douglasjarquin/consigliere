@@ -103,6 +103,49 @@ defmodule Consigliere.ExactSHAProgressionTest do
     refute File.exists?(Path.join(root, "unexpected-delivery"))
   end
 
+  test "latest completion reports bind the later native terminal event", %{
+    source: source,
+    base_sha: base_sha
+  } do
+    %{project: project, mission: mission, attempt: attempt, workspace: workspace} =
+      running_project_attempt!(source, base_sha)
+
+    File.write!(Path.join(workspace.path, "result.txt"), "result\n")
+    result_sha = Git.commit_all(workspace.path, "result")
+    record_checkpoint_event!(attempt, result_sha, 7)
+    {secret, _capability} = mint_capability!(attempt)
+
+    assert {:ok, _} =
+             complete_via_protocol(
+               secret,
+               attempt,
+               mission,
+               workspace,
+               result_sha,
+               "latest"
+             )
+
+    assert Repo.get_by!(AttemptResult, attempt_id: attempt.id).accepted_terminal_sequence == 7
+    record_terminal_event!(attempt, 8)
+
+    assert {:ok, _} =
+             Consigliere.Progression.run(
+               attempt.id,
+               process_group: :dead_verified,
+               command_timeout_ms: 2_000,
+               total_timeout_ms: 5_000
+             )
+
+    result = Repo.get_by!(AttemptResult, attempt_id: attempt.id)
+    assert result.accepted_terminal_sequence == 8
+    assert result.reported_sha == result_sha
+    assert Repo.get!(Attempt, attempt.id).status == "completed"
+    assert Repo.get!(Mission, mission.id).phase == "ready_for_review"
+
+    assert {:ok, ^result_sha} =
+             Git.read_ref(project.trusted_mirror_path, Git.result_ref(project.id, attempt.id))
+  end
+
   test "identity, ancestry, configuration, and verification failures remain explainable", %{
     source: source,
     base_sha: base_sha

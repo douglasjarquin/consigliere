@@ -63,6 +63,9 @@ defmodule Consigliere.Harness.ContextPackTest do
     assert result.input_tokens <= 8_192
     assert result.pack["instructions"]
     assert result.pack["authority"]["may_grant_work"] == false
+    assert result.pack["protocol"]["reporter"] == "$CS_ATTEMPT_BIN"
+    assert result.pack["protocol"]["completion"] =~ "CS_ATTEMPT_BIN"
+    assert result.pack["protocol"]["completion"] =~ "latest"
 
     assert result.pack["capability"]["operations"] ==
              Consigliere.Capabilities.worker_operations()

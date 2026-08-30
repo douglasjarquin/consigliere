@@ -123,11 +123,20 @@ defmodule Consigliere.Operations do
     kind = Map.get(payload, "result_kind")
 
     cond do
-      not is_integer(sequence) or sequence < 1 -> {:error, "terminal_sequence must be positive"}
-      kind not in ["checkpoint", "completed"] -> {:error, "result_kind is invalid"}
-      op == "attempt.checkpoint" and kind != "checkpoint" -> {:error, "result_kind mismatch"}
-      op == "attempt.complete" and kind != "completed" -> {:error, "result_kind mismatch"}
-      true -> :ok
+      not (is_integer(sequence) and sequence > 0) and sequence != "latest" ->
+        {:error, "terminal_sequence must be positive or latest"}
+
+      kind not in ["checkpoint", "completed"] ->
+        {:error, "result_kind is invalid"}
+
+      op == "attempt.checkpoint" and kind != "checkpoint" ->
+        {:error, "result_kind mismatch"}
+
+      op == "attempt.complete" and kind != "completed" ->
+        {:error, "result_kind mismatch"}
+
+      true ->
+        :ok
     end
   end
 

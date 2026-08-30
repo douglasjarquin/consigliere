@@ -12,6 +12,7 @@ defmodule Consigliere.AttemptResults do
 
   alias Consigliere.AttemptResults.AttemptResult
   alias Consigliere.Attempts.Attempt
+  alias Consigliere.DatabaseWriter
   alias Consigliere.HarnessEvents.HarnessEvent
   alias Consigliere.Missions.Mission
   alias Consigliere.Repo
@@ -90,10 +91,41 @@ defmodule Consigliere.AttemptResults do
 
   def report_fields, do: @result_fields
 
+  def bind_terminal_sequence(%AttemptResult{result_kind: "completed"} = result) do
+    sequence =
+      Repo.one(
+        from(e in HarnessEvent,
+          where: e.attempt_id == ^result.attempt_id and e.type == "session.completed",
+          order_by: [desc: e.native_sequence],
+          limit: 1,
+          select: e.native_sequence
+        )
+      )
+
+    if is_integer(sequence) and sequence > 0 do
+      DatabaseWriter.transaction(fn ->
+        current = Repo.get!(AttemptResult, result.id)
+
+        if current.accepted_terminal_sequence == sequence do
+          current
+        else
+          Txn.update!(AttemptResult.changeset(current, %{accepted_terminal_sequence: sequence}))
+        end
+      end)
+
+      :ok
+    else
+      {:error, :terminal_event_missing}
+    end
+  end
+
+  def bind_terminal_sequence(%AttemptResult{}), do: :ok
+
   defp normalize_report!(attempt, mission, workspace, attrs, kind, strict?) do
     result_sha = value(attrs, :result_sha) || value(attrs, :reported_checkpoint_sha)
     result_kind = value(attrs, :result_kind) || kind
     terminal_sequence = value(attrs, :terminal_sequence)
+    deferred_terminal? = terminal_sequence == "latest" and result_kind == "completed"
 
     expected = %{
       mission_id: mission.id,
@@ -114,7 +146,7 @@ defmodule Consigliere.AttemptResults do
       parent_checkpoint_sha:
         value(attrs, :parent_checkpoint_sha) || expected.parent_checkpoint_sha,
       fencing_generation: value(attrs, :fencing_generation) || expected.fencing_generation,
-      accepted_terminal_sequence: terminal_sequence || attempt.last_native_sequence || 1,
+      accepted_terminal_sequence: resolve_terminal_sequence(terminal_sequence, attempt),
       reported_sha: result_sha,
       result_kind: result_kind
     }
@@ -156,7 +188,7 @@ defmodule Consigliere.AttemptResults do
           reported.accepted_terminal_sequence > attempt.last_native_sequence ->
         Txn.illegal(attempt.status, kind, :terminal_sequence_unaccepted)
 
-      strict? and
+      strict? and not deferred_terminal? and
           not accepted_event?(
             attempt.id,
             reported.result_kind,
@@ -221,6 +253,10 @@ defmodule Consigliere.AttemptResults do
   defp value(attrs, key) when is_binary(key) do
     Map.get(attrs, key) || Map.get(attrs, String.to_atom(key))
   end
+
+  defp resolve_terminal_sequence("latest", attempt), do: attempt.last_native_sequence || 1
+  defp resolve_terminal_sequence(nil, attempt), do: attempt.last_native_sequence || 1
+  defp resolve_terminal_sequence(sequence, _attempt), do: sequence
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)

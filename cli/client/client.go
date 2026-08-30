@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -62,6 +63,8 @@ type Dialer struct {
 	ReadTimeout    time.Duration
 	Version        int
 	Secret         string
+	Principal      string
+	AuthorityScope string
 }
 
 func NewDialer(home Home) Dialer {
@@ -80,6 +83,19 @@ func NewBossDialer(home Home) Dialer {
 	return d
 }
 
+func NewAttemptDialer(socket, secret, authorityScope string) Dialer {
+	return Dialer{
+		Home:           Home{Dir: filepath.Dir(socket)},
+		Socket:         socket,
+		ConnectTimeout: 2 * time.Second,
+		ReadTimeout:    30 * time.Second,
+		Version:        ProtocolVersion,
+		Secret:         secret,
+		Principal:      "attempt",
+		AuthorityScope: authorityScope,
+	}
+}
+
 func (d Dialer) Call(op string, payload map[string]any, id, idem string) (*Response, error) {
 	state := Probe(d.Socket)
 	switch state {
@@ -90,22 +106,35 @@ func (d Dialer) Call(op string, payload map[string]any, id, idem string) (*Respo
 	}
 
 	secret := d.Secret
-	principal := "model_advisory"
-	if d.Socket == d.Home.PrivilegedSocket() {
-		principal = "boss"
+	principal := d.Principal
+	if principal == "" {
+		principal = "model_advisory"
+	}
+	switch principal {
+	case "attempt":
 		if secret == "" {
-			s, err := d.Home.BossSecret()
+			return nil, fmt.Errorf("attempt capability missing")
+		}
+		if d.AuthorityScope == "" {
+			return nil, fmt.Errorf("attempt authority scope missing")
+		}
+	default:
+		if d.Socket == d.Home.PrivilegedSocket() {
+			principal = "boss"
+			if secret == "" {
+				s, err := d.Home.BossSecret()
+				if err != nil {
+					return nil, fmt.Errorf("boss credential: %w", err)
+				}
+				secret = s
+			}
+		} else if secret == "" && d.Socket == d.Home.APISocket() {
+			s, err := d.Home.AdvisorySecret()
 			if err != nil {
-				return nil, fmt.Errorf("boss credential: %w", err)
+				return nil, fmt.Errorf("advisory credential: %w", err)
 			}
 			secret = s
 		}
-	} else if secret == "" && d.Socket == d.Home.APISocket() {
-		s, err := d.Home.AdvisorySecret()
-		if err != nil {
-			return nil, fmt.Errorf("advisory credential: %w", err)
-		}
-		secret = s
 	}
 
 	if payload == nil {
@@ -121,7 +150,11 @@ func (d Dialer) Call(op string, payload map[string]any, id, idem string) (*Respo
 	canonicalHash := ""
 	if mutating {
 		var err error
-		canonicalHash, err = CanonicalRequestHash(canonicalScope(principal), op, version, idem, payload)
+		scope := canonicalScope(principal)
+		if d.AuthorityScope != "" {
+			scope = d.AuthorityScope
+		}
+		canonicalHash, err = CanonicalRequestHash(scope, op, version, idem, payload)
 		if err != nil {
 			return nil, err
 		}

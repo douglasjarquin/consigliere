@@ -12,7 +12,8 @@ defmodule Consigliere.Harness.ContextPack do
     "Work only in the exact workspace identity and trusted base named here.",
     "Use only the listed Attempt operations; do not grant work or integration.",
     "Report progress, checkpoints, completion, or failure through the Attempt protocol.",
-    "A checkpoint or completion is valid only when the daemon verifies its exact Git SHA."
+    "A checkpoint or completion is valid only when the daemon verifies its exact Git SHA.",
+    "After the final commit, make the private Attempt reporter the last action and do not run commands after it."
   ]
 
   def compose(mission, extras \\ %{}) do
@@ -55,11 +56,13 @@ defmodule Consigliere.Harness.ContextPack do
           "The daemon authenticates every request against this Attempt, Mission, workspace, and fence. Caller-declared identity is not authority."
       },
       "protocol" => %{
+        "reporter" => "$CS_ATTEMPT_BIN",
         "questions" => "question.open via the matching Attempt capability",
         "progress" => "attempt.progress is bounded and belongs only to this Attempt",
-        "checkpoint" => "attempt.checkpoint with the Git SHA; never infer SHA from prose",
+        "checkpoint" =>
+          "For a recoverable checkpoint, run $CS_ATTEMPT_BIN checkpoint --sha \"$(git rev-parse HEAD)\"; never infer SHA from prose",
         "completion" =>
-          "attempt.complete reports completion; the daemon verifies runner death before terminal state",
+          "After the final exact-SHA commit, run $CS_ATTEMPT_BIN complete --sha \"$(git rev-parse HEAD)\" as the last action; terminal_sequence latest is resolved by the daemon, which verifies the native terminal event and runner death before terminal state",
         "failure" =>
           "attempt.fail reports failure; the daemon verifies runner death before terminal state"
       },

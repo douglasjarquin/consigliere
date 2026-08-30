@@ -89,5 +89,22 @@ func scrubbedHarnessEnv() []string {
 	if v := os.Getenv("CODEX_HOME"); v != "" {
 		env = append(env, "CODEX_HOME="+v)
 	}
+	for _, key := range []string{
+		"CS_ATTEMPT_BIN",
+		"CS_ATTEMPT_ID",
+		"CS_MISSION_ID",
+		"CS_PROJECT_ID",
+		"CS_WORKSPACE_ID",
+		"CS_WORKSPACE_GENERATION",
+		"CS_BASE_SHA",
+		"CS_PARENT_CHECKPOINT_SHA",
+		"CS_FENCING_GENERATION",
+		"CS_CAPABILITY_ID",
+		"CS_CAPABILITY_GENERATION",
+	} {
+		if v := os.Getenv(key); v != "" {
+			env = append(env, key+"="+v)
+		}
+	}
 	return env
 }

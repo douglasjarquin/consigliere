@@ -327,7 +327,7 @@ defmodule Consigliere.Attempts.Transitions do
           exit_classification: "protocol_failure"
         })
 
-      progress_after_death?(attempt, completed?, death) ->
+      progress_after_death?(attempt, completed?, death, status) ->
         attempt
 
       completed? and death == :dead_verified and status in [0, nil] ->
@@ -544,10 +544,12 @@ defmodule Consigliere.Attempts.Transitions do
       is_binary(attempt.fencing_token)
   end
 
-  defp progress_after_death?(attempt, completed?, death) do
+  defp progress_after_death?(attempt, completed?, death, status) do
     death == :dead_verified and
+      status in [0, nil] and
       is_binary(attempt.reported_checkpoint_sha) and attempt.reported_checkpoint_sha != "" and
-      (completed? or attempt.status == "checkpoint_requested")
+      (completed? or attempt.status == "checkpoint_requested" or
+         attempt.exit_classification == "completion_reported")
   end
 
   defp fetch!(id) do

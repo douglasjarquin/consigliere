@@ -239,6 +239,8 @@ defmodule Consigliere.Dispatch do
          invocation_id
        ) do
     {:ok, capability} = Capabilities.mint(attempt)
+    {:ok, capability_record} = Capabilities.authenticate(capability)
+    workspace_record = Repo.get!(Workspace, attempt.workspace_id)
     runtime = Path.join(Home.runtime_attempts_dir(), attempt.id)
     File.mkdir_p!(runtime)
     context_path = Path.join(runtime, "context_pack.json")
@@ -256,8 +258,13 @@ defmodule Consigliere.Dispatch do
          fencing_token: attempt.fencing_token,
          heartbeat_file: Path.join(runtime, "heartbeat"),
          workspace_path: workspace,
+         workspace_id: attempt.workspace_id,
          workspace_generation: workspace_generation,
+         base_sha: mission.base_sha,
+         parent_checkpoint_sha: workspace_record.parent_checkpoint_sha,
          capability: capability,
+         capability_id: capability_record.id,
+         capability_generation: capability_record.generation,
          prompt: pack.encoded,
          policy: policy,
          project_id: mission.project_id,

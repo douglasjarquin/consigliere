@@ -195,8 +195,21 @@ defmodule Consigliere.RunnerProcess do
     env = [
       {~c"CS_HOME", ~c""},
       {~c"CS_API_SOCKET", String.to_charlist(Consigliere.Home.api_socket_path())},
-      {~c"CODEX_HOME", String.to_charlist(Consigliere.Home.ensure_codex_home!())}
+      {~c"CODEX_HOME", String.to_charlist(Consigliere.Home.ensure_codex_home!())},
+      {~c"CS_ATTEMPT_BIN",
+       String.to_charlist(Path.join(:code.priv_dir(:consigliere_daemon), "cs-attempt"))}
     ]
+
+    env = add_env(env, ~c"CS_ATTEMPT_ID", Keyword.get(opts, :attempt_id))
+    env = add_env(env, ~c"CS_MISSION_ID", Keyword.get(opts, :mission_id))
+    env = add_env(env, ~c"CS_PROJECT_ID", Keyword.get(opts, :project_id))
+    env = add_env(env, ~c"CS_WORKSPACE_ID", Keyword.get(opts, :workspace_id))
+    env = add_env(env, ~c"CS_WORKSPACE_GENERATION", Keyword.get(opts, :workspace_generation))
+    env = add_env(env, ~c"CS_BASE_SHA", Keyword.get(opts, :base_sha))
+    env = add_env(env, ~c"CS_PARENT_CHECKPOINT_SHA", Keyword.get(opts, :parent_checkpoint_sha))
+    env = add_env(env, ~c"CS_FENCING_GENERATION", Keyword.get(opts, :fencing_token))
+    env = add_env(env, ~c"CS_CAPABILITY_ID", Keyword.get(opts, :capability_id))
+    env = add_env(env, ~c"CS_CAPABILITY_GENERATION", Keyword.get(opts, :capability_generation))
 
     case Keyword.get(opts, :capability) do
       secret when is_binary(secret) ->
@@ -206,6 +219,10 @@ defmodule Consigliere.RunnerProcess do
         env
     end
   end
+
+  defp add_env(env, _key, nil), do: env
+  defp add_env(env, _key, ""), do: env
+  defp add_env(env, key, value), do: [{key, String.to_charlist(to_string(value))} | env]
 
   defp ingest_stdout(data, state) do
     append_attempt_log(state.attempt_id, data)

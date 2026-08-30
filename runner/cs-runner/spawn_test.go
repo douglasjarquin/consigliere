@@ -36,12 +36,24 @@ func TestScrubbedHarnessEnv_ForwardsCodexHomeNotSecrets(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "gh-secret")
 	t.Setenv("CS_CAPABILITY", "cap-token")
 	t.Setenv("CS_API_SOCKET", "/tmp/api.sock")
+	t.Setenv("CS_ATTEMPT_BIN", "/private/consigliere/priv/cs-attempt")
+	t.Setenv("CS_ATTEMPT_ID", "attempt-1")
+	t.Setenv("CS_CAPABILITY_ID", "capability-1")
+	t.Setenv("CS_CAPABILITY_GENERATION", "7")
 	env := strings.Join(scrubbedHarnessEnv(), "\n")
 	if !strings.Contains(env, "CODEX_HOME=/safe/codex-home") {
 		t.Fatalf("missing CODEX_HOME: %s", env)
 	}
 	if !strings.Contains(env, "CS_CAPABILITY=cap-token") {
 		t.Fatalf("missing capability: %s", env)
+	}
+	if !strings.Contains(env, "CS_ATTEMPT_BIN=/private/consigliere/priv/cs-attempt") {
+		t.Fatalf("missing attempt reporter: %s", env)
+	}
+	if !strings.Contains(env, "CS_ATTEMPT_ID=attempt-1") ||
+		!strings.Contains(env, "CS_CAPABILITY_ID=capability-1") ||
+		!strings.Contains(env, "CS_CAPABILITY_GENERATION=7") {
+		t.Fatalf("missing bound attempt identity: %s", env)
 	}
 	if strings.Contains(env, "CS_HOME=") && strings.Contains(env, "/secret/cs-home") {
 		t.Fatalf("CS_HOME leaked: %s", env)
