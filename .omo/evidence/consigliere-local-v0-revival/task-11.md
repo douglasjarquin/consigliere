@@ -193,3 +193,15 @@ Commit `eca84cff15b651b9fc6a97aa56fd67b0fee143f6` keeps pause capability revocat
 Tests-first GREEN proof passed the real runner pause regression and the combined identity hardening slice with 5 pause tests and 41 tests overall.
 
 The final Linux daemon gate at source head `c71bee7a6706b7279beafba0a951795124ad7ed4` passed `465 passed (1 doctest, 464 tests)` with warnings treated as errors.
+
+## Exact-head asynchronous pause settlement follow-up
+
+The exact-head review found that a runner could exit after the initial pause response while the durable `pausing` blocker remained open and the Mission stayed active.
+
+Tests-first RED proof launched the real runner, requested pause, waited for the runner registry entry to disappear, and observed the Mission remain active with an open pause blocker.
+
+Commit `2109e957a79e07f7941dcb61b0a911515512561c` adds that regression and settles the blocker after runner `DOWN`; commit `dd48a6ff54fc48d557b127503c95098f6dcca6a0` places the same retry in the coordinator refresh path so durable reconstruction and transient settlement failures converge.
+
+Tests-first GREEN proof passed the real asynchronous pause test and the full Linux daemon suite passed `466 passed (1 doctest, 465 tests)` on the source head.
+
+The guard checks the durable `pausing` blocker, so ordinary runner completion and active Missions are not paused as a side effect.
