@@ -10,7 +10,11 @@ defmodule Consigliere.Release do
 
     with_home_lock(fn ->
       {:ok, _, _} =
-        Ecto.Migrator.with_repo(Consigliere.Repo, &Ecto.Migrator.run(&1, :up, all: true))
+        Ecto.Migrator.with_repo(
+          Consigliere.Repo,
+          &Ecto.Migrator.run(&1, :up, all: true),
+          pool_size: 1
+        )
 
       :ok
     end)
@@ -21,7 +25,11 @@ defmodule Consigliere.Release do
 
     with_home_lock(fn ->
       {:ok, _, _} =
-        Ecto.Migrator.with_repo(Consigliere.Repo, &Ecto.Migrator.run(&1, :down, to: version))
+        Ecto.Migrator.with_repo(
+          Consigliere.Repo,
+          &Ecto.Migrator.run(&1, :down, to: version),
+          pool_size: 1
+        )
 
       :ok
     end)
