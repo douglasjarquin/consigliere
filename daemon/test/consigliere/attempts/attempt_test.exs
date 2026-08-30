@@ -56,7 +56,7 @@ defmodule Consigliere.Attempts.AttemptTest do
 
   test "retry_of_attempt_id self-references another Attempt" do
     mission = Fixtures.mission!()
-    original = Fixtures.attempt!(mission)
+    original = Fixtures.attempt!(mission, %{status: "completed"})
 
     attrs = %{
       mission_id: mission.id,
@@ -69,6 +69,23 @@ defmodule Consigliere.Attempts.AttemptTest do
 
     assert {:ok, retry} = Repo.insert(Attempt.changeset(%Attempt{}, attrs))
     assert Repo.get(Attempt, retry.id).retry_of_attempt_id == original.id
+  end
+
+  test "the database rejects a second recoverable Attempt for one Mission" do
+    mission = Fixtures.mission!()
+    first = Fixtures.attempt!(mission)
+
+    attrs = %{
+      mission_id: mission.id,
+      role: "soldier",
+      harness: "claude",
+      status: "planned",
+      fencing_token: "fence-2"
+    }
+
+    assert {:error, changeset} = Repo.insert(Attempt.changeset(%Attempt{}, attrs))
+    assert %{mission_id: ["already has a recoverable Attempt"]} = errors_on(changeset)
+    assert Repo.get!(Attempt, first.id).status == "planned"
   end
 
   test "a nonexistent mission_id is rejected by the foreign key constraint" do
