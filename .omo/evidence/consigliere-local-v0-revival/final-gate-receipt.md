@@ -142,10 +142,10 @@ The selected canary was not rerun, no duplicate Mission was created, and no Prom
 
 ## Authoritative final implementation-head receipt
 
-The authoritative final runtime implementation head is `73d501eb6dff115104e51f2c36e2683557e6a6e4`.
+The authoritative final runtime implementation head is `eb41191b73a04b93d613d8d0cf8b2183a55272ef`.
 
 The exact-head daemon suite returned `502 passed (1 doctest, 501 tests)`.
 
-The native arm64 package and package-only lifecycle proof are recorded in `package-artifact-73d501e.md` and `installed-lifecycle-73d501e.md`.
+The native arm64 package and package-only lifecycle proof are recorded in `package-artifact-eb41191.md` and `installed-lifecycle-eb41191.md`.
 
 The selected canary was not rerun, no duplicate Mission was created, and no Promote claim was made.

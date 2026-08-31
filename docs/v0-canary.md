@@ -78,7 +78,7 @@ The selected operator-controlled canary remains unchanged, was not rerun, and re
 
 The final evidence set contains this addendum and the matching F1-F4 refresh.
 
-The final runtime implementation head is `73d501eb6dff115104e51f2c36e2683557e6a6e4`.
+The final runtime implementation head is `eb41191b73a04b93d613d8d0cf8b2183a55272ef`.
 
 The operator retains the next Continue or Stop decision.
 
