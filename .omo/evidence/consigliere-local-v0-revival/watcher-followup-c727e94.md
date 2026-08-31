@@ -124,7 +124,7 @@ The command returned `watcher_trash_rc=0 crash_trash_rc=0` and verified `watcher
 
 The unrelated `.tmp/attempt-report-*`, `cli/.tmp`, `_build`, and runner scratch artifacts were preserved.
 
-## Current-head security-aligned addendum
+## Historical superseded security-aligned addendum for 2c7f5b6
 
 The source head advanced to `2c7f5b67c8d37737d8f2dd3e0f7110687a800748` for the security-aligned advisory projection and the ContextPack test-quality cleanup.
 
@@ -152,13 +152,13 @@ Its default `cs attempt logs` call returned `ATTEMPT_LOGS_EXIT=0` and exposed on
 
 The same package passed repeated stop, restart, status, why, review, doctor, and final stop checks with `LIFECYCLE=stopped sockets=0 pid_files=0`.
 
-The current package cleanup command was `trash /tmp/cs-p0-real.DH2BRL; trash "$PWD/.tmp/watcher-followup"`.
+The historical package cleanup command was `trash /tmp/cs-p0-real.DH2BRL; trash "$PWD/.tmp/watcher-followup"`.
 
 It returned `home_present=0 watcher_present=0 home_trash_rc=0 watcher_trash_rc=0` and verified `cs-p0-real.DH2BRL absent` and `watcher-followup absent`.
 
 The unrelated taskwork scratch remains preserved.
 
-## Current-head native command bound addendum
+## Historical superseded native command bound addendum for 4e99cf4
 
 The source head advanced to `4e99cf4219998c15b01d23b23349730f27546c61` for the adjacent native command output bound identified during exact-head code review.
 

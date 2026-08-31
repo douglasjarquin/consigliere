@@ -2,27 +2,27 @@
 
 Superseded sections in this archive are explicitly marked historical; the current delivery claims below are bound to the latest immutable evidence child.
 
-The current implementation evidence is bound to `8010d5fdaa69f9e998b951f8282fddd01e5099ea` in `final-gate-receipt.md`, `F1.md`, `F2.md`, `F3.md`, and `F4.md`.
+The current implementation evidence is bound to `0fd7d3b951672df7cb37e6c160401d1593386ba2` in `final-gate-receipt.md`, `F1.md`, `F2.md`, `F3.md`, and `F4.md`.
 
-The current exact implementation includes the bounded Away digest and the monotonic paged cursor acknowledgement fix, with RED/GREEN, daemon, package, and lifecycle receipts in `away-return-8010d5f.md`, `daemon-gate-8010d5f.md`, `package-artifact-8010d5f.md`, and `installed-lifecycle-8010d5f.md`.
+The current exact implementation includes the bounded Away digest and the monotonic paged cursor acknowledgement fix, with focused RED/GREEN, daemon, package, and lifecycle receipts in `away-return-0fd7d3b.md`, `daemon-gate-0fd7d3b.md`, `package-artifact-0fd7d3b.md`, and `installed-lifecycle-0fd7d3b.md`.
 
 Target branch: `revival/v0-local-codex`.
 
-Target runtime commit: `42933d103da9171c76b1564888e0d6557291fb5d`.
+Historical target runtime commit: `42933d103da9171c76b1564888e0d6557291fb5d`.
 
 Base commit: `24ffea8fa1f5bc983fb5965efab0a89b6116f05b` from `origin/rewrite-in-elixer`.
 
 The runtime source commits included at this exact head are `e0e3fb3b7f8f8ff5b180f404ff11a5a8efdfe8f6` for provider-key redaction, `a2636f70b104988f5c676c2012543a0299064be3` for authenticated stderr retention, `f1d1dfa02f39bf88b682855a440d8dc6d5214ebf` for fragmented runner stdout buffering, `98fc4d3ebbe78e0b73e7bba9c19d3861ff966565` for terminal-sequence-safe result replay, `a3951ec73989f236a075973c373c9c57b2672af9` for camel-case credential redaction, `bf2dce60b52447e9075f05f135c4c36ccb2722ae` for runner failure and stream recovery, `39f342e7f8003ffd1b4c585a05a036ebcdc48fb7` for recovery slot and protocol-stream hardening, `f840893055303ab1802bbec5ee33861ece1b5853` for stale dispatch race reconciliation, `95ea4e5e38c6350f6560339708bbc33b985010b8` for protocol-failure exit classification and shared test-home serialization, `9a7b1626a1a2113f8d7faac1521f4ea4305c0b19` for atomic dispatch-slot persistence, `bc7e980c90aa54e165d5aed3dae060f3a2c9e584` for scheduler rebuild coverage, `49db8624a8140eda0449a03f5f706142eeb99493` for one recoverable Attempt and planned cancellation slot release, and `42933d103da9171c76b1564888e0d6557291fb5d` for SQLite uniqueness characterization.
 
-The documentation-only delta from runtime commit `42933d103da9171c76b1564888e0d6557291fb5d` to the final evidence head contains only task evidence records, final gate records, `docs/v0-local.md`, and `docs/v0-canary.md`.
+The historical documentation-only delta from runtime commit `42933d103da9171c76b1564888e0d6557291fb5d` to its then-final evidence head contained only task evidence records, final gate records, `docs/v0-local.md`, and `docs/v0-canary.md`.
 
-Command:
+Historical command:
 
     git diff --exit-code 42933d103da9171c76b1564888e0d6557291fb5d HEAD -- daemon cli runner scripts .github
 
 Result: exit 0 with no runtime, package, workflow, CLI, or runner input changes in that documentation-only delta.
 
-## Authoritative Linux daemon gate
+## Historical authoritative Linux daemon gate for 42933d1
 
 Command:
 
@@ -34,7 +34,7 @@ The complete daemon suite passed three consecutive seed-0 runs after the final h
 
 The suite includes the persisted-PGID termination, structured event redaction, oversized ContextPack, PATH-independent process observation, and pause identity regressions.
 
-## Go gates
+## Historical Go gates for 42933d1
 
 CLI command:
 
@@ -48,7 +48,7 @@ Runner command:
 
 Runner result: format, vet, ordinary tests, race and shuffle tests, and build passed.
 
-## Exact-head package and installed lifecycle
+## Historical exact-head package and installed lifecycle for 42933d1
 
 Package command:
 
@@ -74,7 +74,7 @@ The fresh migration emitted one transient SQLite `database is locked` connection
 
 Cleanup receipt: `CLEANUP=trashed:/tmp/cs-final-42933d1-home.e7matc`; the isolated environment home `/tmp/cs-final-42933d1-env.C2tGuR` was also moved to Trash.
 
-## Canary custody
+## Historical canary custody for 42933d1
 
 The real operator-controlled canary remains the single naturally occurring dotfiles Mission recorded in `task-15.md` and `docs/v0-canary.md`.
 
@@ -86,7 +86,7 @@ There are zero FirstMate duplicate Missions and fewer than 20 naturally occurrin
 
 Raw canary database, manifests, usage rows, and logs remain outside this repository.
 
-## Custody and scope
+## Historical custody and scope for 42933d1
 
 `git diff --check` passed at the target head.
 

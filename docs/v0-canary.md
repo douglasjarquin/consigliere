@@ -68,7 +68,7 @@ There is one completed Consigliere Mission with two Attempts and no FirstMate re
 
 The evidence is insufficient for Promote and makes no economic superiority claim.
 
-## Final delivery-head addendum
+## Historical final delivery-head addendum for eb41191
 
 The historical runtime implementation head was `a45cb4b4e5ead190ce05f1b3672bfbdeb4214f52`.
 
@@ -78,13 +78,13 @@ The selected operator-controlled canary remains unchanged, was not rerun, and re
 
 The final evidence set contains this addendum and the matching F1-F4 refresh.
 
-The final runtime implementation head is `eb41191b73a04b93d613d8d0cf8b2183a55272ef`.
+The historical final runtime implementation head is `eb41191b73a04b93d613d8d0cf8b2183a55272ef`.
 
 The operator retains the next Continue or Stop decision.
 
 No FirstMate duplicate Mission, automatic delivery, push, pull request, merge, fixed allocation, fixed duration, or telemetry service was introduced.
 
-## Final runtime closure
+## Historical final runtime closure for 8010d5f
 
 The historical prior runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
 
@@ -138,8 +138,8 @@ The natural comparable sample remains below 20, so this record makes no Promote 
 
 ## Current runtime closure
 
-The current runtime source head is `8010d5fdaa69f9e998b951f8282fddd01e5099ea`.
+The current runtime source head is `0fd7d3b951672df7cb37e6c160401d1593386ba2`.
 
-The current package and lifecycle proof is documentation-only evidence of the existing operator-controlled path and did not rerun the selected canary or create a duplicate Mission.
+The current package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-0fd7d3b.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-0fd7d3b.md`; it did not rerun the selected canary or create a duplicate Mission.
 
 The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.

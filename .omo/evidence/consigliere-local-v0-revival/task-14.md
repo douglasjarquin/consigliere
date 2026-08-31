@@ -128,7 +128,7 @@ The final source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
 
 The advisory allowlist remains fail-closed for logs and every authority-bearing operation, and the final Linux daemon, Go, package, and installed-lifecycle receipts pass at that exact head.
 
-The current package and lifecycle receipts are `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`.
+The historical package and lifecycle receipts are `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`.
 
 The advisory surface was not broadened during the runner recovery hardening, and no canary duplicate or product delivery action was introduced.
 

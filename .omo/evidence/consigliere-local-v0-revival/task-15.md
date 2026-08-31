@@ -294,9 +294,9 @@ This lifecycle proof did not rerun the selected canary, create a duplicate Missi
 
 The natural comparable sample remains below 20, so Continue or Stop remains an operator decision.
 
-The current runtime source head is `8010d5fdaa69f9e998b951f8282fddd01e5099ea`.
+The current runtime source head is `0fd7d3b951672df7cb37e6c160401d1593386ba2`.
 
-The current package-only lifecycle evidence is recorded in `package-artifact-8010d5f.md` and `installed-lifecycle-8010d5f.md`.
+The current package-only lifecycle evidence is recorded in `package-artifact-0fd7d3b.md` and `installed-lifecycle-0fd7d3b.md`.
 
 This current lifecycle proof did not rerun the selected canary, create a duplicate Mission, or make a Promote claim.
 

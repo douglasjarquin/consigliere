@@ -241,6 +241,6 @@ Five repeated reader and Away runs each passed `16 tests` with `8 excluded`, and
 
 The superseded package and lifecycle evidence is recorded in `away-return-04940bb.md`, `daemon-gate-04940bb.md`, `package-artifact-04940bb.md`, and `installed-lifecycle-04940bb.md`.
 
-The current runtime source head is `8010d5fdaa69f9e998b951f8282fddd01e5099ea`.
+The current runtime source head is `0fd7d3b951672df7cb37e6c160401d1593386ba2`.
 
-The current monotonic cursor RED/GREEN, five repeated focused runs, full daemon gate, package, and lifecycle receipts are `away-return-8010d5f.md`, `daemon-gate-8010d5f.md`, `package-artifact-8010d5f.md`, and `installed-lifecycle-8010d5f.md`.
+The current monotonic cursor RED/GREEN, five repeated focused runs, full daemon gate, package, and lifecycle receipts are `away-return-0fd7d3b.md`, `daemon-gate-0fd7d3b.md`, `package-artifact-0fd7d3b.md`, and `installed-lifecycle-0fd7d3b.md`.

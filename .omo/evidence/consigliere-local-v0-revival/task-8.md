@@ -145,12 +145,12 @@ The complete Linux daemon gate then passed `486 passed (1 doctest, 485 tests)` i
 
 The bounded receipt is `.omo/evidence/consigliere-local-v0-revival/runner-startup-boundary-bf22b5d.log`.
 
-## Current exact-head closure
+## Historical superseded exact-head closure for 7159373
 
-The final runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03`.
+The historical final runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03`.
 
-The current Linux daemon gate passed `491 passed (1 doctest, 490 tests)` in three consecutive seed-0 runs, and the packaged lifecycle proved one verified owner, identity-safe restart, repeated-stop idempotence, and zero residual processes.
+The historical Linux daemon gate passed `491 passed (1 doctest, 490 tests)` in three consecutive seed-0 runs, and the packaged lifecycle proved one verified owner, identity-safe restart, repeated-stop idempotence, and zero residual processes.
 
-The current Go, package, and native macOS receipts are `go-gates-7159373.md`, `package-artifact-7159373.md`, `installed-lifecycle-7159373.md`, and `macos-native-gate-7159373.md`.
+The historical Go, package, and native macOS receipts are `go-gates-7159373.md`, `package-artifact-7159373.md`, `installed-lifecycle-7159373.md`, and `macos-native-gate-7159373.md`.
 
 The selected real canary was not rerun after this runtime closure because duplicate implementation work is forbidden.
