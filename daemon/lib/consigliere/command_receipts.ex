@@ -10,6 +10,7 @@ defmodule Consigliere.CommandReceipts do
   import Ecto.Query
 
   alias Consigliere.Actor
+  alias Consigliere.CommandReceipts.CommandOperation
   alias Consigliere.CommandReceipts.CommandReceipt
   alias Consigliere.DatabaseWriter
   alias Consigliere.Repo
@@ -150,20 +151,16 @@ defmodule Consigliere.CommandReceipts do
     DatabaseWriter.transaction(fn ->
       pending =
         Repo.all(
-          from(r in CommandReceipt,
-            where: r.status == "pending",
-            order_by: [asc: r.inserted_at]
+          from(o in CommandOperation,
+            join: r in CommandReceipt,
+            on: r.operation_id == o.id,
+            where: o.status == "pending" and r.status == "pending",
+            order_by: [asc: o.inserted_at],
+            select: {o, r}
           )
         )
 
-      Enum.each(pending, fn row ->
-        Txn.update!(
-          CommandReceipt.changeset(row, %{
-            response: result_envelope({:error, {:operation_recovery_required, row.id}}),
-            status: "recovery_required"
-          })
-        )
-      end)
+      Enum.each(pending, fn {operation, receipt} -> reconcile_external_txn(operation, receipt) end)
 
       length(pending)
     end)
@@ -207,10 +204,10 @@ defmodule Consigliere.CommandReceipts do
       :conflict ->
         conflict()
 
-      {:ok, receipt_id} ->
+      {:ok, %{receipt_id: receipt_id, operation_id: operation_id}} ->
         result = invoke(prepared, fun)
 
-        case finalize(receipt_id, result_envelope(result, receipt_id)) do
+        case finalize_external(receipt_id, operation_id, result_envelope(result, operation_id)) do
           {:ok, _} -> result
           {:error, _} -> {:error, {:transient, "receipt_finalize_failed"}}
         end
@@ -249,6 +246,7 @@ defmodule Consigliere.CommandReceipts do
          scope: scope,
          op: op,
          key: key,
+         payload: payload,
          request_hash: digest(canonical),
          validation: validation
        }}
@@ -262,7 +260,7 @@ defmodule Consigliere.CommandReceipts do
     end
   end
 
-  defp claim_txn(%{scope: scope, op: op, key: key, request_hash: request_hash}) do
+  defp claim_txn(%{scope: scope, op: op, key: key, request_hash: request_hash, payload: payload}) do
     case Repo.get_by(CommandReceipt, principal: scope, idempotency_key: key) do
       %CommandReceipt{
         op: ^op,
@@ -292,7 +290,24 @@ defmodule Consigliere.CommandReceipts do
             })
           )
 
-        {:ok, row.id}
+        if Consigliere.Operations.database_only?(op) do
+          {:ok, row.id}
+        else
+          operation =
+            Txn.insert!(
+              CommandOperation.changeset(%CommandOperation{}, %{
+                receipt_id: row.id,
+                op: op,
+                principal: scope,
+                payload: payload,
+                evidence: %{"intent" => "external_operation"},
+                status: "pending"
+              })
+            )
+
+          Txn.update!(CommandReceipt.changeset(row, %{operation_id: operation.id}))
+          {:ok, %{receipt_id: row.id, operation_id: operation.id}}
+        end
     end
   end
 
@@ -310,9 +325,74 @@ defmodule Consigliere.CommandReceipts do
     end
   end
 
-  defp finalize(receipt_id, envelope) do
-    DatabaseWriter.transaction(fn -> finalize_txn(receipt_id, envelope) end)
+  defp finalize_external(receipt_id, operation_id, envelope) do
+    DatabaseWriter.transaction(fn ->
+      operation = Repo.get!(CommandOperation, operation_id)
+
+      Txn.update!(
+        CommandOperation.changeset(operation, %{
+          status: "committed",
+          response: envelope,
+          evidence: %{"outcome" => "external_completed"}
+        })
+      )
+
+      finalize_txn(receipt_id, envelope)
+    end)
   end
+
+  defp reconcile_external_txn(operation, receipt) do
+    case external_domain_evidence(operation) do
+      {:completed, evidence, payload} ->
+        envelope = %{
+          "v" => @result_version,
+          "ok" => true,
+          "outcome" => "accepted",
+          "operation_id" => operation.id,
+          "payload" => payload
+        }
+
+        Txn.update!(
+          CommandOperation.changeset(operation, %{
+            status: "committed",
+            evidence: evidence,
+            response: envelope
+          })
+        )
+
+        Txn.update!(CommandReceipt.changeset(receipt, %{status: "committed", response: envelope}))
+
+      :unknown ->
+        envelope = result_envelope({:error, {:operation_recovery_required, operation.id}})
+
+        Txn.update!(
+          CommandOperation.changeset(operation, %{
+            status: "recovery_required",
+            evidence: %{"outcome" => "no_domain_evidence"},
+            response: envelope
+          })
+        )
+
+        Txn.update!(
+          CommandReceipt.changeset(receipt, %{status: "recovery_required", response: envelope})
+        )
+    end
+  end
+
+  defp external_domain_evidence(%CommandOperation{op: "project.add", payload: payload}) do
+    case Repo.get_by(Consigliere.Projects.Project,
+           repository_path: payload["repository_path"]
+         ) do
+      %Consigliere.Projects.Project{} = project ->
+        {:completed, %{"outcome" => "project_present", "project_id" => project.id},
+         %{"id" => project.id}}
+
+      nil ->
+        :unknown
+    end
+  end
+
+  defp external_domain_evidence(_operation), do: :unknown
 
   defp finalize_txn(receipt_id, envelope) do
     row = Repo.get!(CommandReceipt, receipt_id)

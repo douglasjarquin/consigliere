@@ -32,7 +32,9 @@ defmodule Consigliere.API.Protocol do
                     awaiting_integration_authorization failed)
   @max_list_rows 32
 
-  def handle(line, bound \\ :unbound) when is_binary(line) do
+  def handle(line, bound \\ :unbound)
+
+  def handle(line, bound) when is_binary(line) do
     try do
       do_handle(line, bound)
     rescue

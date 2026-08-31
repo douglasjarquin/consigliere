@@ -66,6 +66,7 @@ defmodule Consigliere.Fixtures do
     Repo.delete_all(Mission)
     Repo.delete_all(Consigliere.BossCursors.BossCursor)
     Repo.delete_all(Consigliere.Projects.Project)
+    Repo.delete_all(Consigliere.CommandReceipts.CommandOperation)
     Repo.delete_all(Consigliere.CommandReceipts.CommandReceipt)
     Repo.delete_all(DomainEvent)
     Repo.delete_all(OutboxItem)

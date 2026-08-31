@@ -4,8 +4,11 @@ defmodule Consigliere.CommandReceiptsTest do
   alias Consigliere.API.Protocol
   alias Consigliere.Actor
   alias Consigliere.CommandReceipts
+  alias Consigliere.CommandReceipts.CommandOperation
+  alias Consigliere.CommandReceipts.CommandReceipt
   alias Consigliere.DatabaseWriter
   alias Consigliere.Fixtures
+  alias Consigliere.Projects.Project
   alias Consigliere.Repo
 
   setup do
@@ -163,9 +166,8 @@ defmodule Consigliere.CommandReceiptsTest do
     assert response["error"]["code"] == "transient"
     assert Repo.aggregate(Consigliere.Missions.Mission, :count) == 0
 
-    assert Repo.get_by(Consigliere.CommandReceipts.CommandReceipt,
-             idempotency_key: "atomic-finalize-crash"
-           ) == nil
+    assert Repo.get_by(CommandReceipt, idempotency_key: "atomic-finalize-crash") == nil
+    assert {:ok, 0} = CommandReceipts.reconcile_pending()
   end
 
   test "an invalid first request stores and replays one bounded failure" do
@@ -218,40 +220,49 @@ defmodule Consigliere.CommandReceiptsTest do
     assert second["error"]["code"] == "idempotency_conflict"
   end
 
-  test "boot reconciliation closes pending receipts once without invoking work" do
-    payload = %{"name" => "project", "repository_path" => "/tmp/project"}
+  test "external pending operation reconciles from durable domain evidence" do
+    parent = self()
+    repository_path = "/tmp/project-recovery-evidence"
+    payload = %{"name" => "project", "repository_path" => repository_path}
 
-    {:ok, request_hash} =
-      CommandReceipts.request_hash(Actor.boss(), "project.add", "pending-key", payload)
+    task =
+      Task.async(fn ->
+        CommandReceipts.remember(Actor.boss(), "project.add", "pending-key", payload, fn ->
+          send(parent, :external_work_started)
+          Process.sleep(:infinity)
+        end)
+      end)
 
-    {:ok, receipt} =
+    assert_receive :external_work_started
+
+    receipt = Repo.get_by!(CommandReceipt, idempotency_key: "pending-key")
+    operation = Repo.get_by!(CommandOperation, receipt_id: receipt.id)
+    assert receipt.operation_id == operation.id
+    assert operation.status == "pending"
+
+    {:ok, project} =
       Repo.insert(
-        Consigliere.CommandReceipts.CommandReceipt.changeset(
-          %Consigliere.CommandReceipts.CommandReceipt{},
-          %{
-            idempotency_key: "pending-key",
-            op: "project.add",
-            principal: "boss",
-            payload_hash: request_hash,
-            response: %{},
-            status: "pending"
-          }
-        )
+        Project.changeset(%Project{}, %{
+          name: "project",
+          repository_path: repository_path,
+          repository_url: "file://#{repository_path}",
+          default_branch: "main",
+          trusted_mirror_path: "/tmp/project-recovery-mirror"
+        })
       )
+
+    Task.shutdown(task, :brutal_kill)
 
     assert {:ok, 1} = CommandReceipts.reconcile_pending()
 
-    assert Repo.get!(Consigliere.CommandReceipts.CommandReceipt, receipt.id).status ==
-             "recovery_required"
-
-    assert {:ok, :replay, envelope} =
-             CommandReceipts.remember(Actor.boss(), "project.add", "pending-key", payload, fn ->
-               flunk("recovered receipt must not invoke external work")
-             end)
-
-    assert envelope["ok"] == false
-    assert envelope["error"]["code"] == "operation_recovery_required"
-    assert envelope["error"]["operation_id"] == receipt.id
+    receipt = Repo.get!(CommandReceipt, receipt.id)
+    operation = Repo.get!(CommandOperation, operation.id)
+    assert receipt.status == "committed"
+    assert operation.status == "committed"
+    assert operation.evidence["outcome"] == "project_present"
+    assert operation.evidence["project_id"] == project.id
+    assert receipt.response["operation_id"] == operation.id
+    assert receipt.response["payload"]["id"] == project.id
     assert {:ok, 0} = CommandReceipts.reconcile_pending()
   end
 
@@ -270,7 +281,10 @@ defmodule Consigliere.CommandReceiptsTest do
         idempotency_key: "external-operation-reference"
       )
 
-    assert receipt.response["operation_id"] == receipt.id
+    operation = Repo.get!(CommandOperation, receipt.operation_id)
+    assert operation.receipt_id == receipt.id
+    assert operation.status == "committed"
+    assert receipt.response["operation_id"] == operation.id
   end
 
   test "a supplied canonical request hash must match the authenticated request" do

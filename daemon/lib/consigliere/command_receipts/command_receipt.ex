@@ -9,6 +9,7 @@ defmodule Consigliere.CommandReceipts.CommandReceipt do
     field(:op, :string)
     field(:principal, :string)
     field(:payload_hash, :string)
+    field(:operation_id, :binary_id)
     field(:response, :map, default: %{})
     field(:status, :string, default: "committed")
 
@@ -17,7 +18,15 @@ defmodule Consigliere.CommandReceipts.CommandReceipt do
 
   def changeset(row, attrs) do
     row
-    |> cast(attrs, [:idempotency_key, :op, :principal, :payload_hash, :response, :status])
+    |> cast(attrs, [
+      :idempotency_key,
+      :op,
+      :principal,
+      :payload_hash,
+      :operation_id,
+      :response,
+      :status
+    ])
     |> validate_required([:idempotency_key, :op, :principal, :payload_hash])
     |> unique_constraint([:principal, :idempotency_key])
   end
