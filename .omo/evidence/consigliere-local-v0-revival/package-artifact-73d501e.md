@@ -1,4 +1,4 @@
-# Exact-head package artifact receipt
+# Historical exact-head package artifact receipt
 
 Source head: `73d501eb6dff115104e51f2c36e2683557e6a6e4`.
 

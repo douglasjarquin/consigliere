@@ -1,4 +1,4 @@
-# Exact-head daemon gate
+# Historical exact-head daemon gate
 
 Source head: `73d501eb6dff115104e51f2c36e2683557e6a6e4`.
 

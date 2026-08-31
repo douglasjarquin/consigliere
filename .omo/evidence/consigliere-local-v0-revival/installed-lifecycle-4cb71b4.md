@@ -1,4 +1,4 @@
-# Exact-head installed lifecycle receipt
+# Historical exact-head installed lifecycle receipt
 
 Source head: `4cb71b41075631d8beb30ddaeca5171c9b835234`.
 

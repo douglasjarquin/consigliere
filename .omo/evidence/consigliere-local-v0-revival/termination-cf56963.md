@@ -1,4 +1,4 @@
-# Exact-head cancellation ordering receipt
+# Historical exact-head cancellation ordering receipt
 
 Source head: `cf56963a7206e5c5a260442c08eaa7bdcd65ec7a`.
 

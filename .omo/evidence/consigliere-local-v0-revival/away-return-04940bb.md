@@ -1,4 +1,4 @@
-# Exact-head Away cursor and bounded-return receipt
+# Historical exact-head Away cursor and bounded-return receipt
 
 Source head: `04940bb620efa47c6d399c056a52a6dff837daf7`.
 

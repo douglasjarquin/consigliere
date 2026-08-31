@@ -1,4 +1,4 @@
-# Exact-head Away return boundedness receipt
+# Historical exact-head Away return boundedness receipt
 
 Source head: `4cb71b41075631d8beb30ddaeca5171c9b835234`.
 

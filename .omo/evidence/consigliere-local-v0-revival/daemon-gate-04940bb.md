@@ -1,4 +1,4 @@
-# Exact-head daemon gate receipt
+# Historical exact-head daemon gate receipt
 
 Source head: `04940bb620efa47c6d399c056a52a6dff837daf7`.
 

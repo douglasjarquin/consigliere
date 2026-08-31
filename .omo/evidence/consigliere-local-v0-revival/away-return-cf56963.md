@@ -1,4 +1,4 @@
-# Exact-head Away cursor concurrency receipt
+# Historical exact-head Away cursor concurrency receipt
 
 Source head: `cf56963a7206e5c5a260442c08eaa7bdcd65ec7a`.
 
