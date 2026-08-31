@@ -118,6 +118,7 @@ defmodule Consigliere.CommandReceiptsTest do
       )
 
     assert response["error"]["reason"] == "canonical_request_invalid"
+
     assert Repo.get_by(Consigliere.CommandReceipts.CommandReceipt,
              idempotency_key: "canonical-invalid-hash-key"
            ) == nil
@@ -131,6 +132,40 @@ defmodule Consigliere.CommandReceiptsTest do
     assert first["ok"] == false
     assert second["ok"] == false
     assert first["error"]["code"] == second["error"]["code"]
+  end
+
+  test "database-only finalization failure rolls back the domain mutation and receipt" do
+    project_id = Fixtures.dummy_project!().id
+
+    {:ok, _} =
+      Repo.query("""
+      CREATE TRIGGER receipt_finalize_crash
+      BEFORE UPDATE OF status ON command_receipts
+      WHEN NEW.status = 'committed'
+      BEGIN
+        SELECT RAISE(ABORT, 'receipt finalization crash');
+      END
+      """)
+
+    on_exit(fn ->
+      Repo.query("DROP TRIGGER IF EXISTS receipt_finalize_crash")
+    end)
+
+    response =
+      handle("atomic-finalize-crash", "mission.create", %{
+        "objective" => "o",
+        "scope" => "s",
+        "acceptance_criteria" => "a",
+        "project_id" => project_id
+      })
+
+    assert response["ok"] == false
+    assert response["error"]["code"] == "transient"
+    assert Repo.aggregate(Consigliere.Missions.Mission, :count) == 0
+
+    assert Repo.get_by(Consigliere.CommandReceipts.CommandReceipt,
+             idempotency_key: "atomic-finalize-crash"
+           ) == nil
   end
 
   test "an invalid first request stores and replays one bounded failure" do
@@ -218,6 +253,24 @@ defmodule Consigliere.CommandReceiptsTest do
     assert envelope["error"]["code"] == "operation_recovery_required"
     assert envelope["error"]["operation_id"] == receipt.id
     assert {:ok, 0} = CommandReceipts.reconcile_pending()
+  end
+
+  test "external receipt response references its durable operation" do
+    assert {:ok, %{"id" => "external-1"}} =
+             CommandReceipts.remember(
+               Actor.boss(),
+               "project.add",
+               "external-operation-reference",
+               %{"name" => "project", "repository_path" => "/tmp/project"},
+               fn -> {:ok, %{"id" => "external-1"}} end
+             )
+
+    receipt =
+      Repo.get_by!(Consigliere.CommandReceipts.CommandReceipt,
+        idempotency_key: "external-operation-reference"
+      )
+
+    assert receipt.response["operation_id"] == receipt.id
   end
 
   test "a supplied canonical request hash must match the authenticated request" do

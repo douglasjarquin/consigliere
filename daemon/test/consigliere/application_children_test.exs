@@ -32,8 +32,10 @@ defmodule Consigliere.ApplicationChildrenTest do
       end)
 
     runner_index = Enum.find_index(children, &(&1 == Consigliere.RunnerDynamicSupervisor))
+    recovery_index = Enum.find_index(children, &(&1 == Consigliere.CommandReceipts.Recovery))
     reconciler_index = Enum.find_index(children, &(&1 == Consigliere.Reconciler))
 
+    assert recovery_index < reconciler_index
     assert registry_index < reconciler_index
     assert runner_index < reconciler_index
   end

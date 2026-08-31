@@ -37,6 +37,7 @@ defmodule Consigliere.Application do
       Consigliere.Home.Lock,
       Consigliere.Repo,
       Consigliere.DatabaseWriter,
+      Consigliere.CommandReceipts.Recovery,
       {Registry, keys: :duplicate, name: Consigliere.EventBus.Registry},
       Consigliere.EventBus,
       Consigliere.OutboxDispatcher,
@@ -93,10 +94,6 @@ defmodule Consigliere.Application do
   end
 
   def record_boot_result({:ok, _pid} = result, home) do
-    if Process.whereis(Consigliere.DatabaseWriter) do
-      _ = Consigliere.CommandReceipts.reconcile_pending()
-    end
-
     Consigliere.Home.clear_error!(home)
     result
   end

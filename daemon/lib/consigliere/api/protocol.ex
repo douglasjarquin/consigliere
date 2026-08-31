@@ -154,7 +154,11 @@ defmodule Consigliere.API.Protocol do
     canonical_hash = req["canonical_hash"]
 
     if is_nil(version) and is_nil(canonical_hash) do
-      Consigliere.Operations.validate(op, payload)
+      if Consigliere.Operations.mutating?(op) do
+        :ok
+      else
+        Consigliere.Operations.validate(op, payload)
+      end
     else
       key = req["idempotency_key"] || fallback_id
 

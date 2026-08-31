@@ -140,6 +140,12 @@ defmodule Consigliere.CommandReceipts do
   def result_envelope(_other),
     do: error_envelope("error", "operation_failed")
 
+  defp result_envelope(result, operation_id) do
+    result
+    |> result_envelope()
+    |> Map.put("operation_id", operation_id)
+  end
+
   def reconcile_pending do
     DatabaseWriter.transaction(fn ->
       pending =
@@ -164,7 +170,37 @@ defmodule Consigliere.CommandReceipts do
   end
 
   defp remember_database(prepared, fun) do
-    remember_external(prepared, fun)
+    case DatabaseWriter.transaction(fn ->
+           case claim_txn(prepared) do
+             {:replay, envelope} ->
+               {:replay, envelope}
+
+             :conflict ->
+               :conflict
+
+             {:ok, receipt_id} ->
+               result =
+                 case Repo.transaction(fn -> invoke(prepared, fun) end) do
+                   {:ok, result} -> result
+                   {:error, reason} -> {:error, reason}
+                 end
+
+               finalize_txn(receipt_id, result_envelope(result))
+               {:committed, result}
+           end
+         end) do
+      {:ok, {:replay, envelope}} ->
+        {:ok, :replay, envelope}
+
+      {:ok, :conflict} ->
+        conflict()
+
+      {:ok, {:committed, result}} ->
+        result
+
+      {:error, _reason} ->
+        {:error, {:transient, "receipt_finalize_failed"}}
+    end
   end
 
   defp remember_external(prepared, fun) do
@@ -178,7 +214,7 @@ defmodule Consigliere.CommandReceipts do
       {:ok, receipt_id} ->
         result = invoke(prepared, fun)
 
-        case finalize(receipt_id, result_envelope(result)) do
+        case finalize(receipt_id, result_envelope(result, receipt_id)) do
           {:ok, _} -> result
           {:error, _} -> {:error, {:transient, "receipt_finalize_failed"}}
         end
@@ -273,6 +309,7 @@ defmodule Consigliere.CommandReceipts do
     rescue
       _exception -> {:error, {:invalid, "operation_failed"}}
     catch
+      :throw, {DBConnection, _connection_ref, reason} -> Repo.rollback(reason)
       _kind, _reason -> {:error, {:invalid, "operation_failed"}}
     end
   end
