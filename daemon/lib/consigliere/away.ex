@@ -160,9 +160,6 @@ defmodule Consigliere.Away do
     end
   end
 
-  @doc false
-  def acknowledge_cursor(last_event_id), do: ack_cursor(last_event_id)
-
   defp ack_cursor(last_event_id) do
     DatabaseWriter.transaction(fn ->
       now = Txn.now()

@@ -90,30 +90,6 @@ defmodule Consigliere.AwayCursorTest do
     assert hd(second["events"])["id"] > List.last(first_ids)
   end
 
-  test "a stale acknowledgement cannot move the cursor backwards" do
-    assert Away.mark() == :ok
-
-    events =
-      Enum.map(1..2, fn _index ->
-        Repo.insert!(
-          DomainEvent.changeset(%DomainEvent{}, %{
-            type: "mission.created",
-            subject_type: "mission",
-            subject_id: Ecto.UUID.generate(),
-            occurred_at: DateTime.utc_now()
-          })
-        )
-      end)
-
-    high = List.last(events).id
-    low = hd(events).id
-
-    assert is_map(Away.return())
-    assert Repo.get_by!(BossCursor, name: "boss").last_event_id == high
-    assert {:ok, _} = Consigliere.Away.acknowledge_cursor(low)
-    assert Repo.get_by!(BossCursor, name: "boss").last_event_id == high
-  end
-
   test "overlapping returns never move the cursor backwards" do
     assert Away.mark() == :ok
 
@@ -129,16 +105,37 @@ defmodule Consigliere.AwayCursorTest do
         )
       end)
 
-    results =
-      1..20
-      |> Task.async_stream(fn _index -> Away.return() end,
-        max_concurrency: 5,
-        timeout: 5_000,
-        ordered: false
-      )
-      |> Enum.to_list()
+    run_concurrent_returns = fn ->
+      parent = self()
 
-    assert Enum.all?(results, &match?({:ok, %{}}, &1))
+      tasks =
+        Enum.map(1..20, fn _index ->
+          Task.async(fn ->
+            send(parent, {:away_return_ready, self()})
+
+            receive do
+              :start -> Away.return()
+            end
+          end)
+        end)
+
+      Enum.each(tasks, fn _task ->
+        assert_receive {:away_return_ready, _pid}, 5_000
+      end)
+
+      Enum.each(tasks, &send(&1.pid, :start))
+      Enum.map(tasks, &Task.await(&1, 5_000))
+    end
+
+    first_results = run_concurrent_returns.()
+
+    assert Enum.all?(first_results, &is_map/1)
+    first_cursor = Repo.get_by!(BossCursor, name: "boss").last_event_id
+    assert first_cursor == Enum.at(events, 31).id
+
+    second_results = run_concurrent_returns.()
+
+    assert Enum.all?(second_results, &is_map/1)
     assert Repo.get_by!(BossCursor, name: "boss").last_event_id == List.last(events).id
   end
 end
