@@ -29,6 +29,7 @@ var (
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrProtocol     = errors.New("protocol version mismatch")
 	ErrMalformed    = errors.New("malformed daemon response")
+	ErrAmbiguous    = errors.New("ambiguous daemon transport")
 )
 
 type ErrorBody struct {
@@ -144,19 +145,39 @@ func (d Dialer) Call(op string, payload map[string]any, id, idem string) (*Respo
 		id = fmt.Sprintf("req-%d", time.Now().UnixNano())
 	}
 	version, mutating := operationVersion(op)
-	if mutating && idem == "" {
-		idem = generatedIdempotencyKey()
-	}
 	canonicalHash := ""
+	var retry retryState
+	generated := mutating && idem == ""
 	if mutating {
-		var err error
 		scope := canonicalScope(principal)
 		if d.AuthorityScope != "" {
 			scope = d.AuthorityScope
 		}
-		canonicalHash, err = CanonicalRequestHash(scope, op, version, idem, payload)
-		if err != nil {
-			return nil, err
+		if generated {
+			stored, found, err := d.Home.findRetryState(op, scope, version, payload)
+			if err != nil {
+				return nil, err
+			}
+			if found {
+				retry = stored
+				idem = stored.Key
+				canonicalHash = stored.Hash
+			} else {
+				idem = generatedIdempotencyKey()
+			}
+		}
+		if canonicalHash == "" {
+			var err error
+			canonicalHash, err = CanonicalRequestHash(scope, op, version, idem, payload)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if generated && retry.Key == "" {
+			retry = retryState{Operation: op, Scope: scope, Key: idem, Hash: canonicalHash, Payload: payload}
+			if err := d.Home.saveRetryState(retry); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -181,9 +202,16 @@ func (d Dialer) Call(op string, payload map[string]any, id, idem string) (*Respo
 	if mutating {
 		attempts = 2
 	}
+	ambiguous := false
 	for attempt := 0; attempt < attempts; attempt++ {
 		resp, callErr := d.callOnce(body)
+		if retryable(callErr) {
+			ambiguous = true
+		}
 		if callErr == nil || !mutating || attempt+1 == attempts || !retryable(callErr) {
+			if generated && (callErr == nil || !ambiguous) {
+				_ = d.Home.removeRetryState(retry)
+			}
 			return resp, callErr
 		}
 		boundedRetryDelay()
@@ -203,14 +231,14 @@ func (d Dialer) callOnce(body []byte) (*Response, error) {
 	_ = conn.SetDeadline(time.Now().Add(d.ReadTimeout))
 
 	if _, err := conn.Write(body); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: write request: %v", ErrAmbiguous, err)
 	}
 	line, err := bufio.NewReader(conn).ReadBytes('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
+		return nil, fmt.Errorf("%w: read response: %v", ErrAmbiguous, err)
 	}
 	if len(line) == 0 {
-		return nil, ErrMalformed
+		return nil, fmt.Errorf("%w: empty response", ErrAmbiguous)
 	}
 
 	var resp Response
@@ -229,7 +257,7 @@ func (d Dialer) callOnce(body []byte) (*Response, error) {
 }
 
 func retryable(err error) bool {
-	return errors.Is(err, ErrMalformed) || errors.Is(err, ErrStale)
+	return errors.Is(err, ErrMalformed) || errors.Is(err, ErrStale) || errors.Is(err, ErrAmbiguous)
 }
 
 func ExitFor(err error, resp *Response) int {
