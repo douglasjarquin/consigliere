@@ -128,6 +128,44 @@ defmodule Consigliere.ProgressionTest do
     assert sha != Repo.get!(Mission, mission.id).current_checkpoint_sha
   end
 
+  test "retries an imported result after the durable imported state write is interrupted", %{
+    root: root
+  } do
+    %{attempt: attempt, mission: mission, project: project, sha: sha} =
+      completed_with_commit!(root)
+
+    Repo.query!("""
+    CREATE TRIGGER attempt_results_interrupt_import
+    BEFORE UPDATE OF status ON attempt_results
+    WHEN NEW.status = 'imported'
+    BEGIN
+      SELECT RAISE(ABORT, 'import state write interrupted');
+    END
+    """)
+
+    on_exit(fn -> Repo.query("DROP TRIGGER IF EXISTS attempt_results_interrupt_import") end)
+
+    assert {:error, {:progression_failed, :result_import_persist_failed}} =
+             Progression.run(attempt.id, process_group: :dead_verified, forced_outcome: :passed)
+
+    assert Repo.get!(Attempt, attempt.id).status == "running"
+
+    assert Consigliere.AttemptResults.by_attempt(attempt.id).status == "death_verified"
+
+    {:ok, imported_sha} =
+      Git.read_ref(project.trusted_mirror_path, Git.result_ref(project.id, attempt.id))
+
+    assert imported_sha == sha
+
+    Repo.query!("DROP TRIGGER IF EXISTS attempt_results_interrupt_import")
+
+    assert {:ok, _} =
+             Progression.run(attempt.id, process_group: :dead_verified, forced_outcome: :passed)
+
+    assert Repo.get!(Attempt, attempt.id).status == "completed"
+    assert Repo.get!(Mission, mission.id).current_checkpoint_sha == sha
+  end
+
   test "a Question checkpoint imports the SHA and leaves the Mission active", %{root: root} do
     %{attempt: attempt, mission: mission, workspace: workspace, ws: ws} =
       running_in_workspace!(root)

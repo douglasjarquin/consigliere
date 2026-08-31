@@ -138,10 +138,29 @@ defmodule Consigliere.Progression do
           )
       end
     else
-      {:error, :death_not_verified} = error -> error
-      {:error, :terminal_event_missing} = error -> error
-      {:error, {:dispatch_slot_not_released, _}} = error -> error
-      {:error, reason} -> progression_fail(attempt, result, reason)
+      {:error, :death_not_verified} = error ->
+        error
+
+      {:error, :terminal_event_missing} = error ->
+        error
+
+      {:error, {:dispatch_slot_not_released, _}} = error ->
+        error
+
+      {:error, :result_import_persist_failed} ->
+        retain_import_intent(attempt)
+
+      {:error, reason} ->
+        progression_fail(attempt, result, reason)
+    end
+  end
+
+  defp retain_import_intent(attempt) do
+    _ = note_progression_failure(attempt, "result_import_persist_failed")
+
+    case Attempts.release_scheduler_slot(attempt.id) do
+      :ok -> {:error, {:progression_failed, :result_import_persist_failed}}
+      {:error, reason} -> {:error, reason}
     end
   end
 
