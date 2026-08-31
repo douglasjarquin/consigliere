@@ -163,7 +163,7 @@ defmodule Consigliere.API.Protocol do
     case CommandReceipts.request_hash(actor, op, key, payload) do
       {:ok, ^hash} -> :ok
       {:ok, _other} -> {:error, "canonical_request_mismatch"}
-      {:error, _reason} -> :ok
+      {:error, _reason} -> {:error, "canonical_request_invalid"}
     end
   end
 

@@ -89,6 +89,40 @@ defmodule Consigliere.CommandReceiptsTest do
     assert conflict["error"]["reason"] =~ "idempotency_conflict"
   end
 
+  test "a canonical hash failure rejects an invalid payload before claiming a receipt" do
+    response =
+      handle(
+        "canonical-invalid",
+        "mission.submit",
+        %{"mission_id" => nil},
+        %{"principal" => "boss"},
+        "canonical-invalid-key"
+      )
+
+    assert response["error"]["code"] == "invalid"
+
+    {:ok, response} =
+      JSON.decode(
+        Protocol.handle(
+          JSON.encode!(%{
+            "v" => 1,
+            "id" => "canonical-invalid-hash",
+            "op" => "mission.submit",
+            "operation_version" => 1,
+            "canonical_hash" => "not-a-valid-hash",
+            "idempotency_key" => "canonical-invalid-hash-key",
+            "actor" => %{"principal" => "boss"},
+            "payload" => %{"mission_id" => nil}
+          })
+        )
+      )
+
+    assert response["error"]["reason"] == "canonical_request_invalid"
+    assert Repo.get_by(Consigliere.CommandReceipts.CommandReceipt,
+             idempotency_key: "canonical-invalid-hash-key"
+           ) == nil
+  end
+
   test "a failed command replays as the same failure, not ok true" do
     missing = Ecto.UUID.generate()
     first = handle("k-fail", "mission.submit", %{"mission_id" => missing})
@@ -123,6 +157,30 @@ defmodule Consigliere.CommandReceiptsTest do
     assert first["error"] == second["error"]
     assert first["error"]["code"] == "invalid"
     assert Repo.aggregate(Consigliere.CommandReceipts.CommandReceipt, :count) == 1
+  end
+
+  test "same key with distinct invalid payloads is a conflict" do
+    first =
+      handle(
+        "invalid-conflict-1",
+        "mission.submit",
+        %{"mission_id" => nil},
+        %{"principal" => "boss"},
+        "invalid-conflict-key"
+      )
+
+    second =
+      handle(
+        "invalid-conflict-2",
+        "mission.submit",
+        %{"mission_id" => false},
+        %{"principal" => "boss"},
+        "invalid-conflict-key"
+      )
+
+    assert first["ok"] == false
+    assert second["ok"] == false
+    assert second["error"]["code"] == "idempotency_conflict"
   end
 
   test "boot reconciliation closes pending receipts once without invoking work" do

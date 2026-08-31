@@ -199,7 +199,7 @@ defmodule Consigliere.CommandReceipts do
           build_prepared(scope, op, version, key, payload, nil)
 
         {:error, reason} ->
-          build_prepared(scope, op, version, key, %{"validation_error" => reason}, reason)
+          build_prepared(scope, op, version, key, payload, reason)
       end
     end
   end
