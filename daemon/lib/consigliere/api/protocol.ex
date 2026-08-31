@@ -33,6 +33,18 @@ defmodule Consigliere.API.Protocol do
   @max_list_rows 32
 
   def handle(line, bound \\ :unbound) when is_binary(line) do
+    try do
+      do_handle(line, bound)
+    rescue
+      _exception -> JSON.encode!(fail(nil, "transient", "protocol_error"))
+    catch
+      _kind, _reason -> JSON.encode!(fail(nil, "transient", "protocol_error"))
+    end
+  end
+
+  def handle(_line, _bound), do: JSON.encode!(fail(nil, "invalid", "frame must be binary"))
+
+  defp do_handle(line, bound) do
     case Limits.validate_json_frame(line) do
       {:ok, trimmed} ->
         case JSON.decode(trimmed) do
@@ -142,13 +154,14 @@ defmodule Consigliere.API.Protocol do
     canonical_hash = req["canonical_hash"]
 
     if is_nil(version) and is_nil(canonical_hash) do
-      :ok
+      Consigliere.Operations.validate(op, payload)
     else
       key = req["idempotency_key"] || fallback_id
 
       with {:ok, expected_version} <- Consigliere.Operations.version(op),
            true <- version in [nil, expected_version],
-           :ok <- verify_canonical_hash(canonical_hash, actor, op, key, payload) do
+           :ok <- verify_canonical_hash(canonical_hash, actor, op, key, payload),
+           :ok <- Consigliere.Operations.validate(op, payload) do
         :ok
       else
         false -> {:error, "operation_version_mismatch"}
@@ -829,9 +842,23 @@ defmodule Consigliere.API.Protocol do
     if unknown do
       {:error, "unknown request field #{unknown}"}
     else
-      :ok
+      with :ok <- validate_id(request["id"]),
+           :ok <- validate_operation(request["op"]),
+           :ok <- validate_payload(request["payload"]) do
+        :ok
+      end
     end
   end
+
+  defp validate_id(id) when is_binary(id) and byte_size(id) in 1..256, do: :ok
+  defp validate_id(_id), do: {:error, "id must be a non-empty string"}
+
+  defp validate_operation(op) when is_binary(op) and byte_size(op) in 1..256, do: :ok
+  defp validate_operation(_op), do: {:error, "op must be a non-empty string"}
+
+  defp validate_payload(nil), do: :ok
+  defp validate_payload(payload) when is_map(payload), do: :ok
+  defp validate_payload(_payload), do: {:error, "payload must be an object"}
 
   defp request_stop do
     :ok = Consigliere.Termination.begin_shutdown()

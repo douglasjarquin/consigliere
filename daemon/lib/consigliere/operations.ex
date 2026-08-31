@@ -11,6 +11,10 @@ defmodule Consigliere.Operations do
   @registry %{
     "ping" => %{version: @version, mode: :database},
     "advisory.orient" => %{version: @version, mode: :read},
+    "health" => %{version: @version, mode: :read},
+    "version" => %{version: @version, mode: :read},
+    "project.list" => %{version: @version, mode: :read},
+    "project.get" => %{version: @version, mode: :read, required: ~w(project_id)},
     "project.add" => %{version: @version, mode: :external, required: ~w(name repository_path)},
     "mission.create" => %{
       version: @version,
@@ -19,6 +23,10 @@ defmodule Consigliere.Operations do
     },
     "mission.submit" => %{version: @version, mode: :database, required: ~w(mission_id)},
     "mission.get_own" => %{version: @version, mode: :database, required: ~w(mission_id)},
+    "mission.list" => %{version: @version, mode: :read},
+    "mission.get" => %{version: @version, mode: :read, required: ~w(mission_id)},
+    "mission.why" => %{version: @version, mode: :read, required: ~w(mission_id)},
+    "mission.review" => %{version: @version, mode: :read},
     "mission.request_changes" => %{
       version: @version,
       mode: :database,
@@ -53,7 +61,14 @@ defmodule Consigliere.Operations do
     },
     "attempt.fail" => %{version: @version, mode: :database, required: ~w(attempt_id)},
     "internal.dispatch" => %{version: @version, mode: :external, required: ~w(attempt_id)},
-    "post_attempt.progress" => %{version: @version, mode: :external, required: ~w(attempt_id)}
+    "post_attempt.progress" => %{version: @version, mode: :external, required: ~w(attempt_id)},
+    "questions.inbox" => %{version: @version, mode: :read},
+    "attempt.list" => %{version: @version, mode: :read},
+    "attempt.logs" => %{version: @version, mode: :read, required: ~w(attempt_id)},
+    "incident.list" => %{version: @version, mode: :read},
+    "event.list" => %{version: @version, mode: :read},
+    "reconcile" => %{version: @version, mode: :read},
+    "daemon.shutdown" => %{version: @version, mode: :read}
   }
 
   def version(op) when is_binary(op) do

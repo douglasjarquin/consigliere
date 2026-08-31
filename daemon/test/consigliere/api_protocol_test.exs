@@ -121,6 +121,36 @@ defmodule Consigliere.API.ProtocolTest do
     assert resp["error"]["code"] == "unauthorized"
   end
 
+  test "rejects an envelope with a non-string correlation id" do
+    line =
+      JSON.encode!(%{
+        "v" => 1,
+        "id" => [],
+        "op" => "ping",
+        "actor" => %{"principal" => "boss"}
+      })
+
+    resp = decode(Protocol.handle(line))
+    assert resp["ok"] == false
+    assert resp["error"]["code"] == "invalid"
+  end
+
+  test "returns a bounded protocol response for malformed read input" do
+    line =
+      JSON.encode!(%{
+        "v" => 1,
+        "id" => "bad-read",
+        "op" => "mission.get",
+        "actor" => %{"principal" => "boss"},
+        "payload" => %{"mission_id" => %{}}
+      })
+
+    resp = decode(Protocol.handle(line))
+    assert resp["ok"] == false
+    assert is_binary(resp["error"]["code"])
+    assert byte_size(JSON.encode!(resp)) < 1_048_576
+  end
+
   test "ping" do
     line =
       JSON.encode!(%{"v" => 1, "id" => "p1", "op" => "ping", "actor" => %{"principal" => "boss"}})
