@@ -7,7 +7,7 @@ Branch: `revival/v0-local-codex`.
 Base: `24ffea8fa1f5bc983fb5965efab0a89b6116f05b`.
 
 Implementation commits: `c0194a4` for Go retry persistence, `fc14c20` and `4366f30` for receipt atomicity, and `48c7323` for external operation recovery.
-The current evidence head is `604ff4e959d5365d68b5260ad97600e190916581`.
+The current runtime source head is `d8e6dac66509f724548a0bb09e38f361f627021d`.
 
 The initial RED proof used a clean Linux Elixir container and the Go client test suite.
 
@@ -74,7 +74,7 @@ Go proof:
 cd cli && test -z "$(gofmt -l .)" && go vet ./... && go test ./... && go test -race -shuffle=on -count=1 ./... && go build ./cmd/cs ./cmd/csd
 Result: normal tests, race tests, vet, and builds passed; command packages reported no test files.
 
-Exact current Go gates at `604ff4e959d5365d68b5260ad97600e190916581` also passed for CLI and runner.
+Exact current Go gates at runtime source `d8e6dac66509f724548a0bb09e38f361f627021d` also passed for CLI and runner.
 The CLI race suite passed in 3.442s and the runner race suite passed in 45.487s.
 ```
 
@@ -97,7 +97,7 @@ task3_manual_qa=pass
 
 The package proof also asserted that a package-only `PATH` could not resolve Mix or the source checkout.
 
-The exact current package was rebuilt from `604ff4e959d5365d68b5260ad97600e190916581`.
+The exact current package was rebuilt from runtime source `d8e6dac66509f724548a0bb09e38f361f627021d`.
 Its bounded artifact hashes were `cs=f2239acb35a454f6c5eea02849db5ee8f4534e456607e31323fe18e56d708ccd`, `csd=4dec97350c2078b76f1a05a4f32a6a72055067df98edf3771f10270d01fdd8c3`, `cs-attempt=ff5c91ad936414cb657f3933e785bbff09f6bee3fbc398772b65224f8ccb3435`, and `cs-runner=d51263c4b832d6e66958fd6ac10a025ca91e1cd68f274c21fbb4b56a2cf2121d`.
 The installed-only lifecycle migrated schema `20260831160000`, started, pinged, ran doctor, stopped, restarted, pinged again, stopped, and accepted a repeated stop.
 The final scan reported zero sockets, PID files, owner files, and package processes.

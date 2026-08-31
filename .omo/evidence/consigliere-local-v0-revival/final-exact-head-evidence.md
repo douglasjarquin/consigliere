@@ -199,3 +199,11 @@ All five final read-only review lanes passed candidate `b30f40e10dee9513403aeff1
 The plan, QA, code-quality, security, and context/custody reports are recorded in `final-review-b30f40e.md` and its linked lane artifacts.
 
 The only retained notes are non-blocking timing-based contention and shared-test-home watches.
+
+## Current exact runtime source handoff
+
+Runtime source head: `d8e6dac66509f724548a0bb09e38f361f627021d`.
+
+The receipt remediation adds a durable `command_operations` association, domain-evidence recovery, rollback absence proof, and durable operation payload minimization.
+The focused receipt suite passed 15 tests in five repeated runs, the full daemon suite passed 523 tests including one doctest, CLI and runner Go gates passed, and a fresh native package lifecycle passed with zero residue.
+No canary was rerun or promoted.
