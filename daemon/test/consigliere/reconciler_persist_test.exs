@@ -264,6 +264,26 @@ defmodule Consigliere.ReconcilerPersistTest do
     assert Repo.get!(Workspace, workspace.id).status == "quarantined"
   end
 
+  test "production run_on_boot reconciles a seeded Attempt", %{home: home} do
+    previous_home = System.get_env("CS_HOME")
+    System.put_env("CS_HOME", home)
+
+    on_exit(fn ->
+      if previous_home,
+        do: System.put_env("CS_HOME", previous_home),
+        else: System.delete_env("CS_HOME")
+    end)
+
+    %{attempt: attempt} = running_attempt!()
+    write_manifest!(home, attempt.id, %{"state" => "dead_verified"})
+
+    assert {:ok, state, {:continue, :run}} =
+             Reconciler.init(run_on_boot: true, poll_interval_ms: :infinity)
+
+    assert {:noreply, _state} = Reconciler.handle_continue(:run, state)
+    assert Repo.get!(Attempt, attempt.id).status == "lost"
+  end
+
   test "a live RunnerProcess skips the Attempt", %{home: home} do
     %{attempt: attempt} = starting_attempt!()
     write_manifest!(home, attempt.id, %{"state" => "dead_verified"})

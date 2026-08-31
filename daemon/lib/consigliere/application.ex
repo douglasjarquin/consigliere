@@ -42,9 +42,9 @@ defmodule Consigliere.Application do
       Consigliere.OutboxDispatcher,
       Consigliere.Termination,
       Consigliere.GlobalScheduler,
-      Consigliere.Reconciler,
       {Registry, keys: :unique, name: Consigliere.Registry},
       Consigliere.RunnerDynamicSupervisor,
+      Consigliere.Reconciler,
       Consigliere.MissionDynamicSupervisor,
       Consigliere.MissionBootstrap,
       Consigliere.API.Supervisor
