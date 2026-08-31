@@ -18,6 +18,8 @@ The final reader-bound QA pass created `.tmp/package-final-df939ab`, which was a
 
 The final reader-order QA pass created `.tmp/package-final-bf7a73d`, which was also removed through `/usr/bin/trash` after its package-only lifecycle assertions passed.
 
+The final cap-alignment QA pass created `.tmp/package-final-73d501e`, which was also removed through `/usr/bin/trash` after its package-only lifecycle assertions passed.
+
 The retained pre-existing raw transcript paths are `.omo/evidence/consigliere-local-v0-revival/manual-qa-1a76188e/real-codex-tmux-transcript-*.raw`.
 
 The retained pre-existing canary state paths are `.tmp/task15-canary/mission.json`, `.tmp/task15-canary/authorize.json`, and `.tmp/task15-canary/home-fixed/credentials/{advisory,boss}`.

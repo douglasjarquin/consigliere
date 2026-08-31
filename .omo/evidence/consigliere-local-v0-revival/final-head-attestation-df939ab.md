@@ -1,6 +1,6 @@
-# Authoritative final implementation-head attestation
+# Historical implementation-head attestation
 
-The authoritative final implementation head is `df939ab3e06c1c5bad15ae4156b27bfeae805b16`.
+Historical implementation head: `df939ab3e06c1c5bad15ae4156b27bfeae805b16`.
 
 The exact-head daemon suite returned `502 passed (1 doctest, 501 tests)`.
 

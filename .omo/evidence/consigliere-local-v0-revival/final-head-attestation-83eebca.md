@@ -1,6 +1,6 @@
-# Final implementation-head attestation
+# Historical implementation-head attestation
 
-The final implementation head is `83eebca`.
+Historical implementation head: `83eebca`.
 
 The full implementation SHA is `83eebca5893e1a41313560b19ad8849ff99e806c` as resolved by `git rev-parse HEAD` before this evidence delivery commit.
 

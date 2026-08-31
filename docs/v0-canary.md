@@ -26,7 +26,7 @@ The final run supplied only a temporary auth file through `CS_CODEX_AUTH_HOME`, 
 
 The real canary execution package was built from committed revival head `e2b7fe445e96c356354f31f849e9756b265ecec8`.
 
-The final exact-runtime-head package was rebuilt from `bf22b5d4cae239a222a3065ca4b34b574dd676ad` for the installed lifecycle and scope gates recorded in F3.
+The historical exact-runtime-head package was rebuilt from `bf22b5d4cae239a222a3065ca4b34b574dd676ad` for the installed lifecycle and scope gates recorded in F3.
 
 That final package was not used to rerun the same Mission because the operator-controlled canary forbids duplicate implementation work.
 
@@ -70,7 +70,7 @@ The evidence is insufficient for Promote and makes no economic superiority claim
 
 ## Final delivery-head addendum
 
-The final runtime implementation head is `a45cb4b4e5ead190ce05f1b3672bfbdeb4214f52`.
+The historical runtime implementation head was `a45cb4b4e5ead190ce05f1b3672bfbdeb4214f52`.
 
 The final source change only bounds and deterministically orders default reader list queries.
 
@@ -78,7 +78,7 @@ The selected operator-controlled canary remains unchanged, was not rerun, and re
 
 The final evidence set contains this addendum and the matching F1-F4 refresh.
 
-The final runtime implementation head is `bf7a73dd005fe6c1746a1c73f1929411cd7392c1`.
+The final runtime implementation head is `73d501eb6dff115104e51f2c36e2683557e6a6e4`.
 
 The operator retains the next Continue or Stop decision.
 

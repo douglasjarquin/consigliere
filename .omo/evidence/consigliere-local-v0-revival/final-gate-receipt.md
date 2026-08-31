@@ -42,9 +42,9 @@ The native macOS daemon command passed formatting and compilation and reported `
 
 The selected canary was not rerun against this final package because the operator-controlled canary forbids duplicate implementation work.
 
-## Final implementation-head addendum
+## Historical implementation-head addendum for a45cb4b
 
-The final runtime implementation head is `a45cb4b4e5ead190ce05f1b3672bfbdeb4214f52`.
+The historical runtime implementation head was `a45cb4b4e5ead190ce05f1b3672bfbdeb4214f52`.
 
 The daemon suite returned `502 passed (1 doctest, 501 tests)` after the deterministic reader-query fix.
 
@@ -52,9 +52,9 @@ The rebuilt native arm64 package and fresh package-only reader/lifecycle proof a
 
 The selected canary was not rerun, no duplicate Mission was created, and no Promote claim was made.
 
-## Current exact runtime source gate
+## Historical exact runtime source gate for 7c54c78
 
-The current runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339` on `revival/v0-local-codex`.
+The historical runtime source head was `7c54c782552f3ee5a09ddee35735e90cba1b9339` on `revival/v0-local-codex`.
 
 The Linux daemon command passed formatting, warnings-as-errors compilation, and `496 passed (1 doctest, 495 tests)` in each of three consecutive seed-0 runs.
 
@@ -132,10 +132,20 @@ The selected canary was not rerun against this final package because the operato
 
 ## Authoritative final implementation-head receipt
 
-The authoritative final runtime implementation head is `bf7a73dd005fe6c1746a1c73f1929411cd7392c1`.
+The historical runtime implementation head was `bf7a73dd005fe6c1746a1c73f1929411cd7392c1`.
 
 The exact-head daemon suite returned `502 passed (1 doctest, 501 tests)` after the bounded reader-query hardening.
 
-The fresh native arm64 package and package-only lifecycle proof are recorded in `final-head-attestation-bf7a73d.md`.
+The historical native arm64 package and package-only lifecycle proof are recorded in `final-head-attestation-bf7a73d.md`.
+
+The selected canary was not rerun, no duplicate Mission was created, and no Promote claim was made.
+
+## Authoritative final implementation-head receipt
+
+The authoritative final runtime implementation head is `73d501eb6dff115104e51f2c36e2683557e6a6e4`.
+
+The exact-head daemon suite returned `502 passed (1 doctest, 501 tests)`.
+
+The native arm64 package and package-only lifecycle proof are recorded in `package-artifact-73d501e.md` and `installed-lifecycle-73d501e.md`.
 
 The selected canary was not rerun, no duplicate Mission was created, and no Promote claim was made.
