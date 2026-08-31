@@ -123,8 +123,21 @@ defmodule Consigliere.MissionCoordinator do
 
   defp refresh_and_request_schedule(state) do
     settle_pause(state)
+    reconcile_progression(state.mission_id)
     state = refresh_view(state)
     request_schedule(state)
+  end
+
+  defp reconcile_progression(mission_id) do
+    case load_mission(mission_id) do
+      %Mission{phase: "active"} = mission ->
+        if Consigliere.Progression.next_action(mission) == :import do
+          _ = Consigliere.Progression.maybe_progress(mission.id)
+        end
+
+      _ ->
+        :ok
+    end
   end
 
   defp refresh_view(state) do

@@ -157,11 +157,7 @@ defmodule Consigliere.Progression do
 
   defp retain_import_intent(attempt) do
     _ = note_progression_failure(attempt, "result_import_persist_failed")
-
-    case Attempts.release_scheduler_slot(attempt.id) do
-      :ok -> {:error, {:progression_failed, :result_import_persist_failed}}
-      {:error, reason} -> {:error, reason}
-    end
+    {:error, {:progression_failed, :result_import_persist_failed}}
   end
 
   defp protocol_fail(attempt, reason) do

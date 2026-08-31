@@ -134,6 +134,8 @@ defmodule Consigliere.ProgressionTest do
     %{attempt: attempt, mission: mission, project: project, sha: sha} =
       completed_with_commit!(root)
 
+    assert GlobalScheduler.request_slot(mission.id) in [{:ok, :granted}, {:ok, :held}]
+
     Repo.query!("""
     CREATE TRIGGER attempt_results_interrupt_import
     BEFORE UPDATE OF status ON attempt_results
@@ -150,7 +152,10 @@ defmodule Consigliere.ProgressionTest do
 
     assert Repo.get!(Attempt, attempt.id).status == "running"
 
-    assert Consigliere.AttemptResults.by_attempt(attempt.id).status == "death_verified"
+    assert Consigliere.AttemptResults.by_attempt(attempt.id).status in [
+             "death_verified",
+             "commit_verified"
+           ]
 
     {:ok, imported_sha} =
       Git.read_ref(project.trusted_mirror_path, Git.result_ref(project.id, attempt.id))
@@ -159,8 +164,7 @@ defmodule Consigliere.ProgressionTest do
 
     Repo.query!("DROP TRIGGER IF EXISTS attempt_results_interrupt_import")
 
-    assert {:ok, _} =
-             Progression.run(attempt.id, process_group: :dead_verified, forced_outcome: :passed)
+    wait_until(fn -> Repo.get!(Attempt, attempt.id).status == "completed" end)
 
     assert Repo.get!(Attempt, attempt.id).status == "completed"
     assert Repo.get!(Mission, mission.id).current_checkpoint_sha == sha
@@ -322,5 +326,20 @@ defmodule Consigliere.ProgressionTest do
       result_sha: sha,
       result_kind: kind
     }
+  end
+
+  defp wait_until(fun, attempts \\ 100)
+
+  defp wait_until(fun, 0) do
+    flunk("condition did not become true")
+  end
+
+  defp wait_until(fun, attempts) do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(10)
+      wait_until(fun, attempts - 1)
+    end
   end
 end
