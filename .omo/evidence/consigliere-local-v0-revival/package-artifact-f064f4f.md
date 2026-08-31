@@ -1,4 +1,4 @@
-# Exact-head package artifact receipt
+# Historical exact-head package artifact receipt for f064f4f
 
 Source head: `f064f4f79d9865c27c083e2dbf47e039cbe09c3f`.
 

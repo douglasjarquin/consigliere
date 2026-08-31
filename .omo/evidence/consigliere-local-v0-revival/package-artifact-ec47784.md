@@ -1,4 +1,4 @@
-# Exact-head package artifact receipt
+# Historical exact-head package artifact receipt for ec47784
 
 Source head: `ec47784a801ee8168fae7b249bf3b8342951ae17`.
 
