@@ -469,7 +469,9 @@ defmodule Consigliere.API.Protocol do
           blockers =
             Repo.all(
               from(b in MissionBlocker,
-                where: b.mission_id == ^mission.id and b.status == "open"
+                where: b.mission_id == ^mission.id and b.status == "open",
+                order_by: [asc: b.inserted_at, asc: b.id],
+                limit: ^@max_list_rows
               )
             )
 
@@ -561,7 +563,8 @@ defmodule Consigliere.API.Protocol do
         Repo.all(
           from(q in Question,
             where: q.status in ["open", "routed"],
-            order_by: [asc: q.inserted_at]
+            order_by: [asc: q.inserted_at, asc: q.id],
+            limit: ^@max_list_rows
           )
         )
 
@@ -895,7 +898,9 @@ defmodule Consigliere.API.Protocol do
           blockers =
             Repo.all(
               from(b in MissionBlocker,
-                where: b.mission_id == ^mission.id and b.status == "open"
+                where: b.mission_id == ^mission.id and b.status == "open",
+                order_by: [asc: b.inserted_at, asc: b.id],
+                limit: ^@max_list_rows
               )
             )
 
@@ -906,7 +911,9 @@ defmodule Consigliere.API.Protocol do
               from(a in Consigliere.Attempts.Attempt,
                 where:
                   a.mission_id == ^mission.id and
-                    a.status in ^occupying_statuses
+                    a.status in ^occupying_statuses,
+                order_by: [asc: a.inserted_at, asc: a.id],
+                limit: ^@max_list_rows
               )
             )
 
