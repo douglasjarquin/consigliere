@@ -2,6 +2,7 @@ defmodule Consigliere.MissionCoordinatorRehydrateTest do
   use ExUnit.Case, async: false
 
   alias Consigliere.Actor
+  alias Consigliere.Attempts.Attempt
   alias Consigliere.EventBus
   alias Consigliere.Fixtures
   alias Consigliere.GlobalScheduler
@@ -126,7 +127,12 @@ defmodule Consigliere.MissionCoordinatorRehydrateTest do
   test "killing the coordinator does not require a RunnerProcess and rehydrates the same phase" do
     mission = authorized_mission!()
     pid = start_coord!(mission.id)
-    await_until(fn -> Repo.get!(Mission, mission.id).phase == "active" end)
+
+    await_until(fn ->
+      Repo.get!(Mission, mission.id).phase == "active" and
+        Repo.get_by!(Attempt, mission_id: mission.id).status == "running"
+    end)
+
     assert Repo.get!(Mission, mission.id).phase == "active"
 
     ref = Process.monitor(pid)
