@@ -142,10 +142,18 @@ The historical superseded runtime source head is `0fd7d3b951672df7cb37e6c160401d
 
 The historical superseded package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-0fd7d3b.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-0fd7d3b.md`; it did not rerun the selected canary or create a duplicate Mission.
 
+## Historical superseded runtime closure for cf56963
+
+The historical superseded runtime source head is `cf56963a7206e5c5a260442c08eaa7bdcd65ec7a`.
+
+The historical package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-cf56963.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-cf56963.md`; it did not rerun the selected canary or create a duplicate Mission.
+
+The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.
+
 ## Current runtime closure
 
-The current runtime source head is `cf56963a7206e5c5a260442c08eaa7bdcd65ec7a`.
+The current runtime source head is `ec47784a801ee8168fae7b249bf3b8342951ae17`.
 
-The current package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-cf56963.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-cf56963.md`; it did not rerun the selected canary or create a duplicate Mission.
+The current package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-ec47784.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-ec47784.md`; it did not rerun the selected canary or create a duplicate Mission.
 
 The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.

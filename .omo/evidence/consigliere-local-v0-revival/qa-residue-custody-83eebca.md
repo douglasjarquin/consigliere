@@ -66,13 +66,27 @@ The current 04940bb package prefix and fresh lifecycle home were absent, and no 
 
 This receipt retains the previously classified concurrent-worktree residue and does not delete or rewrite another worker's artifacts.
 
-## Current runtime custody after 8010d5f package QA
+## Historical runtime custody after 8010d5f package QA
 
 The 8010d5f package prefix `.tmp/package-final-8010d5f` and fresh home `/tmp/cs-8010d5f-home.D2r10u` were moved through `/usr/bin/trash` and verified absent.
 
 The retained untracked inventory remains 24,956 paths with SHA-256 `9bfc2b21f4357ee5e5a707350e6d8314fa28e9dff9038932b3639b803d3bfcb9`.
 
 No Consigliere daemon, runner, Attempt, or package process remains from this QA pass.
+
+## Exact retained-residue inventory before final evidence child at runtime source ec47784
+
+The untracked inventory was captured after staging the intended final evidence files and after the ec47784 package-only lifecycle cleanup.
+
+It contained `24960` paths and had SHA-256 `43c850d303b9f57577c0deb9e6d94acee9e0459815e209eb5790b84e9e5de023` when listed with `git ls-files --others --exclude-standard | LC_ALL=C sort`.
+
+The ec47784 package prefix `.tmp/package-final-ec47784` was moved to macOS Trash through `/usr/bin/trash` and verified absent.
+
+The fresh lifecycle home `/tmp/cs-ec47784-home.Xd9aBy` was removed through the supported safe path and verified absent.
+
+No Consigliere daemon, cs-runner, cs-attempt, or Codex process remained after the package QA.
+
+The retained untracked paths are concurrent-worktree residue and prior review output, including prior package and canary artifacts; they were not deleted or rewritten by this pass.
 
 ## Exact retained-residue inventory before final evidence child at runtime source 0fd7d3b
 

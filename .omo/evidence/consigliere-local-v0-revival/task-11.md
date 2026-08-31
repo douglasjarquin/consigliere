@@ -73,7 +73,7 @@ No credentials, raw logs, transcripts, or secrets were written to this evidence 
 
 `git diff --check` passed before the implementation commit.
 
-## Exact-head startup persistence closure
+## Historical startup persistence closure
 
 Commit `8d839378a55e36222e13c19e84e1f91543fc92c4` closes the handshaken-runner leak found by the exact-head code review.
 
@@ -85,7 +85,7 @@ The RED/GREEN process proof and the three-run full Linux result are recorded in 
 
 The current native macOS characterization is `474/483` with the same nine host-only fixture categories named in `.omo/evidence/consigliere-local-v0-revival/macos-native-gate-8d83937.log`.
 
-## Exact-head hardening follow-up
+## Historical hardening follow-up
 
 The exact-head review found that the prior verifier accepted a same-basename executable and hashed the configured path rather than the executable belonging to the observed PID.
 
@@ -112,7 +112,7 @@ The two tests observed a real live `sleep` process, rejected a different executa
 
 The later affected reconciliation suite retained its known macOS-only process-fixture observations and is covered by the authoritative Linux container gate recorded in the final verification lanes.
 
-## PATH-independent termination follow-up
+## Historical PATH-independent termination follow-up
 
 The full Linux gate then reproduced a flaky `RunnerProcessCodexTest` failure where the Attempt became `lost` instead of `failed` while another test temporarily removed `kill` from `PATH`.
 
@@ -128,7 +128,7 @@ Result: 454 passed.
 
 The focused process-group suite also passed with 6 tests, including the PATH-independent real termination case.
 
-## Exact-head termination identity follow-up
+## Historical termination identity follow-up
 
 The exact-head security review found that termination trusted a persisted Attempt PGID before verifying that a live inventory manifest bound that PGID to the Attempt, fence, workspace, and runner identity.
 
@@ -148,7 +148,7 @@ Result: 2 passed.
 
 The process-group assertion confirmed that the unverified persisted PGID remained alive while the Attempt was quarantined as unconfirmed.
 
-## Pause termination identity follow-up
+## Historical pause termination identity follow-up
 
 The exact-head review found that Boss pause independently trusted `Attempt.pgid` in both its termination and liveness checks, bypassing the canonical inventory and runner identity boundary.
 
@@ -164,7 +164,7 @@ Tests-first GREEN proof is the combined event and pause command recorded in task
 
 The green result was 16 passed, and the new process assertion confirmed the unrelated session-leader group remained alive while pause stayed pending.
 
-## Exact-head process-group membership follow-up
+## Historical process-group membership follow-up
 
 The exact-head security review found that a stale runner or harness PID could be alive while belonging to a different process group than the PGID recorded in its manifest.
 
@@ -188,13 +188,13 @@ The reconciler fixture now records harness identity fields so its positive live 
 
 The classic double-fork daemonization case was probed in the existing real runner suite and remains a documented structural limitation of periodic process-tree polling, rather than an unbounded V0 claim.
 
-## Exact-head final verification
+## Historical final verification
 
 The full Linux daemon gate at the preceding source commit `cbdf6f7f2cbc2b1718ac73eaa47c0ad` passed `461 passed (1 doctest, 460 tests)` with warnings treated as errors.
 
 The CLI and runner format, vet, ordinary, race, shuffle, and build gates also passed at that exact source head.
 
-## Exact-head termination fence follow-up
+## Historical termination fence follow-up
 
 The exact-head review found that pause revoked live capabilities and then independently minted a new Attempt fence before the runner manifest could be reconciled, leaving the live manifest stale and making verified-death identity fail closed.
 
@@ -206,7 +206,7 @@ Tests-first GREEN proof passed the real runner pause regression and the combined
 
 The final Linux daemon gate at source head `c71bee7a6706b7279beafba0a951795124ad7ed4` passed `465 passed (1 doctest, 464 tests)` with warnings treated as errors.
 
-## Exact-head asynchronous pause settlement follow-up
+## Historical asynchronous pause settlement follow-up
 
 The exact-head review found that a runner could exit after the initial pause response while the durable `pausing` blocker remained open and the Mission stayed active.
 
@@ -217,6 +217,18 @@ Commit `2109e957a79e07f7941dcb61b0a911515512561c` adds that regression and settl
 Tests-first GREEN proof passed the real asynchronous pause test and the full Linux daemon suite passed `466 passed (1 doctest, 465 tests)` on the source head.
 
 The guard checks the durable `pausing` blocker, so ordinary runner completion and active Missions are not paused as a side effect.
+
+## Current cancellation and marker-race closure
+
+The current runtime source head is `ec47784a801ee8168fae7b249bf3b8342951ae17`.
+
+The current cancellation path persists the requested cause, sends runner termination without prematurely finalizing the Attempt, and lets verified runner death drive the final outcome.
+
+The current Away path fences cursor acknowledgement and marker removal on the exact marker snapshot used to build the bounded digest.
+
+The focused Away, termination, and dispatch proof passed `8 tests` in five consecutive seed-0 runs and `4 tests` respectively, and the full daemon gate passed `507 passed (1 doctest, 506 tests)`.
+
+The current package and lifecycle receipts are `package-artifact-ec47784.md` and `installed-lifecycle-ec47784.md`.
 
 ## Final runtime audit follow-up
 
@@ -260,9 +272,9 @@ The final Linux daemon suite passed `486 passed (1 doctest, 485 tests)` in three
 
 The historical package and installed lifecycle receipts are `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`.
 
-## Current cancellation ordering closure
+## Historical cancellation ordering closure for cf56963
 
-The current runtime source head is `cf56963a7206e5c5a260442c08eaa7bdcd65ec7a`.
+The historical superseded runtime source head is `cf56963a7206e5c5a260442c08eaa7bdcd65ec7a`.
 
 The RED regression reproduced cancellation finalizing a still-registered runner as lost before verified death.
 
@@ -270,7 +282,7 @@ The GREEN fix makes `runner_cancel` delivery request cancellation only; the reco
 
 The focused termination and dispatch slice passed `4 tests`, including the regression that a live runner remains `terminating` after delivery.
 
-The selected real canary was not rerun after this runtime hardening because the operator-controlled rule forbids duplicate implementation work.
+The selected real canary was not rerun after this historical runtime hardening because the operator-controlled rule forbids duplicate implementation work.
 
 ## Historical superseded exact-head closure for 7159373
 
