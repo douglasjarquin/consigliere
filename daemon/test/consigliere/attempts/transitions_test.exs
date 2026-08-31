@@ -4,7 +4,9 @@ defmodule Consigliere.Attempts.TransitionsTest do
   import Ecto.Query
 
   alias Consigliere.Actor
+  alias Consigliere.DispatchOperations
   alias Consigliere.Fixtures
+  alias Consigliere.GlobalScheduler
   alias Consigliere.Missions
   alias Consigliere.Attempts
   alias Consigliere.Questions
@@ -14,6 +16,7 @@ defmodule Consigliere.Attempts.TransitionsTest do
 
   setup do
     Fixtures.reset_phase1_tables!()
+    GlobalScheduler.reset()
     :ok
   end
 
@@ -90,6 +93,24 @@ defmodule Consigliere.Attempts.TransitionsTest do
     assert attempt.status == "checkpointed"
     assert Repo.get!(Consigliere.Missions.Mission, mission.id).current_checkpoint_sha == "sha1"
     assert Repo.get!(Workspace, workspace.id).status == "daemon_exclusive"
+  end
+
+  test "record_checkpointed releases durable and in-memory capacity" do
+    %{attempt: attempt, mission: mission} = running_attempt!()
+    assert {:ok, :granted} = GlobalScheduler.request_slot(mission.id)
+    {:ok, _operation} = DispatchOperations.ensure(attempt, %{slot_state: "granted"})
+
+    {:ok, _} =
+      Attempts.request_checkpoint(attempt.id, Actor.system(), %{reported_checkpoint_sha: "sha1"})
+
+    assert {:ok, _} =
+             Attempts.record_checkpointed(attempt.id, Actor.system(), %{
+               imported_sha: "sha1",
+               process_group: :dead_verified
+             })
+
+    assert DispatchOperations.get_by_attempt(attempt.id).slot_state == "released"
+    assert {:ok, :granted} = GlobalScheduler.request_slot("mission-b")
   end
 
   test "mark_lost with unconfirmed inventory quarantines the workspace and opens an incident" do

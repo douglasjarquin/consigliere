@@ -7,6 +7,7 @@ defmodule Consigliere.Attempts.Transitions do
   alias Consigliere.AttemptResults
   alias Consigliere.AttemptStates
   alias Consigliere.DispatchOperations
+  alias Consigliere.GlobalScheduler
   alias Consigliere.Repo
   alias Consigliere.Txn
   alias Consigliere.Attempts.Attempt
@@ -259,7 +260,14 @@ defmodule Consigliere.Attempts.Transitions do
   end
 
   def record_checkpointed(attempt_id, actor, attrs) do
-    DatabaseWriter.transaction(fn -> record_checkpointed_txn(attempt_id, actor, attrs) end)
+    case DatabaseWriter.transaction(fn -> record_checkpointed_txn(attempt_id, actor, attrs) end) do
+      {:ok, %{attempt: attempt} = result} ->
+        GlobalScheduler.release_slot(attempt.mission_id)
+        {:ok, result}
+
+      other ->
+        other
+    end
   end
 
   def record_checkpointed_txn(attempt_id, actor, attrs) do
@@ -302,6 +310,7 @@ defmodule Consigliere.Attempts.Transitions do
       end
     end
 
+    DispatchOperations.release_slot_txn(attempt.id)
     Txn.append_event!("attempt.checkpointed", "attempt", attempt.id, %{imported_sha: sha})
     %{attempt: attempt, imported_sha: sha}
   end
