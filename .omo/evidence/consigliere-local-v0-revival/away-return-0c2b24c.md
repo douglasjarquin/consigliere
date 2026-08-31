@@ -1,4 +1,4 @@
-# Exact-head Away marker and cursor race receipt
+# Historical superseded exact-head Away marker and cursor race receipt
 
 Source head: `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
 

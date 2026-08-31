@@ -79,4 +79,3 @@ None.
 - The local gates were not rerun during this read-only audit. Their exact `d63f239` receipts were inspected and cross-checked against source and commit ancestry.
 - The concurrency regression uses a 100 ms negative receive assertion. This is weaker than a fully event-driven blocked-state proof, but it does not violate a stated acceptance criterion.
 - The worktree contains pre-existing untracked evidence, build, and scratch artifacts. They are outside immutable HEAD and were not modified or treated as delivery content.
-

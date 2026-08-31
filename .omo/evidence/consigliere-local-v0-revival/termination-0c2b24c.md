@@ -1,4 +1,4 @@
-# Exact-head termination reconciliation receipt
+# Historical superseded exact-head termination reconciliation receipt
 
 Source head: `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
 
