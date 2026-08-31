@@ -179,11 +179,7 @@ defmodule Consigliere.CommandReceipts do
                :conflict
 
              {:ok, receipt_id} ->
-               result =
-                 case Repo.transaction(fn -> invoke(prepared, fun) end) do
-                   {:ok, result} -> result
-                   {:error, reason} -> {:error, reason}
-                 end
+               result = invoke(prepared, fun)
 
                finalize_txn(receipt_id, result_envelope(result))
                {:committed, result}
@@ -305,11 +301,11 @@ defmodule Consigliere.CommandReceipts do
 
   defp invoke(_prepared, fun) do
     try do
-      fun.()
+      Consigliere.Txn.with_atomic_errors(fun)
     rescue
       _exception -> {:error, {:invalid, "operation_failed"}}
     catch
-      :throw, {DBConnection, _connection_ref, reason} -> Repo.rollback(reason)
+      :throw, {:consigliere_txn_error, reason} -> {:error, reason}
       _kind, _reason -> {:error, {:invalid, "operation_failed"}}
     end
   end

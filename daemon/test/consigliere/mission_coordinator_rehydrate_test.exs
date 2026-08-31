@@ -14,9 +14,24 @@ defmodule Consigliere.MissionCoordinatorRehydrateTest do
   alias Consigliere.Repo
 
   setup do
+    stop_mission_coordinators!()
     Fixtures.reset_phase1_tables!()
     GlobalScheduler.reset()
+    assert GlobalScheduler.occupants() == []
     :ok
+  end
+
+  defp stop_mission_coordinators! do
+    DynamicSupervisor.which_children(MissionDynamicSupervisor)
+    |> Enum.each(fn
+      {_id, pid, _type, _modules} when is_pid(pid) ->
+        _ = DynamicSupervisor.terminate_child(MissionDynamicSupervisor, pid)
+
+      _ ->
+        :ok
+    end)
+
+    await_until(fn -> DynamicSupervisor.which_children(MissionDynamicSupervisor) == [] end)
   end
 
   defp start_coord!(mission_id) do

@@ -11,14 +11,27 @@ defmodule Consigliere.Txn do
   def insert!(changeset) do
     case Repo.insert(changeset) do
       {:ok, struct} -> struct
-      {:error, changeset} -> Repo.rollback(changeset)
+      {:error, changeset} -> rollback(changeset)
     end
   end
 
   def update!(changeset) do
     case Repo.update(changeset) do
       {:ok, struct} -> struct
-      {:error, changeset} -> Repo.rollback(changeset)
+      {:error, changeset} -> rollback(changeset)
+    end
+  end
+
+  def with_atomic_errors(fun) when is_function(fun, 0) do
+    previous = Process.get(:consigliere_txn_error_mode)
+    Process.put(:consigliere_txn_error_mode, :throw)
+
+    try do
+      fun.()
+    after
+      if is_nil(previous),
+        do: Process.delete(:consigliere_txn_error_mode),
+        else: Process.put(:consigliere_txn_error_mode, previous)
     end
   end
 
@@ -35,23 +48,23 @@ defmodule Consigliere.Txn do
   end
 
   def illegal(from, to, reason) do
-    Repo.rollback({:illegal_transition, %{from: from, to: to, reason: reason}})
+    rollback({:illegal_transition, %{from: from, to: to, reason: reason}})
   end
 
   def unauthorized(reason) do
-    Repo.rollback({:unauthorized, reason})
+    rollback({:unauthorized, reason})
   end
 
   def fenced(attempt_id) do
-    Repo.rollback({:fenced, attempt_id})
+    rollback({:fenced, attempt_id})
   end
 
   def sha_mismatch(expected, got) do
-    Repo.rollback({:sha_mismatch, %{expected: expected, got: got}})
+    rollback({:sha_mismatch, %{expected: expected, got: got}})
   end
 
   def run_id_mismatch(expected, got) do
-    Repo.rollback({:run_id_mismatch, %{expected: expected, got: got}})
+    rollback({:run_id_mismatch, %{expected: expected, got: got}})
   end
 
   def require_principal(actor, allowed) when is_list(allowed) do
@@ -64,5 +77,13 @@ defmodule Consigliere.Txn do
 
   def mint_fencing_token do
     :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+  end
+
+  defp rollback(reason) do
+    if Process.get(:consigliere_txn_error_mode) == :throw do
+      throw({:consigliere_txn_error, reason})
+    else
+      Repo.rollback(reason)
+    end
   end
 end
