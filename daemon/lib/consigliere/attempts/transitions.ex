@@ -327,6 +327,9 @@ defmodule Consigliere.Attempts.Transitions do
       attempt.status in @terminal ->
         attempt
 
+      attempt.status == "terminating" and death != :dead_verified ->
+        mark_lost_txn(attempt.id, actor, %{inventory: :unconfirmed})
+
       attempt.status == "terminating" ->
         case klass || attempt.exit_classification do
           "failed" ->
