@@ -188,7 +188,9 @@ The exact current receipts are `away-return-d63f239.md`, `daemon-gate-d63f239.md
 
 The focused Away regression passed at ten seeds, the complete daemon gate passed `511 passed (1 doctest, 510 tests)`, both Go module gates exited `0`, and the fresh installed lifecycle passed with zero package processes after cleanup.
 
-The final exact-head review set and remote CI remain pending, so this receipt is not yet the final delivery verdict.
+The five final pre-push review lanes passed at candidate `b30f40e10dee9513403aeff14b03fba79f27ee9a`; the lane reports are recorded in `final-review-b30f40e.md`.
+
+Remote CI and PR custody remain pending until the final evidence child is pushed.
 
 ## Historical pushed-head attestation for c060b88
 
