@@ -101,6 +101,14 @@ Dirty Git workspaces, hung commands, runner process-group termination, daemon re
 
 No Boss, GitHub, source-repository, daemon-owner, Made, remote-worker, transcript, telemetry, PR, push, merge, or automatic delivery authority was added.
 
+## Cleanup receipt
+
+The manual process used the canonical test home `/tmp/consigliere-daemon-test-home` rather than a task-owned disposable home.
+
+The application and API socket were not left running after the proof, and a current process scan finds no Consigliere daemon, runner, Attempt, or Codex process.
+
+The canonical test home is shared test infrastructure and was preserved rather than moved to Trash by this task.
+
 ## Exact-head harness transport hardening
 
 The exact-head security review found that the Codex harness did not need the daemon API socket or reusable Attempt capability to emit its private report marker, but the old environment forwarded both values.
