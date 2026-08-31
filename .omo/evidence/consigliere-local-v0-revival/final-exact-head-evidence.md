@@ -200,10 +200,20 @@ The plan, QA, code-quality, security, and context/custody reports are recorded i
 
 The only retained notes are non-blocking timing-based contention and shared-test-home watches.
 
-## Current exact runtime source handoff
+## Prior exact runtime source handoff for 9260a9f
 
 Runtime source head: `9260a9f22af55c6c073de3afae3602f58e4e8061`.
 
 The receipt remediation adds a durable `command_operations` association, domain-evidence recovery, rollback absence proof, and durable operation payload minimization.
 The focused receipt suite passed 17 tests in five repeated runs, the full daemon suite passed 525 tests including one doctest, CLI and runner Go gates passed, and a fresh native package lifecycle passed with zero residue.
 No canary was rerun or promoted.
+
+## Current exact handoff head
+
+The current exact full handoff head is `9586d96411e068b87de26c6de8e38877f951e3e8`.
+
+The daemon suite passed `525 passed (1 doctest, 524 tests)`, the CLI and runner Go gates passed, and the package and installed lifecycle receipts are retained in `package-receipt-9586d96.md`.
+
+The retry repair has a RED proof for credential-shaped payload persistence and unbounded subprocess waits, followed by focused GREEN coverage.
+
+PR #101 is preserved at its live closed, draft, unmerged state, and PR #141 is intentionally not remote at this head until custody verification completes.

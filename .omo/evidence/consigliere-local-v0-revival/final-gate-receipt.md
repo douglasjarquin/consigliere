@@ -54,13 +54,23 @@ The rebuilt native arm64 package and fresh package-only reader/lifecycle proof a
 
 The selected canary was not rerun, no duplicate Mission was created, and no Promote claim was made.
 
-## Current exact runtime source receipt for 9260a9f
+## Prior exact runtime source receipt for 9260a9f
 
 The current runtime source is `9260a9f22af55c6c073de3afae3602f58e4e8061` on `revival/v0-local-codex`.
 The full daemon gate passed `525 passed (1 doctest, 524 tests)` and the receipt suite passed 17 tests in five repeated runs.
 CLI and runner Go gates passed formatting, vet, ordinary tests, race and shuffle tests, and builds.
 The fresh package migrated schema `20260831160000`, passed start/ping/doctor/stop/restart/repeated-stop lifecycle checks, and ended with zero sockets, PID files, owner files, and package processes.
 The package and QA home were moved to macOS Trash after the proof.
+
+## Current exact handoff receipt for 9586d96
+
+The current exact full handoff head is `9586d96411e068b87de26c6de8e38877f951e3e8`.
+
+The post-review retry correction passed the focused regression, full daemon suite with `525 passed (1 doctest, 524 tests)`, CLI and runner Go format/vet/test/race/build gates, package build, and installed lifecycle.
+
+The retained artifact hashes and bounded lifecycle output are in `package-receipt-9586d96.md`.
+
+PR #101 remains closed, draft, and unmerged; PR #141 is still at its old remote head and is not claimed as delivered until push verification.
 The canary remains below the required comparable sample, and no Promote claim was made.
 
 ## Historical superseded implementation receipt for 4cb71b4

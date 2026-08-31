@@ -7,7 +7,7 @@ Branch: `revival/v0-local-codex`.
 Base: `24ffea8fa1f5bc983fb5965efab0a89b6116f05b`.
 
 Implementation commits: `c0194a4` for Go retry persistence, `fc14c20` and `4366f30` for receipt atomicity, and `48c7323` for external operation recovery.
-The current runtime source head is `9260a9f22af55c6c073de3afae3602f58e4e8061`.
+The current runtime source head is `9586d96411e068b87de26c6de8e38877f951e3e8`.
 
 The initial RED proof used a clean Linux Elixir container and the Go client test suite.
 
@@ -54,7 +54,7 @@ Current receipt regression after the correction:
 
 ```text
 PATH="/opt/homebrew/opt/erlang/bin:$PATH" mix test test/consigliere/command_receipts_test.exs
-Result: 17 passed
+Result: 17 passed, including the retry persistence regression.
 ```
 
 The rollback test asserts `reconcile_pending/0` returns zero after the transaction abort.
@@ -74,8 +74,9 @@ Go proof:
 cd cli && test -z "$(gofmt -l .)" && go vet ./... && go test ./... && go test -race -shuffle=on -count=1 ./... && go build ./cmd/cs ./cmd/csd
 Result: normal tests, race tests, vet, and builds passed; command packages reported no test files.
 
-Exact current Go gates at runtime source `9260a9f22af55c6c073de3afae3602f58e4e8061` also passed for CLI and runner.
-The CLI race suite passed in 3.442s and the runner race suite passed in 45.487s.
+Exact current Go gates at runtime source `9586d96411e068b87de26c6de8e38877f951e3e8` passed for CLI and runner.
+The CLI race suite passed in 3.403s and the corrected runner race suite passed in 41.372s from `runner/cs-runner`.
+The corrected runner build used `go build -o /tmp/cs-runner-gate-9586d96 .` from `runner/cs-runner`, and the explicit output was moved to macOS Trash after the gate.
 ```
 
 Packaged manual QA used `scripts/package.sh` in a disposable Linux container with only the installed prefix, `/usr/bin`, and `/bin` on `PATH`.
@@ -97,8 +98,8 @@ task3_manual_qa=pass
 
 The package proof also asserted that a package-only `PATH` could not resolve Mix or the source checkout.
 
-The exact current package was rebuilt from runtime source `9260a9f22af55c6c073de3afae3602f58e4e8061`.
-Its bounded artifact hashes were `cs=40dfe538c79e6e498b469c24b281f7d13e534ff56f2c2364ce9c25ea71076e36`, `csd=fcbbc344bee19e0106ab9d23f8b2c9b39ba3329afaeecbd72b88be8209b9de2e`, `cs-attempt=c43fe457f610bb21f33c9e8b1a975ac8ce92ac6a692ede090029b4c16e292eab`, and `cs-runner=5f12f764b60b34ceea42e28b46411c94f077c9b99a0abba1188470c6803b70c3`.
+The exact current package was rebuilt from runtime source `9586d96411e068b87de26c6de8e38877f951e3e8`.
+Its bounded artifact hashes and raw lifecycle receipt are retained in `package-receipt-9586d96.md`.
 The installed-only lifecycle migrated schema `20260831160000`, started, pinged, ran doctor, stopped, restarted, pinged again, stopped, and accepted a repeated stop.
 The final scan reported zero sockets, PID files, owner files, and package processes.
 The private QA home and package prefix were moved to macOS Trash after the proof.
