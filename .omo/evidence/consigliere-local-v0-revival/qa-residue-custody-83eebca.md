@@ -15,3 +15,13 @@ This receipt classifies the retained residue and records that only the final pas
 The subsequent deterministic-order QA pass created `.tmp/package-final-a45cb4b`, which was also removed through `/usr/bin/trash` after its package-only lifecycle assertions passed.
 
 The final reader-bound QA pass created `.tmp/package-final-df939ab`, which was also removed through `/usr/bin/trash` after its package-only lifecycle assertions passed.
+
+The final reader-order QA pass created `.tmp/package-final-bf7a73d`, which was also removed through `/usr/bin/trash` after its package-only lifecycle assertions passed.
+
+The retained pre-existing raw transcript paths are `.omo/evidence/consigliere-local-v0-revival/manual-qa-1a76188e/real-codex-tmux-transcript-*.raw`.
+
+The retained pre-existing canary state paths are `.tmp/task15-canary/mission.json`, `.tmp/task15-canary/authorize.json`, and `.tmp/task15-canary/home-fixed/credentials/{advisory,boss}`.
+
+The retained pre-existing detached runner path is `runner/cs-runner/detached-bootstrap-child`.
+
+These paths were not created by the final QA passes and were preserved under the task's concurrent-worktree custody rule.

@@ -1,6 +1,6 @@
 # Consigliere Local V0 canary
 
-The final implementation head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
+The historical canary-package implementation head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
 
 Its native package and installed lifecycle are recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-bf22b5d.log` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-bf22b5d.log`.
 
@@ -32,7 +32,7 @@ That final package was not used to rerun the same Mission because the operator-c
 
 ## Current exact-head closure
 
-The final source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
+The historical canary-package source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
 
 The package was rebuilt from that exact head and the installed-only lifecycle passed from `/tmp` with a fresh `CS_HOME`, `env -i`, no source or Mix access, and no shared Made daemon.
 
@@ -78,7 +78,7 @@ The selected operator-controlled canary remains unchanged, was not rerun, and re
 
 The final evidence set contains this addendum and the matching F1-F4 refresh.
 
-The final runtime implementation head is `df939ab3e06c1c5bad15ae4156b27bfeae805b16`.
+The final runtime implementation head is `bf7a73dd005fe6c1746a1c73f1929411cd7392c1`.
 
 The operator retains the next Continue or Stop decision.
 
@@ -86,7 +86,7 @@ No FirstMate duplicate Mission, automatic delivery, push, pull request, merge, f
 
 ## Final runtime closure
 
-The final runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
+The historical prior runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
 
 The exact-head package, installed lifecycle, Linux daemon gate, Go gates, and native macOS gate are recorded in the `*-7159373.md` receipts under `.omo/evidence/consigliere-local-v0-revival/`.
 

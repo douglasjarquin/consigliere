@@ -1,6 +1,6 @@
 # Final exact-head gate receipt
 
-The final runtime evidence is bound to source commit `42933d103da9171c76b1564888e0d6557291fb5d` on `revival/v0-local-codex`.
+Historical runtime evidence is bound to source commit `42933d103da9171c76b1564888e0d6557291fb5d` on `revival/v0-local-codex`.
 
 The packaged runtime input parent is `42933d103da9171c76b1564888e0d6557291fb5d`.
 
@@ -132,10 +132,10 @@ The selected canary was not rerun against this final package because the operato
 
 ## Authoritative final implementation-head receipt
 
-The authoritative final runtime implementation head is `df939ab3e06c1c5bad15ae4156b27bfeae805b16`.
+The authoritative final runtime implementation head is `bf7a73dd005fe6c1746a1c73f1929411cd7392c1`.
 
 The exact-head daemon suite returned `502 passed (1 doctest, 501 tests)` after the bounded reader-query hardening.
 
-The fresh native arm64 package and package-only lifecycle proof are recorded in `final-head-attestation-df939ab.md`.
+The fresh native arm64 package and package-only lifecycle proof are recorded in `final-head-attestation-bf7a73d.md`.
 
 The selected canary was not rerun, no duplicate Mission was created, and no Promote claim was made.
