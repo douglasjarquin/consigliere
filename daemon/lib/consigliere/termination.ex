@@ -109,9 +109,8 @@ defmodule Consigliere.Termination do
 
   def deliver(item) do
     attempt_id = item.payload["attempt_id"]
-    cause = item.payload["cause"] || "canceled"
     cancel_runner(attempt_id)
-    finalize(attempt_id, cause)
+    :ok
   end
 
   def cancel_runner(attempt_id) do
