@@ -204,3 +204,23 @@ The RED regression emitted one 200,000-byte `/dev/zero` chunk under a bounded he
 The GREEN implementation checks the accumulated byte count plus the received chunk size before combining iodata and returns only the remaining bounded prefix.
 
 The focused command passed `7 tests`, and the serial full daemon gate passed `500 tests (1 doctest, 499 tests)`.
+
+## Away return boundedness follow-up
+
+The exact-head review found that `away.return` loaded unbounded open Questions and Missions, returned raw domain-event payloads, and acknowledged the cursor before the outer protocol encoded the response.
+
+Tests-first RED proof used `MIX_ENV=test mix test test/consigliere/away_cursor_test.exs:47 --no-color --seed 0` and observed `0/1 passed` because the oversized event payload was returned unchanged.
+
+The GREEN implementation bounds each Away query to 32 rows, adds deterministic tie-break ordering, bounds and redacts human text, returns event identity summaries without raw payloads, validates the encoded digest against the 1 MiB frame limit, and acknowledges only after that validation succeeds.
+
+The protocol preserves typed errors from the bounded Away return path, and the human CLI handles the same error result without pattern-matching an unbounded digest.
+
+The focused RED/GREEN and regression command passed `14 tests`, and five repeated runs of the reader, Away, and API slice each passed `15 tests` with `8 excluded`.
+
+The full daemon gate passed `503 tests (1 doctest, 502 tests)` after the fix.
+
+The bounded oversized-payload regression used a secret-shaped 130,000-byte event value, verified no event payload was returned, and verified the boss cursor advanced only with the bounded digest.
+
+The applicable adversarial classes were oversized durable payloads, response-size enforcement, cursor-loss prevention, deterministic ordering, malformed or advisory authorization, and repeated timing.
+
+Malformed schemas, prompt injection, cancel or resume, dirty worktrees, hung commands, and process interruption do not enter `away.return`'s read-and-ack path and remain covered by their owning task records.

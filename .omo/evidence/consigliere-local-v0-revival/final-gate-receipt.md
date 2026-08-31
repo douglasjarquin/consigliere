@@ -54,6 +54,18 @@ The rebuilt native arm64 package and fresh package-only reader/lifecycle proof a
 
 The selected canary was not rerun, no duplicate Mission was created, and no Promote claim was made.
 
+## Current exact implementation and package receipt
+
+The current runtime source head is `4cb71b41075631d8beb30ddaeca5171c9b835234`.
+
+The current exact daemon, package, lifecycle, and Away boundedness receipts are `away-return-4cb71b4.md`, `daemon-gate-eb41191.md`, `package-artifact-4cb71b4.md`, and `installed-lifecycle-4cb71b4.md`.
+
+The current runtime head passes the Away RED/GREEN regression, five repeated bounded-reader runs, and the full `503`-test daemon gate.
+
+The current package-only lifecycle passed `cs boss away`, `cs boss return`, identity-safe restart, repeated stop, and zero-residue cleanup from a fresh `env -i` home.
+
+The final implementation and package changes contain no canary rerun, duplicate Mission, FirstMate implementation, Made operation, push, PR creation, or merge.
+
 ## Historical exact runtime source gate for 7c54c78
 
 The historical runtime source head was `7c54c782552f3ee5a09ddee35735e90cba1b9339` on `revival/v0-local-codex`.
@@ -104,7 +116,7 @@ The complete final delivery attestation is `final-delivery-attestation-c060b88.m
 
 ## Historical exact-head closure for 7159373
 
-The current runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
+The historical runtime source head was `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
 
 The exact-head bounded receipts are `daemon-linux-gate-7159373.md`, `go-gates-7159373.md`, `package-artifact-7159373.md`, `installed-lifecycle-7159373.md`, and `macos-native-gate-7159373.md`.
 

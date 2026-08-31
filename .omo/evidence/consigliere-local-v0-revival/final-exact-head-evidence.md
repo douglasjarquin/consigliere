@@ -2,7 +2,7 @@
 
 All records in this archive are historical snapshots and are not current delivery claims.
 
-The current implementation evidence is bound to `eb41191b73a04b93d613d8d0cf8b2183a55272ef` in `final-gate-receipt.md`, `F1.md`, `F2.md`, `F3.md`, and `F4.md`.
+The current implementation evidence is bound to `4cb71b41075631d8beb30ddaeca5171c9b835234` in `final-gate-receipt.md`, `F1.md`, `F2.md`, `F3.md`, and `F4.md`.
 
 Target branch: `revival/v0-local-codex`.
 
