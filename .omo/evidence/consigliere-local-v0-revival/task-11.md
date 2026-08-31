@@ -230,15 +230,15 @@ The historical focused Away, termination, and dispatch proof passed `8 tests` in
 
 The historical package and lifecycle receipts are `package-artifact-ec47784.md` and `installed-lifecycle-ec47784.md`.
 
-## Current termination and reconciliation closure
+## Historical superseded termination and reconciliation closure for 0c2b24c
 
-The current runtime source head is `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
+The superseded runtime source head was `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
 
-The current termination path persists the requested cause, defers terminal outcome until verified runner death, and reconciles unverified terminating exits through the existing lost, quarantine, and scheduler-slot hold path.
+The superseded termination path persisted the requested cause, deferred terminal outcome until verified runner death, and reconciled unverified terminating exits through the existing lost, quarantine, and scheduler-slot hold path.
 
-The current focused Away, termination, dispatch, recovery, and classify-exit proof passed `25 tests`, and the full daemon gate passed `510 passed (1 doctest, 509 tests)`.
+The historical focused Away, termination, dispatch, recovery, and classify-exit proof passed `25 tests`, and the full daemon gate passed `510 passed (1 doctest, 509 tests)`.
 
-The current package and lifecycle receipts are `package-artifact-0c2b24c.md` and `installed-lifecycle-0c2b24c.md`.
+The historical package and lifecycle receipts are `package-artifact-0c2b24c.md` and `installed-lifecycle-0c2b24c.md`.
 
 ## Final runtime audit follow-up
 

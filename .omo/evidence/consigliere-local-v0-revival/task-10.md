@@ -245,13 +245,13 @@ The historical superseded runtime source head is `0fd7d3b951672df7cb37e6c160401d
 
 The historical monotonic cursor RED/GREEN, five repeated focused runs, full daemon gate, package, and lifecycle receipts are `away-return-0fd7d3b.md`, `daemon-gate-0fd7d3b.md`, `package-artifact-0fd7d3b.md`, and `installed-lifecycle-0fd7d3b.md`.
 
-## Current bounded surface closure
+## Historical superseded bounded surface closure for 0c2b24c
 
-The current runtime source head is `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
+The superseded runtime source head was `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
 
-The bounded API, event, log, usage, Away cursor, and command-output behavior remains covered by the current daemon and package gates; the current receipt set is `daemon-gate-0c2b24c.md`, `package-artifact-0c2b24c.md`, and `installed-lifecycle-0c2b24c.md`.
+The bounded API, event, log, usage, Away cursor, and command-output behavior was covered by the superseded daemon and package gates; the historical receipt set is `daemon-gate-0c2b24c.md`, `package-artifact-0c2b24c.md`, and `installed-lifecycle-0c2b24c.md`.
 
-The current runtime fix additionally ensures that unverified terminating Attempt exits follow the bounded lost and quarantine reconciliation path without changing the established output caps.
+The superseded runtime fix additionally ensured that unverified terminating Attempt exits followed the bounded lost and quarantine reconciliation path without changing the established output caps.
 
 ## Current exact-head correction for d63f239
 
