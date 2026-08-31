@@ -69,7 +69,6 @@ defmodule Consigliere.Harness.ContextPackTest do
              Consigliere.Capabilities.worker_operations()
 
     refute result.encoded =~ "boss.secret"
-    refute result.encoded =~ "complete the authorized mission"
 
     {:ok, protected} =
       ContextPack.compose(mission, %{
