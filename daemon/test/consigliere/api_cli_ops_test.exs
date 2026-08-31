@@ -114,6 +114,27 @@ defmodule Consigliere.API.CLIOpsTest do
     assert Enum.any?(resp["payload"]["missions"], &(&1["id"] == mission.id))
   end
 
+  test "reader list responses remain bounded with many rows" do
+    Enum.each(1..101, fn _ -> Fixtures.dummy_project!() end)
+
+    project_list = call("project.list")
+    assert project_list["ok"] == true
+    assert length(project_list["payload"]["projects"]) == 32
+
+    Enum.each(1..101, fn _ ->
+      {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
+      {:ok, _mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
+    end)
+
+    mission_list = call("mission.list")
+    assert mission_list["ok"] == true
+    assert length(mission_list["payload"]["missions"]) == 32
+
+    review = call("mission.review")
+    assert review["ok"] == true
+    assert length(review["payload"]["missions"]) == 32
+  end
+
   test "attempt.list, incident.list, event.list, and attempt.logs are read-only" do
     {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
 
