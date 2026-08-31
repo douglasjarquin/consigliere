@@ -6,7 +6,8 @@ Branch: `revival/v0-local-codex`.
 
 Base: `24ffea8fa1f5bc983fb5965efab0a89b6116f05b`.
 
-Commit: `feat(v0-02): make commands idempotent outside transactions`.
+Implementation commits: `c0194a4` for Go retry persistence, `fc14c20` and `4366f30` for receipt atomicity, and `48c7323` for external operation recovery.
+The current evidence head is `604ff4e959d5365d68b5260ad97600e190916581`.
 
 The initial RED proof used a clean Linux Elixir container and the Go client test suite.
 
@@ -34,7 +35,10 @@ Changed operation or payload under an existing key returns a stable idempotency 
 
 Protocol-supplied canonical hashes are checked before the command is accepted.
 
-Pending receipts are reconciled at daemon boot into a bounded recovery-required result without re-running the callback.
+Database-only finalization rollback leaves no pending receipt for boot reconciliation.
+External commands claim a separate durable `command_operations` row before work, link it to the receipt, and reconcile only linked pending operations.
+The `project.add` recovery path resolves a killed external worker from the persisted Project domain record and stores the durable operation and Project IDs in bounded evidence.
+Insufficient external domain evidence remains explicitly `recovery_required`, while unrelated pending receipts are not blanket-converted.
 
 The receipt callback runs after the claim transaction releases the SQLite writer, and slow external work does not run inside the writer callback.
 
@@ -44,7 +48,17 @@ RED-to-GREEN targeted proof:
 
 ```text
 cd daemon && mix deps.get >/dev/null && mix format --check-formatted && MIX_ENV=test mix test test/consigliere/command_receipts_test.exs test/consigliere/database_writer_test.exs test/consigliere/database_writer_atomicity_test.exs
-Result: 18 passed
+Historical result before the external-operation correction: 18 passed.
+
+Current receipt regression after the correction:
+
+```text
+PATH="/opt/homebrew/opt/erlang/bin:$PATH" mix test test/consigliere/command_receipts_test.exs
+Result: 15 passed
+```
+
+The rollback test asserts `reconcile_pending/0` returns zero after the transaction abort.
+The external recovery test starts real receipt work, kills it after the durable claim, persists domain evidence, and verifies one linked operation and one linked receipt are committed without callback replay.
 ```
 
 Clean Linux daemon proof:
@@ -59,6 +73,9 @@ Go proof:
 ```text
 cd cli && test -z "$(gofmt -l .)" && go vet ./... && go test ./... && go test -race -shuffle=on -count=1 ./... && go build ./cmd/cs ./cmd/csd
 Result: normal tests, race tests, vet, and builds passed; command packages reported no test files.
+
+Exact current Go gates at `604ff4e959d5365d68b5260ad97600e190916581` also passed for CLI and runner.
+The CLI race suite passed in 3.442s and the runner race suite passed in 45.487s.
 ```
 
 Packaged manual QA used `scripts/package.sh` in a disposable Linux container with only the installed prefix, `/usr/bin`, and `/bin` on `PATH`.
@@ -79,6 +96,12 @@ task3_manual_qa=pass
 ```
 
 The package proof also asserted that a package-only `PATH` could not resolve Mix or the source checkout.
+
+The exact current package was rebuilt from `604ff4e959d5365d68b5260ad97600e190916581`.
+Its bounded artifact hashes were `cs=f2239acb35a454f6c5eea02849db5ee8f4534e456607e31323fe18e56d708ccd`, `csd=4dec97350c2078b76f1a05a4f32a6a72055067df98edf3771f10270d01fdd8c3`, `cs-attempt=ff5c91ad936414cb657f3933e785bbff09f6bee3fbc398772b65224f8ccb3435`, and `cs-runner=d51263c4b832d6e66958fd6ac10a025ca91e1cd68f274c21fbb4b56a2cf2121d`.
+The installed-only lifecycle migrated schema `20260831160000`, started, pinged, ran doctor, stopped, restarted, pinged again, stopped, and accepted a repeated stop.
+The final scan reported zero sockets, PID files, owner files, and package processes.
+The private QA home and package prefix were moved to macOS Trash after the proof.
 
 The temporary package driver, inner fake-server driver, archive, and container were removed automatically after the successful run.
 
