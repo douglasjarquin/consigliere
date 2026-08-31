@@ -24,7 +24,9 @@ defmodule Consigliere.Away do
 
   def path(home \\ Home.dir()), do: Path.join(home, "away")
 
-  def mark(home \\ Home.dir()) do
+  def mark(home \\ Home.dir()), do: with_home_lock(home, fn -> mark_locked(home) end)
+
+  defp mark_locked(home) do
     Home.ensure_dir!(home)
     away_since = Txn.now()
     File.write!(path(home), DateTime.to_iso8601(away_since))
@@ -34,7 +36,9 @@ defmodule Consigliere.Away do
 
   def marked?(home \\ Home.dir()), do: File.exists?(path(home))
 
-  def return(home \\ Home.dir()) do
+  def return(home \\ Home.dir()), do: return_locked(home)
+
+  defp return_locked(home) do
     {digest, cursor} = build_digest(:return)
     frame_bytes = Limits.frame_bytes()
     acknowledged_event_id = digest_cursor(digest)
@@ -42,17 +46,19 @@ defmodule Consigliere.Away do
     case Limits.encoded_size(digest) do
       {:ok, size} ->
         if size <= frame_bytes do
-          case ack_cursor(acknowledged_event_id, cursor.away_since) do
-            {:ok, :ok} ->
-              remove_marker_if_current(home, cursor.away_since)
-              digest
+          with_home_lock(home, fn ->
+            case ack_cursor(acknowledged_event_id, cursor.away_since) do
+              {:ok, :ok} ->
+                remove_marker_if_current(home, cursor.away_since)
+                digest
 
-            {:ok, :stale_marker} ->
-              {:error, :stale_away_return}
+              {:ok, :stale_marker} ->
+                {:error, :stale_away_return}
 
-            {:error, _reason} ->
-              {:error, :cursor_acknowledgement_failed}
-          end
+              {:error, _reason} ->
+                {:error, :cursor_acknowledgement_failed}
+            end
+          end)
         else
           {:error, :response_too_large}
         end
@@ -65,6 +71,10 @@ defmodule Consigliere.Away do
   def digest(mode \\ :inbox) do
     {digest, _cursor} = build_digest(mode)
     digest
+  end
+
+  defp with_home_lock(home, fun) do
+    :global.trans({{__MODULE__, Path.expand(home)}, self()}, fun)
   end
 
   defp build_digest(mode) do

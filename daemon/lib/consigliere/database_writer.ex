@@ -28,13 +28,6 @@ defmodule Consigliere.DatabaseWriter do
     Consigliere.Missions.create(attrs, Consigliere.Actor.system())
   end
 
-  @doc """
-  Run an arbitrary transaction function through the serialized write
-  path. Exists for spike/test scenarios that need direct control
-  (e.g. deliberately holding a transaction open, or writing a
-  poison row via raw SQL). Production code should prefer named
-  functions like insert_mission/1 over this escape hatch.
-  """
   def transaction(fun, timeout \\ 10_000) do
     if self() == Process.whereis(__MODULE__) do
       {:ok, fun.()}

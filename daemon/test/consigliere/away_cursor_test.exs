@@ -156,4 +156,55 @@ defmodule Consigliere.AwayCursorTest do
     assert Enum.all?(second_results, &is_map/1)
     assert Repo.get_by!(BossCursor, name: "boss").last_event_id == List.last(events).id
   end
+
+  test "mark serializes marker and cursor updates behind the home lock" do
+    parent = self()
+    home = Path.expand(Path.dirname(Away.path()))
+
+    lock_holder =
+      Task.async(fn ->
+        :global.trans({{Away, home}, self()}, fn ->
+          send(parent, :away_lock_held)
+
+          receive do
+            :release -> :ok
+          end
+        end)
+      end)
+
+    assert_receive :away_lock_held, 5_000
+
+    tasks =
+      Enum.map(1..2, fn _index ->
+        Task.async(fn ->
+          send(parent, {:away_mark_ready, self()})
+
+          receive do
+            :start ->
+              assert Away.mark() == :ok
+              send(parent, :away_mark_finished)
+              :ok
+          end
+        end)
+      end)
+
+    Enum.each(tasks, fn _task ->
+      assert_receive {:away_mark_ready, _pid}, 5_000
+    end)
+
+    Enum.each(tasks, &send(&1.pid, :start))
+    refute_receive :away_mark_finished, 100
+    send(lock_holder.pid, :release)
+    assert Task.await(lock_holder, 5_000) == :ok
+
+    assert Enum.all?(Enum.map(tasks, &Task.await(&1, 5_000)), &(&1 == :ok))
+    assert_receive :away_mark_finished, 5_000
+    assert_receive :away_mark_finished, 5_000
+
+    cursor = Repo.get_by!(BossCursor, name: "boss")
+    assert File.read!(Away.path()) == DateTime.to_iso8601(cursor.away_since)
+
+    assert is_map(Away.return())
+    refute Away.marked?()
+  end
 end
