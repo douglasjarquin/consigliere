@@ -114,7 +114,7 @@ defmodule Consigliere.API.CLIOpsTest do
     assert Enum.any?(resp["payload"]["missions"], &(&1["id"] == mission.id))
   end
 
-  test "reader list responses remain bounded with many rows" do
+  test "reader list response envelopes remain bounded with many rows" do
     Enum.each(1..101, fn _ -> Fixtures.dummy_project!() end)
 
     project_list = call("project.list")

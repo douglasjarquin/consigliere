@@ -43,7 +43,7 @@ defmodule Consigliere.ProjectVerifications do
     Repo.all(
       from(r in VerificationRun,
         where: r.attempt_id == ^attempt_id,
-        order_by: [asc: r.ordinal],
+        order_by: [asc: r.ordinal, asc: r.id],
         limit: ^@max_commands
       )
     )

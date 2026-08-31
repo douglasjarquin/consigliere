@@ -358,7 +358,10 @@ defmodule Consigliere.API.Protocol do
     with :ok <- require_reader(actor) do
       attempts =
         Repo.all(
-          from(a in Consigliere.Attempts.Attempt, order_by: [desc: a.inserted_at], limit: 100)
+          from(a in Consigliere.Attempts.Attempt,
+            order_by: [desc: a.inserted_at, desc: a.id],
+            limit: 100
+          )
         )
 
       {:ok,
@@ -387,7 +390,10 @@ defmodule Consigliere.API.Protocol do
     with :ok <- require_reader(actor) do
       incidents =
         Repo.all(
-          from(i in Consigliere.Incidents.Incident, order_by: [desc: i.inserted_at], limit: 100)
+          from(i in Consigliere.Incidents.Incident,
+            order_by: [desc: i.inserted_at, desc: i.id],
+            limit: 100
+          )
         )
 
       {:ok,
