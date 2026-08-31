@@ -243,7 +243,13 @@ defmodule Consigliere.API.Protocol do
 
   defp run_allowed("project.list", _payload, actor) do
     with :ok <- require_reader(actor) do
-      projects = Repo.all(from(p in Consigliere.Projects.Project, limit: ^@max_list_rows))
+      projects =
+        Repo.all(
+          from(p in Consigliere.Projects.Project,
+            order_by: [asc: p.name, asc: p.id],
+            limit: ^@max_list_rows
+          )
+        )
 
       {:ok,
        %{
@@ -316,7 +322,12 @@ defmodule Consigliere.API.Protocol do
   defp run_allowed("mission.list", _payload, actor) do
     with :ok <- require_reader(actor) do
       missions =
-        Repo.all(from(m in Mission, order_by: [desc: m.inserted_at], limit: ^@max_list_rows))
+        Repo.all(
+          from(m in Mission,
+            order_by: [desc: m.inserted_at, desc: m.id],
+            limit: ^@max_list_rows
+          )
+        )
 
       {:ok, %{"missions" => Enum.map(missions, &mission_summary/1)}}
     end
@@ -334,7 +345,7 @@ defmodule Consigliere.API.Protocol do
         Repo.all(
           from(m in Mission,
             where: m.phase in ^@review_phases,
-            order_by: [asc: m.inserted_at],
+            order_by: [asc: m.inserted_at, asc: m.id],
             limit: ^@max_list_rows
           )
         )
