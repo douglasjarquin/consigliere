@@ -56,8 +56,10 @@ defmodule Consigliere.ProjectVerifications.Command do
           os_pid,
           [],
           System.monotonic_time(:millisecond) +
-            min(Keyword.get(opts, :timeout_ms, 900_000),
-              Keyword.get(opts, :total_timeout_ms, 1_800_000))
+            min(
+              Keyword.get(opts, :timeout_ms, 900_000),
+              Keyword.get(opts, :total_timeout_ms, 1_800_000)
+            )
         )
     end
   rescue
@@ -77,6 +79,7 @@ defmodule Consigliere.ProjectVerifications.Command do
 
           if overflow? do
             terminate(os_pid, port)
+
             result(
               "infrastructure_error",
               output,

@@ -288,8 +288,116 @@ defmodule Consigliere.CommandReceiptsTest do
     operation = Repo.get!(CommandOperation, receipt.operation_id)
     assert operation.receipt_id == receipt.id
     assert operation.status == "committed"
-    assert operation.payload == %{"repository_path" => "/tmp/project"}
+    assert operation.payload == %{"name" => "project", "repository_path" => "/tmp/project"}
     assert receipt.response["operation_id"] == operation.id
+  end
+
+  test "reconciliation treats a pre-existing Project as an external conflict" do
+    repository_path = "/tmp/project-existing-before-operation"
+    payload = %{"name" => "project", "repository_path" => repository_path}
+
+    {:ok, project} =
+      Repo.insert(
+        Project.changeset(%Project{}, %{
+          name: "project",
+          repository_path: repository_path,
+          repository_url: "file://#{repository_path}",
+          default_branch: "main",
+          trusted_mirror_path: "/tmp/project-existing-mirror"
+        })
+      )
+
+    {:ok, request_hash} =
+      CommandReceipts.request_hash(Actor.boss(), "project.add", "existing-key", payload)
+
+    {:ok, receipt} =
+      Repo.insert(
+        CommandReceipt.changeset(%CommandReceipt{}, %{
+          idempotency_key: "existing-key",
+          op: "project.add",
+          principal: "boss",
+          payload_hash: request_hash,
+          response: %{},
+          status: "pending"
+        })
+      )
+
+    {:ok, operation} =
+      Repo.insert(
+        CommandOperation.changeset(%CommandOperation{}, %{
+          receipt_id: receipt.id,
+          op: "project.add",
+          principal: "boss",
+          payload: payload,
+          evidence: %{"intent" => "external_operation"},
+          status: "pending"
+        })
+      )
+
+    {:ok, receipt} = Repo.update(CommandReceipt.changeset(receipt, %{operation_id: operation.id}))
+
+    assert {:ok, 1} = CommandReceipts.reconcile_pending()
+
+    receipt = Repo.get!(CommandReceipt, receipt.id)
+    operation = Repo.get!(CommandOperation, operation.id)
+    assert receipt.status == "committed"
+    assert receipt.response["ok"] == false
+    assert receipt.response["error"]["code"] == "conflict"
+    assert receipt.response["error"]["reason"] == "project_exists"
+    assert operation.status == "committed"
+    assert operation.evidence["outcome"] == "project_exists"
+    assert operation.evidence["project_id"] == project.id
+  end
+
+  test "reconciliation ignores a pending operation with a mismatched receipt back-reference" do
+    payload = %{"name" => "project", "repository_path" => "/tmp/mismatched-operation"}
+
+    {:ok, request_hash} =
+      CommandReceipts.request_hash(Actor.boss(), "project.add", "mismatch-key", payload)
+
+    {:ok, receipt} =
+      Repo.insert(
+        CommandReceipt.changeset(%CommandReceipt{}, %{
+          idempotency_key: "mismatch-key",
+          op: "project.add",
+          principal: "boss",
+          payload_hash: request_hash,
+          response: %{},
+          status: "pending"
+        })
+      )
+
+    {:ok, other_receipt} =
+      Repo.insert(
+        CommandReceipt.changeset(%CommandReceipt{}, %{
+          idempotency_key: "mismatch-other-key",
+          op: "project.add",
+          principal: "boss",
+          payload_hash: request_hash,
+          response: %{},
+          status: "pending"
+        })
+      )
+
+    {:ok, operation} =
+      Repo.insert(
+        CommandOperation.changeset(%CommandOperation{}, %{
+          receipt_id: other_receipt.id,
+          op: "project.add",
+          principal: "boss",
+          payload: payload,
+          evidence: %{"intent" => "external_operation"},
+          status: "pending"
+        })
+      )
+
+    {:ok, _receipt} =
+      Repo.update(CommandReceipt.changeset(receipt, %{operation_id: operation.id}))
+
+    assert {:ok, 0} = CommandReceipts.reconcile_pending()
+    assert Repo.get!(CommandReceipt, receipt.id).status == "pending"
+    assert Repo.get!(CommandReceipt, other_receipt.id).status == "pending"
+    assert Repo.get!(CommandOperation, operation.id).status == "pending"
   end
 
   test "a supplied canonical request hash must match the authenticated request" do

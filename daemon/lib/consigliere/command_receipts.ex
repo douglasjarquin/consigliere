@@ -13,6 +13,7 @@ defmodule Consigliere.CommandReceipts do
   alias Consigliere.CommandReceipts.CommandOperation
   alias Consigliere.CommandReceipts.CommandReceipt
   alias Consigliere.DatabaseWriter
+  alias Consigliere.Projects.Project
   alias Consigliere.Repo
   alias Consigliere.Txn
 
@@ -153,7 +154,9 @@ defmodule Consigliere.CommandReceipts do
         Repo.all(
           from(o in CommandOperation,
             join: r in CommandReceipt,
-            on: r.operation_id == o.id,
+            on:
+              r.operation_id == o.id and r.id == o.receipt_id and r.op == o.op and
+                r.principal == o.principal,
             where: o.status == "pending" and r.status == "pending",
             order_by: [asc: o.inserted_at],
             select: {o, r}
@@ -312,7 +315,7 @@ defmodule Consigliere.CommandReceipts do
   end
 
   defp operation_payload("project.add", payload),
-    do: Map.take(payload, ["repository_path"])
+    do: Map.take(payload, ["name", "repository_path"])
 
   defp operation_payload(op, payload)
        when op in [
@@ -371,15 +374,14 @@ defmodule Consigliere.CommandReceipts do
           "payload" => payload
         }
 
-        Txn.update!(
-          CommandOperation.changeset(operation, %{
-            status: "committed",
-            evidence: evidence,
-            response: envelope
-          })
-        )
+        finalize_reconciled_txn(operation, receipt, envelope, evidence)
 
-        Txn.update!(CommandReceipt.changeset(receipt, %{status: "committed", response: envelope}))
+      {:conflict, evidence} ->
+        envelope =
+          result_envelope({:error, {:conflict, "project_exists"}})
+          |> Map.put("operation_id", operation.id)
+
+        finalize_reconciled_txn(operation, receipt, envelope, evidence)
 
       :unknown ->
         envelope = result_envelope({:error, {:operation_recovery_required, operation.id}})
@@ -398,13 +400,20 @@ defmodule Consigliere.CommandReceipts do
     end
   end
 
-  defp external_domain_evidence(%CommandOperation{op: "project.add", payload: payload}) do
-    case Repo.get_by(Consigliere.Projects.Project,
-           repository_path: payload["repository_path"]
-         ) do
-      %Consigliere.Projects.Project{} = project ->
-        {:completed, %{"outcome" => "project_present", "project_id" => project.id},
-         %{"id" => project.id}}
+  defp external_domain_evidence(%CommandOperation{
+         op: "project.add",
+         payload: payload,
+         inserted_at: operation_inserted_at
+       }) do
+    case Repo.get_by(Project, name: payload["name"], repository_path: payload["repository_path"]) do
+      %Project{inserted_at: project_inserted_at} = project ->
+        evidence = %{"project_id" => project.id}
+
+        if DateTime.compare(project_inserted_at, operation_inserted_at) == :lt do
+          {:conflict, Map.put(evidence, "outcome", "project_exists")}
+        else
+          {:completed, Map.put(evidence, "outcome", "project_present"), %{"id" => project.id}}
+        end
 
       nil ->
         :unknown
@@ -412,6 +421,18 @@ defmodule Consigliere.CommandReceipts do
   end
 
   defp external_domain_evidence(_operation), do: :unknown
+
+  defp finalize_reconciled_txn(operation, receipt, envelope, evidence) do
+    Txn.update!(
+      CommandOperation.changeset(operation, %{
+        status: "committed",
+        evidence: evidence,
+        response: envelope
+      })
+    )
+
+    Txn.update!(CommandReceipt.changeset(receipt, %{status: "committed", response: envelope}))
+  end
 
   defp finalize_txn(receipt_id, envelope) do
     row = Repo.get!(CommandReceipt, receipt_id)
