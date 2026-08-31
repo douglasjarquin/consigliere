@@ -1,0 +1,3 @@
+HEAD=95756706aa16d00ce0061500363d30bee9446dd8
+ok  	github.com/douglasjarquin/consigliere/cli/client	1.259s
+ok  	github.com/douglasjarquin/consigliere/cli/service	1.300s
