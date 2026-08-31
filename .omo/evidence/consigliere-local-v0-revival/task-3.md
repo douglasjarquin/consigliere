@@ -7,7 +7,7 @@ Branch: `revival/v0-local-codex`.
 Base: `24ffea8fa1f5bc983fb5965efab0a89b6116f05b`.
 
 Implementation commits: `c0194a4` for Go retry persistence, `fc14c20` and `4366f30` for receipt atomicity, and `48c7323` for external operation recovery.
-The current runtime source head is `d8e6dac66509f724548a0bb09e38f361f627021d`.
+The current runtime source head is `9260a9f22af55c6c073de3afae3602f58e4e8061`.
 
 The initial RED proof used a clean Linux Elixir container and the Go client test suite.
 
@@ -54,7 +54,7 @@ Current receipt regression after the correction:
 
 ```text
 PATH="/opt/homebrew/opt/erlang/bin:$PATH" mix test test/consigliere/command_receipts_test.exs
-Result: 15 passed
+Result: 17 passed
 ```
 
 The rollback test asserts `reconcile_pending/0` returns zero after the transaction abort.
@@ -74,7 +74,7 @@ Go proof:
 cd cli && test -z "$(gofmt -l .)" && go vet ./... && go test ./... && go test -race -shuffle=on -count=1 ./... && go build ./cmd/cs ./cmd/csd
 Result: normal tests, race tests, vet, and builds passed; command packages reported no test files.
 
-Exact current Go gates at runtime source `d8e6dac66509f724548a0bb09e38f361f627021d` also passed for CLI and runner.
+Exact current Go gates at runtime source `9260a9f22af55c6c073de3afae3602f58e4e8061` also passed for CLI and runner.
 The CLI race suite passed in 3.442s and the runner race suite passed in 45.487s.
 ```
 
@@ -97,8 +97,8 @@ task3_manual_qa=pass
 
 The package proof also asserted that a package-only `PATH` could not resolve Mix or the source checkout.
 
-The exact current package was rebuilt from runtime source `d8e6dac66509f724548a0bb09e38f361f627021d`.
-Its bounded artifact hashes were `cs=f2239acb35a454f6c5eea02849db5ee8f4534e456607e31323fe18e56d708ccd`, `csd=4dec97350c2078b76f1a05a4f32a6a72055067df98edf3771f10270d01fdd8c3`, `cs-attempt=ff5c91ad936414cb657f3933e785bbff09f6bee3fbc398772b65224f8ccb3435`, and `cs-runner=d51263c4b832d6e66958fd6ac10a025ca91e1cd68f274c21fbb4b56a2cf2121d`.
+The exact current package was rebuilt from runtime source `9260a9f22af55c6c073de3afae3602f58e4e8061`.
+Its bounded artifact hashes were `cs=40dfe538c79e6e498b469c24b281f7d13e534ff56f2c2364ce9c25ea71076e36`, `csd=fcbbc344bee19e0106ab9d23f8b2c9b39ba3329afaeecbd72b88be8209b9de2e`, `cs-attempt=c43fe457f610bb21f33c9e8b1a975ac8ce92ac6a692ede090029b4c16e292eab`, and `cs-runner=5f12f764b60b34ceea42e28b46411c94f077c9b99a0abba1188470c6803b70c3`.
 The installed-only lifecycle migrated schema `20260831160000`, started, pinged, ran doctor, stopped, restarted, pinged again, stopped, and accepted a repeated stop.
 The final scan reported zero sockets, PID files, owner files, and package processes.
 The private QA home and package prefix were moved to macOS Trash after the proof.

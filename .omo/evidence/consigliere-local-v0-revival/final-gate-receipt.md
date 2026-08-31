@@ -54,10 +54,10 @@ The rebuilt native arm64 package and fresh package-only reader/lifecycle proof a
 
 The selected canary was not rerun, no duplicate Mission was created, and no Promote claim was made.
 
-## Current exact runtime source receipt for d8e6dac
+## Current exact runtime source receipt for 9260a9f
 
-The current runtime source is `d8e6dac66509f724548a0bb09e38f361f627021d` on `revival/v0-local-codex`.
-The full daemon gate passed `523 passed (1 doctest, 522 tests)` and the receipt suite passed 15 tests in five repeated runs.
+The current runtime source is `9260a9f22af55c6c073de3afae3602f58e4e8061` on `revival/v0-local-codex`.
+The full daemon gate passed `525 passed (1 doctest, 524 tests)` and the receipt suite passed 17 tests in five repeated runs.
 CLI and runner Go gates passed formatting, vet, ordinary tests, race and shuffle tests, and builds.
 The fresh package migrated schema `20260831160000`, passed start/ping/doctor/stop/restart/repeated-stop lifecycle checks, and ended with zero sockets, PID files, owner files, and package processes.
 The package and QA home were moved to macOS Trash after the proof.

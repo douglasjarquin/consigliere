@@ -202,8 +202,8 @@ The only retained notes are non-blocking timing-based contention and shared-test
 
 ## Current exact runtime source handoff
 
-Runtime source head: `d8e6dac66509f724548a0bb09e38f361f627021d`.
+Runtime source head: `9260a9f22af55c6c073de3afae3602f58e4e8061`.
 
 The receipt remediation adds a durable `command_operations` association, domain-evidence recovery, rollback absence proof, and durable operation payload minimization.
-The focused receipt suite passed 15 tests in five repeated runs, the full daemon suite passed 523 tests including one doctest, CLI and runner Go gates passed, and a fresh native package lifecycle passed with zero residue.
+The focused receipt suite passed 17 tests in five repeated runs, the full daemon suite passed 525 tests including one doctest, CLI and runner Go gates passed, and a fresh native package lifecycle passed with zero residue.
 No canary was rerun or promoted.
