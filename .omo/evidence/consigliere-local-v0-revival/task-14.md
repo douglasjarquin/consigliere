@@ -150,7 +150,7 @@ The advisory regression covers prompt injection, bearer-shaped secrets, private-
 
 The exact package/manual proof returned exit `0` for the default `cs attempt logs` command and exposed structured event summaries only.
 
-The final source head `4e99cf4219998c15b01d23b23349730f27546c61` preserves that event-only advisory response while adding the adjacent native command bound and regression.
+The historical final source head `4e99cf4219998c15b01d23b23349730f27546c61` preserves that event-only advisory response while adding the adjacent native command bound and regression.
 
 ## Exact-head default authorized log security closure
 

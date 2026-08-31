@@ -100,7 +100,7 @@ Historical local final-gate verdict: PASS for runtime source `0fd7d3b951672df7cb
 
 The current runtime source head is `cf56963a7206e5c5a260442c08eaa7bdcd65ec7a`.
 
-The current exact daemon, cursor, termination, package, and lifecycle receipts are `away-return-0fd7d3b.md`, `termination-cf56963.md`, `daemon-gate-cf56963.md`, `package-artifact-cf56963.md`, and `installed-lifecycle-cf56963.md`.
+The current exact daemon, cursor, termination, package, and lifecycle receipts are `away-return-cf56963.md`, `termination-cf56963.md`, `daemon-gate-cf56963.md`, `package-artifact-cf56963.md`, and `installed-lifecycle-cf56963.md`.
 
 The current daemon gate passed `506 passed (1 doctest, 505 tests)` after format and warnings-as-errors compilation.
 

@@ -254,7 +254,7 @@ The cleanup receipt was `CLEANUP=trashed:/tmp/cs-final-42933d1-home.e7matc`; the
 
 ## Historical runtime-hardening package custody for 7c54c78
 
-The final runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339`.
+The historical final runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339`.
 
 Its package artifact and installed lifecycle passed in `package-artifact-7c54c78.md` and `installed-lifecycle-7c54c78.md`.
 
