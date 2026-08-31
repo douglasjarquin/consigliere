@@ -117,6 +117,30 @@ defmodule Consigliere.Attempts.ClassifyExitTest do
     assert lost.exit_classification == "canceled"
   end
 
+  test "verified death after an unverified cancellation releases the held slot" do
+    attempt = running_attempt!()
+    {:ok, _operation} = DispatchOperations.ensure(attempt, %{slot_state: "granted"})
+    assert {:ok, :granted} = GlobalScheduler.request_slot(attempt.mission_id)
+
+    {:ok, attempt} =
+      Repo.update(
+        Attempt.changeset(attempt, %{status: "terminating", exit_classification: "canceled"})
+      )
+
+    assert {:ok, lost} =
+             Attempts.classify_exit(attempt.id, %{process_group: :unconfirmed})
+
+    assert lost.status == "lost"
+    assert DispatchOperations.get_by_attempt(attempt.id).slot_state == "unknown"
+    assert {:error, :busy} = GlobalScheduler.request_slot("held-after-unverified-cancel")
+
+    assert {:ok, _terminal} =
+             Attempts.classify_exit(attempt.id, %{process_group: :dead_verified})
+
+    assert DispatchOperations.get_by_attempt(attempt.id).slot_state == "released"
+    assert {:ok, :granted} = GlobalScheduler.request_slot("released-after-verified-death")
+  end
+
   test "verified terminal exit releases every durable slot state" do
     attempt = running_attempt!()
     {:ok, _operation} = DispatchOperations.ensure(attempt, %{slot_state: "granted"})

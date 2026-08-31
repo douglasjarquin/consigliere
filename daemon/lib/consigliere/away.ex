@@ -26,8 +26,9 @@ defmodule Consigliere.Away do
 
   def mark(home \\ Home.dir()) do
     Home.ensure_dir!(home)
-    File.write!(path(home), DateTime.to_iso8601(DateTime.utc_now()))
-    upsert_cursor(%{away_since: Txn.now(), acknowledged_at: nil})
+    away_since = Txn.now()
+    File.write!(path(home), DateTime.to_iso8601(away_since))
+    upsert_cursor(%{away_since: away_since, acknowledged_at: nil})
     :ok
   end
 
@@ -43,7 +44,7 @@ defmodule Consigliere.Away do
         if size <= frame_bytes do
           case ack_cursor(acknowledged_event_id, cursor.away_since) do
             {:ok, :ok} ->
-              File.rm(path(home))
+              remove_marker_if_current(home, cursor.away_since)
               digest
 
             {:ok, :stale_marker} ->
@@ -217,6 +218,20 @@ defmodule Consigliere.Away do
       end
     end)
   end
+
+  defp remove_marker_if_current(home, %DateTime{} = away_since) do
+    marker = DateTime.to_iso8601(away_since)
+
+    case File.read(path(home)) do
+      {:ok, ^marker} ->
+        File.rm(path(home))
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp remove_marker_if_current(_home, _away_since), do: :ok
 
   defp latest_event_id do
     Repo.one(from(e in DomainEvent, select: max(e.id))) || 0

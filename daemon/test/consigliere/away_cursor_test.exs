@@ -35,6 +35,18 @@ defmodule Consigliere.AwayCursorTest do
     assert is_nil(acked.away_since)
   end
 
+  test "return does not remove a newer marker after acknowledging its snapshot" do
+    assert Away.mark() == :ok
+
+    File.write!(Away.path(), "newer-marker")
+
+    digest = Away.return()
+
+    assert is_map(digest)
+    assert Away.marked?()
+    assert is_nil(Repo.get_by!(BossCursor, name: "boss").away_since)
+  end
+
   test "inbox does not acknowledge the cursor" do
     assert Away.mark() == :ok
     {:ok, _} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
