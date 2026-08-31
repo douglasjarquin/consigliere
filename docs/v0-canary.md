@@ -76,7 +76,9 @@ The final source change only bounds and deterministically orders default reader 
 
 The selected operator-controlled canary remains unchanged, was not rerun, and remains insufficient for Promote.
 
-The separate evidence delivery head is recorded by the commit containing this addendum and the matching F1-F4 refresh.
+The final evidence set contains this addendum and the matching F1-F4 refresh.
+
+The final runtime implementation head is `df939ab3e06c1c5bad15ae4156b27bfeae805b16`.
 
 The operator retains the next Continue or Stop decision.
 

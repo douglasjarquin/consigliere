@@ -112,7 +112,7 @@ The package-only lifecycle and Go gates exited `0`, and the selected canary was 
 
 The selected canary remains one completed Consigliere Mission with one operator-authorized continuation, zero FirstMate Missions, and insufficient evidence for Promote.
 
-## Current final exact-head gate receipt
+## Historical exact-head gate receipt for bf22b5d
 
 The final runtime and package evidence is bound to source commit `bf22b5d4cae239a222a3065ca4b34b574dd676ad` on `revival/v0-local-codex`.
 
@@ -129,3 +129,13 @@ Every lifecycle command exited `0`, restart changed the verified owner identity,
 The exact package and lifecycle outputs are `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`, with `macos-native-gate-bf22b5d.log` retaining the named host-only characterization.
 
 The selected canary was not rerun against this final package because the operator-controlled canary forbids duplicate implementation work.
+
+## Authoritative final implementation-head receipt
+
+The authoritative final runtime implementation head is `df939ab3e06c1c5bad15ae4156b27bfeae805b16`.
+
+The exact-head daemon suite returned `502 passed (1 doctest, 501 tests)` after the bounded reader-query hardening.
+
+The fresh native arm64 package and package-only lifecycle proof are recorded in `final-head-attestation-df939ab.md`.
+
+The selected canary was not rerun, no duplicate Mission was created, and no Promote claim was made.

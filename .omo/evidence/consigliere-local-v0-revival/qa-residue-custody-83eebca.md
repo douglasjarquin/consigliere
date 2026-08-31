@@ -13,3 +13,5 @@ No Consigliere daemon, runner, Attempt process, or Codex process remains running
 This receipt classifies the retained residue and records that only the final pass's own package and homes were removed through the supported safe path.
 
 The subsequent deterministic-order QA pass created `.tmp/package-final-a45cb4b`, which was also removed through `/usr/bin/trash` after its package-only lifecycle assertions passed.
+
+The final reader-bound QA pass created `.tmp/package-final-df939ab`, which was also removed through `/usr/bin/trash` after its package-only lifecycle assertions passed.
