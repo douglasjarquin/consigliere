@@ -132,7 +132,7 @@ The historical package and lifecycle receipts are `package-artifact-bf22b5d.log`
 
 The advisory surface was not broadened during the runner recovery hardening, and no canary duplicate or product delivery action was introduced.
 
-## Watcher follow-up: default Attempt log read
+## Historical watcher follow-up: default Attempt log read
 
 The packaged regression reproduced the documented default CLI failure: `cs attempt logs <attempt-id>` returned exit 5 with `unauthorized: advisory_operation_forbidden` for an authenticated default socket caller.
 
@@ -140,7 +140,7 @@ The exact-head fix restores only the bounded `attempt.logs` read operation to th
 
 The existing advisory mutation and authority-bearing operation restrictions remain fail-closed, with the RED/GREEN authorization regression and exact packaged CLI proof recorded in `watcher-followup-c727e94.md`.
 
-## Watcher follow-up security closure
+## Historical watcher follow-up security closure
 
 The first watcher fix authorized bounded redacted Attempt lines but was rejected by the security audit because arbitrary prompt-bearing log text remained model-visible.
 

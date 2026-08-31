@@ -119,7 +119,7 @@ GREEN proof passed the redaction test with both camel-case values replaced by `[
 
 The final Linux daemon gate then passed `473 tests` in each of three seed-0 runs, including oversized ContextPack, structured event, fragmented output, and native stream-boundary coverage.
 
-## Watcher follow-up: verifier output bound
+## Historical watcher follow-up: verifier output bound
 
 At source head `c727e94ae2bac1be0d3d33fc0005258e5fd850cd`, the verifier now checks the accumulated and received byte sizes before concatenating command output.
 
@@ -195,7 +195,7 @@ Tests-first GREEN proof passed the split completion and fencing regressions with
 
 The final Linux suite then passed three consecutive seed-0 runs with `468 passed (1 doctest, 467 tests)` each.
 
-## Watcher follow-up native command bound
+## Historical watcher follow-up native command bound
 
 The exact source head `4e99cf4219998c15b01d23b23349730f27546c61` also closes the adjacent native command boundary identified during review.
 
@@ -247,8 +247,8 @@ The historical monotonic cursor RED/GREEN, five repeated focused runs, full daem
 
 ## Current bounded surface closure
 
-The current runtime source head is `f064f4f79d9865c27c083e2dbf47e039cbe09c3f`.
+The current runtime source head is `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
 
-The bounded API, event, log, usage, Away cursor, and command-output behavior remains covered by the current daemon and package gates; the current receipt set is `daemon-gate-f064f4f.md`, `package-artifact-f064f4f.md`, and `installed-lifecycle-f064f4f.md`.
+The bounded API, event, log, usage, Away cursor, and command-output behavior remains covered by the current daemon and package gates; the current receipt set is `daemon-gate-0c2b24c.md`, `package-artifact-0c2b24c.md`, and `installed-lifecycle-0c2b24c.md`.
 
 The current runtime fix additionally ensures that unverified terminating Attempt exits follow the bounded lost and quarantine reconciliation path without changing the established output caps.

@@ -88,6 +88,20 @@ No Consigliere daemon, cs-runner, cs-attempt, or Codex process remained after th
 
 The retained untracked paths are concurrent-worktree residue and prior review output, including prior package and canary artifacts; they were not deleted or rewritten by this pass.
 
+## Exact retained-residue inventory before final evidence child at runtime source 0c2b24c
+
+The untracked inventory was captured after staging the intended final evidence files and after the 0c2b24c package-only lifecycle cleanup.
+
+It contained `24961` paths and had SHA-256 `2c44c61e8eaa661ccabda30fb17ae7d0a73b8d0576bffd237dde2586e34fb4bc` when listed with `git ls-files --others --exclude-standard | LC_ALL=C sort`.
+
+The 0c2b24c package prefix `.tmp/package-final-0c2b24c` was moved to macOS Trash through `/usr/bin/trash` and verified absent.
+
+The fresh lifecycle home `/tmp/cs-0c2b24c-home.bqCesZ` was moved through the supported safe path and verified absent.
+
+No Consigliere daemon, cs-runner, cs-attempt, or Codex process remained after the package QA.
+
+The retained untracked paths are concurrent-worktree residue and prior review output, including prior package and canary artifacts; they were not deleted or rewritten by this pass.
+
 ## Exact retained-residue inventory before final evidence child at runtime source f064f4f
 
 The untracked inventory was captured after staging the intended final evidence files and after the f064f4f package-only lifecycle cleanup.

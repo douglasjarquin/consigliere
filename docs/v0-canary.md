@@ -160,8 +160,8 @@ The natural comparable sample remains below 20, so this record makes no Promote 
 
 ## Current runtime closure
 
-The current runtime source head is `f064f4f79d9865c27c083e2dbf47e039cbe09c3f`.
+The current runtime source head is `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
 
-The current package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-f064f4f.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-f064f4f.md`; it did not rerun the selected canary or create a duplicate Mission.
+The current package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-0c2b24c.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-0c2b24c.md`; it did not rerun the selected canary or create a duplicate Mission.
 
 The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.

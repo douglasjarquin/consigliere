@@ -130,19 +130,19 @@ Historical local final-gate verdict: PASS for runtime source `ec47784a801ee8168f
 
 ## Current exact implementation and package receipt
 
-The current runtime source head is `f064f4f79d9865c27c083e2dbf47e039cbe09c3f`.
+The current runtime source head is `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
 
-The current exact daemon, cursor, termination, package, and lifecycle receipts are `away-return-f064f4f.md`, `termination-f064f4f.md`, `daemon-gate-f064f4f.md`, `package-artifact-f064f4f.md`, and `installed-lifecycle-f064f4f.md`.
+The current exact daemon, cursor, termination, package, and lifecycle receipts are `away-return-0c2b24c.md`, `termination-0c2b24c.md`, `daemon-gate-0c2b24c.md`, `package-artifact-0c2b24c.md`, and `installed-lifecycle-0c2b24c.md`.
 
-The current daemon gate passed `508 passed (1 doctest, 507 tests)` after format and warnings-as-errors compilation.
+The current daemon gate passed `510 passed (1 doctest, 509 tests)` after format and warnings-as-errors compilation.
 
 The current package-only lifecycle passed migration, start, ping, Away, restart, repeated stop, and cleanup with `package_processes=0`.
 
-The current cancellation path persists its cause while deferring terminal outcome and workspace disposition until verified runner death, routes unverified terminating exits through lost and quarantine reconciliation, and fences Away acknowledgement by the exact marker snapshot.
+The current cancellation path persists its cause while deferring terminal outcome and workspace disposition until verified runner death, routes unverified terminating exits through lost and quarantine reconciliation, and fences Away acknowledgement and marker removal by the exact marker snapshot token.
 
 The final evidence child is the immutable documentation commit containing this receipt, with its full SHA established by the final `git rev-parse HEAD` custody command.
 
-Current local final-gate verdict: PASS for runtime source `f064f4f79d9865c27c083e2dbf47e039cbe09c3f` and its immutable evidence child, with remote CI and PR custody intentionally pending the final push.
+Current local final-gate verdict: PASS for runtime source `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861` and its immutable evidence child, with remote CI and PR custody intentionally pending the final push.
 
 ## Historical exact runtime source gate for 7c54c78
 

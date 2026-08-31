@@ -232,13 +232,13 @@ The historical package and lifecycle receipts are `package-artifact-ec47784.md` 
 
 ## Current termination and reconciliation closure
 
-The current runtime source head is `f064f4f79d9865c27c083e2dbf47e039cbe09c3f`.
+The current runtime source head is `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
 
 The current termination path persists the requested cause, defers terminal outcome until verified runner death, and reconciles unverified terminating exits through the existing lost, quarantine, and scheduler-slot hold path.
 
-The current focused termination, dispatch, recovery, and classify-exit proof passed `18 tests`, and the full daemon gate passed `508 passed (1 doctest, 507 tests)`.
+The current focused Away, termination, dispatch, recovery, and classify-exit proof passed `25 tests`, and the full daemon gate passed `510 passed (1 doctest, 509 tests)`.
 
-The current package and lifecycle receipts are `package-artifact-f064f4f.md` and `installed-lifecycle-f064f4f.md`.
+The current package and lifecycle receipts are `package-artifact-0c2b24c.md` and `installed-lifecycle-0c2b24c.md`.
 
 ## Final runtime audit follow-up
 

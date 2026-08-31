@@ -179,7 +179,7 @@ The final GREEN suite rejects missing, duplicate, and gapped native stream seque
 
 The final Linux daemon gate passed `473 tests` in three consecutive seed-0 runs after these changes.
 
-## Watcher follow-up: packaged completion projection
+## Historical watcher follow-up: packaged completion projection
 
 The packaged real-Codex regression reproduced the prior runtime contract failure at the inherited head: the generated ContextPack required a checkpoint, so the real Codex process reported a checkpoint before completion and the Attempt became `checkpointed` while the Mission remained active with next action `validate`.
 
@@ -189,7 +189,7 @@ The exact-head packaged run used real `codex-cli 0.151.0` and reached `ready_for
 
 The exact commands, bounded output, and cleanup receipt are recorded in `watcher-followup-c727e94.md`.
 
-## Watcher follow-up security-aligned log read
+## Historical watcher follow-up security-aligned log read
 
 The exact corrected package at source head `2c7f5b67c8d37737d8f2dd3e0f7110687a800748` completed a real Codex Attempt through `ready_for_review` and returned `ATTEMPT_LOGS_EXIT=0`.
 

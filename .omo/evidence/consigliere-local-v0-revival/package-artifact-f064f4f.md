@@ -13,6 +13,6 @@ The packaged binaries were native macOS arm64 Mach-O executables with these SHA-
     cs-runner e6ecdd4dba4915748a809eb2513eb6b317ee3f1a70a318d9e5e4a426821553c3
     cs-attempt 50723bd4289bb9dcc4e73d245863f4ec55bb50e5dc4971720b10ce9229cf75a7
 
-The package source scan found zero files with source-like extensions or module filenames.
+The package contains the fifteen `.exs` migration files required by the installed release and no `.go`, `.ex`, `mix.exs`, `mix.lock`, or `go.mod` source/module files.
 
 The package prefix was moved to macOS Trash after lifecycle validation.

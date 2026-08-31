@@ -324,9 +324,9 @@ The result remains insufficient for Promote because only one naturally occurring
 
 ## Current runtime and lifecycle closure
 
-The current runtime source head is `f064f4f79d9865c27c083e2dbf47e039cbe09c3f`.
+The current runtime source head is `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
 
-The current package-only lifecycle evidence is recorded in `package-artifact-f064f4f.md` and `installed-lifecycle-f064f4f.md`.
+The current package-only lifecycle evidence is recorded in `package-artifact-0c2b24c.md` and `installed-lifecycle-0c2b24c.md`.
 
 This current lifecycle proof did not rerun the selected canary, create a duplicate Mission, or make a Promote claim.
 
