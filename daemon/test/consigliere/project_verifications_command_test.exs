@@ -33,6 +33,42 @@ defmodule Consigliere.ProjectVerificationsCommandTest do
            } = Command.run(["sleep", "1"], workspace, timeout_ms: 25, total_timeout_ms: 100)
   end
 
+  test "combines stderr into the bounded command result", %{workspace: workspace} do
+    assert %{outcome: "failed", output_bytes: output_bytes} =
+             Command.run(["sh", "-c", "printf stderr-only >&2; exit 7"], workspace)
+
+    assert output_bytes == byte_size("stderr-only")
+  end
+
+  test "enforces total timeout from command start", %{workspace: workspace} do
+    started_at = System.monotonic_time(:millisecond)
+
+    assert %{outcome: "infrastructure_error", timed_out: true, error_code: "timeout"} =
+             Command.run(
+               ["sh", "-c", "sleep 0.04; printf started; sleep 1"],
+               workspace,
+               timeout_ms: 500,
+               total_timeout_ms: 50
+             )
+
+    assert System.monotonic_time(:millisecond) - started_at < 250
+  end
+
+  test "timeout terminates the owned process group and its child", %{workspace: workspace} do
+    child_pid_path = Path.join(workspace, "child.pid")
+
+    assert %{outcome: "infrastructure_error", timed_out: true} =
+             Command.run(
+               ["sh", "-c", "sleep 30 & echo $! > #{child_pid_path}; wait"],
+               workspace,
+               timeout_ms: 250,
+               total_timeout_ms: 500
+             )
+
+    child_pid = workspace |> Path.join("child.pid") |> File.read!() |> String.trim()
+    assert {_, 1} = System.cmd("kill", ["-0", child_pid], stderr_to_stdout: true)
+  end
+
   test "returns a bounded output outcome", %{workspace: workspace} do
     assert %{
              outcome: "infrastructure_error",

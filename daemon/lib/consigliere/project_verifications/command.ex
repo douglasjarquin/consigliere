@@ -35,61 +35,57 @@ defmodule Consigliere.ProjectVerifications.Command do
         %{outcome: "infrastructure_error", error_code: "command_missing"}
 
       env_executable ->
+        setsid = Consigliere.Made.Exec.setsid_path()
+
         port =
           Port.open(
-            {:spawn_executable, env_executable},
+            {:spawn_executable, setsid},
             [
               :binary,
               :exit_status,
-              args: ["-i" | environment_args() ++ [executable | args]],
+              :stderr_to_stdout,
+              args: [env_executable, "-i" | environment_args()] ++ [executable | args],
               cd: workspace
             ]
           )
 
+        os_pid = Keyword.get(Port.info(port), :os_pid)
+
         collect(
           port,
-          "",
-          System.monotonic_time(:millisecond) + Keyword.get(opts, :timeout_ms, 900_000),
-          opts
+          os_pid,
+          [],
+          System.monotonic_time(:millisecond) +
+            min(Keyword.get(opts, :timeout_ms, 900_000),
+              Keyword.get(opts, :total_timeout_ms, 1_800_000))
         )
     end
   rescue
     _ -> %{outcome: "infrastructure_error", error_code: "command_spawn_failed"}
   end
 
-  defp collect(port, output, deadline, opts) do
-    remaining =
-      min(
-        deadline - System.monotonic_time(:millisecond),
-        Keyword.get(opts, :total_timeout_ms, 1_800_000)
-      )
+  defp collect(port, os_pid, output, deadline) do
+    remaining = deadline - System.monotonic_time(:millisecond)
 
     if remaining <= 0 do
-      close_port(port)
+      terminate(os_pid, port)
       result("infrastructure_error", output, nil, true, "timeout")
     else
       receive do
         {^port, {:data, data}} ->
-          if byte_size(output) + byte_size(data) > @max_output do
-            close_port(port)
-            remaining = @max_output - byte_size(output)
+          {output, overflow?} = append_bounded(output, data)
 
-            bounded_output =
-              if remaining > 0 do
-                output <> binary_part(data, 0, remaining)
-              else
-                output
-              end
-
+          if overflow? do
+            terminate(os_pid, port)
             result(
               "infrastructure_error",
-              bounded_output,
+              output,
               nil,
               false,
               "output_too_large"
             )
           else
-            collect(port, output <> data, deadline, opts)
+            collect(port, os_pid, output, deadline)
           end
 
         {^port, {:exit_status, status}} ->
@@ -97,9 +93,20 @@ defmodule Consigliere.ProjectVerifications.Command do
           result(outcome, output, status, false, nil)
       after
         remaining ->
-          close_port(port)
+          terminate(os_pid, port)
           result("infrastructure_error", output, nil, true, "timeout")
       end
+    end
+  end
+
+  defp append_bounded(output, data) do
+    available = @max_output - IO.iodata_length(output)
+
+    if byte_size(data) <= available do
+      {[output, data], false}
+    else
+      bounded = if available > 0, do: [output, binary_part(data, 0, available)], else: output
+      {bounded, true}
     end
   end
 
@@ -151,6 +158,14 @@ defmodule Consigliere.ProjectVerifications.Command do
     Enum.map(scrubbed_env(), fn {key, value} ->
       to_string(key) <> "=" <> to_string(value)
     end)
+  end
+
+  defp terminate(os_pid, port) do
+    if is_integer(os_pid) and os_pid > 1 do
+      Consigliere.ProcessGroup.terminate(os_pid, term_timeout_ms: 50, kill_timeout_ms: 500)
+    end
+
+    close_port(port)
   end
 
   defp close_port(port) do
