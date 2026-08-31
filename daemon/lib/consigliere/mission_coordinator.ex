@@ -131,7 +131,7 @@ defmodule Consigliere.MissionCoordinator do
   defp reconcile_progression(mission_id) do
     case load_mission(mission_id) do
       %Mission{phase: "active"} = mission ->
-        if Consigliere.Progression.next_action(mission) == :import do
+        if Consigliere.Progression.import_reconciliation_needed?(mission) do
           _ = Consigliere.Progression.maybe_progress(mission.id)
         end
 

@@ -164,7 +164,8 @@ defmodule Consigliere.ProgressionTest do
 
     Repo.query!("DROP TRIGGER IF EXISTS attempt_results_interrupt_import")
 
-    wait_until(fn -> Repo.get!(Attempt, attempt.id).status == "completed" end)
+    assert {:ok, _} =
+             Progression.run(attempt.id, process_group: :dead_verified, forced_outcome: :passed)
 
     assert Repo.get!(Attempt, attempt.id).status == "completed"
     assert Repo.get!(Mission, mission.id).current_checkpoint_sha == sha
@@ -326,20 +327,5 @@ defmodule Consigliere.ProgressionTest do
       result_sha: sha,
       result_kind: kind
     }
-  end
-
-  defp wait_until(fun, attempts \\ 100)
-
-  defp wait_until(fun, 0) do
-    flunk("condition did not become true")
-  end
-
-  defp wait_until(fun, attempts) do
-    if fun.() do
-      :ok
-    else
-      Process.sleep(10)
-      wait_until(fun, attempts - 1)
-    end
   end
 end

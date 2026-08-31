@@ -90,6 +90,27 @@ defmodule Consigliere.Progression do
     end
   end
 
+  def import_reconciliation_needed?(%Mission{} = mission) do
+    case latest_attempt(mission.id) do
+      %Attempt{status: status} = attempt when status in ["running", "checkpoint_requested"] ->
+        result = AttemptResults.by_attempt(attempt.id)
+
+        result && result.status in ["reported", "death_verified", "commit_verified"] &&
+          Repo.exists?(
+            from(i in Incident,
+              where:
+                i.subject_type == "attempt" and i.subject_id == ^attempt.id and
+                  i.reason == "post-attempt progression failed: result_import_persist_failed"
+            )
+          )
+
+      _ ->
+        false
+    end
+  end
+
+  def import_reconciliation_needed?(_), do: false
+
   def next_action(%Mission{} = mission) do
     attempt = latest_attempt(mission.id)
 
