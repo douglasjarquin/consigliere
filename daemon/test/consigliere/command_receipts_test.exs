@@ -272,7 +272,11 @@ defmodule Consigliere.CommandReceiptsTest do
                Actor.boss(),
                "project.add",
                "external-operation-reference",
-               %{"name" => "project", "repository_path" => "/tmp/project"},
+               %{
+                 "name" => "project",
+                 "repository_path" => "/tmp/project",
+                 "secret" => "do-not-persist"
+               },
                fn -> {:ok, %{"id" => "external-1"}} end
              )
 
@@ -284,6 +288,7 @@ defmodule Consigliere.CommandReceiptsTest do
     operation = Repo.get!(CommandOperation, receipt.operation_id)
     assert operation.receipt_id == receipt.id
     assert operation.status == "committed"
+    assert operation.payload == %{"repository_path" => "/tmp/project"}
     assert receipt.response["operation_id"] == operation.id
   end
 

@@ -299,7 +299,7 @@ defmodule Consigliere.CommandReceipts do
                 receipt_id: row.id,
                 op: op,
                 principal: scope,
-                payload: payload,
+                payload: operation_payload(op, payload),
                 evidence: %{"intent" => "external_operation"},
                 status: "pending"
               })
@@ -310,6 +310,25 @@ defmodule Consigliere.CommandReceipts do
         end
     end
   end
+
+  defp operation_payload("project.add", payload),
+    do: Map.take(payload, ["repository_path"])
+
+  defp operation_payload(op, payload)
+       when op in [
+              "mission.continue",
+              "mission.cancel",
+              "mission.pause",
+              "mission.resume",
+              "mission.grant_integration"
+            ],
+       do:
+         Map.take(payload, ["mission_id", "checkpoint_sha", "target_sha", "target_pull_request"])
+
+  defp operation_payload(op, payload) when op in ["internal.dispatch", "post_attempt.progress"],
+    do: Map.take(payload, ["attempt_id"])
+
+  defp operation_payload(_op, _payload), do: %{}
 
   defp invoke(%{validation: reason}, _fun) when is_binary(reason),
     do: {:error, {:invalid, reason}}
