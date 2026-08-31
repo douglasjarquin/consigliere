@@ -332,12 +332,12 @@ This historical lifecycle proof did not rerun the selected canary, create a dupl
 
 The result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.
 
-## Current runtime and lifecycle closure
+## Historical superseded runtime and lifecycle closure for 0c2b24c
 
-The current runtime source head is `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
+The superseded runtime source head was `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
 
-The current package-only lifecycle evidence is recorded in `package-artifact-0c2b24c.md` and `installed-lifecycle-0c2b24c.md`.
+The superseded package-only lifecycle evidence is recorded in `package-artifact-0c2b24c.md` and `installed-lifecycle-0c2b24c.md`.
 
-This current lifecycle proof did not rerun the selected canary, create a duplicate Mission, or make a Promote claim.
+This superseded lifecycle proof did not rerun the selected canary, create a duplicate Mission, or make a Promote claim.
 
 The result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.
