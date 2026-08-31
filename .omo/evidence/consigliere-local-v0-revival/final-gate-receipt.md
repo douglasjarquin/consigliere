@@ -112,21 +112,37 @@ The final evidence child is documentation-only above this runtime source, and it
 
 Historical local final-gate verdict: PASS for runtime source `cf56963a7206e5c5a260442c08eaa7bdcd65ec7a` and its then immutable evidence child.
 
-## Current exact implementation and package receipt
+## Historical superseded exact implementation and package receipt for ec47784
 
-The current runtime source head is `ec47784a801ee8168fae7b249bf3b8342951ae17`.
+The historical superseded runtime source head is `ec47784a801ee8168fae7b249bf3b8342951ae17`.
 
-The current exact daemon, cursor, termination, package, and lifecycle receipts are `away-return-ec47784.md`, `termination-ec47784.md`, `daemon-gate-ec47784.md`, `package-artifact-ec47784.md`, and `installed-lifecycle-ec47784.md`.
+The historical exact daemon, cursor, termination, package, and lifecycle receipts are `away-return-ec47784.md`, `termination-ec47784.md`, `daemon-gate-ec47784.md`, `package-artifact-ec47784.md`, and `installed-lifecycle-ec47784.md`.
 
-The current daemon gate passed `507 passed (1 doctest, 506 tests)` after format and warnings-as-errors compilation.
+The historical daemon gate passed `507 passed (1 doctest, 506 tests)` after format and warnings-as-errors compilation.
 
-The current package-only lifecycle passed migration, start, ping, Away, restart, repeated stop, and cleanup with `package_processes=0`.
+The historical package-only lifecycle passed migration, start, ping, Away, restart, repeated stop, and cleanup with `package_processes=0`.
 
-The current cancellation path persists its cause while deferring terminal outcome and workspace disposition until verified runner death, and Away acknowledgement is fenced by the exact marker snapshot.
+The historical cancellation path persisted its cause while deferring terminal outcome and workspace disposition until verified runner death, and Away acknowledgement was fenced by the exact marker snapshot.
 
 The final evidence child is the immutable documentation commit containing this receipt, with its full SHA established by the final `git rev-parse HEAD` custody command.
 
-Current local final-gate verdict: PASS for runtime source `ec47784a801ee8168fae7b249bf3b8342951ae17` and its immutable evidence child, with remote CI and PR custody intentionally pending the final push.
+Historical local final-gate verdict: PASS for runtime source `ec47784a801ee8168fae7b249bf3b8342951ae17` and its immutable evidence child.
+
+## Current exact implementation and package receipt
+
+The current runtime source head is `f064f4f79d9865c27c083e2dbf47e039cbe09c3f`.
+
+The current exact daemon, cursor, termination, package, and lifecycle receipts are `away-return-f064f4f.md`, `termination-f064f4f.md`, `daemon-gate-f064f4f.md`, `package-artifact-f064f4f.md`, and `installed-lifecycle-f064f4f.md`.
+
+The current daemon gate passed `508 passed (1 doctest, 507 tests)` after format and warnings-as-errors compilation.
+
+The current package-only lifecycle passed migration, start, ping, Away, restart, repeated stop, and cleanup with `package_processes=0`.
+
+The current cancellation path persists its cause while deferring terminal outcome and workspace disposition until verified runner death, routes unverified terminating exits through lost and quarantine reconciliation, and fences Away acknowledgement by the exact marker snapshot.
+
+The final evidence child is the immutable documentation commit containing this receipt, with its full SHA established by the final `git rev-parse HEAD` custody command.
+
+Current local final-gate verdict: PASS for runtime source `f064f4f79d9865c27c083e2dbf47e039cbe09c3f` and its immutable evidence child, with remote CI and PR custody intentionally pending the final push.
 
 ## Historical exact runtime source gate for 7c54c78
 

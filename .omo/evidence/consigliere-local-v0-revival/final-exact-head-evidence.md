@@ -2,9 +2,9 @@
 
 Superseded sections in this archive are explicitly marked historical; the current delivery claims below are bound to the latest immutable evidence child.
 
-The current implementation evidence is bound to runtime source `ec47784a801ee8168fae7b249bf3b8342951ae17` and the immutable evidence child containing this archive, in `final-gate-receipt.md`, `F1.md`, `F2.md`, `F3.md`, and `F4.md`.
+The current implementation evidence is bound to runtime source `f064f4f79d9865c27c083e2dbf47e039cbe09c3f` and the immutable evidence child containing this archive, in `final-gate-receipt.md`, `F1.md`, `F2.md`, `F3.md`, and `F4.md`.
 
-The current exact implementation includes the bounded Away digest, monotonic paged cursor acknowledgement fix, durable cancellation cause, deferred cancellation outcome fix, and marker snapshot fence, with focused RED/GREEN, daemon, package, and lifecycle receipts in `away-return-ec47784.md`, `termination-ec47784.md`, `daemon-gate-ec47784.md`, `package-artifact-ec47784.md`, and `installed-lifecycle-ec47784.md`.
+The current exact implementation includes the bounded Away digest, monotonic paged cursor acknowledgement fix, durable cancellation cause, deferred cancellation outcome fix, marker snapshot fence, and unverified terminating Attempt reconciliation, with focused RED/GREEN, daemon, package, and lifecycle receipts in `away-return-f064f4f.md`, `termination-f064f4f.md`, `daemon-gate-f064f4f.md`, `package-artifact-f064f4f.md`, and `installed-lifecycle-f064f4f.md`.
 
 Target branch: `revival/v0-local-codex`.
 

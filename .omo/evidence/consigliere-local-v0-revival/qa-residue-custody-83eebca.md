@@ -74,7 +74,7 @@ The retained untracked inventory remains 24,956 paths with SHA-256 `9bfc2b21f435
 
 No Consigliere daemon, runner, Attempt, or package process remains from this QA pass.
 
-## Exact retained-residue inventory before final evidence child at runtime source ec47784
+## Historical exact retained-residue inventory before final evidence child at runtime source ec47784
 
 The untracked inventory was captured after staging the intended final evidence files and after the ec47784 package-only lifecycle cleanup.
 
@@ -83,6 +83,20 @@ It contained `24960` paths and had SHA-256 `43c850d303b9f57577c0deb9e6d94acee9e0
 The ec47784 package prefix `.tmp/package-final-ec47784` was moved to macOS Trash through `/usr/bin/trash` and verified absent.
 
 The fresh lifecycle home `/tmp/cs-ec47784-home.Xd9aBy` was removed through the supported safe path and verified absent.
+
+No Consigliere daemon, cs-runner, cs-attempt, or Codex process remained after the package QA.
+
+The retained untracked paths are concurrent-worktree residue and prior review output, including prior package and canary artifacts; they were not deleted or rewritten by this pass.
+
+## Exact retained-residue inventory before final evidence child at runtime source f064f4f
+
+The untracked inventory was captured after staging the intended final evidence files and after the f064f4f package-only lifecycle cleanup.
+
+It contained `24961` paths and had SHA-256 `2c44c61e8eaa661ccabda30fb17ae7d0a73b8d0576bffd237dde2586e34fb4bc` when listed with `git ls-files --others --exclude-standard | LC_ALL=C sort`.
+
+The f064f4f package prefix `.tmp/package-final-f064` was moved to macOS Trash through `/usr/bin/trash` and verified absent.
+
+The fresh lifecycle home `/tmp/cs-f064-home.X95NBf` was moved through the supported safe path and verified absent.
 
 No Consigliere daemon, cs-runner, cs-attempt, or Codex process remained after the package QA.
 

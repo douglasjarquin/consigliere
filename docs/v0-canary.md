@@ -150,10 +150,18 @@ The historical package and lifecycle proof is recorded in `.omo/evidence/consigl
 
 The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.
 
+## Historical superseded runtime closure for ec47784
+
+The historical superseded runtime source head is `ec47784a801ee8168fae7b249bf3b8342951ae17`.
+
+The historical package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-ec47784.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-ec47784.md`; it did not rerun the selected canary or create a duplicate Mission.
+
+The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.
+
 ## Current runtime closure
 
-The current runtime source head is `ec47784a801ee8168fae7b249bf3b8342951ae17`.
+The current runtime source head is `f064f4f79d9865c27c083e2dbf47e039cbe09c3f`.
 
-The current package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-ec47784.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-ec47784.md`; it did not rerun the selected canary or create a duplicate Mission.
+The current package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-f064f4f.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-f064f4f.md`; it did not rerun the selected canary or create a duplicate Mission.
 
 The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.

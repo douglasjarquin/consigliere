@@ -244,3 +244,11 @@ The superseded package and lifecycle evidence is recorded in `away-return-04940b
 The historical superseded runtime source head is `0fd7d3b951672df7cb37e6c160401d1593386ba2`.
 
 The historical monotonic cursor RED/GREEN, five repeated focused runs, full daemon gate, package, and lifecycle receipts are `away-return-0fd7d3b.md`, `daemon-gate-0fd7d3b.md`, `package-artifact-0fd7d3b.md`, and `installed-lifecycle-0fd7d3b.md`.
+
+## Current bounded surface closure
+
+The current runtime source head is `f064f4f79d9865c27c083e2dbf47e039cbe09c3f`.
+
+The bounded API, event, log, usage, Away cursor, and command-output behavior remains covered by the current daemon and package gates; the current receipt set is `daemon-gate-f064f4f.md`, `package-artifact-f064f4f.md`, and `installed-lifecycle-f064f4f.md`.
+
+The current runtime fix additionally ensures that unverified terminating Attempt exits follow the bounded lost and quarantine reconciliation path without changing the established output caps.

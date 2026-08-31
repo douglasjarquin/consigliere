@@ -312,11 +312,21 @@ This historical lifecycle proof did not rerun the selected canary, create a dupl
 
 The result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.
 
+## Historical superseded runtime and lifecycle closure for ec47784
+
+The historical superseded runtime source head is `ec47784a801ee8168fae7b249bf3b8342951ae17`.
+
+The historical package-only lifecycle evidence is recorded in `package-artifact-ec47784.md` and `installed-lifecycle-ec47784.md`.
+
+This historical lifecycle proof did not rerun the selected canary, create a duplicate Mission, or make a Promote claim.
+
+The result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.
+
 ## Current runtime and lifecycle closure
 
-The current runtime source head is `ec47784a801ee8168fae7b249bf3b8342951ae17`.
+The current runtime source head is `f064f4f79d9865c27c083e2dbf47e039cbe09c3f`.
 
-The current package-only lifecycle evidence is recorded in `package-artifact-ec47784.md` and `installed-lifecycle-ec47784.md`.
+The current package-only lifecycle evidence is recorded in `package-artifact-f064f4f.md` and `installed-lifecycle-f064f4f.md`.
 
 This current lifecycle proof did not rerun the selected canary, create a duplicate Mission, or make a Promote claim.
 

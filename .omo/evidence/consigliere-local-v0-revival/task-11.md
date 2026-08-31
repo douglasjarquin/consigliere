@@ -83,7 +83,7 @@ If that transition fails, the authenticated control channel receives cancellatio
 
 The RED/GREEN process proof and the three-run full Linux result are recorded in `task-8.md` and `.omo/evidence/consigliere-local-v0-revival/daemon-linux-gate-8d83937.log`.
 
-The current native macOS characterization is `474/483` with the same nine host-only fixture categories named in `.omo/evidence/consigliere-local-v0-revival/macos-native-gate-8d83937.log`.
+The historical native macOS characterization is `474/483` with the same nine host-only fixture categories named in `.omo/evidence/consigliere-local-v0-revival/macos-native-gate-8d83937.log`.
 
 ## Historical hardening follow-up
 
@@ -218,17 +218,27 @@ Tests-first GREEN proof passed the real asynchronous pause test and the full Lin
 
 The guard checks the durable `pausing` blocker, so ordinary runner completion and active Missions are not paused as a side effect.
 
-## Current cancellation and marker-race closure
+## Historical superseded cancellation and marker-race closure for ec47784
 
-The current runtime source head is `ec47784a801ee8168fae7b249bf3b8342951ae17`.
+The historical superseded runtime source head is `ec47784a801ee8168fae7b249bf3b8342951ae17`.
 
-The current cancellation path persists the requested cause, sends runner termination without prematurely finalizing the Attempt, and lets verified runner death drive the final outcome.
+The historical cancellation path persisted the requested cause, sent runner termination without prematurely finalizing the Attempt, and let verified runner death drive the final outcome.
 
-The current Away path fences cursor acknowledgement and marker removal on the exact marker snapshot used to build the bounded digest.
+The historical Away path fenced cursor acknowledgement and marker removal on the exact marker snapshot used to build the bounded digest.
 
-The focused Away, termination, and dispatch proof passed `8 tests` in five consecutive seed-0 runs and `4 tests` respectively, and the full daemon gate passed `507 passed (1 doctest, 506 tests)`.
+The historical focused Away, termination, and dispatch proof passed `8 tests` in five consecutive seed-0 runs and `4 tests` respectively, and the full daemon gate passed `507 passed (1 doctest, 506 tests)`.
 
-The current package and lifecycle receipts are `package-artifact-ec47784.md` and `installed-lifecycle-ec47784.md`.
+The historical package and lifecycle receipts are `package-artifact-ec47784.md` and `installed-lifecycle-ec47784.md`.
+
+## Current termination and reconciliation closure
+
+The current runtime source head is `f064f4f79d9865c27c083e2dbf47e039cbe09c3f`.
+
+The current termination path persists the requested cause, defers terminal outcome until verified runner death, and reconciles unverified terminating exits through the existing lost, quarantine, and scheduler-slot hold path.
+
+The current focused termination, dispatch, recovery, and classify-exit proof passed `18 tests`, and the full daemon gate passed `508 passed (1 doctest, 507 tests)`.
+
+The current package and lifecycle receipts are `package-artifact-f064f4f.md` and `installed-lifecycle-f064f4f.md`.
 
 ## Final runtime audit follow-up
 
