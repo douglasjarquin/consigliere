@@ -30,7 +30,7 @@ defmodule Consigliere.API.Protocol do
                    incident.list event.list attempt.logs mission.create)
   @review_phases ~w(awaiting_authorization ready_for_review
                     awaiting_integration_authorization failed)
-  @max_list_rows 100
+  @max_list_rows 32
 
   def handle(line, bound \\ :unbound) when is_binary(line) do
     case Limits.validate_json_frame(line) do
@@ -693,7 +693,7 @@ defmodule Consigliere.API.Protocol do
       Repo.one(
         from(a in Consigliere.Attempts.Attempt,
           where: a.mission_id == ^mission_id,
-          order_by: [desc: a.inserted_at],
+          order_by: [desc: a.inserted_at, desc: a.id],
           limit: 1
         )
       )
@@ -728,7 +728,7 @@ defmodule Consigliere.API.Protocol do
     Repo.one(
       from(r in Consigliere.AttemptResults.AttemptResult,
         where: r.mission_id == ^mission_id,
-        order_by: [desc: r.inserted_at],
+        order_by: [desc: r.inserted_at, desc: r.id],
         limit: 1
       )
     )
@@ -976,7 +976,7 @@ defmodule Consigliere.API.Protocol do
       Repo.one(
         from(o in DispatchOperation,
           where: o.mission_id == ^mission_id,
-          order_by: [desc: o.inserted_at],
+          order_by: [desc: o.inserted_at, desc: o.id],
           limit: 1
         )
       )
