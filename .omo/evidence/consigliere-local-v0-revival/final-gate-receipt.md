@@ -1,10 +1,12 @@
-# Final exact-head gate receipt
+# Historical exact-head gate receipt for 42933d1
 
-Historical runtime evidence is bound to source commit `42933d103da9171c76b1564888e0d6557291fb5d` on `revival/v0-local-codex`.
+This section is historical evidence for source commit `42933d103da9171c76b1564888e0d6557291fb5d` and is not an assertion about the current delivery head.
 
-The packaged runtime input parent is `42933d103da9171c76b1564888e0d6557291fb5d`.
+The historical runtime evidence was bound to source commit `42933d103da9171c76b1564888e0d6557291fb5d` on `revival/v0-local-codex`.
 
-`git diff --exit-code 42933d103da9171c76b1564888e0d6557291fb5d HEAD -- daemon cli runner scripts .github` exited `0` with no runtime, package, workflow, CLI, or runner input changes.
+The historical packaged runtime input parent was `42933d103da9171c76b1564888e0d6557291fb5d`.
+
+At the time of that historical receipt, `git diff --exit-code 42933d103da9171c76b1564888e0d6557291fb5d HEAD -- daemon cli runner scripts .github` exited `0` with no runtime, package, workflow, CLI, or runner input changes.
 
 The bounded redacted output records for these claims are `daemon-linux-gate-final.log`, `cli-go-gate-final.log`, `runner-go-gate-final.log`, `package-artifact-final.log`, `installed-lifecycle-final.log`, and `macos-native-gate-final.log` in this evidence directory.
 

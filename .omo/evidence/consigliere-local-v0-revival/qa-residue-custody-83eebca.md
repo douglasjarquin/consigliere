@@ -29,3 +29,21 @@ The retained pre-existing canary state paths are `.tmp/task15-canary/mission.jso
 The retained pre-existing detached runner path is `runner/cs-runner/detached-bootstrap-child`.
 
 These paths were not created by the final QA passes and were preserved under the task's concurrent-worktree custody rule.
+
+## Exact retained-residue inventory at delivery head 3bf48e6
+
+The untracked inventory was captured with `git ls-files --others --exclude-standard` from delivery head `3bf48e6b0506cd47e0c03ab17a609f8643402d67`.
+
+The manifest contained `24953` paths and had SHA-256 `182ab9001c2deef735623edbde52aede00e5a48c55d71a065a33e03877c43369`.
+
+The retained categories were `.tmp/package-*` with `23983` paths, `.tmp/attempt-report-*` with `653` paths, `.tmp/task15-canary/*` with `18` paths, other `.tmp/*` with `138` paths, `.omo/evidence/*` with `146` paths, `.omo/ulw-notepad*` with `1` path, `cli/.tmp/*` with `2` paths, `runner/cs-runner/detached-bootstrap-child` with `1` path, `_build/*` with `8` paths, `.debug-journal.md` with `1` path, `AGENTS.md` with `1` path, and `CLAUDE.md` with `1` path.
+
+The retained residue occupied `1.9G` in `.tmp`, `13M` in `.omo/evidence`, `9.8M` in `cli/.tmp`, `4.0K` in the detached runner artifact, and `48K` in `.debug-journal.md`.
+
+The exact final QA prefix `.tmp/package-final-eb41191` was absent and had zero remaining untracked paths.
+
+The retained categories predated the final flake-remediation QA pass and were not modified by it.
+
+Only the final pass's `.tmp/package-final-eb41191` prefix and its fresh temporary lifecycle homes were owned by that pass, and those were moved through `/usr/bin/trash` after cleanup assertions passed.
+
+The inventory and cleanup checks produced no Consigliere daemon, `cs-runner`, or `cs-attempt` process from the final QA pass.

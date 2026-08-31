@@ -98,9 +98,9 @@ The selected real Mission and its one operator-authorized continuation were not 
 
 The public result therefore remains one completed Consigliere Mission with two Attempts, zero FirstMate Missions, and insufficient evidence for Promote.
 
-## Final runtime-hardening custody
+## Historical runtime-hardening custody for 7c54c78
 
-The current runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339` on `revival/v0-local-codex`.
+The historical runtime source head for this custody record was `7c54c782552f3ee5a09ddee35735e90cba1b9339` on `revival/v0-local-codex`.
 
 The exact package and installed lifecycle receipts are `.omo/evidence/consigliere-local-v0-revival/package-artifact-7c54c78.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-7c54c78.md`.
 
@@ -114,16 +114,16 @@ It was not rerun after runtime hardening because the operator-controlled canary 
 
 The comparable sample remains below 20, so the public evidence is insufficient for Promote and the operator retains Continue or Stop.
 
-## Delivery record
+## Historical delivery records for 85f02c5 and c060b88
 
-The runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339` and the pushed evidence delivery head is `85f02c5b739116d7de0d3f04a372f463bbb913e6`.
+The historical runtime source head was `7c54c782552f3ee5a09ddee35735e90cba1b9339` and the historical pushed evidence delivery head was `85f02c5b739116d7de0d3f04a372f463bbb913e6`.
 
 PR #141 is the separate open draft replacement against `rewrite-in-elixer`.
 
-Remote CI run `33322422318` passed all five checks for the pushed head.
+Historical remote CI run `33322422318` passed all five checks for that pushed head.
 
 This delivery record does not change the canary result, create a duplicate Mission, or make a Promote claim.
 
-The final pushed evidence head is `c060b88035128bbdbf361f1bcab9a100521965e9`, with remote CI run `33322804969` passing all five checks.
+The later historical pushed evidence head was `c060b88035128bbdbf361f1bcab9a100521965e9`, with remote CI run `33322804969` passing all five checks at that historical PR head.
 
 The canary remains insufficient for Promote and the operator retains Continue or Stop.
