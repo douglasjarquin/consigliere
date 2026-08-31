@@ -1,6 +1,8 @@
 defmodule Consigliere.API.CLIOpsTest do
   use ExUnit.Case, async: false
 
+  import Ecto.Query
+
   alias Consigliere.API.Protocol
   alias Consigliere.Actor
   alias Consigliere.Fixtures
@@ -115,33 +117,43 @@ defmodule Consigliere.API.CLIOpsTest do
   end
 
   test "reader list response envelopes remain bounded with many rows" do
-    projects = Enum.map(1..101, fn _ -> Fixtures.dummy_project!() end)
+    Enum.each(1..101, fn _ -> Fixtures.dummy_project!() end)
 
     project_list = call("project.list")
     assert project_list["ok"] == true
     assert length(project_list["payload"]["projects"]) == 32
 
-    assert Enum.map(project_list["payload"]["projects"], & &1["id"]) ==
-             projects
-             |> Enum.sort_by(&{&1.name, &1.id})
-             |> Enum.take(32)
-             |> Enum.map(& &1.id)
+    assert Repo.aggregate(Consigliere.Projects.Project, :count, :id) == 101
 
-    missions =
-      Enum.map(1..101, fn _ ->
-        {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
-        {:ok, _mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
-        mission
-      end)
+    expected_projects =
+      Repo.all(
+        from(p in Consigliere.Projects.Project,
+          order_by: [asc: p.name, asc: p.id],
+          limit: 32
+        )
+      )
+      |> Enum.map(& &1.id)
+
+    assert Enum.map(project_list["payload"]["projects"], & &1["id"]) == expected_projects
+
+    Enum.each(1..101, fn _ ->
+      {:ok, mission} = Missions.create(Fixtures.mission_attrs(), Actor.boss())
+      {:ok, _mission} = Missions.submit_for_authorization(mission.id, Actor.boss())
+    end)
 
     mission_list = call("mission.list")
     assert mission_list["ok"] == true
     assert length(mission_list["payload"]["missions"]) == 32
 
+    assert Repo.aggregate(Consigliere.Missions.Mission, :count, :id) == 101
+
     expected_missions =
-      missions
-      |> Enum.sort_by(&{&1.inserted_at, &1.id}, :desc)
-      |> Enum.take(32)
+      Repo.all(
+        from(m in Consigliere.Missions.Mission,
+          order_by: [desc: m.inserted_at, desc: m.id],
+          limit: 32
+        )
+      )
       |> Enum.map(& &1.id)
 
     assert Enum.map(mission_list["payload"]["missions"], & &1["id"]) == expected_missions
@@ -151,9 +163,19 @@ defmodule Consigliere.API.CLIOpsTest do
     assert length(review["payload"]["missions"]) == 32
 
     expected_review =
-      missions
-      |> Enum.sort_by(&{&1.inserted_at, &1.id})
-      |> Enum.take(32)
+      Repo.all(
+        from(m in Consigliere.Missions.Mission,
+          where:
+            m.phase in ^[
+              "awaiting_authorization",
+              "ready_for_review",
+              "awaiting_integration_authorization",
+              "failed"
+            ],
+          order_by: [asc: m.inserted_at, asc: m.id],
+          limit: 32
+        )
+      )
       |> Enum.map(& &1.id)
 
     assert Enum.map(review["payload"]["missions"], & &1["id"]) == expected_review
