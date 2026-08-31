@@ -68,6 +68,16 @@ There is one completed Consigliere Mission with two Attempts and no FirstMate re
 
 The evidence is insufficient for Promote and makes no economic superiority claim.
 
+## Final delivery-head addendum
+
+The final runtime implementation head is `a45cb4b4e5ead190ce05f1b3672bfbdeb4214f52`.
+
+The final source change only bounds and deterministically orders default reader list queries.
+
+The selected operator-controlled canary remains unchanged, was not rerun, and remains insufficient for Promote.
+
+The separate evidence delivery head is recorded by the commit containing this addendum and the matching F1-F4 refresh.
+
 The operator retains the next Continue or Stop decision.
 
 No FirstMate duplicate Mission, automatic delivery, push, pull request, merge, fixed allocation, fixed duration, or telemetry service was introduced.

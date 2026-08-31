@@ -42,6 +42,16 @@ The native macOS daemon command passed formatting and compilation and reported `
 
 The selected canary was not rerun against this final package because the operator-controlled canary forbids duplicate implementation work.
 
+## Final implementation-head addendum
+
+The final runtime implementation head is `a45cb4b4e5ead190ce05f1b3672bfbdeb4214f52`.
+
+The daemon suite returned `502 passed (1 doctest, 501 tests)` after the deterministic reader-query fix.
+
+The rebuilt native arm64 package and fresh package-only reader/lifecycle proof are recorded in `final-head-attestation-a45cb4b.md`.
+
+The selected canary was not rerun, no duplicate Mission was created, and no Promote claim was made.
+
 ## Current exact runtime source gate
 
 The current runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339` on `revival/v0-local-codex`.
