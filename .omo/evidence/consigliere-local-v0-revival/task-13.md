@@ -228,3 +228,15 @@ The response omitted the injected secret-shaped text, prompt-like text, and priv
 The same run verified the bounded command-output error at 65,536 bytes, changed owner identity after restart, accepted repeated stop, and left zero sockets or PID files.
 
 The temporary package home and source repository were moved to macOS Trash and verified absent.
+
+## Post-import durable intent recovery
+
+Commit `a38489d89fe55ed6d6e822f6a8e78254e4fe5bf7` preserves the durable progression intent when Git import succeeds but the subsequent `imported` state write is interrupted.
+
+The RED regression at `daemon/test/consigliere/progression_test.exs:131` injected a database trigger for the `imported` write and observed the prior unrecoverable failure path.
+
+The GREEN implementation leaves the Attempt and result in retryable states, records the progression incident, releases the scheduler slot, and allows a subsequent reconciliation to reuse the existing exact result ref.
+
+The focused GREEN command passed `Result: 1 passed, 8 excluded` with exit `0`.
+
+The retry assertion verified the exact imported SHA, completed Attempt, and `ready_for_review` Mission after the trigger was removed.
