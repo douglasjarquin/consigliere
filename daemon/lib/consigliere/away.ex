@@ -160,12 +160,38 @@ defmodule Consigliere.Away do
     end
   end
 
+  @doc false
+  def acknowledge_cursor(last_event_id), do: ack_cursor(last_event_id)
+
   defp ack_cursor(last_event_id) do
-    upsert_cursor(%{
-      last_event_id: last_event_id,
-      away_since: nil,
-      acknowledged_at: Txn.now()
-    })
+    DatabaseWriter.transaction(fn ->
+      now = Txn.now()
+
+      query =
+        from(c in BossCursor,
+          where: c.name == ^@cursor,
+          update: [
+            set: [
+              last_event_id: fragment("MAX(last_event_id, ?)", ^last_event_id),
+              away_since: nil,
+              acknowledged_at: ^now,
+              updated_at: ^now
+            ]
+          ]
+        )
+
+      {updated, _} = Repo.update_all(query, [])
+
+      if updated == 1 do
+        :ok
+      else
+        upsert_cursor(%{
+          last_event_id: last_event_id,
+          away_since: nil,
+          acknowledged_at: now
+        })
+      end
+    end)
   end
 
   defp latest_event_id do

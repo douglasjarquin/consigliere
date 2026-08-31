@@ -89,4 +89,56 @@ defmodule Consigliere.AwayCursorTest do
     assert length(second["events"]) == 1
     assert hd(second["events"])["id"] > List.last(first_ids)
   end
+
+  test "a stale acknowledgement cannot move the cursor backwards" do
+    assert Away.mark() == :ok
+
+    events =
+      Enum.map(1..2, fn _index ->
+        Repo.insert!(
+          DomainEvent.changeset(%DomainEvent{}, %{
+            type: "mission.created",
+            subject_type: "mission",
+            subject_id: Ecto.UUID.generate(),
+            occurred_at: DateTime.utc_now()
+          })
+        )
+      end)
+
+    high = List.last(events).id
+    low = hd(events).id
+
+    assert is_map(Away.return())
+    assert Repo.get_by!(BossCursor, name: "boss").last_event_id == high
+    assert {:ok, _} = Consigliere.Away.acknowledge_cursor(low)
+    assert Repo.get_by!(BossCursor, name: "boss").last_event_id == high
+  end
+
+  test "overlapping returns never move the cursor backwards" do
+    assert Away.mark() == :ok
+
+    events =
+      Enum.map(1..64, fn _index ->
+        Repo.insert!(
+          DomainEvent.changeset(%DomainEvent{}, %{
+            type: "mission.created",
+            subject_type: "mission",
+            subject_id: Ecto.UUID.generate(),
+            occurred_at: DateTime.utc_now()
+          })
+        )
+      end)
+
+    results =
+      1..20
+      |> Task.async_stream(fn _index -> Away.return() end,
+        max_concurrency: 5,
+        timeout: 5_000,
+        ordered: false
+      )
+      |> Enum.to_list()
+
+    assert Enum.all?(results, &match?({:ok, %{}}, &1))
+    assert Repo.get_by!(BossCursor, name: "boss").last_event_id == List.last(events).id
+  end
 end
