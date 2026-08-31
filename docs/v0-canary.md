@@ -30,7 +30,7 @@ The historical exact-runtime-head package was rebuilt from `bf22b5d4cae239a222a3
 
 That final package was not used to rerun the same Mission because the operator-controlled canary forbids duplicate implementation work.
 
-## Current exact-head closure
+## Historical exact-head closure for bf22b5d
 
 The historical canary-package source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
 
@@ -128,9 +128,17 @@ The later historical pushed evidence head was `c060b88035128bbdbf361f1bcab9a1005
 
 The canary remains insufficient for Promote and the operator retains Continue or Stop.
 
+## Historical runtime closure for 04940bb
+
+The historical runtime source head was `04940bb620efa47c6d399c056a52a6dff837daf7`.
+
+The historical package and lifecycle proof is documentation-only evidence of the existing operator-controlled path and did not rerun the selected canary or create a duplicate Mission.
+
+The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.
+
 ## Current runtime closure
 
-The current runtime source head is `04940bb620efa47c6d399c056a52a6dff837daf7`.
+The current runtime source head is `8010d5fdaa69f9e998b951f8282fddd01e5099ea`.
 
 The current package and lifecycle proof is documentation-only evidence of the existing operator-controlled path and did not rerun the selected canary or create a duplicate Mission.
 

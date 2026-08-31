@@ -65,3 +65,11 @@ It remained `24956` paths with SHA-256 `9bfc2b21f4357ee5e5a707350e6d8314fa28e9df
 The current 04940bb package prefix and fresh lifecycle home were absent, and no product process remained.
 
 This receipt retains the previously classified concurrent-worktree residue and does not delete or rewrite another worker's artifacts.
+
+## Current runtime custody after 8010d5f package QA
+
+The 8010d5f package prefix `.tmp/package-final-8010d5f` and fresh home `/tmp/cs-8010d5f-home.D2r10u` were moved through `/usr/bin/trash` and verified absent.
+
+The retained untracked inventory remains 24,956 paths with SHA-256 `9bfc2b21f4357ee5e5a707350e6d8314fa28e9dff9038932b3639b803d3bfcb9`.
+
+No Consigliere daemon, runner, Attempt, or package process remains from this QA pass.

@@ -178,7 +178,7 @@ After the selected canary record, exact head `8d839378a55e36222e13c19e84e1f91543
 
 The package was native macOS arm64 and the installed lifecycle ended with zero sockets, PID files, owner files, notification files, and package processes.
 
-The current package and cleanup receipts are `.omo/evidence/consigliere-local-v0-revival/package-artifact-8d83937.log` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-8d83937.log`.
+The historical package and cleanup receipts are `.omo/evidence/consigliere-local-v0-revival/package-artifact-8d83937.log` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-8d83937.log`.
 
 The selected canary was not rerun because doing so would create duplicate implementation work; its one Mission, two operator-authorized Attempts, zero FirstMate records, and insufficient Promote evidence remain authoritative.
 
@@ -286,12 +286,18 @@ The exact package identities, command results, and Trash cleanup receipt are rec
 
 ## Current runtime and lifecycle closure
 
-The current runtime source head is `04940bb620efa47c6d399c056a52a6dff837daf7`.
+The superseded runtime source head was `04940bb620efa47c6d399c056a52a6dff837daf7`.
 
-The current package-only lifecycle evidence is recorded in `package-artifact-04940bb.md` and `installed-lifecycle-04940bb.md`.
+The superseded package-only lifecycle evidence is recorded in `package-artifact-04940bb.md` and `installed-lifecycle-04940bb.md`.
 
 This lifecycle proof did not rerun the selected canary, create a duplicate Mission, or make a Promote claim.
 
 The natural comparable sample remains below 20, so Continue or Stop remains an operator decision.
+
+The current runtime source head is `8010d5fdaa69f9e998b951f8282fddd01e5099ea`.
+
+The current package-only lifecycle evidence is recorded in `package-artifact-8010d5f.md` and `installed-lifecycle-8010d5f.md`.
+
+This current lifecycle proof did not rerun the selected canary, create a duplicate Mission, or make a Promote claim.
 
 The final result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.

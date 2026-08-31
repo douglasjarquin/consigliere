@@ -1,10 +1,10 @@
-# Historical exact-head verification archive
+# Exact-head verification archive
 
-All records in this archive are historical snapshots and are not current delivery claims.
+Superseded sections in this archive are explicitly marked historical; the current delivery claims below are bound to the latest immutable evidence child.
 
-The current implementation evidence is bound to `04940bb620efa47c6d399c056a52a6dff837daf7` in `final-gate-receipt.md`, `F1.md`, `F2.md`, `F3.md`, and `F4.md`.
+The current implementation evidence is bound to `8010d5fdaa69f9e998b951f8282fddd01e5099ea` in `final-gate-receipt.md`, `F1.md`, `F2.md`, `F3.md`, and `F4.md`.
 
-The current exact implementation includes the bounded Away digest and the paged cursor acknowledgement fix, with RED/GREEN, daemon, package, and lifecycle receipts in `away-return-04940bb.md`, `daemon-gate-04940bb.md`, `package-artifact-04940bb.md`, and `installed-lifecycle-04940bb.md`.
+The current exact implementation includes the bounded Away digest and the monotonic paged cursor acknowledgement fix, with RED/GREEN, daemon, package, and lifecycle receipts in `away-return-8010d5f.md`, `daemon-gate-8010d5f.md`, `package-artifact-8010d5f.md`, and `installed-lifecycle-8010d5f.md`.
 
 Target branch: `revival/v0-local-codex`.
 
@@ -100,7 +100,7 @@ PR #101 remains historical input and PR #141 is the separate draft replacement; 
 
 The prior receipt targets are historical intermediate heads.
 
-The current implementation head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad` on `revival/v0-local-codex`.
+The historical implementation head was `bf22b5d4cae239a222a3065ca4b34b574dd676ad` on `revival/v0-local-codex`.
 
 The final Linux daemon receipt reports `486 passed (1 doctest, 485 tests)` in three consecutive seed-0 runs.
 

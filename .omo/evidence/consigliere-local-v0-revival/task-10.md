@@ -227,7 +227,7 @@ Malformed schemas, prompt injection, cancel or resume, dirty worktrees, hung com
 
 ## Paged Away cursor race follow-up
 
-The exact runtime source head is `04940bb620efa47c6d399c056a52a6dff837daf7`.
+The superseded runtime source head for this cursor follow-up was `04940bb620efa47c6d399c056a52a6dff837daf7`.
 
 The RED regression inserted 33 events after `Away.mark`, returned the first bounded page, and observed that the old implementation acknowledged the database's latest event rather than the last event actually returned, permanently skipping a concurrently inserted event.
 
@@ -239,4 +239,8 @@ The focused GREEN command was `mix test test/consigliere/away_cursor_test.exs te
 
 Five repeated reader and Away runs each passed `16 tests` with `8 excluded`, and the full daemon gate passed `504 tests (1 doctest, 503 tests)`.
 
-The new package and lifecycle evidence is recorded in `away-return-04940bb.md`, `daemon-gate-04940bb.md`, `package-artifact-04940bb.md`, and `installed-lifecycle-04940bb.md`.
+The superseded package and lifecycle evidence is recorded in `away-return-04940bb.md`, `daemon-gate-04940bb.md`, `package-artifact-04940bb.md`, and `installed-lifecycle-04940bb.md`.
+
+The current runtime source head is `8010d5fdaa69f9e998b951f8282fddd01e5099ea`.
+
+The current monotonic cursor RED/GREEN, five repeated focused runs, full daemon gate, package, and lifecycle receipts are `away-return-8010d5f.md`, `daemon-gate-8010d5f.md`, `package-artifact-8010d5f.md`, and `installed-lifecycle-8010d5f.md`.

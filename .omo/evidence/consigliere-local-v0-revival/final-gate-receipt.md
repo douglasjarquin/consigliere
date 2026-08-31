@@ -68,15 +68,17 @@ That superseded implementation and package pass contained no canary rerun, dupli
 
 ## Current exact implementation and package receipt
 
-The current runtime source head is `04940bb620efa47c6d399c056a52a6dff837daf7`.
+The current runtime source head is `8010d5fdaa69f9e998b951f8282fddd01e5099ea`.
 
-The current exact daemon, cursor, package, and lifecycle receipts are `away-return-04940bb.md`, `daemon-gate-04940bb.md`, `package-artifact-04940bb.md`, and `installed-lifecycle-04940bb.md`.
+The current exact daemon, cursor, package, and lifecycle receipts are `away-return-8010d5f.md`, `daemon-gate-8010d5f.md`, `package-artifact-8010d5f.md`, and `installed-lifecycle-8010d5f.md`.
 
-The current daemon gate passed `504 tests (1 doctest, 503 tests)` after the bounded Away and paged cursor fixes.
+The current daemon gate passed `506 tests (1 doctest, 505 tests)` after the bounded Away and monotonic cursor fixes.
 
 The current package-only lifecycle passed migration, start, ping, Away, restart, repeated stop, and cleanup with `package_processes=0`.
 
 The final evidence child is documentation-only above this runtime source, and its exact-head reviewers must bind their verdicts to that immutable child.
+
+Current local final-gate verdict: PASS for runtime source `8010d5fdaa69f9e998b951f8282fddd01e5099ea` and the immutable evidence child, with remote CI and PR custody intentionally pending the final push.
 
 ## Historical exact runtime source gate for 7c54c78
 
