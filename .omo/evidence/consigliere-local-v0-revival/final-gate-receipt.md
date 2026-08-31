@@ -62,7 +62,7 @@ The superseded daemon, package, lifecycle, and Away boundedness receipts were `a
 
 That superseded runtime head passed the Away RED/GREEN regression, five repeated bounded-reader runs, and the full `503`-test daemon gate.
 
-The current package-only lifecycle passed `cs boss away`, `cs boss return`, identity-safe restart, repeated stop, and zero-residue cleanup from a fresh `env -i` home.
+The superseded package-only lifecycle passed `cs boss away`, `cs boss return`, identity-safe restart, repeated stop, and zero-residue cleanup from a fresh `env -i` home.
 
 That superseded implementation and package pass contained no canary rerun, duplicate Mission, FirstMate implementation, Made operation, push, PR creation, or merge.
 
@@ -166,9 +166,9 @@ The historical native arm64 package and package-only lifecycle proof are recorde
 
 The selected canary was not rerun, no duplicate Mission was created, and no Promote claim was made.
 
-## Authoritative final implementation-head receipt
+## Historical superseded implementation-head receipt for eb41191
 
-The authoritative final runtime implementation head is `eb41191b73a04b93d613d8d0cf8b2183a55272ef`.
+The superseded runtime implementation head was `eb41191b73a04b93d613d8d0cf8b2183a55272ef`.
 
 The exact-head daemon suite returned `502 passed (1 doctest, 501 tests)`.
 

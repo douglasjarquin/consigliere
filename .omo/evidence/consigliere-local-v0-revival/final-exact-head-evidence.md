@@ -116,7 +116,7 @@ The natural comparable sample remains below 20, so the evidence is insufficient 
 
 ## Historical exact-head closure for 7159373
 
-The current runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
+The historical runtime source head was `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
 
 The exact-head package and lifecycle receipts are `package-artifact-7159373.md` and `installed-lifecycle-7159373.md`.
 
@@ -128,7 +128,7 @@ The public canary result remains one completed Consigliere Mission with two Atte
 
 ## Historical exact runtime source closure for 7c54c78
 
-The current runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339` on `revival/v0-local-codex`.
+The historical runtime source head was `7c54c782552f3ee5a09ddee35735e90cba1b9339` on `revival/v0-local-codex`.
 
 The preceding runtime audit blockers are closed by `runtime-audit-followup-7c54c78.md`.
 
