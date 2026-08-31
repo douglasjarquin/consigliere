@@ -136,6 +136,16 @@ The historical package and lifecycle proof is documentation-only evidence of the
 
 The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.
 
+## Exact-head package refresh for d63f239
+
+The current runtime source head is `d63f2390944a534f4746c64ef60e43332fd546c3`.
+
+The current package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-d63f239.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-d63f239.md`.
+
+It did not rerun the selected canary or create a duplicate Mission.
+
+The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.
+
 ## Historical superseded runtime closure for 0fd7d3b
 
 The historical superseded runtime source head is `0fd7d3b951672df7cb37e6c160401d1593386ba2`.
@@ -158,10 +168,20 @@ The historical package and lifecycle proof is recorded in `.omo/evidence/consigl
 
 The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.
 
-## Current runtime closure
+## Historical superseded runtime closure for 0c2b24c
 
-The current runtime source head is `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
+The superseded runtime source head was `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
 
-The current package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-0c2b24c.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-0c2b24c.md`; it did not rerun the selected canary or create a duplicate Mission.
+The superseded package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-0c2b24c.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-0c2b24c.md`; it did not rerun the selected canary or create a duplicate Mission.
+
+The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.
+
+## Current runtime closure for d63f239
+
+The current runtime source head is `d63f2390944a534f4746c64ef60e43332fd546c3`.
+
+The current package and lifecycle proof is recorded in `.omo/evidence/consigliere-local-v0-revival/package-artifact-d63f239.md` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-d63f239.md`.
+
+It did not rerun the selected canary or create a duplicate Mission.
 
 The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.

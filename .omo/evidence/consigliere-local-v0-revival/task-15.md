@@ -312,6 +312,16 @@ This historical lifecycle proof did not rerun the selected canary, create a dupl
 
 The result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.
 
+## Current exact-head lifecycle closure for d63f239
+
+The current runtime source head is `d63f2390944a534f4746c64ef60e43332fd546c3`.
+
+The fresh package-only lifecycle passed with `env -i`, migration, start, ping, doctor, stop, restart, post-restart ping, repeated stop, and zero residual package processes.
+
+The current package and lifecycle evidence is recorded in `package-artifact-d63f239.md` and `installed-lifecycle-d63f239.md`.
+
+This QA did not rerun the selected canary, create duplicate work, or make a Promote claim.
+
 ## Historical superseded runtime and lifecycle closure for ec47784
 
 The historical superseded runtime source head is `ec47784a801ee8168fae7b249bf3b8342951ae17`.

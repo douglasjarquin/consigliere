@@ -180,6 +180,16 @@ The final gate verdict is PASS for plan compliance, source quality, package/manu
 
 The supporting final gate review is `gate-review-final-85f02c5.md`.
 
+## Current exact-head correction for d63f239
+
+The current immutable runtime source head is `d63f2390944a534f4746c64ef60e43332fd546c3`.
+
+The exact current receipts are `away-return-d63f239.md`, `daemon-gate-d63f239.md`, `go-gates-d63f239.md`, `package-artifact-d63f239.md`, and `installed-lifecycle-d63f239.md`.
+
+The focused Away regression passed at ten seeds, the complete daemon gate passed `511 passed (1 doctest, 510 tests)`, both Go module gates exited `0`, and the fresh installed lifecycle passed with zero package processes after cleanup.
+
+The final exact-head review set and remote CI remain pending, so this receipt is not yet the final delivery verdict.
+
 ## Historical pushed-head attestation for c060b88
 
 The final pushed head is `c060b88035128bbdbf361f1bcab9a100521965e9`.

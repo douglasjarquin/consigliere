@@ -175,3 +175,19 @@ It is a documentation/evidence-only child of runtime source `7c54c782552f3ee5a09
 The final runtime diff check exited `0`, remote CI run `33322804969` passed all five checks, and PR #141 is open and draft at the exact pushed head.
 
 The complete final delivery attestation is `final-delivery-attestation-c060b88.md`.
+
+## Current exact-head correction for d63f239
+
+The current runtime source head is `d63f2390944a534f4746c64ef60e43332fd546c3` on `revival/v0-local-codex`.
+
+The Away correction preserves the bounded overlapping-return contract while serializing mark's marker and cursor update and return's acknowledgement plus token-checked marker removal on the same expanded-home global resource.
+
+Focused proof passed ten seeds with `7` tests each, the complete daemon gate passed `511 passed (1 doctest, 510 tests)`, and both Go module gates exited `0`.
+
+The fresh package was exercised only through installed artifacts in a fresh `env -i` home, and cleanup reported zero package processes with the package and QA home moved to Trash.
+
+The exact current receipts are `away-return-d63f239.md`, `daemon-gate-d63f239.md`, `go-gates-d63f239.md`, `package-artifact-d63f239.md`, and `installed-lifecycle-d63f239.md`.
+
+The selected canary was not rerun, because the operator-controlled no-duplicate rule forbids duplicate implementation work.
+
+The natural comparable sample remains below 20, so no Promote claim is made and Continue or Stop remains operator-owned.

@@ -135,3 +135,13 @@ The temporary archive and package prefix were moved to the host trash.
 The FIFO lock probe, its writer, fresh homes, and package daemons were contained within the removed container.
 
 No shared daemon was stopped, restarted, or updated.
+
+## Current Away shared-resource correction for d63f239
+
+The current runtime source head is `d63f2390944a534f4746c64ef60e43332fd546c3`.
+
+The Away marker and cursor boundary now uses the expanded `CS_HOME` in the shared `:global.trans({{Consigliere.Away, Path.expand(home)}, self()}, fun)` resource.
+
+The concurrent mark regression holds that exact resource in a separate task and proves two real mark calls cannot complete until release, then verifies marker and cursor agreement.
+
+The focused and full daemon results are recorded in `away-return-d63f239.md` and `daemon-gate-d63f239.md`.

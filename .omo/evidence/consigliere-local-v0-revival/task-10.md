@@ -252,3 +252,11 @@ The current runtime source head is `0c2b24c02490c8f6f53b7f6bc1a9fb9add519861`.
 The bounded API, event, log, usage, Away cursor, and command-output behavior remains covered by the current daemon and package gates; the current receipt set is `daemon-gate-0c2b24c.md`, `package-artifact-0c2b24c.md`, and `installed-lifecycle-0c2b24c.md`.
 
 The current runtime fix additionally ensures that unverified terminating Attempt exits follow the bounded lost and quarantine reconciliation path without changing the established output caps.
+
+## Current exact-head correction for d63f239
+
+The current runtime source head is `d63f2390944a534f4746c64ef60e43332fd546c3`.
+
+The bounded data surfaces remain covered by the complete daemon gate, and the new Away concurrency regression proves shared-home serialization without changing overlapping-return boundedness.
+
+The exact current receipts are `away-return-d63f239.md`, `daemon-gate-d63f239.md`, `package-artifact-d63f239.md`, and `installed-lifecycle-d63f239.md`.
