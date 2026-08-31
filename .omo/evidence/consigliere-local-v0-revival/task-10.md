@@ -224,3 +224,19 @@ The bounded oversized-payload regression used a secret-shaped 130,000-byte event
 The applicable adversarial classes were oversized durable payloads, response-size enforcement, cursor-loss prevention, deterministic ordering, malformed or advisory authorization, and repeated timing.
 
 Malformed schemas, prompt injection, cancel or resume, dirty worktrees, hung commands, and process interruption do not enter `away.return`'s read-and-ack path and remain covered by their owning task records.
+
+## Paged Away cursor race follow-up
+
+The exact runtime source head is `04940bb620efa47c6d399c056a52a6dff837daf7`.
+
+The RED regression inserted 33 events after `Away.mark`, returned the first bounded page, and observed that the old implementation acknowledged the database's latest event rather than the last event actually returned, permanently skipping a concurrently inserted event.
+
+The GREEN fix acknowledges the last event ID in the returned page and leaves later events available to the next page.
+
+The focused RED command was `mix test test/consigliere/away_cursor_test.exs:68 --no-color --seed 0` and failed `0/1 passed` before the fix.
+
+The focused GREEN command was `mix test test/consigliere/away_cursor_test.exs test/consigliere/away_test.exs test/consigliere/api_protocol_test.exs --no-color --seed 0` and passed `15 tests`.
+
+Five repeated reader and Away runs each passed `16 tests` with `8 excluded`, and the full daemon gate passed `504 tests (1 doctest, 503 tests)`.
+
+The new package and lifecycle evidence is recorded in `away-return-04940bb.md`, `daemon-gate-04940bb.md`, `package-artifact-04940bb.md`, and `installed-lifecycle-04940bb.md`.

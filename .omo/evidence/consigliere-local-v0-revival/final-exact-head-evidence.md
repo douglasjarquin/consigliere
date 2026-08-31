@@ -2,7 +2,9 @@
 
 All records in this archive are historical snapshots and are not current delivery claims.
 
-The current implementation evidence is bound to `4cb71b41075631d8beb30ddaeca5171c9b835234` in `final-gate-receipt.md`, `F1.md`, `F2.md`, `F3.md`, and `F4.md`.
+The current implementation evidence is bound to `04940bb620efa47c6d399c056a52a6dff837daf7` in `final-gate-receipt.md`, `F1.md`, `F2.md`, `F3.md`, and `F4.md`.
+
+The current exact implementation includes the bounded Away digest and the paged cursor acknowledgement fix, with RED/GREEN, daemon, package, and lifecycle receipts in `away-return-04940bb.md`, `daemon-gate-04940bb.md`, `package-artifact-04940bb.md`, and `installed-lifecycle-04940bb.md`.
 
 Target branch: `revival/v0-local-codex`.
 

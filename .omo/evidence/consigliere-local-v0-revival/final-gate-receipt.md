@@ -54,17 +54,29 @@ The rebuilt native arm64 package and fresh package-only reader/lifecycle proof a
 
 The selected canary was not rerun, no duplicate Mission was created, and no Promote claim was made.
 
-## Current exact implementation and package receipt
+## Historical superseded implementation receipt for 4cb71b4
 
-The current runtime source head is `4cb71b41075631d8beb30ddaeca5171c9b835234`.
+The superseded runtime source head was `4cb71b41075631d8beb30ddaeca5171c9b835234`.
 
-The current exact daemon, package, lifecycle, and Away boundedness receipts are `away-return-4cb71b4.md`, `daemon-gate-eb41191.md`, `package-artifact-4cb71b4.md`, and `installed-lifecycle-4cb71b4.md`.
+The superseded daemon, package, lifecycle, and Away boundedness receipts were `away-return-4cb71b4.md`, `daemon-gate-eb41191.md`, `package-artifact-4cb71b4.md`, and `installed-lifecycle-4cb71b4.md`.
 
-The current runtime head passes the Away RED/GREEN regression, five repeated bounded-reader runs, and the full `503`-test daemon gate.
+That superseded runtime head passed the Away RED/GREEN regression, five repeated bounded-reader runs, and the full `503`-test daemon gate.
 
 The current package-only lifecycle passed `cs boss away`, `cs boss return`, identity-safe restart, repeated stop, and zero-residue cleanup from a fresh `env -i` home.
 
-The final implementation and package changes contain no canary rerun, duplicate Mission, FirstMate implementation, Made operation, push, PR creation, or merge.
+That superseded implementation and package pass contained no canary rerun, duplicate Mission, FirstMate implementation, Made operation, push, PR creation, or merge.
+
+## Current exact implementation and package receipt
+
+The current runtime source head is `04940bb620efa47c6d399c056a52a6dff837daf7`.
+
+The current exact daemon, cursor, package, and lifecycle receipts are `away-return-04940bb.md`, `daemon-gate-04940bb.md`, `package-artifact-04940bb.md`, and `installed-lifecycle-04940bb.md`.
+
+The current daemon gate passed `504 tests (1 doctest, 503 tests)` after the bounded Away and paged cursor fixes.
+
+The current package-only lifecycle passed migration, start, ping, Away, restart, repeated stop, and cleanup with `package_processes=0`.
+
+The final evidence child is documentation-only above this runtime source, and its exact-head reviewers must bind their verdicts to that immutable child.
 
 ## Historical exact runtime source gate for 7c54c78
 

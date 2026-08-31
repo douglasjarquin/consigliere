@@ -284,4 +284,14 @@ The package rebuilt from the final head passed the installed-only lifecycle from
 
 The exact package identities, command results, and Trash cleanup receipt are recorded in `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`.
 
+## Current runtime and lifecycle closure
+
+The current runtime source head is `04940bb620efa47c6d399c056a52a6dff837daf7`.
+
+The current package-only lifecycle evidence is recorded in `package-artifact-04940bb.md` and `installed-lifecycle-04940bb.md`.
+
+This lifecycle proof did not rerun the selected canary, create a duplicate Mission, or make a Promote claim.
+
+The natural comparable sample remains below 20, so Continue or Stop remains an operator decision.
+
 The final result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.

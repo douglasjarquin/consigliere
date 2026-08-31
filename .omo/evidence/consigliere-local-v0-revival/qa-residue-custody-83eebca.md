@@ -55,3 +55,13 @@ They predated the final flake-remediation QA pass and were not created or modifi
 Only the final pass's `.tmp/package-final-eb41191` prefix and its fresh temporary lifecycle homes were owned by that pass, and those were moved through `/usr/bin/trash` after cleanup assertions passed.
 
 The inventory and cleanup checks produced no Consigliere daemon, `cs-runner`, or `cs-attempt` process from the final QA pass.
+
+## Exact retained-residue inventory before final evidence child
+
+The untracked inventory was rechecked after the 04940bb package and lifecycle pass and before the final evidence child was created.
+
+It remained `24956` paths with SHA-256 `9bfc2b21f4357ee5e5a707350e6d8314fa28e9dff9038932b3639b803d3bfcb9`.
+
+The current 04940bb package prefix and fresh lifecycle home were absent, and no product process remained.
+
+This receipt retains the previously classified concurrent-worktree residue and does not delete or rewrite another worker's artifacts.

@@ -127,3 +127,11 @@ This delivery record does not change the canary result, create a duplicate Missi
 The later historical pushed evidence head was `c060b88035128bbdbf361f1bcab9a100521965e9`, with remote CI run `33322804969` passing all five checks at that historical PR head.
 
 The canary remains insufficient for Promote and the operator retains Continue or Stop.
+
+## Current runtime closure
+
+The current runtime source head is `04940bb620efa47c6d399c056a52a6dff837daf7`.
+
+The current package and lifecycle proof is documentation-only evidence of the existing operator-controlled path and did not rerun the selected canary or create a duplicate Mission.
+
+The natural comparable sample remains below 20, so this record makes no Promote claim and leaves Continue or Stop to the operator.
