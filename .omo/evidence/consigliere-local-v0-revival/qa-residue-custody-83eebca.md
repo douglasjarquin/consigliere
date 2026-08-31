@@ -30,19 +30,27 @@ The retained pre-existing detached runner path is `runner/cs-runner/detached-boo
 
 These paths were not created by the final QA passes and were preserved under the task's concurrent-worktree custody rule.
 
-## Exact retained-residue inventory at delivery head 3bf48e6
+## Exact retained-residue inventory at delivery head 4547d4d
 
-The untracked inventory was captured with `git ls-files --others --exclude-standard` from delivery head `3bf48e6b0506cd47e0c03ab17a609f8643402d67`.
+The untracked inventory was captured with `git ls-files --others --exclude-standard` from delivery head `4547d4d2718d3e5070b70757a04c3315bebf8157`.
 
-The manifest contained `24953` paths and had SHA-256 `182ab9001c2deef735623edbde52aede00e5a48c55d71a065a33e03877c43369`.
+The manifest contained `24954` paths and had SHA-256 `249dc4186707c5322a90d53ac26fce1b786a3aa8c5cfbd663347f47aeaf8b084`.
 
-The retained categories were `.tmp/package-*` with `23983` paths, `.tmp/attempt-report-*` with `653` paths, `.tmp/task15-canary/*` with `18` paths, other `.tmp/*` with `138` paths, `.omo/evidence/*` with `146` paths, `.omo/ulw-notepad*` with `1` path, `cli/.tmp/*` with `2` paths, `runner/cs-runner/detached-bootstrap-child` with `1` path, `_build/*` with `8` paths, `.debug-journal.md` with `1` path, `AGENTS.md` with `1` path, and `CLAUDE.md` with `1` path.
+The retained categories were `.tmp/package-*` with `23983` paths, `.tmp/attempt-report-*` with `653` paths, `.tmp/task15-canary/*` with `18` paths, other `.tmp/*` with `138` paths, `.omo/evidence/*` with `147` paths, `.omo/ulw-notepad*` with `1` path, `cli/.tmp/*` with `2` paths, `runner/cs-runner/detached-bootstrap-child` with `1` path, `_build/*` with `8` paths, `.debug-journal.md` with `1` path, `AGENTS.md` with `1` path, and `CLAUDE.md` with `1` path.
 
 The retained residue occupied `1.9G` in `.tmp`, `13M` in `.omo/evidence`, `9.8M` in `cli/.tmp`, `4.0K` in the detached runner artifact, and `48K` in `.debug-journal.md`.
 
 The exact final QA prefix `.tmp/package-final-eb41191` was absent and had zero remaining untracked paths.
 
 The retained categories predated the final flake-remediation QA pass and were not modified by it.
+
+The two additional untracked evidence paths since the prior inventory were `.omo/evidence/consigliere-local-v0-plan-compliance-gate-review.md` and `.omo/evidence/consigliere-local-v0-revival/final-read-only-manual-qa.md`.
+
+Those two paths are handoff-review artifacts, are not product inputs, and remain untracked pending the final custody decision.
+
+The retained zero-byte runtime lock paths `.tmp/attempt-report-home-fixed/lock`, `.tmp/attempt-report-home/lock`, and `.tmp/task15-canary/home-fixed/lock` were checked with `lsof` and had no owning process.
+
+They predated the final flake-remediation QA pass and were not created or modified by it, so they remain classified residue rather than being deleted by this worker.
 
 Only the final pass's `.tmp/package-final-eb41191` prefix and its fresh temporary lifecycle homes were owned by that pass, and those were moved through `/usr/bin/trash` after cleanup assertions passed.
 
