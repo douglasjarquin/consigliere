@@ -36,11 +36,12 @@ defmodule Consigliere.Away do
   def return(home \\ Home.dir()) do
     digest = digest(:return)
     frame_bytes = Limits.frame_bytes()
+    acknowledged_event_id = digest_cursor(digest)
 
     case Limits.encoded_size(digest) do
       {:ok, size} ->
         if size <= frame_bytes do
-          case ack_cursor() do
+          case ack_cursor(acknowledged_event_id) do
             {:ok, _} ->
               File.rm(path(home))
               digest
@@ -152,9 +153,16 @@ defmodule Consigliere.Away do
     end)
   end
 
-  defp ack_cursor do
+  defp digest_cursor(%{"cursor" => cursor, "events" => events}) do
+    case List.last(events) do
+      %{"id" => event_id} -> event_id
+      _ -> cursor
+    end
+  end
+
+  defp ack_cursor(last_event_id) do
     upsert_cursor(%{
-      last_event_id: latest_event_id(),
+      last_event_id: last_event_id,
       away_since: nil,
       acknowledged_at: Txn.now()
     })

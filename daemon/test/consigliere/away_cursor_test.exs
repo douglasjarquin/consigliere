@@ -64,4 +64,29 @@ defmodule Consigliere.AwayCursorTest do
     assert Enum.all?(digest["events"], &(!Map.has_key?(&1, "payload")))
     assert Repo.get_by!(BossCursor, name: "boss").last_event_id > marked_at
   end
+
+  test "return acknowledges only the bounded event page" do
+    assert Away.mark() == :ok
+
+    Enum.each(1..33, fn _index ->
+      Repo.insert!(
+        DomainEvent.changeset(%DomainEvent{}, %{
+          type: "mission.created",
+          subject_type: "mission",
+          subject_id: Ecto.UUID.generate(),
+          occurred_at: DateTime.utc_now()
+        })
+      )
+    end)
+
+    first = Away.return()
+    first_ids = Enum.map(first["events"], & &1["id"])
+
+    assert length(first_ids) == 32
+    assert Repo.get_by!(BossCursor, name: "boss").last_event_id == List.last(first_ids)
+
+    second = Away.return()
+    assert length(second["events"]) == 1
+    assert hd(second["events"])["id"] > List.last(first_ids)
+  end
 end
