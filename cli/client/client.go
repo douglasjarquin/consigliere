@@ -174,7 +174,7 @@ func (d Dialer) Call(op string, payload map[string]any, id, idem string) (*Respo
 			}
 		}
 		if generated && retry.Key == "" {
-			retry = retryState{Operation: op, Scope: scope, Key: idem, Hash: canonicalHash, Payload: payload}
+			retry = retryState{Operation: op, Scope: scope, Key: idem, Hash: canonicalHash, Payload: retryPayload(op, payload)}
 			if err := d.Home.saveRetryState(retry); err != nil {
 				return nil, err
 			}

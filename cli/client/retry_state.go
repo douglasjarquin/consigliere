@@ -41,9 +41,8 @@ func (h Home) findRetryState(op, scope string, version int, payload map[string]a
 		if json.Unmarshal(data, &state) != nil || state.Operation != op || state.Scope != scope {
 			continue
 		}
-		storedHash, storedErr := CanonicalRequestHash(scope, op, version, state.Key, state.Payload)
 		currentHash, currentErr := CanonicalRequestHash(scope, op, version, state.Key, payload)
-		if storedErr == nil && currentErr == nil && storedHash == state.Hash && currentHash == state.Hash {
+		if currentErr == nil && currentHash == state.Hash {
 			return state, true, nil
 		}
 	}

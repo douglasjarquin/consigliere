@@ -41,6 +41,43 @@ var v0ReadOperations = map[string]int{
 	"advisory.orient": 1,
 }
 
+var retryPayloadFields = map[string][]string{
+	"project.add":               {"name", "repository_path", "default_branch"},
+	"mission.create":            {"project_id"},
+	"mission.submit":            {"mission_id"},
+	"mission.request_changes":   {"mission_id"},
+	"mission.grant_work":        {"mission_id"},
+	"mission.continue":          {"mission_id", "checkpoint_sha"},
+	"mission.cancel":            {"mission_id"},
+	"mission.pause":             {"mission_id"},
+	"mission.resume":            {"mission_id"},
+	"mission.grant_integration": {"mission_id", "target_pull_request", "target_sha"},
+	"question.open":             {"attempt_id", "request_id", "blocking_scope", "requested_authority"},
+	"question.answer":           {"question_id"},
+	"away.mark":                 {},
+	"away.return":               {},
+	"attempt.progress":          {"attempt_id"},
+	"attempt.checkpoint":        {"attempt_id"},
+	"attempt.complete":          {"attempt_id"},
+	"attempt.fail":              {"attempt_id"},
+	"internal.dispatch":         {"attempt_id"},
+	"post_attempt.progress":     {"attempt_id"},
+}
+
+func retryPayload(op string, payload map[string]any) map[string]any {
+	fields, ok := retryPayloadFields[op]
+	if !ok {
+		return map[string]any{}
+	}
+	projected := make(map[string]any, len(fields))
+	for _, field := range fields {
+		if value, present := payload[field]; present {
+			projected[field] = value
+		}
+	}
+	return projected
+}
+
 func operationVersion(op string) (int, bool) {
 	if version, ok := v0Operations[op]; ok {
 		return version, true
