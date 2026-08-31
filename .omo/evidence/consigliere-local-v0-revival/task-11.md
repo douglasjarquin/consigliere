@@ -250,15 +250,25 @@ The native macOS full suite passed `467/476` with nine host-specific socket, pat
 
 Failure classes exercised or ruled out here were stale state, repeated interruption, malformed protocol completion, misleading process exit status, and flaky shared-test timing.
 
-## Final runner identity and release-gate receipt
+## Historical final runner identity and release-gate receipt for bf22b5d
 
-The final source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
+The historical final source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
 
 The fail-closed startup RED/GREEN proof is recorded in `runner-startup-boundary-bf22b5d.log`.
 
 The final Linux daemon suite passed `486 passed (1 doctest, 485 tests)` in three consecutive seed-0 runs, and the CLI and runner Go gates passed formatting, vet, ordinary tests, race and shuffle tests, and builds.
 
-The final package and installed lifecycle receipts are `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`.
+The historical package and installed lifecycle receipts are `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`.
+
+## Current cancellation ordering closure
+
+The current runtime source head is `cf56963a7206e5c5a260442c08eaa7bdcd65ec7a`.
+
+The RED regression reproduced cancellation finalizing a still-registered runner as lost before verified death.
+
+The GREEN fix makes `runner_cancel` delivery request cancellation only; the reconciler and RunnerProcess exit path retain responsibility for terminal outcome and workspace disposition after verified process death.
+
+The focused termination and dispatch slice passed `4 tests`, including the regression that a live runner remains `terminating` after delivery.
 
 The selected real canary was not rerun after this runtime hardening because the operator-controlled rule forbids duplicate implementation work.
 
@@ -270,7 +280,7 @@ The fail-closed runner identity and short-lived harness recovery fixes are inclu
 
 The Linux daemon gate passed `491 passed (1 doctest, 490 tests)` in three consecutive seed-0 runs, and the installed package lifecycle verified owner identity, restart generation change, terminal runner absence, repeated stop, and cleanup.
 
-The exact current receipts are `daemon-linux-gate-7159373.md`, `package-artifact-7159373.md`, and `installed-lifecycle-7159373.md`.
+The exact historical receipts are `daemon-linux-gate-7159373.md`, `package-artifact-7159373.md`, and `installed-lifecycle-7159373.md`.
 
 ## Historical exact-head runtime audit follow-up for 7c54c78
 

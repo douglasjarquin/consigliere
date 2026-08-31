@@ -85,3 +85,15 @@ The new package prefix `.tmp/package-final-0fd7d3b` and fresh home `/tmp/cs-0fd7
 The retained inventory is concurrent-worktree residue and prior review output, including prior package and canary artifacts, and was not deleted or rewritten by this pass.
 
 No Consigliere daemon, runner, Attempt, or Codex process remained after the new package lifecycle.
+
+## Exact retained-residue inventory before final evidence child at runtime source cf56963
+
+The untracked inventory was captured after staging the intended evidence files and after the cf56963 package-only lifecycle cleanup.
+
+It contained `24959` paths and had SHA-256 `e270e6ce6d57faed2ba6dcf61de8ca706d5b4bdcb2e7e6b68009924b5172f39e` when listed with `git ls-files --others --exclude-standard | LC_ALL=C sort`.
+
+The new package prefix `.tmp/package-final-cf56963` and fresh home `/tmp/cs-cf56963-r2-home.x6XQV1` were moved through `/usr/bin/trash` and verified absent.
+
+The retained inventory is concurrent-worktree residue and prior review output, including prior package and canary artifacts, and was not deleted or rewritten by this pass.
+
+No Consigliere daemon, runner, Attempt, or Codex process remained after the new package lifecycle.

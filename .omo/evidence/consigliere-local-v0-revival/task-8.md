@@ -133,9 +133,9 @@ The authoritative Linux daemon gate on the committed follow-up returned `482 pas
 
 The failure classes covered here were stale planned slots, duplicate recoverable continuation, direct SQLite uniqueness violation, planned replacement, restart rebuild, and repeated cancellation.
 
-## Final exact-head boundary receipt
+## Historical final exact-head boundary receipt for bf22b5d
 
-The final source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
+The historical final source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
 
 The runner startup boundary RED proof against the pre-fix runtime failed with `a runner started without a durable Attempt`.
 
@@ -143,7 +143,7 @@ The GREEN recovery suite passed six tests after startup now fails closed for mis
 
 The complete Linux daemon gate then passed `486 passed (1 doctest, 485 tests)` in three consecutive seed-0 runs.
 
-The bounded receipt is `.omo/evidence/consigliere-local-v0-revival/runner-startup-boundary-bf22b5d.log`.
+The historical bounded receipt is `.omo/evidence/consigliere-local-v0-revival/runner-startup-boundary-bf22b5d.log`.
 
 ## Historical superseded exact-head closure for 7159373
 

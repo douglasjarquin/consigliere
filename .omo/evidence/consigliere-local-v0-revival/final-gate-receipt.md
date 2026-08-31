@@ -80,21 +80,37 @@ The final evidence child is documentation-only above this runtime source, and it
 
 Historical local final-gate verdict: PASS for runtime source `8010d5fdaa69f9e998b951f8282fddd01e5099ea` and its then evidence child.
 
-## Current exact implementation and package receipt
+## Historical superseded exact implementation and package receipt for 0fd7d3b
 
-The current runtime source head is `0fd7d3b951672df7cb37e6c160401d1593386ba2`.
+The historical runtime source head is `0fd7d3b951672df7cb37e6c160401d1593386ba2`.
 
-The current exact daemon, cursor, package, and lifecycle receipts are `away-return-0fd7d3b.md`, `daemon-gate-0fd7d3b.md`, `package-artifact-0fd7d3b.md`, and `installed-lifecycle-0fd7d3b.md`.
+The historical exact daemon, cursor, package, and lifecycle receipts are `away-return-0fd7d3b.md`, `daemon-gate-0fd7d3b.md`, `package-artifact-0fd7d3b.md`, and `installed-lifecycle-0fd7d3b.md`.
 
-The current daemon gate passed `505 passed (1 doctest, 504 tests)` after format and warnings-as-errors compilation.
+The historical daemon gate passed `505 passed (1 doctest, 504 tests)` after format and warnings-as-errors compilation.
 
-The current package-only lifecycle passed migration, start, ping, Away, restart, repeated stop, and cleanup with `package_processes=0`.
+The historical package-only lifecycle passed migration, start, ping, Away, restart, repeated stop, and cleanup with `package_processes=0`.
 
 The current source commit removes the exported cursor acknowledgement helper and uses an atomic SQL `MAX` update for monotonic acknowledgements under concurrent returns.
 
 The final evidence child is documentation-only above this runtime source, and its exact-head reviewers must bind their verdicts to that immutable child.
 
-Current local final-gate verdict: PASS for runtime source `0fd7d3b951672df7cb37e6c160401d1593386ba2` and its immutable evidence child, with remote CI and PR custody intentionally pending the final push.
+Historical local final-gate verdict: PASS for runtime source `0fd7d3b951672df7cb37e6c160401d1593386ba2` and its then immutable evidence child.
+
+## Current exact implementation and package receipt
+
+The current runtime source head is `cf56963a7206e5c5a260442c08eaa7bdcd65ec7a`.
+
+The current exact daemon, cursor, termination, package, and lifecycle receipts are `away-return-0fd7d3b.md`, `termination-cf56963.md`, `daemon-gate-cf56963.md`, `package-artifact-cf56963.md`, and `installed-lifecycle-cf56963.md`.
+
+The current daemon gate passed `506 passed (1 doctest, 505 tests)` after format and warnings-as-errors compilation.
+
+The current package-only lifecycle passed migration, start, ping, Away, restart, repeated stop, and cleanup with `package_processes=0`.
+
+The current cancellation path requests runner termination and defers terminal outcome and workspace disposition until the reconciler or RunnerProcess exit path has verified death.
+
+The final evidence child is documentation-only above this runtime source, and its exact-head reviewers must bind their verdicts to that immutable child.
+
+Current local final-gate verdict: PASS for runtime source `cf56963a7206e5c5a260442c08eaa7bdcd65ec7a` and its immutable evidence child, with remote CI and PR custody intentionally pending the final push.
 
 ## Historical exact runtime source gate for 7c54c78
 

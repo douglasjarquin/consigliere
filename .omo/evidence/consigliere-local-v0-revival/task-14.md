@@ -122,9 +122,9 @@ The advisory principal now fails closed before reading Attempt log files, while 
 
 The RED/GREEN authorization proof is recorded in `task-8.md`, and the exact-head package and lifecycle receipts are `.omo/evidence/consigliere-local-v0-revival/package-artifact-8d83937.log` and `.omo/evidence/consigliere-local-v0-revival/installed-lifecycle-8d83937.log`.
 
-## Final exact-head advisory boundary receipt
+## Historical final exact-head advisory boundary receipt for bf22b5d
 
-The final source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
+The historical final source head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
 
 The advisory allowlist remains fail-closed for logs and every authority-bearing operation, and the final Linux daemon, Go, package, and installed-lifecycle receipts pass at that exact head.
 

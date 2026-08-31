@@ -172,7 +172,7 @@ The final run is one completed Consigliere record and zero FirstMate records, so
 
 No credentials, raw Codex configuration, full prompt, transcript, or unredacted logs are included here.
 
-## Final exact-head package retry boundary
+## Historical final exact-head package retry boundary for 8d83937
 
 After the selected canary record, exact head `8d839378a55e36222e13c19e84e1f91543fc92c4` was packaged and exercised through the installed `csd migrate`, `csd start`, `cs ping`, `cs doctor`, `csd stop`, `csd restart`, and repeated-stop lifecycle.
 
@@ -276,7 +276,7 @@ The final result remains insufficient for Promote because only one naturally occ
 
 ## Historical exact-head package closure for bf22b5d
 
-The final implementation head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
+The historical final implementation head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
 
 The selected canary Mission and its two Attempts were not rerun after the runtime hardening because the operator-controlled canary forbids duplicate implementation work.
 
@@ -284,7 +284,7 @@ The package rebuilt from the final head passed the installed-only lifecycle from
 
 The exact package identities, command results, and Trash cleanup receipt are recorded in `package-artifact-bf22b5d.log` and `installed-lifecycle-bf22b5d.log`.
 
-## Current runtime and lifecycle closure
+## Historical superseded runtime and lifecycle closure for 0fd7d3b
 
 The superseded runtime source head was `04940bb620efa47c6d399c056a52a6dff837daf7`.
 
@@ -294,10 +294,20 @@ This lifecycle proof did not rerun the selected canary, create a duplicate Missi
 
 The natural comparable sample remains below 20, so Continue or Stop remains an operator decision.
 
-The current runtime source head is `0fd7d3b951672df7cb37e6c160401d1593386ba2`.
+The historical superseded runtime source head is `0fd7d3b951672df7cb37e6c160401d1593386ba2`.
 
-The current package-only lifecycle evidence is recorded in `package-artifact-0fd7d3b.md` and `installed-lifecycle-0fd7d3b.md`.
+The historical superseded package-only lifecycle evidence is recorded in `package-artifact-0fd7d3b.md` and `installed-lifecycle-0fd7d3b.md`.
+
+This historical superseded lifecycle proof did not rerun the selected canary, create a duplicate Mission, or make a Promote claim.
+
+The historical result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.
+
+## Current runtime and lifecycle closure
+
+The current runtime source head is `cf56963a7206e5c5a260442c08eaa7bdcd65ec7a`.
+
+The current package-only lifecycle evidence is recorded in `package-artifact-cf56963.md` and `installed-lifecycle-cf56963.md`.
 
 This current lifecycle proof did not rerun the selected canary, create a duplicate Mission, or make a Promote claim.
 
-The final result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.
+The result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.
