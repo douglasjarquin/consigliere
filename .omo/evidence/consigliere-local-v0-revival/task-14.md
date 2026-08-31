@@ -151,3 +151,19 @@ The advisory regression covers prompt injection, bearer-shaped secrets, private-
 The exact package/manual proof returned exit `0` for the default `cs attempt logs` command and exposed structured event summaries only.
 
 The final source head `4e99cf4219998c15b01d23b23349730f27546c61` preserves that event-only advisory response while adding the adjacent native command bound and regression.
+
+## Exact-head default authorized log security closure
+
+Commit `cc5c2ae368007ec30fba81d74d5a30808176a9d8` applies the event-only projection at the shared authorized API boundary.
+
+The default Boss-authorized path no longer returns captured harness lines or private log paths.
+
+The model-advisory path retains its existing authorization restrictions and now receives the same bounded allowlisted event summaries.
+
+The regression covers raw secret-shaped text, prompt-like text, exact response-key allowlisting, and private-path omission.
+
+The focused suite passed `Result: 21 passed` with exit `0`.
+
+The exact-head packaged transcript `manual-qa-cc5c2ae-real-final.log` observed `attempt_logs_surface=event_only` and a sanitized JSON payload.
+
+No authority-bearing operation, capability, credential, raw transcript, or captured log line was added to the authorized response.

@@ -204,3 +204,27 @@ The exact package identifiers, result SHA, artifact hashes, gate commands, and c
 The final packaged run was rebuilt from source head `4e99cf4219998c15b01d23b23349730f27546c61` after the native command output-bound review finding.
 
 The real Codex terminal transition again reached `ready_for_review`, imported one exact result SHA, and returned `ATTEMPT_LOGS_EXIT=0` with structured event summaries.
+
+## Exact-head default Attempt log boundary closure
+
+Commit `cc5c2ae368007ec30fba81d74d5a30808176a9d8` routes every authorized `attempt.logs` response through the existing bounded event-only sanitizer.
+
+The RED characterization at `daemon/test/consigliere/api_cli_ops_test.exs:117` observed raw captured text and a private path from the default authorized response.
+
+The RED regression then added bearer-shaped secret text and prompt-like text and required the response keys to be exactly `attempt_id` and `lines`.
+
+The GREEN focused command passed `Result: 1 passed, 7 excluded` for the targeted test.
+
+The focused API, advisory, and protocol suite passed `Result: 21 passed` with exit `0`.
+
+The exact-head packaged run is recorded in `manual-qa-cc5c2ae-real-final.log`.
+
+It used native arm64 `cs` and `csd` artifacts, the installed real Codex CLI, one completed Attempt, and one `ready_for_review` Mission.
+
+The default `cs attempt logs` response exposed only bounded allowlisted event summaries.
+
+The response omitted the injected secret-shaped text, prompt-like text, and private filesystem path.
+
+The same run verified the bounded command-output error at 65,536 bytes, changed owner identity after restart, accepted repeated stop, and left zero sockets or PID files.
+
+The temporary package home and source repository were moved to macOS Trash and verified absent.

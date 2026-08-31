@@ -1,0 +1,3 @@
+lifecycle_start=ok
+mission_id_present=yes attempt_status=completed mission_phase=ready_for_review
+cleanup_home_present=0 cleanup_source_present=0
