@@ -328,10 +328,25 @@ defmodule Consigliere.Attempts.Transitions do
         attempt
 
       attempt.status == "terminating" ->
-        cancel_txn(attempt.id, actor, %{
-          process_group: death,
-          exit_classification: klass || attempt.exit_classification || "canceled"
-        })
+        case klass || attempt.exit_classification do
+          "failed" ->
+            fail_txn(attempt.id, actor, %{
+              process_group: death,
+              exit_classification: "failed"
+            })
+
+          cause when cause in ["paused", "superseded"] ->
+            cancel_txn(attempt.id, actor, %{
+              process_group: death,
+              exit_classification: cause
+            })
+
+          _ ->
+            cancel_txn(attempt.id, actor, %{
+              process_group: death,
+              exit_classification: "canceled"
+            })
+        end
 
       protocol_missing_sha?(attempt, completed?, death) ->
         fail_txn(attempt.id, actor, %{

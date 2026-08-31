@@ -71,4 +71,17 @@ defmodule Consigliere.TerminationTest do
     assert :ok = Termination.deliver(item)
     assert Repo.get!(Attempt, attempt.id).status == "terminating"
   end
+
+  test "termination cause remains durable while runner death is pending" do
+    mission = Fixtures.mission!()
+    attempt = Fixtures.attempt!(mission, %{status: "running"})
+
+    assert attempt.exit_classification == nil
+
+    attempt = Termination.request_attempt!(attempt, "failed")
+
+    assert attempt.status == "terminating"
+    assert attempt.exit_classification == "failed"
+    assert Repo.get!(Attempt, attempt.id).exit_classification == "failed"
+  end
 end

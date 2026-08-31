@@ -82,7 +82,12 @@ defmodule Consigliere.Termination do
     Capabilities.revoke_for_attempt_txn(attempt.id)
 
     attempt =
-      Txn.update!(Attempt.changeset(attempt, %{status: "terminating"}))
+      Txn.update!(
+        Attempt.changeset(attempt, %{
+          status: "terminating",
+          exit_classification: to_string(cause)
+        })
+      )
 
     Txn.append_event!("attempt.termination_requested", "attempt", attempt.id, %{
       cause: to_string(cause)

@@ -34,17 +34,20 @@ defmodule Consigliere.Away do
   def marked?(home \\ Home.dir()), do: File.exists?(path(home))
 
   def return(home \\ Home.dir()) do
-    digest = digest(:return)
+    {digest, cursor} = build_digest(:return)
     frame_bytes = Limits.frame_bytes()
     acknowledged_event_id = digest_cursor(digest)
 
     case Limits.encoded_size(digest) do
       {:ok, size} ->
         if size <= frame_bytes do
-          case ack_cursor(acknowledged_event_id) do
-            {:ok, _} ->
+          case ack_cursor(acknowledged_event_id, cursor.away_since) do
+            {:ok, :ok} ->
               File.rm(path(home))
               digest
+
+            {:ok, :stale_marker} ->
+              {:error, :stale_away_return}
 
             {:error, _reason} ->
               {:error, :cursor_acknowledgement_failed}
@@ -59,17 +62,25 @@ defmodule Consigliere.Away do
   end
 
   def digest(mode \\ :inbox) do
+    {digest, _cursor} = build_digest(mode)
+    digest
+  end
+
+  defp build_digest(mode) do
     cursor = load_cursor()
     questions = open_questions()
     events = if mode == :return, do: events_since(cursor.last_event_id), else: []
     missions = open_missions()
 
-    %{
-      "away" => marked?(),
-      "cursor" => cursor.last_event_id,
-      "questions" => Enum.map(questions, &question_payload/1),
-      "events" => events,
-      "missions" => missions
+    {
+      %{
+        "away" => marked?(),
+        "cursor" => cursor.last_event_id,
+        "questions" => Enum.map(questions, &question_payload/1),
+        "events" => events,
+        "missions" => missions
+      },
+      cursor
     }
   end
 
@@ -160,7 +171,7 @@ defmodule Consigliere.Away do
     end
   end
 
-  defp ack_cursor(last_event_id) do
+  defp ack_cursor(last_event_id, expected_away_since) do
     DatabaseWriter.transaction(fn ->
       now = Txn.now()
 
@@ -177,16 +188,32 @@ defmodule Consigliere.Away do
           ]
         )
 
+      query =
+        if is_nil(expected_away_since) do
+          from(c in query, where: is_nil(c.away_since))
+        else
+          from(c in query, where: c.away_since == ^expected_away_since)
+        end
+
       {updated, _} = Repo.update_all(query, [])
 
       if updated == 1 do
         :ok
       else
-        upsert_cursor(%{
-          last_event_id: last_event_id,
-          away_since: nil,
-          acknowledged_at: now
-        })
+        case Repo.get_by(BossCursor, name: @cursor) do
+          nil when is_nil(expected_away_since) ->
+            upsert_cursor(%{
+              last_event_id: last_event_id,
+              away_since: nil,
+              acknowledged_at: now
+            })
+
+          %BossCursor{away_since: ^expected_away_since} ->
+            :ok
+
+          _ ->
+            :stale_marker
+        end
       end
     end)
   end

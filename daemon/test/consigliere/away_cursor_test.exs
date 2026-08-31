@@ -129,7 +129,13 @@ defmodule Consigliere.AwayCursorTest do
 
     first_results = run_concurrent_returns.()
 
-    assert Enum.all?(first_results, &is_map/1)
+    assert Enum.all?(first_results, fn
+             result when is_map(result) -> true
+             {:error, :stale_away_return} -> true
+           end)
+
+    assert {:error, :stale_away_return} in first_results
+
     first_cursor = Repo.get_by!(BossCursor, name: "boss").last_event_id
     assert first_cursor == Enum.at(events, 31).id
 
