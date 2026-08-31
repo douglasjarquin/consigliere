@@ -555,7 +555,10 @@ defmodule Consigliere.API.Protocol do
 
   defp run_allowed("away.return", _payload, actor) do
     if actor.principal == "boss" do
-      {:ok, Away.return()}
+      case Away.return() do
+        {:error, reason} -> {:error, reason}
+        digest -> {:ok, digest}
+      end
     else
       {:error, {:unauthorized, :principal}}
     end

@@ -74,7 +74,7 @@ The final runtime audit follow-up and fresh review reports are bound to this exa
 
 The selected real canary was not rerun because the operator-controlled no-duplicate rule forbids duplicate implementation work.
 
-## Closing delivery-head gate
+## Historical closing delivery-head gate for 85f02c5
 
 The runtime source gates are bound to `7c54c782552f3ee5a09ddee35735e90cba1b9339`.
 
@@ -90,7 +90,7 @@ The final gate verdict is PASS for plan compliance, source quality, package/manu
 
 The supporting final gate review is `gate-review-final-85f02c5.md`.
 
-## Final pushed-head attestation
+## Historical pushed-head attestation for c060b88
 
 The final pushed head is `c060b88035128bbdbf361f1bcab9a100521965e9`.
 
@@ -102,7 +102,7 @@ PR #141 is open and draft, PR #101 is unchanged and unmerged, and no canary reru
 
 The complete final delivery attestation is `final-delivery-attestation-c060b88.md`.
 
-## Current exact-head closure
+## Historical exact-head closure for 7159373
 
 The current runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
 
@@ -132,7 +132,7 @@ The exact package and lifecycle outputs are `package-artifact-bf22b5d.log` and `
 
 The selected canary was not rerun against this final package because the operator-controlled canary forbids duplicate implementation work.
 
-## Authoritative final implementation-head receipt
+## Historical implementation-head receipt for bf7a73d
 
 The historical runtime implementation head was `bf7a73dd005fe6c1746a1c73f1929411cd7392c1`.
 

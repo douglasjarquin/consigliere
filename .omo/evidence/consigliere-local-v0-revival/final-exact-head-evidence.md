@@ -1,4 +1,8 @@
-# Final exact-head verification record
+# Historical exact-head verification archive
+
+All records in this archive are historical snapshots and are not current delivery claims.
+
+The current implementation evidence is bound to `eb41191b73a04b93d613d8d0cf8b2183a55272ef` in `final-gate-receipt.md`, `F1.md`, `F2.md`, `F3.md`, and `F4.md`.
 
 Target branch: `revival/v0-local-codex`.
 
@@ -90,7 +94,7 @@ Only intended tracked implementation, test, documentation, and evidence files ar
 
 PR #101 remains historical input and PR #141 is the separate draft replacement; neither is merged.
 
-## Current final exact-head evidence
+## Historical final exact-head evidence for bf22b5d
 
 The prior receipt targets are historical intermediate heads.
 
@@ -108,7 +112,7 @@ The canary was not rerun against the final package because the operator-controll
 
 The natural comparable sample remains below 20, so the evidence is insufficient for Promote and the operator retains Continue or Stop.
 
-## Current exact-head closure
+## Historical exact-head closure for 7159373
 
 The current runtime source head is `71593738cf6aae723c9208743405fa12a9dc7a03` on `revival/v0-local-codex`.
 
@@ -120,7 +124,7 @@ The selected canary was not rerun against this package because the operator-cont
 
 The public canary result remains one completed Consigliere Mission with two Attempts, zero FirstMate Missions, and insufficient evidence for Promote.
 
-## Current exact runtime source closure
+## Historical exact runtime source closure for 7c54c78
 
 The current runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339` on `revival/v0-local-codex`.
 
@@ -140,7 +144,7 @@ The selected real canary was not rerun against the final package because the ope
 
 The public canary remains one completed Consigliere Mission with two Attempts, zero FirstMate Missions, and insufficient evidence for Promote.
 
-## Closing delivery-head evidence
+## Historical closing delivery-head evidence for 85f02c5
 
 The runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339`.
 
@@ -160,7 +164,7 @@ The final gate review is `gate-review-final-85f02c5.md` and reports PASS with no
 
 The selected real canary was not rerun after runtime hardening because the no-duplicate rule forbids another implementation record.
 
-## Final pushed-head attestation
+## Historical pushed-head attestation for c060b88
 
 The final pushed head is `c060b88035128bbdbf361f1bcab9a100521965e9`.
 

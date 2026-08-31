@@ -238,7 +238,7 @@ The natural comparable sample remains below 20, so the evidence is insufficient 
 
 No duplicate implementation, push, pull request, merge, fixed allocation, hard duration, fixed Continue limit, or telemetry service was introduced.
 
-## Post-canary runtime and package closure
+## Historical post-canary runtime and package closure for 42933d1
 
 The final runtime head after the audit fixes is `42933d103da9171c76b1564888e0d6557291fb5d`.
 
@@ -252,7 +252,7 @@ The installed-only lifecycle ran from `/tmp` with `env -i`, passed migration, st
 
 The cleanup receipt was `CLEANUP=trashed:/tmp/cs-final-42933d1-home.e7matc`; the isolated environment home `/tmp/cs-final-42933d1-env.C2tGuR` was also moved to Trash.
 
-## Final runtime-hardening package custody
+## Historical runtime-hardening package custody for 7c54c78
 
 The final runtime source head is `7c54c782552f3ee5a09ddee35735e90cba1b9339`.
 
@@ -274,7 +274,7 @@ The CLI and runner Go gates passed formatting, vet, ordinary tests, race and shu
 
 The final result remains insufficient for Promote because only one naturally occurring Consigliere Mission and zero FirstMate Missions are available, and the operator retains the next Continue or Stop decision.
 
-## Final exact-head package closure
+## Historical exact-head package closure for bf22b5d
 
 The final implementation head is `bf22b5d4cae239a222a3065ca4b34b574dd676ad`.
 

@@ -10,13 +10,17 @@ defmodule Consigliere.Away do
   alias Consigliere.BossCursors.BossCursor
   alias Consigliere.DatabaseWriter
   alias Consigliere.DomainEvents.DomainEvent
+  alias Consigliere.Harness.Redaction
   alias Consigliere.Home
   alias Consigliere.Missions.Mission
   alias Consigliere.Questions.Question
   alias Consigliere.Repo
   alias Consigliere.Txn
+  alias Consigliere.V0.Limits
 
   @cursor "boss"
+  @max_rows 32
+  @max_text_bytes 4_096
 
   def path(home \\ Home.dir()), do: Path.join(home, "away")
 
@@ -31,9 +35,26 @@ defmodule Consigliere.Away do
 
   def return(home \\ Home.dir()) do
     digest = digest(:return)
-    File.rm(path(home))
-    ack_cursor()
-    digest
+    frame_bytes = Limits.frame_bytes()
+
+    case Limits.encoded_size(digest) do
+      {:ok, size} ->
+        if size <= frame_bytes do
+          case ack_cursor() do
+            {:ok, _} ->
+              File.rm(path(home))
+              digest
+
+            {:error, _reason} ->
+              {:error, :cursor_acknowledgement_failed}
+          end
+        else
+          {:error, :response_too_large}
+        end
+
+      _ ->
+        {:error, :response_too_large}
+    end
   end
 
   def digest(mode \\ :inbox) do
@@ -55,7 +76,8 @@ defmodule Consigliere.Away do
     Repo.all(
       from(q in Question,
         where: q.status in ["open", "routed"],
-        order_by: [asc: q.inserted_at]
+        order_by: [asc: q.inserted_at, asc: q.id],
+        limit: ^@max_rows
       )
     )
     |> Enum.uniq_by(& &1.id)
@@ -65,12 +87,17 @@ defmodule Consigliere.Away do
     Repo.all(
       from(m in Mission,
         where: m.phase not in ["completed", "canceled", "superseded"],
-        order_by: [asc: m.inserted_at],
+        order_by: [asc: m.inserted_at, asc: m.id],
+        limit: ^@max_rows,
         select: %{id: m.id, phase: m.phase, objective: m.objective}
       )
     )
     |> Enum.map(fn m ->
-      %{"id" => m.id, "phase" => m.phase, "objective" => m.objective}
+      %{
+        "id" => m.id,
+        "phase" => m.phase,
+        "objective" => m.objective |> Redaction.text() |> String.slice(0, @max_text_bytes)
+      }
     end)
   end
 
@@ -79,7 +106,8 @@ defmodule Consigliere.Away do
       from(e in DomainEvent,
         where: e.id > ^last_id,
         order_by: [asc: e.id],
-        limit: 200
+        limit: ^@max_rows,
+        select: %{id: e.id, type: e.type, subject_type: e.subject_type, subject_id: e.subject_id}
       )
     )
     |> Enum.map(fn e ->
@@ -87,8 +115,7 @@ defmodule Consigliere.Away do
         "id" => e.id,
         "type" => e.type,
         "subject_type" => e.subject_type,
-        "subject_id" => e.subject_id,
-        "payload" => e.payload
+        "subject_id" => e.subject_id
       }
     end)
   end
@@ -97,7 +124,7 @@ defmodule Consigliere.Away do
     %{
       "id" => q.id,
       "status" => q.status,
-      "prompt" => q.prompt,
+      "prompt" => q.prompt |> Redaction.text() |> String.slice(0, @max_text_bytes),
       "requested_authority" => q.requested_authority,
       "mission_id" => q.mission_id
     }

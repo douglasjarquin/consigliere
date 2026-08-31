@@ -4,6 +4,7 @@ defmodule Consigliere.AwayCursorTest do
   alias Consigliere.Actor
   alias Consigliere.Away
   alias Consigliere.BossCursors.BossCursor
+  alias Consigliere.DomainEvents.DomainEvent
   alias Consigliere.Fixtures
   alias Consigliere.Missions
   alias Consigliere.Repo
@@ -41,5 +42,26 @@ defmodule Consigliere.AwayCursorTest do
     assert inbox["events"] == []
     cursor = Repo.get_by!(BossCursor, name: "boss")
     assert is_nil(cursor.acknowledged_at)
+  end
+
+  test "return bounds event digests before acknowledging oversized payloads" do
+    assert Away.mark() == :ok
+    marked_at = Repo.get_by!(BossCursor, name: "boss").last_event_id
+
+    Repo.insert!(
+      DomainEvent.changeset(%DomainEvent{}, %{
+        type: "mission.created",
+        subject_type: "mission",
+        subject_id: Ecto.UUID.generate(),
+        occurred_at: DateTime.utc_now(),
+        payload: %{"prompt" => String.duplicate("secret-shaped", 10_000)}
+      })
+    )
+
+    digest = Away.return()
+
+    assert is_map(digest)
+    assert Enum.all?(digest["events"], &(!Map.has_key?(&1, "payload")))
+    assert Repo.get_by!(BossCursor, name: "boss").last_event_id > marked_at
   end
 end

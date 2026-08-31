@@ -169,13 +169,17 @@ defmodule Consigliere.CLI do
   end
 
   def return do
-    digest = Consigliere.Away.return()
-    n = length(digest["questions"])
-    IO.puts("return: #{n} open question(s)")
+    case Consigliere.Away.return() do
+      %{"questions" => questions} ->
+        IO.puts("return: #{length(questions)} open question(s)")
 
-    Enum.each(digest["questions"], fn q ->
-      IO.puts("- #{q["id"]} #{q["prompt"]}")
-    end)
+        Enum.each(questions, fn q ->
+          IO.puts("- #{q["id"]} #{q["prompt"]}")
+        end)
+
+      {:error, reason} ->
+        IO.puts("return failed: #{reason}")
+    end
   end
 
   def cutover do
