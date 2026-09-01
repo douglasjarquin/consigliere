@@ -199,7 +199,7 @@ DRAIN_LOCK_HELD=false
 # TELEMETRY, measurement only: record which wake kinds actually caused this turn,
 # so the turn-end emitter can attribute it to supervision and name its
 # provenance. The vocabulary is the queue's own (cs_wake_append validates
-# signal|stale|check|capo|heartbeat); nothing is re-classified here. Silent, and
+# signal|stale|check|heartbeat); nothing is re-classified here. Silent, and
 # it cannot fail, print, or change what the drain already committed above.
 record_wake_telemetry() {
   local _epoch _seq kind _key _payload

@@ -345,7 +345,7 @@ cs_telemetry_on() {
 #
 # Vocabulary (the folding table is below; docs/telemetry.md restates it for an
 # analyst):
-#   wake <kind>    one drained wake row of kind signal|stale|check|capo|heartbeat
+#   wake <kind>    one drained wake row of kind signal|stale|check|heartbeat
 #   checkpoint     a bounded foreground supervision checkpoint ran
 #   spawn <kind>   a soldier or capo was dispatched
 #   steer          a direct report was messaged

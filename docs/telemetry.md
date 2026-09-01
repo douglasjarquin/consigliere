@@ -137,7 +137,7 @@ Purpose: `boss`, `dispatch`, `supervision`, `status`, `decision`, `review`, `rec
 Supervision outcome, recorded for every turn whose purpose is `supervision`: `wait`, `no_action`, `message_worker`, `dispatch_more`, `technical_intervention`, `recovery_action`, `escalate_up`, `completed`, `unknown`.
 `wait` and `no_action` matter most: together they estimate the ceiling of what a cheaper supervision tier could absorb.
 
-Wake provenance: `wake_kind` stays inside the queue's own vocabulary of `signal`, `stale`, `check`, `capo`, and `heartbeat`, plus `checkpoint` for a turn whose only supervision was a bounded foreground checkpoint.
+Wake provenance: `wake_kind` stays inside the queue's own vocabulary of `signal`, `stale`, `check`, and `heartbeat`, plus `checkpoint` for a turn whose only supervision was a bounded foreground checkpoint.
 It carries the FIRST kind the turn drained, so supervision counted by wake kind still sums to the supervision turn count.
 `wake_kinds` is the additive companion: every distinct kind the turn drained, in drain order, so a turn that drained several stays fully recoverable.
 It is null for a turn that drained none.
