@@ -3,10 +3,15 @@
 # worktree, and loaded context; only the contract changes. Flips kind= to ship
 # in state/<task-id>.meta so cs-teardown.sh applies the full ship-task teardown
 # protection again, and records the delivery mode and yolo posture the promoted
-# task will ship under. After promoting, send the soldier its ship instructions
-# via cs-send.sh (inventory scratch state, reset to a clean default-branch base,
-# carry over only intended fix changes, stay on branch cs/<task-id>, implement,
-# then report done according to the recorded delivery mode).
+# task will ship under.
+# Before flipping the meta, writes data/<task-id>/ship-instructions.md: the
+# scratch-inventory/clean-base/branch steps plus the mode-specific Definition
+# of done rendered by bin/cs-dod-lib.sh - the same single owner cs-brief.sh
+# scaffolds from, so a promoted scout receives the byte-identical contract a
+# briefed ship worker gets, including the ask-user escalation rule and the
+# --yes prohibition. The instructions default to ultrawork execution; edit
+# that line to plan-first before sending when the task warrants it. Deliver
+# them with the printed cs-send.sh command.
 #
 # --mode and --yolo are both REQUIRED. A scout carries no delivery posture at all
 # (cs-spawn.sh records none for it, because a report has nothing to land), which
@@ -31,6 +36,8 @@ esac
 
 # shellcheck source=bin/cs-delivery-lib.sh
 . "$SCRIPT_DIR/cs-delivery-lib.sh"
+# shellcheck source=bin/cs-dod-lib.sh
+. "$SCRIPT_DIR/cs-dod-lib.sh"
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
@@ -78,6 +85,30 @@ META="$STATE/$ID.meta"
 [ -f "$META" ] || { echo "error: no meta for task $ID at $META" >&2; exit 1; }
 grep -qx 'kind=scout' "$META" || { echo "error: task $ID is not a scout task (kind=scout not in meta)" >&2; exit 1; }
 
+# Publish the ship instructions BEFORE flipping the meta, so a failed write
+# never leaves a promoted task with no delivered contract to follow.
+INSTR="$DATA/$ID/ship-instructions.md"
+if [ -e "$INSTR" ]; then
+  echo "error: $INSTR already exists" >&2
+  exit 1
+fi
+mkdir -p "$DATA/$ID"
+DOD=$(cs_dod_render "$MODE" "$ID")
+cat > "$INSTR" <<EOF
+Your scout task is promoted to a ship task in place: same pane, same worktree, new contract.
+
+# Promotion steps
+1. Inventory your scratch state with \`git status\` and \`git log\`.
+2. Return to a clean base on the current default branch; carry over only the intended fix changes. Scratch commits and debug edits never ride along, and a reproduced bug becomes the regression test.
+3. Stay on branch \`cs/$ID\`.
+4. Execution mode: ultrawork (plan obsessively, then implement with test-first RED-then-GREEN proof), unless consigliere's message says plan-first.
+5. Your original brief's rules still apply, including its worktree isolation, status protocol, and rule 6: decisions that belong to a human, including ask-user findings, are escalated with \`needs-decision:\` and never answered by you.
+
+$DOD
+
+Delivery contract: mode=$MODE
+EOF
+
 TMP="$META.tmp"
 { grep -Ev '^(kind|mode|yolo)=' "$META" || true; } > "$TMP"
 {
@@ -90,5 +121,7 @@ mv "$TMP" "$META"
 cs_telemetry_crumb promote "$MODE" || true
 
 HOME_Q=$(printf '%q' "$CS_HOME")
+INSTR_Q=$(printf '%q' "$INSTR")
 echo "promoted $ID to ship mode=$MODE yolo=$YOLO (teardown protection restored)"
-echo "next: CS_HOME=$HOME_Q bin/cs-send.sh $ID '<ship instructions: review scratch state with git status and git log; reset to a clean default-branch base; carry over only intended fix changes; stay on branch cs/$ID; implement; report done per mode=$MODE; also state execution mode (ultrawork, or plan-first per bin/cs-brief.sh --help) in the instructions>'"
+echo "ship instructions written: $INSTR (edit its execution-mode line to plan-first first when the task warrants it)"
+echo "next: CS_HOME=$HOME_Q bin/cs-send.sh $ID 'Promoted to ship (mode=$MODE). Read and follow $INSTR_Q now.'"

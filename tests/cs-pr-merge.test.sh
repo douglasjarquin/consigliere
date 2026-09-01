@@ -16,6 +16,11 @@
 #   (g) a valid GitLab merge request URL is refused LOUDLY by name
 #   (h) explicit merge method is not overridden by the default --squash
 #   (i) repo override args fail fast because the repo comes from the URL
+#   (j) a merge command success with GitHub still reporting OPEN is a loud
+#       failure, never reported as merged
+#   (k) a PR sitting in the merge queue is reported queued (exit 3), not merged
+#   (l) a verified merge leaves a durable record: a done: status event and
+#       merged=/merged_at= in the task meta
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -61,9 +66,12 @@ SH
 }
 
 # gh-axi mock recording every invocation to a log file, and gh mock answering
-# headRefOid for cs-pr-check.sh's pr_head lookup. Args: case_dir head_sha
+# headRefOid for cs-pr-check.sh's pr_head lookup plus the post-merge outcome
+# read. Args: case_dir head_sha [outcome-line], where outcome-line is the
+# "<state> <isInMergeQueue> <mergedAt>" join the script's -q filter would
+# produce (defaults to a GitHub-confirmed merged PR).
 add_gh_mocks() {
-  local case_dir=$1 head=$2
+  local case_dir=$1 head=$2 outcome=${3:-"MERGED false 2026-09-01T00:00:00Z"}
   cat > "$case_dir/fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$CS_TEST_GH_AXI_LOG"
@@ -75,6 +83,7 @@ case "\${1:-} \${2:-}" in
   "pr view")
     case " \$* " in
       *headRefOid*) printf '%s\n' '$head' ; exit 0 ;;
+      *isInMergeQueue*) printf '%s\n' '$outcome' ; exit 0 ;;
     esac
     ;;
 esac
@@ -340,6 +349,73 @@ test_parses_pr_url_for_gh_axi() {
   pass "cs-pr-merge parses a GitHub PR URL into gh-axi number and --repo arguments"
 }
 
+test_open_pr_after_merge_command_is_loud_failure() {
+  local case_dir rc
+  case_dir=$(make_case open-after-merge)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "OPEN false "
+  : > "$case_dir/gh-axi.log"
+
+  set +e
+  run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/31 \
+    > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "open-after-merge: an unmerged PR must not be reported as merged"
+  assert_grep 'GitHub reports the PR as OPEN, not merged' "$case_dir/stderr" \
+    "open-after-merge: refusal did not name the observed GitHub state"
+  assert_no_grep 'merged=' "$case_dir/state/task-x1.meta" \
+    "open-after-merge: merged= was recorded for an unmerged PR"
+  assert_absent "$case_dir/state/task-x1.status" \
+    "open-after-merge: a done: status event was written for an unmerged PR"
+  pass "cs-pr-merge fails loudly when the merge command succeeds but GitHub reports the PR open"
+}
+
+test_queued_pr_reported_queued_not_merged() {
+  local case_dir rc
+  case_dir=$(make_case queued-not-merged)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb "OPEN true "
+  : > "$case_dir/gh-axi.log"
+
+  set +e
+  run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/32 \
+    > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 3 "$rc" "queued-not-merged: a queued PR must exit 3, distinct from merged and failed"
+  assert_grep 'queued: PR https://github.com/example/repo/pull/32 is in the merge queue' "$case_dir/stdout" \
+    "queued-not-merged: the queued state was not reported distinctly"
+  assert_no_grep 'merged=' "$case_dir/state/task-x1.meta" \
+    "queued-not-merged: merged= was recorded for a queued PR"
+  assert_absent "$case_dir/state/task-x1.status" \
+    "queued-not-merged: a done: status event was written for a queued PR"
+  pass "cs-pr-merge reports a merge-queued PR as queued, never as merged"
+}
+
+test_verified_merge_leaves_durable_record() {
+  local case_dir
+  case_dir=$(make_case durable-record)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks "$case_dir" cccccccccccccccccccccccccccccccccccccccc
+  : > "$case_dir/gh-axi.log"
+
+  run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/33 \
+    > "$case_dir/stdout" 2> "$case_dir/stderr" || fail "durable-record: cs-pr-merge failed"
+
+  assert_grep 'merged: PR https://github.com/example/repo/pull/33' "$case_dir/stdout" \
+    "durable-record: the verified merge was not reported"
+  assert_grep 'done: PR https://github.com/example/repo/pull/33 merged' "$case_dir/state/task-x1.status" \
+    "durable-record: no done: status event was appended for the verified merge"
+  assert_grep 'merged=1' "$case_dir/state/task-x1.meta" \
+    "durable-record: merged=1 was not recorded in the task meta"
+  assert_grep 'merged_at=2026-09-01T00:00:00Z' "$case_dir/state/task-x1.meta" \
+    "durable-record: merged_at= was not recorded in the task meta"
+  pass "cs-pr-merge leaves a durable status event and meta record on a GitHub-verified merge"
+}
+
 # Regression lock-in: bin/cs-pr-merge.sh must have zero autonomous callers
 # anywhere in the repo, so a later change can never silently add one. The
 # only allow-listed non-call reference is bin/cs-merge-local.sh's own
@@ -382,5 +458,8 @@ test_repo_override_args_refuse_before_recording
 test_explicit_merge_method_not_overridden
 test_method_equals_merge_method_not_overridden
 test_parses_pr_url_for_gh_axi
+test_open_pr_after_merge_command_is_loud_failure
+test_queued_pr_reported_queued_not_merged
+test_verified_merge_leaves_durable_record
 test_zero_autonomous_callers_of_pr_merge
 test_zero_autonomous_callers_regression_has_teeth

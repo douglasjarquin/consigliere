@@ -112,6 +112,73 @@ test_working_note_not_working_surfaced() {
   pass "a no-verb working: note whose soldier is idle with no running pipeline is surfaced"
 }
 
+# The classifier reads the appended SPAN, not the last line: a boss-relevant
+# event followed by a later routine append inside the same batch must still
+# surface even when the soldier is provably working, because the advancing
+# .seen-* suppressor would otherwise never re-read the buried event.
+test_buried_boss_verb_in_span_surfaced() {
+  local dir state fakebin out status_file pid sz
+  dir=$(make_case buried-span); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  status_file="$state/task.status"
+  printf 'working: setup\n' > "$status_file"
+  sz=$(wc -c < "$status_file" | tr -d '[:space:]')
+  printf '%s:1234567890' "$sz" > "$state/.seen-task_status"
+  printf 'needs-decision: pick A or B\nworking: carrying on meanwhile\n' >> "$status_file"
+  export CS_FAKE_CREW_STATE='state: working · source: run-step · validating (running)'
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" || fail "watcher absorbed a needs-decision buried under a later routine append"
+  grep -F "signal: $status_file" "$out" >/dev/null || fail "watcher did not print the buried-span signal reason"
+  grep "$(printf '\tsignal\t')" "$state/.wake-queue" | grep -F "task.status" >/dev/null \
+    || fail "buried boss verb was not queued"
+  unset CS_FAKE_CREW_STATE
+  pass "a boss verb anywhere in the unread appended span surfaces even under a later routine line"
+}
+
+# The turn-end absorb is reachable without an exact busy verdict: a wake
+# carrying only bare turn-ended markers whose pane content churned since the
+# previous poll is benign, while an unchanged pane still surfaces.
+test_turn_end_with_pane_churn_absorbed() {
+  local dir state fakebin out capture_file pid
+  dir=$(make_case turn-end-churn); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  cs_write_meta "$state/task.meta" "pane=pane-churn-1" "kind=ship"
+  : > "$state/task.turn-ended"
+  capture_file="$dir/capture.txt"
+  printf 'fresh pane content after the turn\n' > "$capture_file"
+  export CS_FAKE_HERDR_CAPTURE="$capture_file"
+  printf 'a-hash-that-cannot-match' > "$state/.hash-pane-churn-1"
+  export CS_FAKE_CREW_STATE='state: unknown · source: none · no current-state source available'
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  if ! absorbed_alive "$pid" "$state/.seen-task_turn-ended"; then
+    reap "$pid"; fail "watcher exited or never absorbed a turn-end with recent pane churn: $(cat "$out")"
+  fi
+  [ ! -s "$state/.wake-queue" ] || fail "churn-absorbable turn-end enqueued a durable wake record"
+  reap "$pid"
+  unset CS_FAKE_CREW_STATE CS_FAKE_HERDR_CAPTURE
+  pass "a turn-ended-only wake with recent pane churn is absorbed without a busy verdict"
+}
+
+test_turn_end_without_pane_churn_surfaced() {
+  local dir state fakebin out capture_file pid h
+  dir=$(make_case turn-end-static); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  cs_write_meta "$state/task.meta" "pane=pane-static-1" "kind=ship"
+  : > "$state/task.turn-ended"
+  capture_file="$dir/capture.txt"
+  printf 'a pane that stopped rendering' > "$capture_file"
+  export CS_FAKE_HERDR_CAPTURE="$capture_file"
+  if command -v md5 >/dev/null 2>&1; then h=$(md5 -q < "$capture_file"); else h=$(md5sum < "$capture_file" | cut -d' ' -f1); fi
+  printf '%s' "$h" > "$state/.hash-pane-static-1"
+  export CS_FAKE_CREW_STATE='state: unknown · source: none · no current-state source available'
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" || fail "watcher absorbed a turn-end whose pane did not change"
+  grep "$(printf '\tsignal\t')" "$state/.wake-queue" | grep -F "task.turn-ended" >/dev/null \
+    || fail "static-pane turn-end was not queued"
+  unset CS_FAKE_CREW_STATE CS_FAKE_HERDR_CAPTURE
+  pass "a turn-ended-only wake with an unchanged pane still surfaces"
+}
+
 # --- actionable wakes are surfaced (queue + exit) -----------------------------
 
 test_actionable_signal_surfaced() {
@@ -1123,6 +1190,9 @@ test_turn_ended_not_working_surfaced
 test_working_note_not_working_surfaced
 test_actionable_signal_surfaced
 test_needs_review_signal_surfaced
+test_buried_boss_verb_in_span_surfaced
+test_turn_end_with_pane_churn_absorbed
+test_turn_end_without_pane_churn_surfaced
 test_boss_verb_signal_takes_the_short_grace
 test_no_verb_signal_keeps_the_long_grace
 test_terminal_stale_surfaced

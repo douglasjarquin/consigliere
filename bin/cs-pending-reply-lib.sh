@@ -76,6 +76,10 @@ _CS_PENDING_REPLY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/n
 . "$_CS_PENDING_REPLY_LIB_DIR/cs-herdr-lib.sh"
 # shellcheck source=bin/cs-classify-lib.sh
 . "$_CS_PENDING_REPLY_LIB_DIR/cs-classify-lib.sh"
+# Self-announced status appends: the escalation close is this home's own
+# bookkeeping and must not re-wake the session that wrote it.
+# shellcheck source=bin/cs-wake-lib.sh
+. "$_CS_PENDING_REPLY_LIB_DIR/cs-wake-lib.sh"
 
 CS_PENDING_REPLY_SCHEMA='cs-pending-reply.v1'
 CS_PENDING_REPLY_CORR_RE='corr=[A-Fa-f0-9]{16}'
@@ -824,10 +828,10 @@ cs_pending_reply_close_escalation() {  # <state-dir> <corr_id>
       open_note=${open_line#*$'\t'}
       open_note=${open_note#*$'\t'}
       [ "$open_note" = "$note" ] || continue
-      printf 'resolved [key=%s]: pending-reply-resolved: task=%s pending-reply-id=%s via=%s\n' \
-        "$key" "$(cs_pending_reply_get "$rec" task_id)" "$corr" \
-        "$(cs_pending_reply_get "$rec" resolved_via)" \
-        >> "$parent_status" 2>/dev/null || return 1
+      cs_wake_status_append_self_announced "$(dirname "$parent_status")" "$parent_status" \
+        "$(printf 'resolved [key=%s]: pending-reply-resolved: task=%s pending-reply-id=%s via=%s' \
+          "$key" "$(cs_pending_reply_get "$rec" task_id)" "$corr" \
+          "$(cs_pending_reply_get "$rec" resolved_via)")" 2>/dev/null || return 1
       break
     done <<EOF
 $(status_open_decisions "$parent_status")

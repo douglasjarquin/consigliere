@@ -279,6 +279,32 @@ test_repeated_adoption_converges() {
   pass "adopting several orphaned batches converges in one committed drain"
 }
 
+# This home's OWN bookkeeping appends (a cs-send --resolve-key close, a
+# pending-reply escalation close) must not re-wake the session that wrote
+# them: the guarded append advances the .seen-* marker over exactly its own
+# bytes, and fails toward waking on any pending or interleaved foreign write.
+test_self_announced_append_does_not_rewake() {
+  local dir state lib="$ROOT/bin/cs-wake-lib.sh"
+  dir=$(make_case self-announce)
+  state="$dir/state"
+  CS_STATE_OVERRIDE="$state" bash -c '
+    # shellcheck disable=SC1090,SC1091
+    . "$1"
+    f="$STATE/task.status"
+    printf "working: a\n" > "$f"
+    printf "%s" "$(cs_wake_signal_sig "$f")" > "$(cs_wake_seen_path "$STATE" "$f")"
+    cs_wake_status_append_self_announced "$STATE" "$f" "resolved [key=x]: answered via cs-send" || exit 1
+    cs_wake_seen_current "$STATE" "$f" || { echo "marker not advanced over own bytes" >&2; exit 1; }
+    printf "needs-decision: a foreign write landed\n" >> "$f"
+    cs_wake_status_append_self_announced "$STATE" "$f" "resolved [key=y]: second close" || exit 1
+    cs_wake_seen_current "$STATE" "$f" && { echo "marker swallowed a foreign write" >&2; exit 1; }
+    grep -q "resolved \[key=y\]" "$f" || { echo "guarded append lost its line" >&2; exit 1; }
+    exit 0
+  ' _ "$lib" || fail "self-announced append contract violated"
+  pass "a bookkeeping append advances the seen marker only over exactly its own bytes"
+}
+
+test_self_announced_append_does_not_rewake
 test_concurrent_append_and_drain
 test_atomic_double_drain
 test_drain_dedupes_obvious_duplicates

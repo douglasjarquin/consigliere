@@ -338,6 +338,35 @@ test_already_current_unchanged() {
   pass "already-current clone is reported unchanged"
 }
 
+# A PLAIN (non-repo) directory under projects/ must be skipped as "not a clone
+# root": git discovery walks upward, so without the clone-root guard every
+# `git -C` call would resolve to the ENCLOSING repository and fetch/fast-forward
+# IT under the plain directory's label. The enclosing repo is deliberately left
+# one commit behind its origin so a leaked git call would visibly move it.
+test_plain_dir_under_projects_is_skipped_not_synced_via_enclosing_repo() {
+  local home enclosing plain out before
+  home=$(new_home)
+  enclosing=$(build_pair "$home" enclosing)
+  advance_origin "$home" enclosing C1
+  plain="$enclosing/projects/plain"
+  mkdir -p "$plain"
+  printf 'not a repo\n' > "$plain/file.txt"
+  before=$(head_sha "$enclosing")
+
+  out=$(CS_PROJECTS_OVERRIDE="$enclosing/projects" run_sync "$home" "$plain")
+
+  assert_contains "$out" "plain: skipped: not a clone root" "plain dir reports the clone-root skip"
+  assert_contains "$out" "$plain" "diagnostic names the plain directory's path"
+  assert_not_contains "$out" "synced" "plain dir must not sync anything"
+  assert_not_contains "$out" "STUCK" "plain dir skip is benign, not STUCK"
+  [ "$(head_sha "$enclosing")" = "$before" ] \
+    || fail "enclosing repo was moved by a plain-directory candidate"
+  git -C "$enclosing" rev-parse --verify --quiet refs/remotes/origin/main >/dev/null \
+    && [ "$(git -C "$enclosing" rev-parse origin/main)" = "$before" ] \
+    || fail "enclosing repo's remote refs were fetched by a plain-directory candidate"
+  pass "a plain directory under projects/ is skipped without touching the enclosing repo"
+}
+
 test_no_origin_skipped() {
   local home clone out
   home=$(new_home)
@@ -658,6 +687,7 @@ test_non_default_branch_is_stuck_untouched
 test_diverged_is_stuck_untouched
 test_on_default_clean_behind_fast_forwards
 test_already_current_unchanged
+test_plain_dir_under_projects_is_skipped_not_synced_via_enclosing_repo
 test_no_origin_skipped
 test_local_only_skipped
 test_single_project_by_bare_name_resolves

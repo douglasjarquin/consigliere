@@ -11,12 +11,21 @@
 # cs-send fails closed without it so a steer cannot silently resolve against
 # another home's state.
 #
-# Text submission is verified against native agent state: an idle target must
-# reach `working` after the send (Enter is retried alone, never retyped, up to
-# CS_SEND_RETRIES times); a target that was already `working` accepts the text
-# as queued input (codex queues mid-turn input) and the send reports queued.
-# A send that cannot be confirmed exits non-zero so the caller knows the steer
-# may not have landed.
+# Text submission is verified against native agent state first: an idle target
+# that reaches `working` after the send is confirmed. Native state alone is not
+# trusted to report a swallow (ported upstream fix, firstmate #2647): herdr can
+# leave agent_status idle for a whole landed claude turn, so when the wait
+# stays idle the composer verdict (bin/cs-composer-lib.sh) settles it - a
+# cleared composer is positive delivery; proven leftover text retries Enter
+# (alone, never retyped, up to CS_SEND_RETRIES times); an unreadable composer
+# stops the retries, because Enter must never be fired blind at a pane whose
+# state cannot be read. A target that was already `working` accepts the text as
+# queued input (codex queues mid-turn input) and the send reports queued; a
+# target that turns out busy AFTER the retries with the text still visible is
+# the queued-Enter shape (harnesses can keep queued text visible while busy)
+# and also reports queued. Only a genuinely idle pane with the text still
+# proven in its composer - or one that cannot be read - exits non-zero, as
+# UNCONFIRMED, so the caller knows the steer may not have landed.
 #
 # A codex `$skill` invocation gets a longer pre-Enter settle
 # (CS_SEND_SKILL_SETTLE, default 1.5s) so the completion popup does not
@@ -81,8 +90,16 @@ STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 
 # shellcheck source=bin/cs-herdr-lib.sh
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
+# Composer verdict owner, consulted when native agent state stays idle after a
+# send (the false-swallow fix in the header). Requires cs-herdr-lib.sh first.
+# shellcheck source=bin/cs-composer-lib.sh
+. "$SCRIPT_DIR/cs-composer-lib.sh"
 # shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# Self-announced status appends: a --resolve-key close is this home's own
+# bookkeeping and must not re-wake the session that wrote it.
+# shellcheck source=bin/cs-wake-lib.sh
+. "$SCRIPT_DIR/cs-wake-lib.sh"
 # shellcheck source=bin/cs-operational-input.sh
 . "$SCRIPT_DIR/cs-operational-input.sh"
 # shellcheck source=bin/cs-marker-lib.sh
@@ -218,7 +235,7 @@ cs_send_close_resolved_keys() {  # <answer-text>
   for k in $RESOLVE_KEYS; do
     prefix="resolved [key=$k]: ${verb} via cs-send: "
     cs_cap_line_var "$note" "$((CS_LINE_CAP_DEFAULT - ${#prefix}))"
-    if ! printf '%s\n' "$prefix$CS_LINE_CAP_LINE" >> "$RESOLVE_STATUS_FILE"; then
+    if ! cs_wake_status_append_self_announced "$(dirname "$RESOLVE_STATUS_FILE")" "$RESOLVE_STATUS_FILE" "$prefix$CS_LINE_CAP_LINE"; then
       echo "error: the answer was delivered to '$RAW' ($PANE), but decision key '$k' could not be closed in $RESOLVE_STATUS_FILE. Close it manually with: echo 'resolved [key=$k]: <how it was answered>' >> $RESOLVE_STATUS_FILE - do not resend the answer." >&2
       return 1
     fi
@@ -304,41 +321,61 @@ case "$RAW_TEXT" in
     ;;
 esac
 
-if [ "$pre_status" = busy ]; then
-  # Mid-turn steer: the harness queues the input for after the turn; native state
-  # cannot distinguish queued from swallowed, so report queued and succeed. That
-  # is a confirmed delivery for the decision close too - the same verdict that
-  # commits the pending-reply expectation - because the harness holds the answer
-  # and will process it when the turn ends.
+# One exit for every confirmed delivery, native or composer-proven: commit the
+# pending-reply expectation, close answered decisions, report <outcome>.
+# TELEMETRY, measurement only: a delivered steer is what turns a supervision
+# turn's outcome from "reviewed, nothing to do" into "messaged the worker".
+send_confirmed() {  # <outcome-line>
   pending_confirm_delivery
   if [ -n "$RESOLVE_KEYS" ]; then
     cs_send_close_resolved_keys "$RAW_TEXT" || exit 1
   fi
-  # TELEMETRY, measurement only: a delivered steer is what turns a supervision
-  # turn's outcome from "reviewed, nothing to do" into "messaged the worker".
   cs_telemetry_crumb steer "$KIND" || true
-  echo "queued (target was mid-turn)"
+  echo "$1"
   [ "$SETTLE" = 0 ] || sleep "$SETTLE"
   exit 0
+}
+
+if [ "$pre_status" = busy ]; then
+  # Mid-turn steer: the harness queues the input for after the turn; native state
+  # cannot distinguish queued from swallowed, so report queued and succeed. That
+  # is a confirmed delivery for the decision close too, because the harness holds
+  # the answer and will process it when the turn ends.
+  send_confirmed "queued (target was mid-turn)"
 fi
 
 attempt=0
 while [ "$attempt" -le "$RETRIES" ]; do
   if cs_herdr_submit_confirm "$PANE" 4000; then
-    pending_confirm_delivery
-    if [ -n "$RESOLVE_KEYS" ]; then
-      cs_send_close_resolved_keys "$RAW_TEXT" || exit 1
-    fi
-    cs_telemetry_crumb steer "$KIND" || true
-    echo "submitted"
-    [ "$SETTLE" = 0 ] || sleep "$SETTLE"
-    exit 0
+    send_confirmed "submitted"
   fi
+  # Native state stayed idle, which is NOT proof of a swallow (see the header:
+  # herdr can leave agent_status idle for a whole landed claude turn). The
+  # composer verdict settles it: cleared is delivery, proven leftover text
+  # retries Enter, and an unreadable composer stops the retries - Enter is
+  # never fired blind at a pane whose state cannot be read.
+  composer=$(cs_composer_state "$PANE")
+  case "$composer" in
+    empty)
+      send_confirmed "submitted (composer cleared; native agent state stayed idle)" ;;
+    pending) ;;
+    *)
+      echo "error: send to '$RAW' ($PANE) is UNCONFIRMED: native agent state stayed idle and the composer is unreadable (state=${composer:-unknown}); refusing to retry Enter blind. Inspect the pane before resending." >&2
+      exit 1 ;;
+  esac
   attempt=$((attempt + 1))
   [ "$attempt" -le "$RETRIES" ] || break
   # Enter only, never retype: a swallowed Enter leaves the text in the composer.
   cs_herdr_send_keys "$PANE" Enter >/dev/null
 done
 
-echo "error: send to '$RAW' ($PANE) not confirmed after $RETRIES Enter retries; the text may sit unsubmitted in the composer" >&2
+# Retries exhausted with the text still proven in the composer. A busy target
+# keeps queued Enter text visible until its turn ends, so busy here is the
+# queued shape, not a swallow; only a genuinely idle pane with a pending
+# composer stays unconfirmed.
+if [ "$(cs_herdr_agent_busy_state "$PANE")" = busy ]; then
+  send_confirmed "queued (text visible while the target is mid-turn; it submits when the turn ends)"
+fi
+
+echo "error: send to '$RAW' ($PANE) not confirmed after $RETRIES Enter retries; the text sits unsubmitted in the composer" >&2
 exit 1

@@ -23,8 +23,9 @@ set -u
 BIN="$ROOT/bin/cs-promote.sh"
 TMP=$(cs_test_tmproot cs-promote)
 export CS_STATE_OVERRIDE="$TMP/state"
+export CS_DATA_OVERRIDE="$TMP/data"
 export CS_HOME="$TMP"
-mkdir -p "$TMP/state"
+mkdir -p "$TMP/state" "$TMP/data"
 
 # 1. happy path: a scout task flips to ship with the stated posture, other fields
 #    preserved. A real scout meta carries no mode=/yolo= at all (cs-spawn.sh
@@ -75,5 +76,43 @@ set -e
 [ "$rc" -ne 0 ] || fail "no-arg invocation should be non-zero"
 assert_contains "$out" "usage" "no-arg invocation prints usage"
 pass "cs-promote refuses with usage when given no task id"
+
+# 5. Port of firstmate c7fdef9: a promoted scout must receive the same
+#    mode-specific Definition of done a briefed ship worker gets - including
+#    the ask-user escalation rule and the --yes prohibition - rendered from
+#    the single owner bin/cs-dod-lib.sh, byte-identical to cs-brief.sh's.
+cs_write_meta "$TMP/state/s2.meta" "project=$TMP/proj-s2" "kind=scout"
+out=$("$BIN" s2 --mode made --yolo off 2>&1) || fail "made promotion failed: $out"
+INSTR="$TMP/data/s2/ship-instructions.md"
+assert_contains "$out" "ship instructions written" "promotion announces the instructions file"
+assert_present "$INSTR" "promotion writes ship-instructions.md"
+assert_grep '# Definition of done' "$INSTR" "instructions carry the Definition of done"
+assert_grep 'needs-review: {summary of what you built}' "$INSTR" "made instructions carry the needs-review contract"
+# shellcheck disable=SC2016  # literal grep patterns; backticks are instruction markup, not expansion
+assert_grep 'Never pass `--yes`' "$INSTR" "instructions state the --yes prohibition"
+assert_grep 'ask-user findings are not yours to answer' "$INSTR" "instructions state the ask-user escalation rule"
+assert_grep 'needs-decision: {summary of options}' "$INSTR" "the ask-user rule names the exact escalation append"
+assert_grep 'cs/s2' "$INSTR" "instructions name the task branch"
+assert_grep 'Delivery contract: mode=made' "$INSTR" "instructions record the stated mode"
+assert_contains "$out" "cs-send.sh s2" "promotion prints the delivery command"
+assert_contains "$out" "ship-instructions.md" "the delivery command points at the instructions file"
+
+"$ROOT/bin/cs-brief.sh" s2 proj-s2 --mode made >/dev/null 2>&1 || fail "reference brief scaffold failed"
+brief_dod=$(sed -n '/^# Definition of done/,$p' "$TMP/data/s2/brief.md" | grep -v '^Delivery contract: ')
+instr_dod=$(sed -n '/^# Definition of done/,$p' "$INSTR" | grep -v '^Delivery contract: ')
+[ "$brief_dod" = "$instr_dod" ] || fail "the promoted Definition of done must be byte-identical to the briefed one"
+pass "cs-promote delivers the briefed mode-specific definition of done, --yes ban included"
+
+# 6. an existing instructions file refuses before any meta mutation.
+cs_write_meta "$TMP/state/s3.meta" "kind=scout"
+mkdir -p "$TMP/data/s3"
+: > "$TMP/data/s3/ship-instructions.md"
+set +e
+out=$("$BIN" s3 --mode direct-PR --yolo off 2>&1); rc=$?
+set -e
+expect_code 1 "$rc" "existing instructions should exit 1"
+assert_contains "$out" "already exists" "the refusal names the collision"
+assert_grep 'kind=scout' "$TMP/state/s3.meta" "the refusal leaves the meta a scout"
+pass "cs-promote refuses to clobber existing ship instructions"
 
 pass "cs-promote scout-to-ship promotion behavior characterized"

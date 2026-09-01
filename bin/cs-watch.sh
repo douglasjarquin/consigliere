@@ -10,9 +10,11 @@
 # pause is the separate idle absorb case and re-surfaces only on its long
 # bounded cadence, although its initial no-verb status signal still surfaces in
 # normal mode. Printed reason lines:
-#   signal: <file>...      status/turn-end signals, surfaced when a listed status
-#                          has a boss-relevant verb OR a no-verb signal's soldier
-#                          is not provably working
+#   signal: <file>...      status/turn-end signals, surfaced when a listed
+#                          status carries a boss-relevant verb anywhere in its
+#                          unread appended span (not just the last line) OR a
+#                          no-verb signal's soldier is neither provably working
+#                          nor a turn-ended-only wake with recent pane churn
 #   stale: <pane>          a provably-working stale is ALWAYS absorbed (with a wedge
 #                          timer) regardless of what the status log says - an active
 #                          run-step or busy pane outranks even a boss-relevant log
@@ -109,20 +111,13 @@ WATCHER_STALE_GRACE=${CS_WATCHER_STALE_GRACE:-${CS_GUARD_GRACE:-300}}
 # including the event-wait splice below - and returns before acquiring the lock
 # or starting the loop. Running it as a script executes the runtime.
 
-# Portable stat. macOS (BSD) stat uses `-f <fmt>`; Linux (GNU) stat uses `-c <fmt>`.
-# Do NOT use the `stat -f <fmt> ... || stat -c <fmt> ...` fallback form: on Linux
-# `stat -f` is *filesystem* stat and writes a partial filesystem dump ("File: ...",
-# "Blocks: ...") to stdout before failing, so the fallback's correct output gets
-# appended to that garbage. Arithmetic under `set -u` then aborts on the stray
-# token (e.g. the word "File" read as an unset variable), which silently kills the
-# watcher mid-cycle. Detect the platform once and pick the right form.
-if [ "$(uname)" = Darwin ]; then
-  stat_mtime() { stat -f %m "$1" 2>/dev/null; }        # epoch seconds of mtime
-  stat_sig()   { stat -f '%z:%Fm' "$1" 2>/dev/null; }   # size:mtime signature
-else
-  stat_mtime() { stat -c %Y "$1" 2>/dev/null; }
-  stat_sig()   { stat -c '%s:%Y' "$1" 2>/dev/null; }
-fi
+# Portable stat. stat_mtime delegates to cs_lock_path_mtime (bin/cs-lock-lib.sh,
+# sourced through cs-wake-lib.sh above), the one owner of the portable mtime
+# read. stat_sig delegates to cs_wake_signal_sig (bin/cs-wake-lib.sh), the one
+# owner of the size:mtime signal signature that the span classifier and the
+# self-announced bookkeeping append also read.
+stat_mtime() { cs_lock_path_mtime "$1"; }              # epoch seconds of mtime
+stat_sig() { cs_wake_signal_sig "$1"; }                # size:mtime signature
 
 POLL=${CS_POLL:-15}                   # seconds between cycles
 HEARTBEAT=${CS_HEARTBEAT:-600}        # base seconds between heartbeat scans
@@ -559,7 +554,7 @@ scan_signals() {
   for f in "$STATE"/*.status "$STATE"/*.turn-ended; do
     [ -e "$f" ] || continue
     sig=$(stat_sig "$f") || continue
-    sf="$STATE/.seen-$(basename "$f" | tr '.' '_')"
+    sf=$(cs_wake_seen_path "$STATE" "$f")
     if [ "$sig" != "$(cat "$sf" 2>/dev/null)" ]; then
       printf '%s\t%s\t%s\n' "$sf" "$sig" "$f"
     fi
@@ -580,6 +575,48 @@ signal_files_of() {  # <pending-blob> -> " <file> <file> ..."
 $blob
 EOF
   printf '%s' "$files"
+}
+
+# Second absorb proof for a no-verb turn-end wake, making the benign-turn-end
+# triage reachable for a harness whose semantic busy state has no verified
+# source (cs-crew-state.sh can only answer unknown for it, so every turn
+# boundary would otherwise surface a contentless signal wake per soldier).
+# 0 (benign) ONLY when the wake carries nothing but bare .turn-ended markers
+# AND every named task's pane content changed since the previous poll - a
+# fresh bounded capture hashing differently from the same state/.hash-<key>
+# marker the staleness backbone already records and trusts as liveness. It
+# claims no harness semantics and fabricates no busy verdict. The absorb
+# defers rather than swallows: a soldier that has stopped renders nothing
+# further, so its now-static pane surfaces through the staleness backbone
+# within a poll or two. Any status file in the wake, an unresolvable task, a
+# missing prior hash, a failed or empty capture, or an unchanged pane
+# surfaces exactly as before. Owned here with the .hash-* marker format.
+signal_turn_end_churn_absorbable() {  # <file> ...
+  local f base task meta pane key prev tail40 h seen=''
+  for f in "$@"; do
+    base=${f##*/}
+    case "$base" in
+      *.turn-ended) task=${base%.turn-ended} ;;
+      *) return 1 ;;
+    esac
+    [ -n "$task" ] || return 1
+    case " $seen " in *" $task "*) continue ;; esac
+    seen="$seen $task"
+    meta="$STATE/$task.meta"
+    [ -e "$meta" ] || return 1
+    pane=$(cs_meta_get "$meta" pane 2>/dev/null) || return 1
+    [ -n "$pane" ] || return 1
+    key=$(printf '%s' "$pane" | tr ':/.' '___')
+    prev=$(cat "$STATE/.hash-$key" 2>/dev/null || true)
+    [ -n "$prev" ] || return 1
+    tail40=$(cs_herdr_capture "$pane" 40 text 2>/dev/null) || return 1
+    [ -n "$tail40" ] || return 1
+    h=$(printf '%s' "$tail40" | hash_pane)
+    [ -n "$h" ] || return 1
+    [ "$h" != "$prev" ] || return 1
+  done
+  [ -n "$seen" ] || return 1
+  return 0
 }
 
 run_check_process() {
@@ -1296,8 +1333,22 @@ while :; do
     # made status query - crew_is_provably_working over cs-crew-state.sh, a
     # `made status --json` read, never a log scrape), so the || ordering
     # evaluates it only for a no-boss-verb signal.
+    # A no-verb wake has a second absorb proof after provably-working: bounded
+    # recent pane churn for a turn-ended-only wake (signal_turn_end_churn_absorbable
+    # above), which never applies once any listed span carries a boss verb.
     # shellcheck disable=SC2086  # $files is a space-separated status-path list (ids carry no spaces)
-    if signal_reason_is_actionable $files || ! signal_crew_provably_working $files; then
+    if signal_reason_is_actionable $files; then
+      signal_benign=false
+    elif signal_crew_provably_working $files; then
+      signal_benign=true
+      signal_absorb_proof="provably working"
+    elif signal_turn_end_churn_absorbable $files; then
+      signal_benign=true
+      signal_absorb_proof="turn-end with recent pane churn"
+    else
+      signal_benign=false
+    fi
+    if [ "$signal_benign" = false ]; then
       while IFS=$(printf '\t') read -r sf sig f; do
         [ -n "$sf" ] || continue
         cs_wake_append signal "$(basename "$f")" "$reason" || exit 1
@@ -1319,7 +1370,7 @@ EOF
       done <<EOF
 $pending
 EOF
-      triage_log "absorbed benign $reason"
+      triage_log "absorbed benign ($signal_absorb_proof) $reason"
     fi
   fi
 

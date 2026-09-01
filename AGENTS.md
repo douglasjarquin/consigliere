@@ -335,6 +335,7 @@ Run `bin/cs-pr-check.sh <id> <PR url>` - it records the PR identity in the task'
 Tell the boss the PR's full URL, always the complete `https://...` link rather than a bare `#number`, a concise outcome summary, and the no-mistakes risk level when applicable.
 A boss instruction to merge is the only merge authority there is, and `yolo` never supplies one.
 For any custom `state/<id>.check.sh` you write yourself, keep it an ordinary single-link mode-`0700` file, print one line only when consigliere should wake, print nothing otherwise, finish before `CS_CHECK_TIMEOUT`, then bind its current bytes with `bin/cs-check-register.sh <id>` before the watcher may execute it.
+Retire a custom check only through `bin/cs-check-unregister.sh <id>`, which validates the id and state directory before removing the check, its trust binding, and its watcher sidecars - never with a hand-typed `rm`.
 
 Tear down a ship task only after landing is confirmed.
 A teardown refusal for uncommitted or unlanded work is a stop-and-investigate result, never an obstacle to bypass.
@@ -351,7 +352,8 @@ Read the report, relay its findings rather than merely saying it finished, recor
 A report may recommend implementation but does not authorize it.
 Before treating the investigation or any visual review as complete, load `decision-hold-lifecycle`; teardown enforces that shared completion gate.
 When implementation is separately authorized, promote the existing scout through `bin/cs-promote.sh` rather than creating a duplicate task.
-`cs-promote.sh` does not regenerate brief text, so state execution mode in the manually-composed follow-up ship instructions the same way `bin/cs-brief.sh` would have.
+`cs-promote.sh` writes the promotion's ship instructions to `data/<id>/ship-instructions.md`, carrying the same mode-specific definition of done a briefed ship worker gets - `bin/cs-dod-lib.sh` is the single owner both scripts render it from.
+Those instructions default to ultrawork execution; edit their execution-mode line to plan-first before delivering them when the task warrants it.
 The promoted soldier must inventory scratch state, return to a clean default-branch base, carry over only intended fix changes, create the ship branch, and follow the delivery path the promotion stated.
 Scratch commits and debug edits never ride along, and a reproduced bug becomes the regression test.
 
@@ -463,7 +465,7 @@ It tracks work items only, never agents; persistent capos never appear as backlo
 Work routed to a capo is recorded in that capo home's own backlog, not the main backlog.
 When a main-side thread such as a pending boss decision or relay reminder is worth durable tracking, file it as its own work item; use `tasks-axi hold <id> --reason "<reason>" --kind captain` for a boss-gated thread.
 Unresolved decisions discovered by investigations or visual reviews follow `decision-hold-lifecycle`, which owns their mandatory backlog lifecycle.
-Update the backlog on every dispatch, completion, and decision for a work item.
+Dispatch and completion transitions ride with the physical change itself: pass the item to `bin/cs-spawn.sh --backlog-item <id>` so dispatch marks it in flight and successful teardown records it done, and update the backlog by hand only for decisions and whenever those scripts print a reminder instead.
 Re-evaluate queued work after every teardown and heartbeat, dispatching items only when dependencies and time gates have cleared.
 
 `.tasks.toml`, `docs/configuration.md`, and current `tasks-axi --help` own the backlog schema, compatibility, retention, and routine command syntax.
