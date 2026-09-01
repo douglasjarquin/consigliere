@@ -993,6 +993,8 @@ if [ "$HARNESS" = claude ]; then
   rm -f "$STATE/$ID.claude-settings.json"
 elif [ "$HARNESS" = codex ]; then
   [ -n "$WT" ] && cs_harness_codex_untrust_dir "$WT" || true
+elif [ "$HARNESS" = grok ]; then
+  cs_grok_turnend_disarm "$STATE" "$ID" "$WT"
 fi
 rm -f "$STATE/$ID.status" "$STATE/$ID.turn-ended" "$STATE/$ID.meta"
 remove_watcher_markers || exit 1

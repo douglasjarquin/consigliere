@@ -118,6 +118,7 @@ cs_deps_purpose() {
     herdr) printf 'terminal runtime; every soldier runs in a herdr workspace/worktree\n' ;;
     codex) printf 'harness that runs consigliere and its soldiers\n' ;;
     claude) printf 'harness that runs consigliere and its soldiers\n' ;;
+    grok) printf 'harness that runs consigliere and its soldiers\n' ;;
     jq) printf 'parses every herdr JSON response\n' ;;
     gh) printf 'GitHub auth and API for PR-based delivery\n' ;;
     gh-axi) printf 'the GitHub interface consigliere and its soldiers actually call\n' ;;
@@ -140,6 +141,7 @@ cs_deps_hint() {
     herdr) printf 'brew install herdr, or bin/cs-install-herdr.sh <dir> for CI'\''s pinned build (https://herdr.dev)\n' ;;
     codex) printf 'brew install --cask codex, or npm i -g @openai/codex\n' ;;
     claude) printf 'npm i -g @anthropic-ai/claude-code, or the native installer (https://claude.com/claude-code)\n' ;;
+    grok) printf 'install Grok Build from xAI (default binary: ~/.grok/bin/grok)\n' ;;
     jq) printf 'brew install jq (https://jqlang.github.io/jq)\n' ;;
     gh) printf 'brew install gh (https://cli.github.com), then gh auth login\n' ;;
     gh-axi) printf 'npm i -g gh-axi\n' ;;
