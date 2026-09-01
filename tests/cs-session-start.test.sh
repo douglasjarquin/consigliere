@@ -26,6 +26,8 @@ set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+export CS_LOCK_HARNESS_RE='bash|zsh|codex|claude'
+
 TMP=$(cs_test_tmproot cs-session-start)
 mkdir -p "$TMP"
 BIN="$ROOT/bin/cs-session-start.sh"
