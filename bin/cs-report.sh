@@ -112,6 +112,10 @@ FIELDS=(
   "created_at=$CREATED_AT"
 )
 cs_message_publish "$PARENT_STATE/inbox" "${FIELDS[@]}" || { echo "error: could not publish report to $PARENT_STATE/inbox" >&2; exit 1; }
+cs_message_route_write "$PARENT_STATE/inbox/$MESSAGE_ID.msg" "$PARENT_TASK" "$TO_GENERATION" || {
+  echo "error: could not record report route" >&2
+  exit 1
+}
 if [ "$PARENT_ROUTE_OK" -ne 1 ]; then
   exit 1
 fi

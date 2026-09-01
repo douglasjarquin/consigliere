@@ -76,7 +76,7 @@ message_source_valid() {
     echo "error: stale sender generation in '$file'" >&2
     return 1
   }
-  [ "$(cs_meta_get "$TASK_META" endpoint_generation)" = "$(cs_message_field "$file" to_endpoint_generation)" ] || {
+  [ "$(cs_meta_get "$TASK_META" endpoint_generation)" = "$(cs_message_route_generation "$file")" ] || {
     echo "error: stale receiver generation in '$file'" >&2
     return 1
   }

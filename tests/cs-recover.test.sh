@@ -70,14 +70,37 @@ else
 fi
 printf '%s\n' "$output" | grep -F "re-woke message=$message_id" >/dev/null || fail "recover did not report the re-wake"
 [ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$message_id" "$TMP/prompts")" = 1 ] || fail "recover did not deliver one bounded wake"
+[ -f "$STATE/inbox/$message_id.route" ] || fail "recovery did not record the verified delivery route"
+grep -F 'endpoint_generation=root-generation' "$STATE/inbox/$message_id.route" >/dev/null \
+  || fail "initial recovery route recorded the wrong endpoint generation"
 pass "recovery re-wakes an existing durable obligation once"
+
+relaunch_id=message-recover-0000000000000002
+printf '%s\n' 'endpoint_generation=root-generation-2' >> "$STATE/root.meta"
+cs_message_publish "$STATE/inbox" \
+  "schema=cs-message.v1" "message_id=$relaunch_id" "correlation_id=$relaunch_id" \
+  "sequence=1" "kind=question" "from_task_id=child" "to_task_id=root" \
+  "from_home=$HOME_DIR" "from_endpoint_generation=child-generation" \
+  "to_endpoint_generation=root-generation" "summary=survives relaunch" "artifact=" \
+  "commit_sha=" "pull_request=" "created_at=1700000000" || fail "relaunch message setup"
+cs_message_pending_create "$STATE" "$relaunch_id" "$relaunch_id" child root question 1700000000 \
+  || fail "relaunch pending setup"
+output=$("$ROOT/bin/cs-recover.sh") || fail "recover should repair a relaunched parent route"
+printf '%s\n' "$output" | grep -F "re-woke message=$relaunch_id" >/dev/null \
+  || fail "relaunch recovery did not re-wake the durable message"
+grep -F 'endpoint_generation=root-generation-2' "$STATE/inbox/$relaunch_id.route" >/dev/null \
+  || fail "relaunch recovery did not update the route to the current generation"
+CS_TASK_ID=root "$ROOT/bin/cs-inbox.sh" --ack "$relaunch_id" --reply accepted >/dev/null \
+  || fail "the repaired route could not be acknowledged by the relaunched parent"
+[ -f "$STATE/inbox/$relaunch_id.ack" ] || fail "relaunch message acknowledgement is missing"
+pass "recovery repairs a verified route after the parent endpoint relaunches"
 
 export CS_FAKE_PANE_CWD="$TMP/wrong-worktree"
 if "$ROOT/bin/cs-recover.sh" >"$TMP/wrong.out" 2>"$TMP/wrong.err"; then
   fail "recover accepted a wrong-home endpoint"
 fi
 grep -F 'wrong' "$TMP/wrong.err" >/dev/null || fail "wrong-home recovery refusal lacked its reason"
-[ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$message_id" "$TMP/prompts")" = 1 ] || fail "wrong-home recovery sent a wake"
+[ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$message_id" "$TMP/prompts")" = 2 ] || fail "wrong-home recovery sent a wake"
 pass "recovery refuses a stale or wrong-home endpoint without guessing"
 
 pass "bounded durable-message recovery contract"

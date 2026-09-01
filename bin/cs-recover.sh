@@ -43,16 +43,18 @@ endpoint_ready() {
 }
 
 wake_message() {
-  local file=$1 recipient_meta=$2 message_id to_generation pane
+  local file=$1 recipient_meta=$2 message_id to_generation pane recipient_task
   message_id=$(cs_message_field "$file" message_id)
-  to_generation=$(cs_message_field "$file" to_endpoint_generation)
+  recipient_task=$(cs_message_field "$file" to_task_id)
   pane=$(cs_meta_get "$recipient_meta" pane 2>/dev/null || true)
   [ -n "$pane" ] || { echo "error: message '$message_id' recipient has no pane" >&2; return 1; }
-  [ "$to_generation" = "$(cs_meta_get "$recipient_meta" endpoint_generation 2>/dev/null || true)" ] || {
-    echo "error: message '$message_id' has a stale receiver generation" >&2
+  endpoint_ready "$recipient_meta" "$pane" "message '$message_id' recipient" || return 1
+  to_generation=$(cs_meta_get "$recipient_meta" endpoint_generation 2>/dev/null || true)
+  [ -n "$to_generation" ] || { echo "error: message '$message_id' recipient has no endpoint generation" >&2; return 1; }
+  cs_message_route_write "$file" "$recipient_task" "$to_generation" || {
+    echo "error: message '$message_id' route could not be repaired" >&2
     return 1
   }
-  endpoint_ready "$recipient_meta" "$pane" "message '$message_id' recipient" || return 1
   cs_herdr_agent_prompt_confirmed "$pane" "CONSIGLIERE_WAKE v1 message=$message_id" || {
     echo "error: message '$message_id' wake was not confirmed" >&2
     return 1
