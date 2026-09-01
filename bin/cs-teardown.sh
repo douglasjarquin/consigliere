@@ -82,6 +82,8 @@ esac
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
 # shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# shellcheck source=bin/cs-message-lib.sh
+. "$SCRIPT_DIR/cs-message-lib.sh"
 # shellcheck source=bin/cs-harness-lib.sh
 . "$SCRIPT_DIR/cs-harness-lib.sh"
 # shellcheck source=bin/cs-made-run-lib.sh
@@ -133,6 +135,51 @@ NM_RUNS_LIMIT=200
 # lsof is the verified mechanism for the leaked-process sweep; resolved once.
 LSOF_BIN=$(command -v lsof || true)
 CS_REAP_SURVIVORS=""
+
+message_state_has_open_records() {
+  local state=$1 target=$2 file id ack
+  for file in "$state"/pending/*.pending; do
+    [ -f "$file" ] || continue
+    id=$(cs_message_field "$file" message_id 2>/dev/null || true)
+    [ -n "$id" ] || return 1
+    [ -f "$state/pending/$id.closed" ] || return 1
+  done
+  for file in "$state"/inbox/*.msg; do
+    [ -f "$file" ] || continue
+    cs_message_validate_file "$file" || return 1
+    [ "$(cs_message_field "$file" to_task_id)" = "$target" ] || continue
+    ack="${file%.msg}.ack"
+    if [ -e "$ack" ]; then
+      cs_message_validate_ack "$ack" || return 1
+    else
+      return 1
+    fi
+  done
+  return 0
+}
+
+reconcile_messages_before_teardown() {
+  local parent_state recovery_out recovery_rc=0 has_records=0
+  if [ -d "$STATE/pending" ] || [ -d "$STATE/inbox" ]; then
+    has_records=1
+  fi
+  parent_state=$(cs_meta_get "$META" parent_state 2>/dev/null || true)
+  if [ -n "$parent_state" ] && [ "$parent_state" != "$STATE" ] && {
+    [ -d "$parent_state/inbox" ] || [ -d "$parent_state/pending" ];
+  }; then
+    has_records=1
+  fi
+  [ "$has_records" -eq 1 ] || return 0
+  recovery_out=$(CS_HOME="${HOME_PATH:-$CS_HOME}" CS_STATE_OVERRIDE="$STATE" \
+    "$SCRIPT_DIR/cs-recover.sh" 2>&1) || recovery_rc=$?
+  [ -n "$recovery_out" ] && printf '%s\n' "$recovery_out" >&2
+  [ "$recovery_rc" -eq 0 ] || return 1
+  message_state_has_open_records "$STATE" "$ID" || return 1
+  if [ -n "$parent_state" ] && [ "$parent_state" != "$STATE" ]; then
+    message_state_has_open_records "$parent_state" "$ID" || return 1
+  fi
+  return 0
+}
 
 default_branch() {
   local ref name
@@ -852,6 +899,11 @@ if [ "$KIND" = scout ] && [ "$FORCE" != "--force" ]; then
       exit 1
     fi
   fi
+fi
+
+if [ "$FORCE" != "--force" ] && ! reconcile_messages_before_teardown; then
+  echo "REFUSED: message reconciliation for task $ID is unresolved or malformed; records and worktree were preserved." >&2
+  exit 1
 fi
 
 if [ -n "$WT" ] && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then

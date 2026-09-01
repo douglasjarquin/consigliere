@@ -7,6 +7,8 @@
 set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=bin/cs-message-lib.sh
+. "$ROOT/bin/cs-message-lib.sh"
 
 TMP=$(cs_test_tmproot cs-teardown)
 export CS_DATA_OVERRIDE="$TMP/data"
@@ -578,5 +580,35 @@ if command -v lsof >/dev/null 2>&1; then
 else
   pass "leaked-process reap (skipped: lsof unavailable)"
 fi
+
+# 17. Teardown must reconcile this task's durable message obligations before
+# removing its worktree. A failed recovery keeps the message, obligation, and
+# worktree available for a later explicit resolution.
+make_task msg1 ship
+cs_meta_set "$TMP/state/msg1.meta" home "$TMP"
+cs_meta_set "$TMP/state/msg1.meta" parent_task_id root
+cs_meta_set "$TMP/state/msg1.meta" parent_home "$TMP"
+cs_meta_set "$TMP/state/msg1.meta" parent_state "$TMP/state"
+cs_meta_set "$TMP/state/msg1.meta" parent_pane w99:p98
+cs_meta_set "$TMP/state/msg1.meta" parent_generation root-generation
+cs_meta_set "$TMP/state/msg1.meta" endpoint_generation msg1-generation
+cs_write_meta "$TMP/state/root.meta" \
+  task_id=root kind=capo home="$TMP" worktree="$TMP" pane=w99:p98 \
+  endpoint_generation=root-generation
+message_id=message-teardown-0000000000000001
+cs_message_publish "$TMP/state/inbox" \
+  "schema=cs-message.v1" "message_id=$message_id" "correlation_id=$message_id" \
+  "sequence=1" "kind=question" "from_task_id=msg1" "to_task_id=root" \
+  "from_home=$TMP" "from_endpoint_generation=msg1-generation" \
+  "to_endpoint_generation=root-generation" "summary=needs answer" "artifact=" \
+  "commit_sha=" "pull_request=" "created_at=1700000000" || fail "teardown message setup"
+cs_message_pending_create "$TMP/state" "$message_id" "$message_id" msg1 root question 1700000000 \
+  || fail "teardown obligation setup"
+out=$("$BIN" msg1 2>&1) && fail "teardown must refuse with an unresolved message obligation"
+assert_contains "$out" "message reconciliation" "teardown refusal names unresolved message reconciliation"
+assert_present "$TMP/wt-msg1" "teardown preserves the worktree with an unresolved obligation"
+assert_present "$TMP/state/msg1.meta" "teardown preserves metadata with an unresolved obligation"
+assert_present "$TMP/state/pending/$message_id.pending" "teardown preserves the pending obligation"
+pass "teardown reconciles messages before cleanup and refuses unresolved obligations"
 
 pass "cs-teardown landed-work proofs"
