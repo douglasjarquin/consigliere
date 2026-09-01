@@ -1086,6 +1086,12 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
     if [ -n "$meta" ]; then
       expected_agent=$(cs_meta_get "$meta" harness 2>/dev/null || true)
       [ -z "$expected_agent" ] || cs_herdr_agent_kind_matches "$p" "$expected_agent" || continue
+      expected_worktree=$(cs_meta_get "$meta" worktree 2>/dev/null || true)
+      if [ -n "$expected_worktree" ]; then
+        actual_worktree=$(cs_herdr_pane_cwd "$p" 2>/dev/null || true)
+        [ -n "$actual_worktree" ] &&
+          [ "$(cd "$actual_worktree" 2>/dev/null && pwd -P)" = "$(cd "$expected_worktree" 2>/dev/null && pwd -P)" ] || continue
+      fi
     fi
     record=$(cs_transition_normalize "$p" "" "$raw" "")
     if hit=$(cs_transition_apply "$state" "$record"); then

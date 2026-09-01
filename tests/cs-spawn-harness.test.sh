@@ -299,6 +299,8 @@ env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude CLAUDE_CONFIG_DIR="$TMP/wor
 launch=$(cat "$TMP/launch-foo")
 capo_native_name=$(printf '%s\n' "$launch" | sed -n 's/^name=//p')
 [ "$(cs_meta_get "$HOME_DIR/state/foo.meta" kind)" = capo ] || fail "capo meta kind"
+[ "$(cs_meta_get "$CAPO_HOME/state/foo.meta" kind)" = capo ] || fail "capo home meta kind"
+[ "$(cs_meta_get "$CAPO_HOME/state/foo.meta" parent_task_id)" = root ] || fail "capo home parent edge"
 [ "$cross_kind_ship_name" != "$capo_native_name" ] \
   || fail "ship capo-foo and capo foo must not collide as native agent names"
 assert_contains "$launch" "name=n-capo-foo-" "capo native names use a delimiter that lands in the normalized namespace"

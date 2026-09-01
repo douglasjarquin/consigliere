@@ -836,6 +836,23 @@ if [ "$KIND" = capo ]; then
     "parent_pane=$PARENT_PANE" \
     "parent_generation=$PARENT_GENERATION" \
     "endpoint_generation=$ENDPOINT_GENERATION"
+  mkdir -p "$HOME_ABS/state"
+  cs_meta_write "$HOME_ABS/state/$ID.meta" \
+    "workspace=$WS" \
+    "pane=$PANE" \
+    "worktree=$HOME_ABS" \
+    "project=$HOME_ABS" \
+    "kind=capo" \
+    "mode=capo" \
+    "yolo=off" \
+    "harness=$HARNESS" \
+    "home=$HOME_ABS" \
+    "parent_task_id=$PARENT_TASK" \
+    "parent_home=$PARENT_HOME" \
+    "parent_state=$PARENT_STATE" \
+    "parent_pane=$PARENT_PANE" \
+    "parent_generation=$PARENT_GENERATION" \
+    "endpoint_generation=$ENDPOINT_GENERATION"
   report_task_metadata "$PANE" "$ID" capo
 
   encoded_brief=$("$SCRIPT_DIR/cs-operational-input.sh" encode launch-brief < "$BRIEF") || {
