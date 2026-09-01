@@ -146,6 +146,23 @@ grep -F 'does not match its inbox identity' "$TMP/generation-mismatch.err" >/dev
 rm -f "$STATE/inbox/$mismatch_id.msg" "$STATE/pending/$mismatch_id.pending"
 pass "recovery refuses a pending obligation with mismatched endpoint generation"
 
+destination_mismatch_id='message-recover-destination-generation-mismatch-0001'
+cs_message_publish "$STATE/inbox" \
+  "schema=cs-message.v1" "message_id=$destination_mismatch_id" "correlation_id=$destination_mismatch_id" \
+  "sequence=1" "kind=question" "from_task_id=child" "to_task_id=root" \
+  "from_home=$HOME_DIR" "from_endpoint_generation=child-generation" \
+  "to_endpoint_generation=root-generation-2" "summary=destination generation mismatch" "artifact=" \
+  "commit_sha=" "pull_request=" "created_at=1700000000" || fail "destination mismatch message setup"
+cs_message_pending_create "$STATE" "$destination_mismatch_id" "$destination_mismatch_id" child root question 1700000000 \
+  "$HOME_DIR" child-generation root-generation || fail "destination mismatch pending setup"
+if "$ROOT/bin/cs-recover.sh" >"$TMP/destination-generation-mismatch.out" 2>"$TMP/destination-generation-mismatch.err"; then
+  fail "recovery accepted a pending obligation with mismatched destination endpoint generation"
+fi
+grep -F 'does not match its inbox identity' "$TMP/destination-generation-mismatch.err" >/dev/null \
+  || fail "destination generation mismatch refusal lacked its identity reason"
+rm -f "$STATE/inbox/$destination_mismatch_id.msg" "$STATE/pending/$destination_mismatch_id.pending"
+pass "recovery refuses a pending obligation with mismatched destination endpoint generation"
+
 printf '%s\n' 'done: child stopped before semantic report' > "$STATE/child.status"
 export CS_FAKE_PANE_CWD="$HOME_DIR" CS_FAKE_AGENT_LIVE=1
 output=$("$ROOT"/bin/cs-recover.sh) || fail "recover should request a report from a live settled child"
