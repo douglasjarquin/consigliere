@@ -125,12 +125,12 @@ for pending in "$STATE"/pending/*.pending; do
     failed=1
     continue
   fi
-  message_id=$(cs_message_field "$pending" message_id 2>/dev/null || true)
+  message_id=$(cs_message_pending_field "$pending" message_id 2>/dev/null || true)
   if seen_message "$message_id"; then continue; fi
-  task=$(cs_message_field "$pending" task_id)
-  pending_parent=$(awk -F= '$1 == "parent_task_id" { print substr($0, 17) }' "$pending")
-  pending_correlation=$(awk -F= '$1 == "correlation_id" { print substr($0, 16) }' "$pending")
-  pending_kind=$(awk -F= '$1 == "kind" { print substr($0, 6) }' "$pending")
+  task=$(cs_message_pending_field "$pending" task_id)
+  pending_parent=$(cs_message_pending_field "$pending" parent_task_id)
+  pending_correlation=$(cs_message_pending_field "$pending" correlation_id)
+  pending_kind=$(cs_message_pending_field "$pending" kind)
   child_meta="$STATE/$task.meta"
   if [ ! -f "$child_meta" ]; then
     echo "error: pending message '$message_id' names missing sender metadata '$child_meta'" >&2

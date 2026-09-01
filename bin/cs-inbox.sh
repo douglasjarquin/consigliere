@@ -21,7 +21,10 @@ STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 TASK_ID=$CS_TASK_ID
 cs_message_task "$TASK_ID" || { echo "error: invalid task id '$TASK_ID'" >&2; exit 2; }
 TASK_META="$STATE/$TASK_ID.meta"
-[ -f "$TASK_META" ] || { echo "error: task metadata is missing at $TASK_META" >&2; exit 1; }
+if [ "$TASK_ID" != root ] && [ ! -f "$TASK_META" ]; then
+  echo "error: task metadata is missing at $TASK_META" >&2
+  exit 1
+fi
 INBOX="$STATE/inbox"
 [ -d "$INBOX" ] || { echo "inbox task=$TASK_ID messages=0"; exit 0; }
 
@@ -101,10 +104,12 @@ message_source_valid() {
     echo "error: stale sender generation in '$file'" >&2
     return 1
   }
-  [ "$(cs_meta_get "$TASK_META" endpoint_generation)" = "$(cs_message_route_generation "$file")" ] || {
-    echo "error: stale receiver generation in '$file'" >&2
-    return 1
-  }
+  if [ "$TASK_ID" != root ]; then
+    [ "$(cs_meta_get "$TASK_META" endpoint_generation)" = "$(cs_message_route_generation "$file")" ] || {
+      echo "error: stale receiver generation in '$file'" >&2
+      return 1
+    }
+  fi
 }
 
 deliver_reply() {
@@ -185,6 +190,13 @@ ack_message() {
     echo "error: result message '$ACK_ID' has unverifiable artifact, commit, or pull request evidence; acknowledgement remains absent" >&2
     return 1
   fi
+  if [ "$kind" = question ] || [ "$kind" = decision-required ]; then
+    pending_file=$(cs_message_pending_path "$from_home/state" "$ACK_ID")
+    cs_message_pending_matches_message "$pending_file" "$file" || {
+      echo "error: response obligation '$ACK_ID' does not match its inbox message; acknowledgement remains absent" >&2
+      return 1
+    }
+  fi
   case "$kind" in
     question|decision-required)
       [ -n "$REPLY" ] || {
@@ -225,6 +237,10 @@ escalate_message() {
   }
   cs_message_pending_validate_file "$pending_file" || {
     echo "error: message '$ESCALATE_ID' has a malformed response obligation" >&2
+    return 1
+  }
+  cs_message_pending_matches_message "$pending_file" "$file" || {
+    echo "error: response obligation '$ESCALATE_ID' does not match its inbox message" >&2
     return 1
   }
   cs_meta_validate_parent_edge "$TASK_META" || {

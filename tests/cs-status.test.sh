@@ -35,6 +35,12 @@ assert_contains "$output" "next=CS_HOME=$HOME_DIR bin/cs-recover.sh" "status mus
 assert_contains "$output" "next=CS_TASK_ID=root bin/cs-inbox.sh" "status must give the inbox action"
 pass "status renders bounded message obligations and exact next actions"
 
+printf '%s\n' 'not-a-closure' > "$STATE/pending/$message_id.closed"
+output=$(CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" "$ROOT/bin/cs-status.sh") \
+  || fail "status should render malformed closure state"
+assert_contains "$output" 'pending_obligations=1' "status must not trust a malformed closure marker"
+pass "status counts malformed closure markers as unresolved obligations"
+
 rm -f "$STATE/pending/$message_id.pending"
 output=$(CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" CS_RECOVER_MAX_RECORDS=1 \
   "$ROOT/bin/cs-recover.sh" 2>&1) && fail "recovery must refuse malformed records"

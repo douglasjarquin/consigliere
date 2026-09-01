@@ -63,7 +63,9 @@ if [ -z "$PARENT_CWD" ] || [ "$(cd "$PARENT_CWD" 2>/dev/null && pwd -P)" != "$PA
 else
   PARENT_ROUTE_OK=1
 fi
-PARENT_AGENT=$(cs_meta_get "$META" harness 2>/dev/null || true)
+PARENT_META="$PARENT_STATE/$PARENT_TASK.meta"
+PARENT_AGENT=$(cs_meta_get "$PARENT_META" harness 2>/dev/null || true)
+[ -n "$PARENT_AGENT" ] || PARENT_AGENT=$(cs_meta_get "$META" harness 2>/dev/null || true)
 if [ "$PARENT_ROUTE_OK" -eq 1 ] && [ -n "$PARENT_AGENT" ] &&
   ! cs_herdr_agent_kind_matches "$PARENT_PANE" "$PARENT_AGENT"; then
   echo "warning: parent pane '$PARENT_PANE' does not contain the recorded $PARENT_AGENT agent; the durable report remains in $PARENT_STATE/inbox" >&2

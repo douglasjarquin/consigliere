@@ -38,7 +38,12 @@ done
 pending=0
 for file in "$STATE"/pending/*.pending; do
   [ -f "$file" ] || continue
-  [ -e "${file%.pending}.closed" ] || pending=$((pending + 1))
+  message_id=$(cs_message_pending_field "$file" message_id 2>/dev/null || true)
+  closed="${file%.pending}.closed"
+  if [ -e "$closed" ] && cs_message_pending_close_validate_file "$closed" "$message_id"; then
+    continue
+  fi
+  pending=$((pending + 1))
 done
 
 printf 'status home=%s tasks=%s open_messages=%s pending_obligations=%s malformed_messages=%s\n' \

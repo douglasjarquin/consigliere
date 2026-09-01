@@ -155,6 +155,16 @@ grep -F 'pull request could not be verified' "$TMP/unavailable-pr.err" >/dev/nul
 [ ! -e "$STATE/inbox/message-unavailable-pr.ack" ] || fail "unavailable PR was acknowledged"
 pass "result acknowledgement refuses an unavailable pull request"
 
+message message-mismatched-pending current question child-generation
+cs_message_pending_create "$STATE" message-mismatched-pending different-correlation child current question 1700000000 \
+  || fail "mismatched pending setup"
+if "$INBOX" --ack message-mismatched-pending --reply "answer" >/dev/null 2>"$TMP/mismatched-pending.err"; then
+  fail "a response obligation with mismatched correlation must not be acknowledged"
+fi
+grep -F 'does not match' "$TMP/mismatched-pending.err" >/dev/null || fail "pending mismatch refusal must name the mismatch"
+[ ! -e "$STATE/inbox/message-mismatched-pending.ack" ] || fail "mismatched pending obligation was acknowledged"
+pass "response acknowledgement refuses a mismatched pending identity"
+
 "$INBOX" --ack message-current >/dev/null || fail "message acknowledgement"
 [ -f "$STATE/inbox/message-current.ack" ] || fail "acknowledgement record missing"
 "$INBOX" --ack message-current >/dev/null || fail "duplicate acknowledgement"
@@ -167,6 +177,22 @@ if "$INBOX" --ack message-current >/dev/null 2>&1; then
   fail "an acknowledgement naming another message must not suppress the requested message"
 fi
 pass "acknowledgement is explicit, scoped, and idempotent"
+
+{
+  printf '%s\n' 'parent_task_id=root'
+  printf '%s\n' 'parent_home='"$HOME_DIR"
+  printf '%s\n' 'parent_state='"$STATE"
+  printf '%s\n' 'parent_pane=unknown'
+  printf '%s\n' 'parent_generation=current-generation'
+} >> "$STATE/child.meta"
+message message-root root result child-generation
+if CS_TASK_ID=root "$INBOX" --ack message-root >/dev/null; then
+  :
+else
+  fail "the root inbox must work without a synthetic root metadata record"
+fi
+[ -f "$STATE/inbox/message-root.ack" ] || fail "root inbox did not acknowledge its message"
+pass "the root inbox handles messages without requiring root.meta"
 
 printf '%s\n' 'schema=invalid' > "$STATE/inbox/malformed.msg"
 if "$INBOX" >/dev/null 2>"$TMP/malformed.err"; then

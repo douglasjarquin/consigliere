@@ -340,6 +340,23 @@ cs_message_pending_validate_file() {
   done
 }
 
+cs_message_pending_field() {
+  local file=$1 key=$2
+  cs_message_pending_validate_file "$file" || return 1
+  awk -F= -v wanted="$key" '$1 == wanted { print substr($0, length(wanted) + 2); found=1 } END { exit !found }' "$file"
+}
+
+cs_message_pending_matches_message() {
+  local pending=$1 message=$2
+  cs_message_pending_validate_file "$pending" || return 1
+  cs_message_validate_file "$message" || return 1
+  [ "$(cs_message_pending_field "$pending" message_id)" = "$(cs_message_field "$message" message_id)" ] &&
+    [ "$(cs_message_pending_field "$pending" correlation_id)" = "$(cs_message_field "$message" correlation_id)" ] &&
+    [ "$(cs_message_pending_field "$pending" task_id)" = "$(cs_message_field "$message" from_task_id)" ] &&
+    [ "$(cs_message_pending_field "$pending" parent_task_id)" = "$(cs_message_field "$message" to_task_id)" ] &&
+    [ "$(cs_message_pending_field "$pending" kind)" = "$(cs_message_field "$message" kind)" ]
+}
+
 cs_message_pending_create() {
   local state=$1 message_id=$2 correlation_id=$3 task_id=$4 parent_task_id=$5 kind=$6 created_at=$7
   local dir file tmp same
