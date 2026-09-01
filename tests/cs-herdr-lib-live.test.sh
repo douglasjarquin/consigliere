@@ -85,7 +85,11 @@ assert_contains "$out" "cs-capture-probe" "pane run output visible in capture"
 pass "pane run + capture round-trip"
 
 detection_out=""
-cs_herdr_pane_run_confirmed "$task_pane" "printf '%s\\n' '• Working (thinking, esc to interrupt)'" 5000 || fail "detection probe pane run"
+probe_marker="CS_DETECTION_PROBE_$$_${RANDOM}_${RANDOM}"
+probe_line="printf '%s\\n' '• Working (thinking, esc to interrupt)'; printf '%s%s\\n' 'CS' '${probe_marker#CS}'; sleep 3"
+cs_herdr_run "$task_pane" "$probe_line" >/dev/null || fail "detection probe pane run"
+cs_herdr pane wait-output "$task_pane" --match "$probe_marker" --timeout 5000 >/dev/null 2>&1 ||
+  fail "detection probe execution"
 detection_out=$(cs_herdr_capture_detection "$task_pane" 20 text) || fail "detection capture"
 assert_contains "$detection_out" "• Working (thinking, esc to interrupt)" "detection source capture contains the probe"
 detection_capture="$TMP/detection.capture"
