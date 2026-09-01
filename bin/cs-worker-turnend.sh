@@ -3,8 +3,11 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -n "${CS_HOME+x}" ] && [ -n "${CS_HOME:-}" ] || exit 0
+# shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
+# shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# shellcheck source=bin/cs-message-lib.sh
 . "$SCRIPT_DIR/cs-message-lib.sh"
 cs_resolve_root || exit 0
 

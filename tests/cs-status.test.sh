@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -u
+# shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=bin/cs-message-lib.sh
 . "$ROOT/bin/cs-message-lib.sh"
 
 TMP=$(cs_test_tmproot cs-status)

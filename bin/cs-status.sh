@@ -6,8 +6,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   echo "error: CS_HOME is not set; status refuses to guess a home" >&2
   exit 1
 }
+# shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
+# shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# shellcheck source=bin/cs-message-lib.sh
 . "$SCRIPT_DIR/cs-message-lib.sh"
 cs_resolve_root
 

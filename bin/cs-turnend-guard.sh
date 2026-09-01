@@ -49,7 +49,9 @@ GRACE=${CS_GUARD_GRACE:-300}
 . "$SCRIPT_DIR/cs-primary-scope-lib.sh"
 # shellcheck source=bin/cs-operational-input.sh
 . "$SCRIPT_DIR/cs-operational-input.sh"
+# shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# shellcheck source=bin/cs-message-lib.sh
 . "$SCRIPT_DIR/cs-message-lib.sh"
 # Optional turn telemetry (off unless host/telemetry.conf enables it). The
 # library is pure function definitions with no side effects on source, and every
