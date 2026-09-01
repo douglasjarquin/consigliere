@@ -580,7 +580,7 @@ cs_herdr_pane_agent_process() { # <pane_id> -> <pid>\t<argv0>, rc 1 if absent
   [ -n "$out" ] || return 1
   printf '%s' "$out" | jq -er '
     .result.process_info.foreground_processes // []
-    | map(select((.argv0 // "") | test("^(codex|claude)$")))
+    | map(select((.argv0 // "") | test("^(codex|claude|grok|cursor-agent)$")))
     | first
     | select(. != null)
     | "\(.pid)\t\(.argv0)"

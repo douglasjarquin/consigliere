@@ -48,6 +48,41 @@ cs_path_age() {
   echo $(( $(date +%s) - m ))
 }
 
+CS_WATCHER_MATCHED_IDENTITY=
+cs_watcher_lock_matches_pid() {
+  local state=$1 watch_path=$2 pid=$3 home=${4:-$CS_HOME} lockdir lock_home lock_path lock_identity current_identity
+  CS_WATCHER_MATCHED_IDENTITY=
+  lockdir="$state/.watch.lock"
+  lock_home=$(cat "$lockdir/cs-home" 2>/dev/null || true)
+  lock_path=$(cat "$lockdir/watcher-path" 2>/dev/null || true)
+  lock_identity=$(cat "$lockdir/pid-identity" 2>/dev/null || true)
+  [ "$lock_home" = "$home" ] || return 1
+  [ "$lock_path" = "$watch_path" ] || return 1
+  [ -n "$lock_identity" ] || return 1
+  current_identity=$(cs_pid_identity "$pid") || return 1
+  [ "$current_identity" = "$lock_identity" ] || return 1
+  CS_WATCHER_MATCHED_IDENTITY=$lock_identity
+}
+
+CS_WATCHER_HEALTHY_PID=
+CS_WATCHER_HEALTHY_IDENTITY=
+cs_watcher_healthy() {
+  local state=$1 watch_path=$2 grace=${3:-${CS_GUARD_GRACE:-300}} home=${4:-$CS_HOME} lockdir beat pid identity age
+  CS_WATCHER_HEALTHY_PID=
+  CS_WATCHER_HEALTHY_IDENTITY=
+  lockdir="$state/.watch.lock"
+  beat="$state/.last-watcher-beat"
+  pid=$(cat "$lockdir/pid" 2>/dev/null || true)
+  cs_pid_alive "$pid" || return 1
+  cs_watcher_lock_matches_pid "$state" "$watch_path" "$pid" "$home" || return 1
+  identity=$CS_WATCHER_MATCHED_IDENTITY
+  age=$(cs_path_age "$beat")
+  [ "$age" -lt "$grace" ] || return 1
+  CS_WATCHER_HEALTHY_PID=$pid
+  CS_WATCHER_HEALTHY_IDENTITY=$identity
+  return 0
+}
+
 cs_lock_clean_known_files() {
   local lockdir=$1
   rm -f \

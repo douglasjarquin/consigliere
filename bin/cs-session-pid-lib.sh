@@ -34,7 +34,7 @@ CS_SESSION_PID_LIB_SOURCED=1
 # shell. Read at call time, not at source time, so a caller that sources this lib
 # early still honors an override set later.
 cs_session_harness_re() {
-  printf '%s\n' "${CS_LOCK_HARNESS_RE:-codex|claude}"
+  printf '%s\n' "${CS_LOCK_HARNESS_RE:-codex|claude|grok|cursor-agent}"
 }
 
 # Does any WHOLE path component of $1 name the harness?
