@@ -1436,7 +1436,10 @@ EOF
     # otherwise reach is unreachable by construction. A capo's pane is a
     # supervisor's, not a supervised turn-taker's, so it is exempt.
     if [ "$kind" != capo ] && pane_is_busy "$bs" "$tail40"; then
-      if bage=$(busy_turn_age "$task") && [ "$bage" -ge "$BUSY_TURN_MAX_SECS" ]; then
+      if status_is_paused_or_boss_held "$(last_status_line "$STATE/$task.status")"; then
+        rm -f "$btf"
+        handle_paused_stale "$w" "$task" "$h"
+      elif bage=$(busy_turn_age "$task") && [ "$bage" -ge "$BUSY_TURN_MAX_SECS" ]; then
         wedge_timer_check "$w" "$btf" "busy ${bage}s with no completed turn" "$ewf"
       else
         # Within the bound, or unreadable: no wedge in progress.

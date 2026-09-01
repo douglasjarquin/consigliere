@@ -24,6 +24,7 @@
 #   cs-decision-hold.sh verify <origin-id>
 #   cs-decision-hold.sh resolve <origin-id> <decision-key> \
 #     --decision-file <path> --routed-to <task-id> [--routed-to <task-id>...]
+#   cs-decision-hold.sh decline <origin-id> <decision-key> --decision-file <path>
 #
 # `complete` is the shared investigation and visual-review completion gate.
 # `--none` is an explicit semantic attestation that the just-reviewed surface has
@@ -37,6 +38,10 @@
 # It writes the boss decision and routed identities into the hold body, clears
 # those dependency edges, and only then marks the hold Done. A failure before the
 # final step leaves the boss hold open.
+#
+# `decline` closes an actively held hold with a recorded boss decision and no
+# routed task. It takes no --routed-to task and refuses while any task is still
+# blocked by the hold.
 #
 # tasks-axi's hold vocabulary (`--kind captain`, hold_kind captain) and the
 # `captain-held` status verb (CS_CLASSIFY_BOSS_HELD_VERB_DEFAULT in
@@ -99,6 +104,71 @@ hold_id() {  # <origin-id> <decision-key>
   validate_slug origin-id "$1"
   validate_slug decision-key "$2"
   printf '%s-decision-%s\n' "$1" "$2"
+}
+
+ROUTED_NONE='(none)'
+
+DECISION_TEXT=''
+DECISION_DIGEST=''
+
+load_decision() {  # <path>; sets DECISION_TEXT and DECISION_DIGEST
+  local path=$1 decision
+  [ -n "$path" ] || fail "--decision-file is required"
+  [ -f "$path" ] || fail "decision file does not exist: $path"
+  decision=$(cat "$path")
+  [ -n "$decision" ] || fail "decision file must not be empty"
+  [ "$(printf '%s' "$decision" | LC_ALL=C wc -c | tr -d ' ')" -le 8192 ] \
+    || fail "decision file exceeds 8192 bytes"
+  DECISION_TEXT=$decision
+  DECISION_DIGEST=$(sha256_text "$decision")
+}
+
+resolution_body() {  # <mode> <routed-csv> [routed-task-id...]
+  local mode=$1 routed_csv=$2 body dep
+  shift 2
+  body=$(printf 'Resolution recorded by cs-decision-hold.\nDecision digest: %s\nRouted identities: %s\nResolution mode: %s\n\nBoss decision:\n%s\n\nRouted work:\n' \
+    "$DECISION_DIGEST" "$routed_csv" "$mode" "$DECISION_TEXT")
+  if [ "$#" -eq 0 ]; then
+    body="${body}${ROUTED_NONE}"$'\n'
+  else
+    for dep in "$@"; do
+      body="${body}- ${dep}"$'\n'
+    done
+  fi
+  printf '%s' "$body"
+}
+
+normalized_blocked_by() {  # <show-output>
+  local blocked
+  blocked=$(show_field "$1" blocked_by | tr -d '[:space:]')
+  blocked=${blocked#\"}
+  blocked=${blocked%\"}
+  printf '%s' "$blocked"
+}
+
+tasks_blocked_by() {  # <hold-id>
+  local id=$1 rows row candidate show found=''
+  rows=$(tasks_axi list --fields blocked_by) \
+    || fail "could not read backlog work while checking what $id still blocks"
+  while IFS= read -r row; do
+    case "$row" in
+      *"$id"*) : ;;
+      *) continue ;;
+    esac
+    candidate=${row%%,*}
+    candidate=${candidate// /}
+    [ -n "$candidate" ] || continue
+    [ "$candidate" != "$id" ] || continue
+    case "$candidate" in
+      *[!A-Za-z0-9._-]*) continue ;;
+    esac
+    show=$(task_show "$candidate") || continue
+    list_has_key "$(normalized_blocked_by "$show")" "$id" || continue
+    found="${found}${found:+ }$candidate"
+  done <<EOF
+$rows
+EOF
+  printf '%s' "$found"
 }
 
 tasks_axi() {
@@ -217,6 +287,7 @@ verify_resolution_identity() {
   esac
   case "$resolution_fields" in
     *'\nRouted identities: '*'\n\nBoss decision:'*) : ;;
+    *'\nRouted identities: '*'\nResolution mode:'*) : ;;
     *) fail "boss hold $id has an invalid retry identity record" ;;
   esac
   recorded_digest=${resolution_fields%%\\n*}
@@ -374,7 +445,7 @@ EOF
 }
 
 command_resolve() {
-  local origin=${1:-} key=${2:-} decision_file='' id='' decision='' decision_digest='' body='' routed='' routed_csv='' dep show blocked state hold_show hold_body resolution_recorded=0
+  local origin=${1:-} key=${2:-} decision_file='' id='' body='' routed='' routed_csv='' dep show blocked state hold_show hold_body resolution_recorded=0
   [ "$#" -ge 2 ] || { usage >&2; exit 2; }
   shift 2
   while [ "$#" -gt 0 ]; do
@@ -387,23 +458,17 @@ command_resolve() {
   done
   validate_slug origin-id "$origin"
   validate_slug decision-key "$key"
-  [ -n "$decision_file" ] || fail "--decision-file is required"
-  [ -f "$decision_file" ] || fail "decision file does not exist: $decision_file"
-  decision=$(cat "$decision_file")
-  [ -n "$decision" ] || fail "decision file must not be empty"
-  [ "$(printf '%s' "$decision" | LC_ALL=C wc -c | tr -d ' ')" -le 8192 ] \
-    || fail "decision file exceeds 8192 bytes"
+  load_decision "$decision_file"
   [ -n "$routed" ] || fail "at least one --routed-to task is required"
   routed=$(printf '%s\n' "$routed" | tr ' ' '\n' | sed '/^$/d' | LC_ALL=C sort -u | paste -sd' ' -)
   routed_csv=$(printf '%s\n' "$routed" | tr ' ' ',')
-  decision_digest=$(sha256_text "$decision")
   require_tasks_axi
   id=$(hold_id "$origin" "$key")
   if verify_hold_resolved "$id"; then
     hold_show=$(task_show "$id")
     hold_body=$(show_field "$hold_show" body)
-    verify_resolution_identity "$id" "$hold_body" "$decision_digest" "$routed_csv"
-    printf 'resolved: %s\n' "$id"
+    verify_resolution_identity "$id" "$hold_body" "$DECISION_DIGEST" "$routed_csv"
+    printf 'resolved: %s -> %s\n' "$id" "$routed"
     return 0
   fi
   verify_hold_active "$id"
@@ -411,7 +476,7 @@ command_resolve() {
   hold_body=$(show_field "$hold_show" body)
   case "$hold_body" in
     *"Resolution recorded by cs-decision-hold."*)
-      verify_resolution_identity "$id" "$hold_body" "$decision_digest" "$routed_csv"
+      verify_resolution_identity "$id" "$hold_body" "$DECISION_DIGEST" "$routed_csv"
       resolution_recorded=1
       ;;
   esac
@@ -421,10 +486,7 @@ command_resolve() {
     state=$(show_field "$show" state)
     [ "$state" != "done" ] || [ "$resolution_recorded" = 1 ] \
       || fail "routed task $dep is already done"
-    # tasks-axi quotes multi-entry blocked_by as "a,b,c"; strip so edge ids match.
-    blocked=$(show_field "$show" blocked_by | tr -d '[:space:]')
-    blocked=${blocked#\"}
-    blocked=${blocked%\"}
+    blocked=$(normalized_blocked_by "$show")
     case ",$blocked," in
       *",$id,"*) : ;;
       *)
@@ -436,27 +498,70 @@ command_resolve() {
     esac
   done
 
-  body=$(printf 'Resolution recorded by cs-decision-hold.\nDecision digest: %s\nRouted identities: %s\n\nBoss decision:\n%s\n\nRouted work:\n' "$decision_digest" "$routed_csv" "$decision")
-  for dep in $routed; do
-    body="${body}- ${dep}"$'\n'
-  done
+  body=$(resolution_body resolved "$routed_csv" $routed)
   tasks_axi update "$id" --body "$body" >/dev/null \
     || fail "could not record the boss decision on $id"
   for dep in $routed; do
     show=$(task_show "$dep") || fail "routed task $dep disappeared before routing"
-    blocked=$(show_field "$show" blocked_by | tr -d '[:space:]')
-    blocked=${blocked#\"}
-    blocked=${blocked%\"}
-    case ",$blocked," in
-      *",$id,"*)
-        tasks_axi unblock "$dep" --by "$id" >/dev/null \
-          || fail "could not route the recorded decision to $dep"
-        ;;
-    esac
+    if list_has_key "$(normalized_blocked_by "$show")" "$id"; then
+      tasks_axi unblock "$dep" --by "$id" >/dev/null \
+        || fail "could not route the recorded decision to $dep"
+    fi
   done
   tasks_axi "done" "$id" >/dev/null || fail "could not close resolved boss hold $id"
   verify_hold_resolved "$id" || fail "boss hold $id did not retain its durable resolution record"
   printf 'resolved: %s -> %s\n' "$id" "$routed"
+}
+
+parse_decision_only_flags() {
+  local decision_file=''
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --decision-file) shift; decision_file=${1:-} ;;
+      *) usage >&2; exit 2 ;;
+    esac
+    shift
+  done
+  printf '%s' "$decision_file"
+}
+
+command_decline() {
+  local origin=${1:-} key=${2:-} decision_file id body hold_show hold_body state dependents
+  [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+  shift 2
+  decision_file=$(parse_decision_only_flags "$@") || exit 2
+  validate_slug origin-id "$origin"
+  validate_slug decision-key "$key"
+  load_decision "$decision_file"
+  require_tasks_axi
+  id=$(hold_id "$origin" "$key")
+  if verify_hold_resolved "$id"; then
+    hold_show=$(task_show "$id")
+    hold_body=$(show_field "$hold_show" body)
+    verify_resolution_identity "$id" "$hold_body" "$DECISION_DIGEST" "$ROUTED_NONE"
+    printf 'declined: %s\n' "$id"
+    return 0
+  fi
+  hold_show=$(task_show "$id") || fail "boss hold $id is absent from $CS_HOME/config/backlog.md"
+  state=$(show_field "$hold_show" state)
+  [ "$state" != "done" ] \
+    || fail "boss hold $id was closed outside cs-decision-hold; cannot decline a closed hold"
+  verify_hold_active "$id"
+  hold_body=$(show_field "$hold_show" body)
+  case "$hold_body" in
+    *"Resolution recorded by cs-decision-hold."*)
+      verify_resolution_identity "$id" "$hold_body" "$DECISION_DIGEST" "$ROUTED_NONE"
+      ;;
+  esac
+  dependents=$(tasks_blocked_by "$id") || exit 1
+  [ -z "$dependents" ] \
+    || fail "boss hold $id still blocks routed work ($dependents); use resolve to record that work"
+  body=$(resolution_body declined "$ROUTED_NONE")
+  tasks_axi update "$id" --body "$body" >/dev/null \
+    || fail "could not record the boss decision on $id"
+  tasks_axi "done" "$id" >/dev/null || fail "could not close declined boss hold $id"
+  verify_hold_resolved "$id" || fail "boss hold $id did not retain its durable resolution record"
+  printf 'declined: %s\n' "$id"
 }
 
 case "${1:-}" in
@@ -465,6 +570,7 @@ case "${1:-}" in
   complete) shift; command_complete "$@" ;;
   verify) shift; command_verify "$@" ;;
   resolve) shift; command_resolve "$@" ;;
+  decline) shift; command_decline "$@" ;;
   -h|--help) usage ;;
   *) usage >&2; exit 2 ;;
 esac
