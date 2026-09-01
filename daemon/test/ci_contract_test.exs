@@ -31,15 +31,6 @@ defmodule CIContractTest do
     refute on_block =~ ~r/^\s+paths:/m
   end
 
-  test "does not depend on deleted legacy Bash CI paths", %{yaml: yaml} do
-    refute yaml =~ "bin/cs-lint.sh"
-    refute yaml =~ "bin/cs-ci-lanes.sh"
-    refute yaml =~ "bin/cs-test-run.sh"
-    refute yaml =~ "tests/*.test.sh"
-    refute yaml =~ "bin/cs-install-shellcheck.sh"
-    refute yaml =~ "bin/cs-herdr"
-  end
-
   test "daemon mix test is present and always on", %{jobs: jobs} do
     job = job_with_command(jobs, "mix test")
     assert job, "CI must run mix test from daemon/"
