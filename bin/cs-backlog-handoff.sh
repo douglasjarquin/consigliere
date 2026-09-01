@@ -170,10 +170,6 @@ resume_pending_capo_wakes() {
 
 finish_handoff_wake() {
   local id=$1
-  if [ ! -f "$STATE/$id.meta" ] || [ -L "$STATE/$id.meta" ]; then
-    printf 'warning: handed off work to capo %s, but no live receiver endpoint is recorded; the destination backlog is durable\n' "$id" >&2
-    return 0
-  fi
   receiver_wake_mark_pending "$id" || {
     echo "error: handed off work to capo $id, but durable receiver wake state could not be recorded" >&2
     return 1
