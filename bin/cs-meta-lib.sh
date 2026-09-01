@@ -64,3 +64,32 @@ cs_meta_validate_parent_edge() {
     "$(cs_meta_get "$meta" parent_generation 2>/dev/null || true)" \
     "$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)"
 }
+
+cs_meta_event_route() {
+  local state=$1 pane=$2 workspace=$3 agent=$4 meta id found=''
+  [ -d "$state" ] || return 1
+  [ -n "$pane" ] || return 1
+  for meta in "$state"/*.meta; do
+    [ -f "$meta" ] || continue
+    [ "$(cs_meta_get "$meta" pane 2>/dev/null || true)" = "$pane" ] || continue
+    [ -z "$found" ] || return 1
+    found=$meta
+  done
+  [ -n "$found" ] || return 1
+  if [ -n "$workspace" ] && [ "$(cs_meta_get "$found" workspace 2>/dev/null || true)" != "$workspace" ]; then
+    return 1
+  fi
+  if [ -n "$agent" ] && [ "$(cs_meta_get "$found" harness 2>/dev/null || true)" != "$agent" ]; then
+    return 1
+  fi
+  cs_meta_validate_parent_edge "$found" || return 1
+  id=$(basename "$found" .meta)
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' \
+    "$id" \
+    "$(cs_meta_get "$found" parent_task_id)" \
+    "$(cs_meta_get "$found" parent_home)" \
+    "$(cs_meta_get "$found" parent_state)" \
+    "$(cs_meta_get "$found" parent_pane)" \
+    "$(cs_meta_get "$found" parent_generation)" \
+    "$(cs_meta_get "$found" endpoint_generation)"
+}

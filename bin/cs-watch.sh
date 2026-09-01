@@ -923,7 +923,24 @@ cs_transition_field() {  # <record> <n>
 }
 
 cs_transition_pane_id()   { cs_transition_field "$1" 1; }
+cs_transition_workspace() { cs_transition_field "$1" 2; }
 cs_transition_to_status() { cs_transition_field "$1" 4; }
+cs_transition_agent()     { cs_transition_field "$1" 5; }
+
+cs_transition_validate_route() { # <state_dir> <record>
+  local state=$1 record=$2 pane meta route parent_state state_real
+  pane=$(cs_transition_pane_id "$record")
+  meta=$(meta_for_pane "$pane" 2>/dev/null || true)
+  [ -n "$meta" ] || return 0
+  route=$(cs_meta_event_route "$state" "$pane" "$(cs_transition_workspace "$record")" \
+    "$(cs_transition_agent "$record")") || return 1
+  parent_state=$(printf '%s' "$route" | cut -f4)
+  state_real=$(cd "$state" 2>/dev/null && pwd -P) || return 1
+  [ "$parent_state" = "$state" ] || {
+    parent_state=$(cd "$parent_state" 2>/dev/null && pwd -P) || return 1
+    [ "$parent_state" = "$state_real" ] || return 1
+  }
+}
 
 # cs_transition_policy: THE single-owner status -> supervision-action table.
 #   actionable - escalate IMMEDIATELY. `blocked` is the only immediately-
@@ -1104,6 +1121,7 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
       status=$(printf '%s' "$line" | cut -f4)
       agent=$(printf '%s' "$line" | cut -f5)
       record=$(cs_transition_normalize "$p" "$ws" "$status" "$agent")
+      cs_transition_validate_route "$state" "$record" || continue
       idx=-1
       n=${#pending_panes[@]}
       for ((i = 0; i < n; i++)); do
