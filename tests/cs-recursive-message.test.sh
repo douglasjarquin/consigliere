@@ -40,6 +40,8 @@ cat > "$STATE/mate.meta" <<EOF
 task_id=mate
 kind=capo
 home=$HOME_DIR
+worktree=$HOME_DIR
+pane=w-mate:p1
 parent_task_id=root
 parent_home=$HOME_DIR
 parent_state=$STATE
@@ -51,6 +53,8 @@ cat > "$STATE/worker.meta" <<EOF
 task_id=worker
 kind=ship
 home=$HOME_DIR
+worktree=$HOME_DIR
+pane=w-worker:p1
 parent_task_id=mate
 parent_home=$HOME_DIR
 parent_state=$STATE
@@ -79,9 +83,11 @@ if printf '%s\n' "$mate_view" | grep -F 'from=root' >/dev/null; then
   fail "mate inbox included an unrelated parent message"
 fi
 env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
-  CS_TASK_ID=mate "$ROOT/bin/cs-inbox.sh" --ack "$worker_id" >/dev/null || fail "mate acknowledgement"
+  CS_TASK_ID=mate CS_FAKE_PARENT_HOME="$HOME_DIR" CS_FAKE_PROMPTS="$TMP/prompts" \
+  "$ROOT/bin/cs-inbox.sh" --ack "$worker_id" --reply "use the local option" >/dev/null || fail "mate acknowledgement"
 [ -f "$STATE/inbox/$worker_id.ack" ] || fail "mate acknowledgement was not durable"
 [ -f "$STATE/pending/$worker_id.closed" ] || fail "mate acknowledgement did not close the worker obligation"
+grep -F "CONSIGLIERE_REPLY v1 message=$worker_id" "$TMP/prompts" >/dev/null || fail "mate reply was not delivered to the child"
 pass "the immediate parent receives and acknowledges the worker message"
 
 mate_report=$(run_report mate result "mate resolved the worker choice" --correlation "$worker_id") || fail "mate result report"

@@ -133,6 +133,19 @@ question_id=$(printf '%s\n' "$question_report" | sed -n 's/^reported message=\([
 [ -f "$STATE/pending/$question_id.pending" ] || fail "question report did not create a pending obligation before delivery"
 pass "response-required reports create a durable pending obligation"
 
+retry_id=message-retry-0000000000000001
+env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
+  CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
+  CS_FAKE_MESSAGE_PROMPTS="$CS_FAKE_MESSAGE_PROMPTS" \
+  "$REPORT" result "retryable result" --message-id "$retry_id" >/dev/null || fail "first explicit-id report"
+env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
+  CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
+  CS_FAKE_MESSAGE_PROMPTS="$CS_FAKE_MESSAGE_PROMPTS" \
+  "$REPORT" result "retryable result" --message-id "$retry_id" >/dev/null || fail "same-id report retry"
+[ "$(find "$STATE/inbox" -name "$retry_id.msg" -type f | wc -l | tr -d ' ')" = 1 ] || fail "same-id retry created more than one message record"
+[ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$retry_id" "$CS_FAKE_MESSAGE_PROMPTS")" = 2 ] || fail "same-id retry did not re-ring the same message"
+pass "same-id report retry preserves one logical message and repeats only the doorbell"
+
 export CS_FAKE_MESSAGE_PARENT_HOME="$TMP/missing-parent"
 if env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
@@ -140,7 +153,7 @@ if env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   "$REPORT" blocked "parent unavailable" >/dev/null 2>&1; then
   fail "an unavailable parent must not receive a wake"
 fi
-[ "$(find "$STATE/inbox" -name '*.msg' -type f | wc -l | tr -d ' ')" = 5 ] || fail "unavailable parent report was not retained"
+[ "$(find "$STATE/inbox" -name '*.msg' -type f | wc -l | tr -d ' ')" = 6 ] || fail "unavailable parent report was not retained"
 pass "report remains durable when the parent endpoint is unavailable"
 export CS_FAKE_MESSAGE_PARENT_HOME="$HOME_DIR"
 

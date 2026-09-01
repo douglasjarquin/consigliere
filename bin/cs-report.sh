@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Report one bounded semantic message to the recorded immediate parent.
-# Usage: cs-report.sh <kind> <summary> [--artifact <relative-path>] [--commit <sha>] [--pr <number>] [--correlation <id>] [--sequence <n>]
+# Usage: cs-report.sh <kind> <summary> [--artifact <relative-path>] [--commit <sha>] [--pr <number>] [--correlation <id>] [--sequence <n>] [--message-id <id>]
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,6 +25,7 @@ COMMIT=
 PULL_REQUEST=
 CORRELATION=
 SEQUENCE=1
+MESSAGE_ID=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --artifact) ARTIFACT=${2:?--artifact requires a path}; shift ;;
@@ -32,6 +33,7 @@ while [ "$#" -gt 0 ]; do
     --pr) PULL_REQUEST=${2:?--pr requires a number}; shift ;;
     --correlation) CORRELATION=${2:?--correlation requires an id}; shift ;;
     --sequence) SEQUENCE=${2:?--sequence requires a number}; shift ;;
+    --message-id) MESSAGE_ID=${2:?--message-id requires an id}; shift ;;
     *) echo "error: unknown flag $1" >&2; exit 2 ;;
   esac
   shift
@@ -57,9 +59,33 @@ else
   PARENT_ROUTE_OK=1
 fi
 
-MESSAGE_ID=$(cs_message_new_id)
+if [ -n "$MESSAGE_ID" ]; then
+  cs_message_id "$MESSAGE_ID" || { echo "error: invalid message id '$MESSAGE_ID'" >&2; exit 2; }
+else
+  MESSAGE_ID=$(cs_message_new_id)
+fi
 [ -n "$CORRELATION" ] || CORRELATION=$MESSAGE_ID
 CREATED_AT=$(cs_message_now)
+MESSAGE_FILE=$(cs_message_path "$PARENT_STATE/inbox" "$MESSAGE_ID")
+if [ -e "$MESSAGE_FILE" ]; then
+  cs_message_validate_file "$MESSAGE_FILE" || {
+    echo "error: existing message '$MESSAGE_ID' is malformed" >&2
+    exit 1
+  }
+  for expected in \
+    "correlation_id=$CORRELATION" "sequence=$SEQUENCE" "kind=$KIND" \
+    "from_task_id=$TASK_ID" "to_task_id=$PARENT_TASK" "from_home=$CS_HOME" \
+    "from_endpoint_generation=$FROM_GENERATION" "to_endpoint_generation=$TO_GENERATION" \
+    "summary=$SUMMARY" "artifact=$ARTIFACT" "commit_sha=$COMMIT" "pull_request=$PULL_REQUEST"; do
+    field=${expected%%=*}
+    value=${expected#*=}
+    [ "$(cs_message_field "$MESSAGE_FILE" "$field")" = "$value" ] || {
+      echo "error: retry message '$MESSAGE_ID' conflicts on $field" >&2
+      exit 1
+    }
+  done
+  CREATED_AT=$(cs_message_field "$MESSAGE_FILE" created_at)
+fi
 case "$KIND" in
   question|decision-required)
     cs_message_pending_create "$STATE" "$MESSAGE_ID" "$CORRELATION" "$TASK_ID" "$PARENT_TASK" "$KIND" "$CREATED_AT" || {

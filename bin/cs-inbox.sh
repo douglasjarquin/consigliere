@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Drain the current task's durable parent/child messages.
-# Usage: cs-inbox.sh [--ack <message-id>]
+# Usage: cs-inbox.sh [--ack <message-id> [--reply <bounded-answer>]]
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,6 +13,8 @@ STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 [ -d "$STATE" ] || { echo "error: state dir '$STATE' is missing" >&2; exit 1; }
 # shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# shellcheck source=bin/cs-herdr-lib.sh
+. "$SCRIPT_DIR/cs-herdr-lib.sh"
 # shellcheck source=bin/cs-message-lib.sh
 . "$SCRIPT_DIR/cs-message-lib.sh"
 
@@ -24,6 +26,7 @@ INBOX="$STATE/inbox"
 [ -d "$INBOX" ] || { echo "inbox task=$TASK_ID messages=0"; exit 0; }
 
 ACK_ID=
+REPLY=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --ack)
@@ -31,8 +34,13 @@ while [ "$#" -gt 0 ]; do
       ACK_ID=${2:?--ack requires a message id}
       shift 2
       ;;
+    --reply)
+      [ -z "$REPLY" ] || { echo "error: --reply may be supplied once" >&2; exit 2; }
+      REPLY=${2:?--reply requires an answer}
+      shift 2
+      ;;
     --help|-h)
-      printf '%s\n' 'usage: cs-inbox.sh [--ack <message-id>]'
+      printf '%s\n' 'usage: cs-inbox.sh [--ack <message-id> [--reply <bounded-answer>]]'
       exit 0
       ;;
     *) echo "error: unknown flag $1" >&2; exit 2 ;;
@@ -75,14 +83,49 @@ message_source_valid() {
 }
 
 ack_message() {
-  local file="$INBOX/$ACK_ID.msg" kind from_home
+  local file="$INBOX/$ACK_ID.msg" kind from_home source_task source_meta source_pane source_worktree
+  local source_cwd corr
   cs_message_id "$ACK_ID" || { echo "error: invalid message id '$ACK_ID'" >&2; return 1; }
   [ -f "$file" ] || { echo "error: message '$ACK_ID' is missing" >&2; return 1; }
+  ack="$INBOX/$ACK_ID.ack"
+  if [ -e "$ack" ]; then
+    cs_message_validate_ack "$ack" || { echo "error: malformed acknowledgement '$ack'" >&2; return 1; }
+    printf 'already acknowledged message=%s task=%s\n' "$ACK_ID" "$TASK_ID"
+    return 0
+  fi
   message_source_valid "$file" || return 1
   kind=$(cs_message_field "$file" kind)
   from_home=$(cs_message_field "$file" from_home)
   case "$kind" in
     question|decision-required)
+      [ -n "$REPLY" ] || {
+        echo "error: response-required message '$ACK_ID' needs --reply before acknowledgement" >&2
+        return 1
+      }
+      cs_message_scalar "$REPLY" "$CS_MESSAGE_MAX_SUMMARY" || {
+        echo "error: reply for message '$ACK_ID' exceeds the bounded message field or contains control characters" >&2
+        return 1
+      }
+      source_task=$(cs_message_field "$file" from_task_id)
+      source_meta="$from_home/state/$source_task.meta"
+      source_pane=$(cs_meta_get "$source_meta" pane) || {
+        echo "error: sender metadata for message '$ACK_ID' has no pane" >&2
+        return 1
+      }
+      source_worktree=$(cs_meta_get "$source_meta" worktree) || {
+        echo "error: sender metadata for message '$ACK_ID' has no worktree" >&2
+        return 1
+      }
+      source_cwd=$(cs_herdr_pane_cwd "$source_pane" || true)
+      [ -n "$source_cwd" ] && [ "$(cd "$source_cwd" 2>/dev/null && pwd -P)" = "$(cd "$source_worktree" 2>/dev/null && pwd -P)" ] || {
+        echo "error: sender pane '$source_pane' is unavailable or belongs to another worktree; message '$ACK_ID' remains open" >&2
+        return 1
+      }
+      corr=$(cs_message_field "$file" correlation_id)
+      cs_herdr_agent_prompt_confirmed "$source_pane" "CONSIGLIERE_REPLY v1 message=$ACK_ID correlation=$corr summary=$REPLY" || {
+        echo "error: reply for message '$ACK_ID' was not confirmed; obligation remains open" >&2
+        return 1
+      }
       cs_message_pending_close "$from_home/state" "$ACK_ID" "handled-by-$TASK_ID" || {
         echo "error: response obligation for message '$ACK_ID' could not be closed" >&2
         return 1
@@ -100,6 +143,7 @@ if [ -n "$ACK_ID" ]; then
   ack_message
   exit 0
 fi
+[ -z "$REPLY" ] || { echo "error: --reply requires --ack" >&2; exit 2; }
 
 count=0
 failed=0
