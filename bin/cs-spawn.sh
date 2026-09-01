@@ -2,6 +2,7 @@
 # Spawn a direct report: a soldier in a herdr-native task worktree, or a capo
 # in its isolated consigliere home.
 # Usage: cs-spawn.sh <task-id> <project-dir> --mode <made|direct-PR|local-only> --yolo <on|off> [--base <ref>] [--issue <n>]
+#        cs-spawn.sh <task-id> <project-dir> [--parent <task-id>] [--parent-home <path>] [--parent-pane <pane>] [--parent-generation <generation>]
 #        cs-spawn.sh <task-id> <project-dir> --scout [--headless] [--base <ref>]
 #        cs-spawn.sh <task-id> <capo-home> --capo
 #        cs-spawn.sh --relaunch <task-id>
@@ -247,6 +248,10 @@ MODE=
 YOLO=
 BASE=
 HEADLESS=0
+PARENT_TASK=
+PARENT_HOME=
+PARENT_PANE=
+PARENT_GENERATION=
 # Seconds to wait for an agent to appear after the launch line is delivered.
 # Generous on purpose: a cold codex/claude start on a busy machine is slow, and
 # a false abort tears down a worktree that was about to work.
@@ -285,6 +290,10 @@ while [ "$#" -gt 0 ]; do
     --yolo) YOLO=${2:?--yolo requires a value}; shift ;;
     --base) BASE=${2:?--base requires a value}; shift ;;
     --issue) ISSUE=${2:?--issue requires a value}; shift ;;
+    --parent) PARENT_TASK=${2:?--parent requires a task id}; shift ;;
+    --parent-home) PARENT_HOME=${2:?--parent-home requires a path}; shift ;;
+    --parent-pane) PARENT_PANE=${2:?--parent-pane requires a pane}; shift ;;
+    --parent-generation) PARENT_GENERATION=${2:?--parent-generation requires a generation}; shift ;;
     -*) echo "error: unknown flag $1" >&2; exit 2 ;;
     *) POS+=("$1") ;;
   esac
@@ -309,6 +318,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
   relaunch_refuse_flag --yolo "$YOLO"
   relaunch_refuse_flag --base "$BASE"
   relaunch_refuse_flag --issue "$ISSUE"
+  relaunch_refuse_flag --parent "$PARENT_TASK"
+  relaunch_refuse_flag --parent-home "$PARENT_HOME"
+  relaunch_refuse_flag --parent-pane "$PARENT_PANE"
+  relaunch_refuse_flag --parent-generation "$PARENT_GENERATION"
   ID=${POS[0]}
 else
   [ "${#POS[@]}" -ge 2 ] || { usage >&2; exit 2; }
@@ -319,6 +332,26 @@ fi
 case "$ID" in
   *[!A-Za-z0-9._-]*|'') echo "error: task id must be [A-Za-z0-9._-]+: '$ID'" >&2; exit 2 ;;
 esac
+
+if [ -n "$PARENT_TASK" ] && [ -z "$PARENT_HOME" ]; then
+  PARENT_META="$STATE/$PARENT_TASK.meta"
+  if [ -f "$PARENT_META" ]; then
+    PARENT_HOME=$(cs_meta_get "$PARENT_META" home 2>/dev/null || true)
+    PARENT_PANE=${PARENT_PANE:-$(cs_meta_get "$PARENT_META" pane 2>/dev/null || true)}
+    PARENT_GENERATION=${PARENT_GENERATION:-$(cs_meta_get "$PARENT_META" endpoint_generation 2>/dev/null || true)}
+  fi
+fi
+PARENT_TASK=${PARENT_TASK:-root}
+PARENT_HOME=${PARENT_HOME:-$CS_HOME}
+PARENT_STATE=${PARENT_HOME}/state
+PARENT_PANE=${PARENT_PANE:-${HERDR_PANE_ID:-unknown}}
+PARENT_GENERATION=${PARENT_GENERATION:-${CS_PARENT_ENDPOINT_GENERATION:-unknown}}
+ENDPOINT_GENERATION=${CS_ENDPOINT_GENERATION:-task-$$-$(date +%s)-$RANDOM}
+if ! cs_meta_validate_parent_values "$PARENT_TASK" "$PARENT_HOME" "$PARENT_STATE" \
+  "$PARENT_PANE" "$PARENT_GENERATION" "$ENDPOINT_GENERATION"; then
+  echo "error: invalid or unavailable immediate-parent edge for '$ID'" >&2
+  exit 2
+fi
 # Resolve config/permission-mode.conf up front. The launch builders read it too, but
 # they run after the worktree and metadata exist; validating here keeps a
 # malformed file from leaving a half-created task behind.
@@ -776,7 +809,13 @@ if [ "$KIND" = capo ]; then
     "mode=capo" \
     "yolo=off" \
     "harness=$HARNESS" \
-    "home=$HOME_ABS"
+    "home=$HOME_ABS" \
+    "parent_task_id=$PARENT_TASK" \
+    "parent_home=$PARENT_HOME" \
+    "parent_state=$PARENT_STATE" \
+    "parent_pane=$PARENT_PANE" \
+    "parent_generation=$PARENT_GENERATION" \
+    "endpoint_generation=$ENDPOINT_GENERATION"
   report_task_metadata "$PANE" "$ID" capo
 
   encoded_brief=$("$SCRIPT_DIR/cs-operational-input.sh" encode launch-brief < "$BRIEF") || {
@@ -941,6 +980,12 @@ META_LINES=(
   "worktree=$WT_REAL"
   "project=$PROJ_ABS"
   "kind=$KIND"
+  "parent_task_id=$PARENT_TASK"
+  "parent_home=$PARENT_HOME"
+  "parent_state=$PARENT_STATE"
+  "parent_pane=$PARENT_PANE"
+  "parent_generation=$PARENT_GENERATION"
+  "endpoint_generation=$ENDPOINT_GENERATION"
 )
 # A scout records no delivery posture at all: its deliverable is a report, so
 # there is no mode to honour and no approval posture to apply. cs-promote.sh

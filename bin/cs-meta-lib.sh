@@ -40,3 +40,27 @@ cs_meta_list_ids() { # <state-dir> -> task ids with meta files, one per line
     basename "$f" .meta
   done
 }
+
+cs_meta_validate_parent_values() {
+  local parent_task=$1 parent_home=$2 parent_state=$3 parent_pane=$4
+  local parent_generation=$5 endpoint_generation=$6
+  case "$parent_task" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "$parent_home" in /*) ;; *) return 1 ;; esac
+  case "$parent_state" in "$parent_home/state") ;; *) return 1 ;; esac
+  [ -d "$parent_home" ] && [ -d "$parent_state" ] || return 1
+  case "$parent_pane" in w[[:alnum:]_-]*:p[[:alnum:]_-]*) ;; unknown) ;; *) return 1 ;; esac
+  case "$parent_generation" in ''|*[!A-Za-z0-9._:-]*) return 1 ;; esac
+  case "$endpoint_generation" in ''|*[!A-Za-z0-9._:-]*) return 1 ;; esac
+}
+
+cs_meta_validate_parent_edge() {
+  local meta=$1
+  [ -f "$meta" ] || return 1
+  cs_meta_validate_parent_values \
+    "$(cs_meta_get "$meta" parent_task_id 2>/dev/null || true)" \
+    "$(cs_meta_get "$meta" parent_home 2>/dev/null || true)" \
+    "$(cs_meta_get "$meta" parent_state 2>/dev/null || true)" \
+    "$(cs_meta_get "$meta" parent_pane 2>/dev/null || true)" \
+    "$(cs_meta_get "$meta" parent_generation 2>/dev/null || true)" \
+    "$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)"
+}

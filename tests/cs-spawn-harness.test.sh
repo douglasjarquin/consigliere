@@ -173,6 +173,9 @@ spawn_one() {
 # --- codex root: unchanged launch shape, harness=codex ----------------------
 launch=$(spawn_one codex t-codex --mode made --yolo off)
 [ "$(cs_meta_get "$HOME_DIR/state/t-codex.meta" harness)" = codex ] || fail "codex meta harness"
+[ "$(cs_meta_get "$HOME_DIR/state/t-codex.meta" parent_task_id)" = root ] || fail "root spawn parent task"
+[ "$(cs_meta_get "$HOME_DIR/state/t-codex.meta" parent_home)" = "$HOME_DIR" ] || fail "root spawn parent home"
+[ "$(cs_meta_get "$HOME_DIR/state/t-codex.meta" endpoint_generation)" != "" ] || fail "root spawn endpoint generation"
 assert_present "$TMP/metadata-t-codex" "spawn reports display metadata for the task pane"
 assert_grep '--source cs-spawn' "$TMP/metadata-t-codex" "display metadata uses the non-reserved spawn source"
 assert_grep '--state-label working=task=t-codex mode=made' "$TMP/metadata-t-codex" \
@@ -185,6 +188,13 @@ assert_contains "$launch" 'notify=' "codex root wires notify turn-end"
 assert_not_contains "$launch" '--settings' "codex root does not use --settings"
 assert_absent "$HOME_DIR/state/t-codex.claude-settings.json" "codex root writes no claude settings file"
 pass "codex root: harness=codex, codex notify launch, no settings file"
+
+launch=$(spawn_one codex t-nested --mode made --yolo off --parent parent --parent-home "$HOME_DIR" --parent-pane w1:p1 --parent-generation parent-generation-2)
+[ "$(cs_meta_get "$HOME_DIR/state/t-nested.meta" parent_task_id)" = parent ] || fail "nested spawn parent task"
+[ "$(cs_meta_get "$HOME_DIR/state/t-nested.meta" parent_home)" = "$HOME_DIR" ] || fail "nested spawn parent home"
+[ "$(cs_meta_get "$HOME_DIR/state/t-nested.meta" parent_pane)" = w1:p1 ] || fail "nested spawn parent pane"
+[ "$(cs_meta_get "$HOME_DIR/state/t-nested.meta" parent_generation)" = parent-generation-2 ] || fail "nested spawn parent generation"
+pass "nested spawn records its explicit immediate parent edge"
 
 launch=$(spawn_one codex Foo.Bar --mode made --yolo off)
 assert_contains "$launch" "name=n-foo-bar-" "native agent names normalize task ids into the transformed namespace"
