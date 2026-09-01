@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -lc 'payload=$(cat 2>/dev/null || true); [ -n \"$payload\" ] || exit 0; command -v jq >/dev/null 2>&1 || exit 0; root=$(pwd -P) || exit 0; [ -x \"$root/bin/cs-sessionstart-run.sh\" ] || exit 0; [ -f \"$root/CLAUDE.md\" ] || exit 0; [ -f \"$root/.claude/settings.json\" ] || exit 0; jq -e \"any(.hooks.SessionStart[]?.hooks[]?.command?; type == \\\"string\\\" and contains(\\\"cs-sessionstart-run.sh\\\"))\" \"$root/.claude/settings.json\" >/dev/null 2>&1 || exit 0; printf \"%s\" \"$payload\" | \"$root/bin/cs-sessionstart-run.sh\"'",
+            "command": "bash -lc 'payload=$(cat 2>/dev/null || true); [ -n \"$payload\" ] || exit 0; command -v jq >/dev/null 2>&1 || exit 0; root=$(pwd -P) || exit 0; [ -x \"$root/bin/cs-sessionstart-run.sh\" ] || exit 0; [ -f \"$root/CLAUDE.md\" ] || exit 0; [ -f \"$root/.claude/settings.json\" ] || exit 0; jq -e \"any(.hooks.SessionStart[]?.hooks[]?.command?; type == \\\"string\\\" and contains(\\\"cs-sessionstart-run.sh\\\"))\" \"$root/.claude/settings.json\" >/dev/null 2>&1 || exit 0; . \"$root/bin/cs-hook-host-lib.sh\" 2>/dev/null || exit 0; cs_hook_payload_is_foreign_host \"$payload\" && exit 0; printf \"%s\" \"$payload\" | \"$root/bin/cs-sessionstart-run.sh\"'",
             "timeout": 180
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -lc 'payload=$(cat 2>/dev/null || true); [ -n \"$payload\" ] || exit 0; command -v jq >/dev/null 2>&1 || exit 0; root=$(pwd -P) || exit 0; [ -x \"$root/bin/cs-turnend-guard.sh\" ] || exit 0; [ -f \"$root/CLAUDE.md\" ] || exit 0; [ -f \"$root/.claude/settings.json\" ] || exit 0; jq -e \"any(.hooks.Stop[]?.hooks[]?.command?; type == \\\"string\\\" and contains(\\\"cs-turnend-guard.sh\\\"))\" \"$root/.claude/settings.json\" >/dev/null 2>&1 || exit 0; printf \"%s\" \"$payload\" | \"$root/bin/cs-turnend-guard.sh\"'",
+            "command": "bash -lc 'payload=$(cat 2>/dev/null || true); [ -n \"$payload\" ] || exit 0; command -v jq >/dev/null 2>&1 || exit 0; root=$(pwd -P) || exit 0; [ -x \"$root/bin/cs-turnend-guard.sh\" ] || exit 0; [ -f \"$root/CLAUDE.md\" ] || exit 0; [ -f \"$root/.claude/settings.json\" ] || exit 0; jq -e \"any(.hooks.Stop[]?.hooks[]?.command?; type == \\\"string\\\" and contains(\\\"cs-turnend-guard.sh\\\"))\" \"$root/.claude/settings.json\" >/dev/null 2>&1 || exit 0; . \"$root/bin/cs-hook-host-lib.sh\" 2>/dev/null || exit 0; cs_hook_payload_is_foreign_host \"$payload\" && exit 0; printf \"%s\" \"$payload\" | \"$root/bin/cs-turnend-guard.sh\"'",
             "timeout": 30
           }
         ]

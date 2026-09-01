@@ -66,7 +66,7 @@ Consigliere adds this skill's load instruction to consigliere-repo briefs by han
 ## Compatibility and enforcement
 
 Consigliere runs on one of two harnesses (codex or claude) and one terminal runtime (herdr); `bin/cs-harness-lib.sh` is the whole harness layer and there is no broader adapter matrix to sweep.
-Before changing shared tracked behavior that touches a harness or herdr, re-verify the affected facts against `docs/codex.md`, `docs/claude.md`, `docs/grok.md`, and `docs/herdr.md`, and update that verification evidence when behavior changes.
+Before changing shared tracked behavior that touches a harness or herdr, re-verify the affected facts against `docs/codex.md`, `docs/claude.md`, `docs/cursor.md`, `docs/grok.md`, and `docs/herdr.md`, and update that verification evidence when behavior changes.
 
 For critical safety, routing, startup, and supervision infrastructure, prefer deterministic and idempotent enforcement over relying on agent memory alone.
 Keep instructions as the authority and discovery layer, but make repeated execution converge safely and make invalid or unsafe states fail closed wherever the runtime can enforce them.

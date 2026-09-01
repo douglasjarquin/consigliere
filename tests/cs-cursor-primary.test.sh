@@ -37,20 +37,39 @@ test_sessionstart_cursor_wraps_digest() {
 }
 
 test_turnend_guard_stands_down_on_cursor_payload() {
-  local dir="$TMP_ROOT/guard-home"
+  local dir="$TMP_ROOT/guard-home" rc out
   mkdir -p "$dir/state"
   git init -q "$dir"
   git -C "$dir" commit -q --allow-empty -m init
   : > "$dir/AGENTS.md"
+  : > "$dir/state/task1.meta"
   rc=0
   printf '%s' "$CURSOR_PAYLOAD" | CS_HOME="$dir" CS_ROOT="$dir" CS_STATE_OVERRIDE="$dir/state" \
     "$ROOT/bin/cs-turnend-guard.sh" >/dev/null 2>&1 || rc=$?
   [ "$rc" -eq 0 ] || fail "turnend guard must stand down on cursor payload without --cursor, got rc=$rc"
-  pass "cs-turnend-guard.sh stands down on cursor-delivered payloads"
+  rc=0
+  out=$(printf '%s' "$CURSOR_PAYLOAD" | CS_HOME="$dir" CS_ROOT="$dir" CS_STATE_OVERRIDE="$dir/state" \
+    "$ROOT/bin/cs-turnend-guard.sh" --cursor 2>&1) || rc=$?
+  [ "$rc" -eq 2 ] || fail "--cursor must reach the shared block decision, got rc=$rc"
+  case "$out" in *'CANNOT SUPERVISE WORK'*) ;; *) fail "expected the shared cursor banner, got: $out" ;; esac
+  pass "cs-turnend-guard.sh stands down on cursor-delivered payloads and blocks with --cursor"
+}
+
+test_sessionstart_run_stands_down_on_cursor_payload() {
+  local dir="$TMP_ROOT/sessionstart-home" out
+  mkdir -p "$dir/state"
+  git init -q "$dir"
+  git -C "$dir" commit -q --allow-empty -m init
+  : > "$dir/AGENTS.md"
+  out=$(printf '%s' "$CURSOR_PAYLOAD" | CS_HOME="$dir" CS_ROOT="$dir" CS_STATE_OVERRIDE="$dir/state" \
+    "$ROOT/bin/cs-sessionstart-run.sh" 2>&1)
+  [ -z "$out" ] || fail "sessionstart-run must stay silent on a cursor duplicate payload: $out"
+  pass "cs-sessionstart-run.sh stays inert on cursor payloads"
 }
 
 test_hook_host_stands_down_claude_payload
 test_sessionstart_cursor_wraps_digest
 test_turnend_guard_stands_down_on_cursor_payload
+test_sessionstart_run_stands_down_on_cursor_payload
 
 pass "cs-cursor-primary"
