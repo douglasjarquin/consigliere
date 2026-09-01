@@ -737,7 +737,7 @@ When this session owns supervision:
 1. Drain first with bin/cs-wake-drain.sh.
 2. Run at most ONE foreground watcher checkpoint per turn:
      bin/cs-watch-checkpoint.sh --seconds "${CS_WATCH_CHECKPOINT:-180}"
-3. Whatever it returns - a wake (signal:, stale:, check:, capo:, heartbeat) or
+3. Whatever it returns - a wake (signal:, stale:, check:, heartbeat) or
    a quiet checkpoint (prints checkpoint: / exits 124) - drain queued wakes,
    handle what they report, say what happened, and END the turn. A second
    checkpoint in the same turn is refused: a turn boundary is the only moment

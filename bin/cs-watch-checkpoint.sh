@@ -154,7 +154,7 @@ run_watcher_inline() {  # fallback only: no monitor could be started
   fi
   set -e
 
-  if grep -E '^(signal:|stale:|check:|capo:|heartbeat($|:))' "$OUT" >/dev/null 2>&1; then
+  if grep -E '^(signal:|stale:|check:|heartbeat($|:))' "$OUT" >/dev/null 2>&1; then
     cat "$OUT"
     [ ! -s "$ERR" ] || cat "$ERR" >&2
     exit 0

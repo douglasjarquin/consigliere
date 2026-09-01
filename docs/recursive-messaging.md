@@ -61,7 +61,8 @@ Teardown runs it before cleanup and refuses to remove a task while its pending o
 
 Interactive worker launches also install a turn-end backstop that reports a terminal child without a semantic result as `failed` recovery evidence instead of treating terminal prose as success.
 
-Event-driven lifecycle routing, recursive inbox draining, bounded cold reconciliation, recursive escalation, and settled-child stop-hook recovery are implemented in the active slices above.
-Polling reduction, deletion of redundant supervision paths, and the nested real-Herdr canary remain later phases.
+Event-driven lifecycle routing, recursive inbox draining, bounded cold reconciliation, recursive escalation, settled-child stop-hook recovery, and removal of the root-side Capo worker scan are implemented in the active slices above.
+The heartbeat backstop and bounded telemetry transcript reads remain because they respectively protect against lost status edges and provide measurement rather than semantic supervision.
+The nested real-Herdr canary remains a later phase.
 
 No issue checkbox for a later phase is complete until its named real-surface evidence exists.
