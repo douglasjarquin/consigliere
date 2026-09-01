@@ -51,7 +51,7 @@ cs_write_meta "$TMP/state/msg1.meta" \
   parent_task_id=root parent_home="$TMP" parent_state="$TMP/state" \
   parent_pane=w99:p98 parent_generation=root-generation
 
-message_id=message-teardown-0000000000000001
+message_id='message-teardown-0000000000000001'
 cs_message_publish "$TMP/state/inbox" \
   "schema=cs-message.v1" "message_id=$message_id" "correlation_id=$message_id" \
   "sequence=1" "kind=question" "from_task_id=msg1" "to_task_id=root" \

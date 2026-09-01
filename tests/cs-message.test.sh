@@ -147,7 +147,7 @@ question_id=$(printf '%s\n' "$question_report" | sed -n 's/^reported message=\([
 [ -f "$STATE/pending/$question_id.pending" ] || fail "question report did not create a pending obligation before delivery"
 pass "response-required reports create a durable pending obligation"
 
-retry_id=message-retry-0000000000000001
+retry_id='message-retry-0000000000000001'
 env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
   CS_FAKE_MESSAGE_PROMPTS="$CS_FAKE_MESSAGE_PROMPTS" \

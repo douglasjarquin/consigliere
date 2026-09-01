@@ -61,7 +61,7 @@ endpoint_generation=child-generation
 harness=codex
 EOF
 
-message_id=message-recover-0000000000000001
+message_id='message-recover-0000000000000001'
 cs_message_publish "$STATE/inbox" \
   "schema=cs-message.v1" "message_id=$message_id" "correlation_id=$message_id" \
   "sequence=1" "kind=question" "from_task_id=child" "to_task_id=root" \
@@ -84,7 +84,7 @@ grep -F 'endpoint_generation=root-generation' "$STATE/inbox/$message_id.route" >
   || fail "initial recovery route recorded the wrong endpoint generation"
 pass "recovery re-wakes an existing durable obligation once"
 
-relaunch_id=message-recover-0000000000000002
+relaunch_id='message-recover-0000000000000002'
 printf '%s\n' 'endpoint_generation=root-generation-2' >> "$STATE/root.meta"
 cs_message_publish "$STATE/inbox" \
   "schema=cs-message.v1" "message_id=$relaunch_id" "correlation_id=$relaunch_id" \

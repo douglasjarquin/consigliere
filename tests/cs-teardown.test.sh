@@ -598,7 +598,7 @@ cs_meta_set "$TMP/state/msg1.meta" endpoint_generation msg1-generation
 cs_write_meta "$TMP/state/root.meta" \
   task_id=root kind=capo home="$TMP" worktree="$TMP" pane=w99:p98 \
   endpoint_generation=root-generation
-message_id=message-teardown-0000000000000001
+message_id='message-teardown-0000000000000001'
 cs_message_publish "$TMP/state/inbox" \
   "schema=cs-message.v1" "message_id=$message_id" "correlation_id=$message_id" \
   "sequence=1" "kind=question" "from_task_id=msg1" "to_task_id=root" \
