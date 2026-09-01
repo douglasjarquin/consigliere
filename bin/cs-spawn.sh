@@ -339,7 +339,16 @@ if [ -n "$PARENT_TASK" ] && [ -z "$PARENT_HOME" ]; then
     PARENT_HOME=$(cs_meta_get "$PARENT_META" home 2>/dev/null || true)
     PARENT_PANE=${PARENT_PANE:-$(cs_meta_get "$PARENT_META" pane 2>/dev/null || true)}
     PARENT_GENERATION=${PARENT_GENERATION:-$(cs_meta_get "$PARENT_META" endpoint_generation 2>/dev/null || true)}
+  elif [ "$PARENT_TASK" != root ]; then
+    echo "error: immediate parent '$PARENT_TASK' is not recorded in $STATE; pass a complete cross-home parent edge or repair the parent first" >&2
+    exit 2
   fi
+fi
+if [ -n "$PARENT_TASK" ] && [ "$PARENT_TASK" != root ] && {
+  [ -z "$PARENT_HOME" ] || [ -z "$PARENT_PANE" ] || [ -z "$PARENT_GENERATION" ];
+}; then
+  echo "error: nested spawn requires parent home, pane, and endpoint generation" >&2
+  exit 2
 fi
 PARENT_TASK=${PARENT_TASK:-root}
 PARENT_HOME=${PARENT_HOME:-$CS_HOME}

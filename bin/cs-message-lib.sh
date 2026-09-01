@@ -21,8 +21,10 @@ cs_message_new_id() {
 }
 
 cs_message_scalar() {
-  local value=$1 max=$2
+  local value=$1 max=$2 clean
   case "$value" in *$'\n'*|*$'\r'*|*$'\t'*) return 1 ;; esac
+  clean=$(printf '%s' "$value" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177')
+  [ "$clean" = "$value" ] || return 1
   [ "${#value}" -le "$max" ]
 }
 
@@ -100,6 +102,15 @@ cs_message_field() {
   awk -F= -v wanted="$key" '$1 == wanted { print substr($0, length(wanted) + 2); found=1 } END { exit !found }' "$file"
 }
 
+cs_message_validate_ack() {
+  local file=$1
+  [ -f "$file" ] || return 1
+  [ "$(wc -l < "$file" | tr -d ' ')" = 3 ] || return 1
+  grep -Eq '^schema=cs-message\.v1$' "$file" || return 1
+  grep -Eq '^message_id=[A-Za-z0-9._-]{1,96}$' "$file" || return 1
+  grep -Eq '^acked_at=[0-9]{1,20}$' "$file"
+}
+
 cs_message_publish() {
   local inbox=$1 field message_id='' file tmp same
   shift
@@ -135,8 +146,12 @@ cs_message_ack() {
   ack="$inbox/$message_id.ack"
   tmp="$inbox/.$message_id.ack.tmp.$$.$RANDOM"
   printf 'schema=%s\nmessage_id=%s\nacked_at=%s\n' "$CS_MESSAGE_SCHEMA" "$message_id" "$(cs_message_now)" > "$tmp"
-  if [ -e "$ack" ]; then rm -f "$tmp"; return 0; fi
+  if [ -e "$ack" ]; then
+    rm -f "$tmp"
+    cs_message_validate_ack "$ack"
+    return
+  fi
   if ln "$tmp" "$ack" 2>/dev/null; then rm -f "$tmp"; return 0; fi
   rm -f "$tmp"
-  [ -e "$ack" ]
+  [ -e "$ack" ] && cs_message_validate_ack "$ack"
 }
