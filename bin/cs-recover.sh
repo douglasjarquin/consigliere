@@ -102,20 +102,28 @@ wake_root_message() {
 }
 
 reconcile_settled_child() {
-  local meta=$1 task kind status last generation pane recovery_id marker
+  local meta=$1 task kind status last generation pane recovery_id marker native_state
   task=$(basename "$meta" .meta)
   kind=$(cs_meta_get "$meta" kind 2>/dev/null || true)
   [ "$kind" != capo ] || return 0
   status="$STATE/$task.status"
-  [ -f "$status" ] || return 0
-  last=$(tail -n 1 "$status" 2>/dev/null || true)
-  case "$last" in
-    done:*|done\ *|failed:*|failed\ *) ;;
-    *) return 0
-  esac
   generation=$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)
   pane=$(cs_meta_get "$meta" pane 2>/dev/null || true)
   [ -n "$generation" ] && [ -n "$pane" ] || return 1
+  if [ -f "$status" ]; then
+    last=$(tail -n 1 "$status" 2>/dev/null || true)
+    case "$last" in
+      done:*|done\ *|failed:*|failed\ *) ;;
+      *) return 0 ;;
+    esac
+  else
+    native_state=$(cs_herdr_agent_busy_state "$pane" 2>/dev/null || true)
+    case "$native_state" in
+      done) ;;
+      idle) [ -f "$STATE/$task.turn-ended" ] || return 0 ;;
+      *) return 0 ;;
+    esac
+  fi
   for file in "$STATE"/inbox/*.msg; do
     [ -f "$file" ] || continue
     cs_message_validate_file "$file" || continue
@@ -129,6 +137,7 @@ reconcile_settled_child() {
   : > "$marker" || return 1
   if endpoint_ready "$meta" "$pane" "settled child '$task'" && cs_herdr_agent_alive "$pane"; then
     cs_herdr_agent_prompt_confirmed "$pane" "CONSIGLIERE_REPORT_REQUIRED v1 task=$task" || {
+      rm -f "$marker"
       echo "error: settled child '$task' did not accept the one-time report request" >&2
       return 1
     }
@@ -145,6 +154,7 @@ reconcile_settled_child() {
     requested=$((requested + 1))
     return 0
   fi
+  rm -f "$marker"
   echo "error: settled child '$task' has no recoverable endpoint or semantic result" >&2
   return 1
 }
@@ -193,7 +203,14 @@ for pending in "$STATE"/pending/*.pending; do
       failed=1
       continue
     }
-  [ -e "${message_file%.msg}.ack" ] && continue
+  ack_file="${message_file%.msg}.ack"
+  if [ -e "$ack_file" ]; then
+    cs_message_validate_ack "$ack_file" "$message_id" || {
+      echo "error: malformed acknowledgement '$ack_file'" >&2
+      failed=1
+    }
+    continue
+  fi
   recipient_meta="$parent_state/$parent_task.meta"
   if [ "$parent_task" = root ] && [ ! -f "$recipient_meta" ]; then
     if wake_root_message "$message_file"; then
@@ -215,7 +232,20 @@ done
 for message_file in "$STATE"/inbox/*.msg; do
   [ -f "$message_file" ] || continue
   [ "$checked" -lt "$MAX_RECORDS" ] || break
-  [ -e "${message_file%.msg}.ack" ] && continue
+  message_id=$(basename "$message_file" .msg)
+  cs_message_id "$message_id" || {
+    echo "error: inbox message '$message_file' has an invalid filename identity" >&2
+    failed=1
+    continue
+  }
+  ack_file="${message_file%.msg}.ack"
+  if [ -e "$ack_file" ]; then
+    cs_message_validate_ack "$ack_file" "$message_id" || {
+      echo "error: malformed acknowledgement '$ack_file'" >&2
+      failed=1
+    }
+    continue
+  fi
   checked=$((checked + 1))
   if ! cs_message_validate_file "$message_file"; then
     echo "error: malformed inbox message '$message_file'" >&2
@@ -225,6 +255,19 @@ for message_file in "$STATE"/inbox/*.msg; do
   message_id=$(cs_message_field "$message_file" message_id)
   if seen_message "$message_id"; then continue; fi
   task=$(cs_message_field "$message_file" to_task_id)
+  source_task=$(cs_message_field "$message_file" from_task_id)
+  source_home=$(cs_message_field "$message_file" from_home)
+  source_meta="$source_home/state/$source_task.meta"
+  if [ ! -f "$source_meta" ] || ! cs_meta_validate_parent_edge "$source_meta" ||
+    [ "$(cs_meta_get "$source_meta" parent_task_id 2>/dev/null || true)" != "$task" ] ||
+    [ "$(cs_meta_get "$source_meta" parent_home 2>/dev/null || true)" != "$CS_HOME" ] ||
+    ! cs_meta_endpoint_generation_known "$source_meta" \
+      "$(cs_message_field "$message_file" from_endpoint_generation)" \
+      "$(cs_message_field "$message_file" created_at)"; then
+    echo "error: inbox message '$message_id' has invalid sender lineage or generation" >&2
+    failed=1
+    continue
+  fi
   recipient_meta="$STATE/$task.meta"
   if [ "$task" = root ] && [ ! -f "$recipient_meta" ]; then
     if wake_root_message "$message_file"; then

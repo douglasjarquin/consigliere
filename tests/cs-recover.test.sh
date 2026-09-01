@@ -95,6 +95,8 @@ grep -F 'endpoint_generation=root-generation-2' "$STATE/inbox/$relaunch_id.route
 CS_TASK_ID=root "$ROOT/bin/cs-inbox.sh" --ack "$relaunch_id" --reply accepted >/dev/null \
   || fail "the repaired route could not be acknowledged by the relaunched parent"
 [ -f "$STATE/inbox/$relaunch_id.ack" ] || fail "relaunch message acknowledgement is missing"
+cs_message_validate_ack "$STATE/inbox/$relaunch_id.ack" "$relaunch_id" \
+  || fail "relaunch acknowledgement is malformed"
 pass "recovery repairs a verified route after the parent endpoint relaunches"
 
 export CS_FAKE_PANE_CWD="$TMP/wrong-worktree"
@@ -104,6 +106,25 @@ fi
 grep -F 'another home' "$TMP/wrong.err" >/dev/null || fail "wrong-home recovery refusal lacked its reason"
 [ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$message_id" "$TMP/prompts")" = 2 ] || fail "wrong-home recovery sent a wake"
 pass "recovery refuses a stale or wrong-home endpoint without guessing"
+
+bad_ack_id='message-recover-bad-0000000000000001'
+cs_message_publish "$STATE/inbox" \
+  "schema=cs-message.v1" "message_id=$bad_ack_id" "correlation_id=$bad_ack_id" \
+  "sequence=1" "kind=question" "from_task_id=child" "to_task_id=root" \
+  "from_home=$HOME_DIR" "from_endpoint_generation=child-generation" \
+  "to_endpoint_generation=root-generation-2" "summary=bad acknowledgement" "artifact=" \
+  "commit_sha=" "pull_request=" "created_at=1700000000" || fail "bad acknowledgement message setup"
+cs_message_pending_create "$STATE" "$bad_ack_id" "$bad_ack_id" child root question 1700000000 \
+  || fail "bad acknowledgement pending setup"
+printf '%s\n' 'schema=cs-message.v1' 'message_id=another-message' 'acked_at=1700000000' \
+  > "$STATE/inbox/$bad_ack_id.ack"
+if "$ROOT/bin/cs-recover.sh" >"$TMP/bad-ack.out" 2>"$TMP/bad-ack.err"; then
+  fail "recovery must refuse an acknowledgement naming another message"
+fi
+grep -F 'malformed acknowledgement' "$TMP/bad-ack.err" >/dev/null \
+  || fail "malformed acknowledgement refusal must name the record"
+pass "recovery refuses a mismatched acknowledgement instead of suppressing work"
+rm -f "$STATE/inbox/$bad_ack_id.msg" "$STATE/inbox/$bad_ack_id.ack" "$STATE/pending/$bad_ack_id.pending"
 
 printf '%s\n' 'done: child stopped before semantic report' > "$STATE/child.status"
 export CS_FAKE_PANE_CWD="$HOME_DIR" CS_FAKE_AGENT_LIVE=1

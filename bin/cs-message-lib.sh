@@ -520,14 +520,29 @@ cs_message_reply_delivery_validate_file() {
 }
 
 cs_message_pending_close_validate_file() {
-  local file=$1 expected=${2:-} reason embedded
+  local file=$1 expected=${2:-} line key value seen='' required embedded
+  local -a required_keys=(schema message_id closed_at reason)
   [ -f "$file" ] || return 1
   [ "$(wc -l < "$file" | tr -d ' ')" = 4 ] || return 1
-  grep -Eq "^schema=$CS_MESSAGE_PENDING_SCHEMA$" "$file" || return 1
-  grep -Eq '^message_id=[A-Za-z0-9._-]{1,96}$' "$file" || return 1
-  grep -Eq '^closed_at=[0-9]{1,20}$' "$file" || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    key=${line%%=*}
+    value=${line#*=}
+    case "$key" in
+      schema) [ "$value" = "$CS_MESSAGE_PENDING_SCHEMA" ] || return 1 ;;
+      message_id) cs_message_id "$value" || return 1 ;;
+      closed_at)
+        case "$value" in ''|*[!0-9]*) return 1 ;; esac
+        [ "${#value}" -le 20 ] || return 1
+        ;;
+      reason) cs_message_scalar "$value" "$CS_MESSAGE_MAX_SUMMARY" || return 1 ;;
+      *) return 1 ;;
+    esac
+    case " $seen " in *" $key "*) return 1 ;; esac
+    seen="$seen $key"
+  done < "$file"
+  for required in "${required_keys[@]}"; do
+    case " $seen " in *" $required "*) ;; *) return 1 ;; esac
+  done
   embedded=$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$file")
-  [ -z "$expected" ] || [ "$embedded" = "$expected" ] || return 1
-  reason=$(awk -F= '$1 == "reason" { print substr($0, 8) }' "$file")
-  cs_message_scalar "$reason" "$CS_MESSAGE_MAX_SUMMARY"
+  [ -z "$expected" ] || [ "$embedded" = "$expected" ]
 }
