@@ -152,12 +152,16 @@ env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
   CS_FAKE_MESSAGE_PROMPTS="$CS_FAKE_MESSAGE_PROMPTS" \
   "$REPORT" result "retryable result" --artifact reports/result.md --message-id "$retry_id" >/dev/null || fail "first explicit-id report"
+cs_message_route_write "$STATE/inbox/$retry_id.msg" parent parent-generation-2 \
+  || fail "recovery route repair setup"
 env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
   CS_FAKE_MESSAGE_PROMPTS="$CS_FAKE_MESSAGE_PROMPTS" \
   "$REPORT" result "retryable result" --artifact reports/result.md --message-id "$retry_id" >/dev/null || fail "same-id report retry"
 [ "$(find "$STATE/inbox" -name "$retry_id.msg" -type f | wc -l | tr -d ' ')" = 1 ] || fail "same-id retry created more than one message record"
 [ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$retry_id" "$CS_FAKE_MESSAGE_PROMPTS")" = 2 ] || fail "same-id retry did not re-ring the same message"
+grep -F 'endpoint_generation=parent-generation-2' "$STATE/inbox/$retry_id.route" >/dev/null \
+  || fail "same-id report retry downgraded a repaired route"
 if env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
   CS_FAKE_MESSAGE_PROMPTS="$CS_FAKE_MESSAGE_PROMPTS" \

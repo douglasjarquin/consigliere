@@ -129,10 +129,23 @@ FIELDS=(
   "created_at=$CREATED_AT"
 )
 cs_message_publish "$PARENT_STATE/inbox" "${FIELDS[@]}" || { echo "error: could not publish report to $PARENT_STATE/inbox" >&2; exit 1; }
-cs_message_route_write "$PARENT_STATE/inbox/$MESSAGE_ID.msg" "$PARENT_TASK" "$TO_GENERATION" || {
-  echo "error: could not record report route" >&2
-  exit 1
-}
+ROUTE_FILE=$(cs_message_route_path "$PARENT_STATE/inbox/$MESSAGE_ID.msg")
+if [ -e "$ROUTE_FILE" ]; then
+  cs_message_route_validate_file "$ROUTE_FILE" || {
+    echo "error: existing report route is malformed" >&2
+    exit 1
+  }
+  [ "$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$ROUTE_FILE")" = "$MESSAGE_ID" ] &&
+    [ "$(awk -F= '$1 == "to_task_id" { print substr($0, 12) }' "$ROUTE_FILE")" = "$PARENT_TASK" ] || {
+      echo "error: existing report route does not match the durable message" >&2
+      exit 1
+    }
+else
+  cs_message_route_write "$PARENT_STATE/inbox/$MESSAGE_ID.msg" "$PARENT_TASK" "$TO_GENERATION" || {
+    echo "error: could not record report route" >&2
+    exit 1
+  }
+fi
 if [ "$PARENT_ROUTE_OK" -ne 1 ]; then
   exit 1
 fi
