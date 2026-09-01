@@ -685,7 +685,8 @@ subsection "MESSAGE RECOVERY"
 if [ "$READ_ONLY" -eq 1 ]; then
   printf 'skipped (read-only session) - the session holding the lock owns message recovery.\n'
 else
-  RECOVERY_OUT=$("$SCRIPT_DIR/cs-recover.sh" 2>&1) || RECOVERY_RC=$?
+  RECOVERY_OUT=$(CS_HOME="$CS_HOME" CS_STATE_OVERRIDE="$STATE" \
+    "$SCRIPT_DIR/cs-recover.sh" 2>&1) || RECOVERY_RC=$?
   RECOVERY_RC=${RECOVERY_RC:-0}
   if [ -n "$RECOVERY_OUT" ]; then
     printf '%s\n' "$RECOVERY_OUT"
