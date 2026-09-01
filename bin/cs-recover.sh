@@ -23,6 +23,7 @@ seen=''
 checked=0
 rewoken=0
 failed=0
+requested=0
 
 seen_message() {
   case " $seen " in *" $1 "*) return 0 ;; esac
@@ -60,6 +61,53 @@ wake_message() {
     return 1
   }
   printf 'recover: re-woke message=%s task=%s\n' "$message_id" "$(cs_message_field "$file" to_task_id)"
+}
+
+reconcile_settled_child() {
+  local meta=$1 task kind status last generation pane recovery_id marker
+  task=$(basename "$meta" .meta)
+  kind=$(cs_meta_get "$meta" kind 2>/dev/null || true)
+  [ "$kind" != capo ] || return 0
+  status="$STATE/$task.status"
+  [ -f "$status" ] || return 0
+  last=$(tail -n 1 "$status" 2>/dev/null || true)
+  case "$last" in
+    done:*|done\ *|failed:*|failed\ *) ;;
+    *) return 0
+  esac
+  generation=$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)
+  pane=$(cs_meta_get "$meta" pane 2>/dev/null || true)
+  [ -n "$generation" ] && [ -n "$pane" ] || return 1
+  for file in "$STATE"/inbox/*.msg; do
+    [ -f "$file" ] || continue
+    cs_message_validate_file "$file" || continue
+    [ "$(cs_message_field "$file" from_task_id)" = "$task" ] || continue
+    [ "$(cs_message_field "$file" from_endpoint_generation)" = "$generation" ] || continue
+    case "$(cs_message_field "$file" kind)" in result|failed) return 0 ;; esac
+  done
+  recovery_id=$(cs_message_recovery_id "$task" "$generation") || return 1
+  marker="$STATE/.report-requested-$recovery_id"
+  [ ! -e "$marker" ] || return 0
+  : > "$marker" || return 1
+  if endpoint_ready "$meta" "$pane" "settled child '$task'" && cs_herdr_agent_alive "$pane"; then
+    cs_herdr_agent_prompt_confirmed "$pane" "CONSIGLIERE_REPORT_REQUIRED v1 task=$task" || {
+      echo "error: settled child '$task' did not accept the one-time report request" >&2
+      return 1
+    }
+    printf 'recover: requested-report task=%s\n' "$task"
+    requested=$((requested + 1))
+    return 0
+  fi
+  CS_HOME="$CS_HOME" CS_ROOT_OVERRIDE="${CS_ROOT:-}" CS_STATE_OVERRIDE="$STATE" \
+    CS_DATA_OVERRIDE="${CS_DATA_OVERRIDE:-$CS_HOME/data}" CS_TASK_ID="$task" \
+    "$SCRIPT_DIR/cs-worker-turnend.sh" >/dev/null 2>&1 || true
+  if [ -f "$(cs_meta_get "$meta" parent_state 2>/dev/null || true)/inbox/$recovery_id.msg" ]; then
+    printf 'recover: escalated-gone task=%s message=%s\n' "$task" "$recovery_id"
+    requested=$((requested + 1))
+    return 0
+  fi
+  echo "error: settled child '$task' has no recoverable endpoint or semantic result" >&2
+  return 1
 }
 
 for pending in "$STATE"/pending/*.pending; do
@@ -133,13 +181,20 @@ for message_file in "$STATE"/inbox/*.msg; do
   fi
 done
 
-printf 'recover: checked=%s re-woke=%s\n' "$checked" "$rewoken"
+for meta in "$STATE"/*.meta; do
+  [ "$checked" -lt "$MAX_RECORDS" ] || break
+  [ -f "$meta" ] || continue
+  checked=$((checked + 1))
+  reconcile_settled_child "$meta" || failed=1
+done
+
+printf 'recover: checked=%s re-woke=%s requested=%s\n' "$checked" "$rewoken" "$requested"
 if [ "$failed" -ne 0 ]; then
   printf 'recover: next=inspect the named endpoint, metadata, or message before retrying\n'
   exit 1
 fi
-if [ "$rewoken" -gt 0 ]; then
-  printf 'recover: next=drain each re-woken recipient inbox\n'
+if [ "$rewoken" -gt 0 ] || [ "$requested" -gt 0 ]; then
+  printf 'recover: next=drain re-woken inboxes and collect requested reports\n'
 else
   printf 'recover: next=none\n'
 fi

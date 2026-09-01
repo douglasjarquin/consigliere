@@ -663,6 +663,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
     claude) R_TELEMETRY=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" stdin) ;;
     codex) R_TELEMETRY=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" nostdin) ;;
   esac
+  R_WORKER_HOOK=$(shell_quote "$SCRIPT_DIR/cs-worker-turnend.sh")
+  if [ -n "$R_TELEMETRY" ]; then R_TELEMETRY="$R_TELEMETRY; $R_WORKER_HOOK"; else R_TELEMETRY=$R_WORKER_HOOK; fi
   SETTINGS_FILE=''
   if [ "$R_HARNESS" = claude ]; then
     SETTINGS_FILE="$STATE/$ID.claude-settings.json"
@@ -1028,6 +1030,8 @@ if [ "$HEADLESS" -eq 0 ]; then
     claude) TELEMETRY_HOOK=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" stdin) ;;
     codex) TELEMETRY_HOOK=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" nostdin) ;;
   esac
+  WORKER_HOOK=$(shell_quote "$SCRIPT_DIR/cs-worker-turnend.sh")
+  if [ -n "$TELEMETRY_HOOK" ]; then TELEMETRY_HOOK="$TELEMETRY_HOOK; $WORKER_HOOK"; else TELEMETRY_HOOK=$WORKER_HOOK; fi
 fi
 if [ "$HEADLESS" -eq 1 ]; then
   # Fire-and-forget scout: the harness runs the brief non-interactively (codex

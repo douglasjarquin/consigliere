@@ -25,6 +25,13 @@ case "${1:-} ${2:-}" in
     printf '%s\n' "${4:-}" >> "${CS_FAKE_PROMPTS:?}"
     printf '{"result":{"type":"agent_prompted"}}\n'
     ;;
+  "agent get")
+    if [ "${CS_FAKE_AGENT_LIVE:-0}" = 1 ]; then
+      printf '{"result":{"agent":{"agent":"codex","agent_status":"idle"}}}\n'
+    else
+      printf '{}\n'
+    fi
+    ;;
   *) printf '{}\n' ;;
 esac
 SH
@@ -102,5 +109,18 @@ fi
 grep -F 'wrong' "$TMP/wrong.err" >/dev/null || fail "wrong-home recovery refusal lacked its reason"
 [ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$message_id" "$TMP/prompts")" = 2 ] || fail "wrong-home recovery sent a wake"
 pass "recovery refuses a stale or wrong-home endpoint without guessing"
+
+printf '%s\n' 'done: child stopped before semantic report' > "$STATE/child.status"
+export CS_FAKE_PANE_CWD="$HOME_DIR" CS_FAKE_AGENT_LIVE=1
+output=$($ROOT/bin/cs-recover.sh) || fail "recover should request a report from a live settled child"
+printf '%s\n' "$output" | grep -F 'requested-report task=child' >/dev/null \
+  || fail "recover did not report the one-time child report request"
+grep -F 'CONSIGLIERE_REPORT_REQUIRED v1 task=child' "$TMP/prompts" >/dev/null \
+  || fail "recover did not prompt the live child for a semantic report"
+prompt_count=$(grep -Fc 'CONSIGLIERE_REPORT_REQUIRED v1 task=child' "$TMP/prompts")
+output=$($ROOT/bin/cs-recover.sh) || fail "repeated recovery should remain bounded"
+[ "$(grep -Fc 'CONSIGLIERE_REPORT_REQUIRED v1 task=child' "$TMP/prompts")" = "$prompt_count" ] \
+  || fail "repeated recovery prompted the settled child twice"
+pass "recovery requests one missing report from a live settled child"
 
 pass "bounded durable-message recovery contract"

@@ -460,18 +460,20 @@ assert_contains "$output" "no agent appeared" "the swallowed launch must be name
 assert_not_contains "$output" "spawned t-swallowed" "a swallowed launch must never print a spawn success line"
 pass "a launch line the shell swallowed fails loudly instead of reporting a spawn"
 
-# --- optional worker telemetry reaches (only) a real instrumented spawn ------
-# The launch artefacts above are the uninstrumented shape, which is the point:
-# telemetry is resolved at spawn time, so a soldier launched while telemetry is
-# off must be byte identical to one launched before the instrumentation existed.
-# docs/telemetry.md owns the contract; this proves it end to end from cs-spawn.
+# --- worker turn-end recovery and optional telemetry ---------------------------
+# The worker recovery hook is always present; telemetry remains optional.
+# docs/telemetry.md owns the measurement contract; this proves both paths from cs-spawn.
 assert_not_contains "$(cat "$TMP/launch-t-codex")" 'cs-telemetry-emit.sh' \
   "telemetry off must add nothing to a codex soldier launch"
-[ "$(jq -r '.hooks.Stop[0].hooks | length' "$HOME_DIR/state/t-claude.claude-settings.json")" = 1 ] ||
-  fail "telemetry off must leave the claude soldier's Stop hook list at exactly the turn-end touch"
+assert_contains "$(cat "$TMP/launch-t-codex")" 'cs-worker-turnend.sh' \
+  "telemetry off must retain the worker recovery hook"
+[ "$(jq -r '.hooks.Stop[0].hooks | length' "$HOME_DIR/state/t-claude.claude-settings.json")" = 2 ] ||
+  fail "telemetry off must retain the turn-end touch and worker recovery hook"
 [ "$(jq -r '.hooks.Stop[0].hooks[0].command' "$HOME_DIR/state/t-claude.claude-settings.json")" \
   = "touch '$HOME_DIR/state/t-claude.turn-ended'" ] ||
-  fail "telemetry off must leave the claude soldier's single Stop hook command as the bare turn-end touch"
+  fail "telemetry off must leave the claude soldier's first Stop hook as the bare turn-end touch"
+assert_contains "$(jq -r '.hooks.Stop[0].hooks[1].command' "$HOME_DIR/state/t-claude.claude-settings.json")" \
+  'cs-worker-turnend.sh' "telemetry off must retain the worker recovery hook"
 
 mkdir -p "$HOME_DIR/host"
 printf 'enabled true\n' > "$HOME_DIR/host/telemetry.conf"
@@ -498,7 +500,7 @@ jq -e . "$SETTINGS" >/dev/null || fail "an instrumented claude settings file mus
 [ "$(jq -r '.hooks.Stop[0].hooks | length' "$SETTINGS")" = 2 ] ||
   fail "telemetry must be a second hook command, never folded into the touch"
 case "$(jq -r '.hooks.Stop[0].hooks[1].command' "$SETTINGS")" in
-  *cs-telemetry-emit.sh*--stdin) ;;
+  *cs-telemetry-emit.sh*--stdin*) ;;
   *) fail "claude feeds the Stop payload to every hook command, so the emitter must read it from stdin" ;;
 esac
 

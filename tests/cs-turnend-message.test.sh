@@ -75,3 +75,18 @@ expect_code 0 "$second_rc" "a repeated turn end must remain permitted"
 [ "$(find "$PARENT_STATE/inbox" -name '*.msg' -type f | wc -l | tr -d ' ')" = 1 ] || \
   fail "recovery backstop must not create a second message"
 pass "cs-turnend-guard: recovers a settled child without semantic reporting exactly once"
+
+printf '%s\n' 'task_id=worker' 'kind=ship' 'home='"$HOME_DIR" 'worktree='"$HOME_DIR" \
+  'pane=w3:p3' 'endpoint_generation=worker-generation' 'parent_task_id=root' \
+  'parent_home='"$TMP" 'parent_state='"$PARENT_STATE" 'parent_pane=w1:p1' \
+  'parent_generation=root-generation' > "$STATE/worker.meta"
+printf '%s\n' 'done: worker terminal buffer only' > "$STATE/worker.status"
+worker_id=$(cs_message_recovery_id worker worker-generation) || fail "worker recovery id derivation"
+rm -f "$STATE/.message-recovery-$worker_id"
+CS_TASK_ID=worker "$ROOT/bin/cs-worker-turnend.sh"
+assert_present "$PARENT_STATE/inbox/$worker_id.msg" "worker turn-end hook must publish a recovery message"
+assert_present "$STATE/.message-recovery-$worker_id" "worker turn-end hook must record its idempotence marker"
+CS_TASK_ID=worker "$ROOT/bin/cs-worker-turnend.sh"
+[ "$(find "$PARENT_STATE/inbox" -name "$worker_id.msg" -type f | wc -l | tr -d ' ')" = 1 ] || \
+  fail "worker turn-end hook must not publish a duplicate recovery message"
+pass "worker turn-end hook recovers a terminal child outside primary scope"
