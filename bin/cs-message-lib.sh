@@ -135,11 +135,20 @@ cs_message_route_generation() {
 }
 
 cs_message_route_write() {
-  local file=$1 target=$2 generation=$3 route tmp
+  local file=$1 target=$2 generation=$3 route tmp existing_message existing_target existing_generation
   cs_message_validate_file "$file" || return 1
   cs_message_task "$target" && cs_message_generation "$generation" || return 1
   [ "$(cs_message_field "$file" to_task_id)" = "$target" ] || return 1
   route=$(cs_message_route_path "$file")
+  if [ -e "$route" ]; then
+    cs_message_route_validate_file "$route" || return 1
+    existing_message=$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$route")
+    existing_target=$(awk -F= '$1 == "to_task_id" { print substr($0, 12) }' "$route")
+    existing_generation=$(awk -F= '$1 == "endpoint_generation" { print substr($0, 21) }' "$route")
+    [ "$existing_message" = "$(cs_message_field "$file" message_id)" ] || return 1
+    [ "$existing_target" = "$target" ] || return 1
+    [ "$existing_generation" = "$generation" ] && return 0
+  fi
   tmp="$route.tmp.$$.$RANDOM"
   printf 'schema=%s\nmessage_id=%s\nto_task_id=%s\nendpoint_generation=%s\nupdated_at=%s\n' \
     "$CS_MESSAGE_ROUTE_SCHEMA" "$(cs_message_field "$file" message_id)" "$target" \
