@@ -85,13 +85,8 @@ assert_contains "$out" "cs-capture-probe" "pane run output visible in capture"
 pass "pane run + capture round-trip"
 
 detection_out=""
-for _ in $(seq 1 30); do
-  cs_herdr_run "$task_pane" "printf '%s\\n' '• Working (thinking, esc to interrupt)'" >/dev/null || fail "detection probe pane run"
-  sleep 0.3
-  detection_out=$(cs_herdr_capture_detection "$task_pane" 20 text) || fail "detection capture"
-  case "$detection_out" in *'• Working (thinking, esc to interrupt)'*) break ;; esac
-  sleep 0.5
-done
+cs_herdr_pane_run_confirmed "$task_pane" "printf '%s\\n' '• Working (thinking, esc to interrupt)'" 5000 || fail "detection probe pane run"
+detection_out=$(cs_herdr_capture_detection "$task_pane" 20 text) || fail "detection capture"
 assert_contains "$detection_out" "• Working (thinking, esc to interrupt)" "detection source capture contains the probe"
 detection_capture="$TMP/detection.capture"
 printf '%s' "$detection_out" > "$detection_capture"
