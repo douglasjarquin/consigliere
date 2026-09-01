@@ -107,7 +107,7 @@ fi
 [ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
 
 worker_settled_without_report() {
-  local task=$1 meta kind status last parent_state generation file message_kind
+  local task=$1 meta kind status last parent_state parent_task child_home generation file message_kind
   local recovery_id marker
   meta="$STATE/$task.meta"
   [ -f "$meta" ] || return 0
@@ -121,13 +121,17 @@ worker_settled_without_report() {
     *) return 0
   esac
   parent_state=$(cs_meta_get "$meta" parent_state 2>/dev/null || true)
+  parent_task=$(cs_meta_get "$meta" parent_task_id 2>/dev/null || true)
+  child_home=$(cs_meta_get "$meta" home 2>/dev/null || true)
   generation=$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)
   [ -n "$parent_state" ] && [ -n "$generation" ] || return 0
   for file in "$parent_state/inbox"/*.msg; do
     [ -f "$file" ] || continue
     cs_message_validate_file "$file" || continue
     [ "$(cs_message_field "$file" from_task_id)" = "$task" ] || continue
+    [ "$(cs_message_field "$file" from_home)" = "$child_home" ] || continue
     [ "$(cs_message_field "$file" from_endpoint_generation)" = "$generation" ] || continue
+    [ "$(cs_message_field "$file" to_task_id)" = "$parent_task" ] || continue
     message_kind=$(cs_message_field "$file" kind)
     case "$message_kind" in result|failed) return 0 ;; esac
   done

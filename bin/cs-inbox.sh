@@ -187,10 +187,22 @@ ack_message() {
     cs_message_validate_ack "$ack" "$ACK_ID" || { echo "error: malformed acknowledgement '$ack'" >&2; return 1; }
     if [ -n "$REPLY" ]; then
       message_source_valid "$file" || return 1
+      case "$(cs_message_field "$file" kind)" in
+        question|decision-required)
+          pending_file=$(cs_message_pending_path "$(cs_message_field "$file" from_home)/state" "$ACK_ID")
+          cs_message_pending_matches_message "$pending_file" "$file" || {
+            echo "error: response obligation '$ACK_ID' does not match its inbox message; acknowledgement remains absent" >&2
+            return 1
+          }
+          ;;
+      esac
       deliver_reply "$file" || return 1
-      pending_file=$(cs_message_pending_path "$(cs_message_field "$file" from_home)/state" "$ACK_ID")
-      if [ -f "$pending_file" ] && [ ! -e "${pending_file%.pending}.closed" ]; then
-        cs_message_pending_close "$(cs_message_field "$file" from_home)/state" "$ACK_ID" "handled-by-$TASK_ID" || return 1
+      if [ -f "${pending_file:-}" ]; then
+        if [ -e "${pending_file%.pending}.closed" ]; then
+          cs_message_pending_close_validate_file "${pending_file%.pending}.closed" "$ACK_ID" || return 1
+        else
+          cs_message_pending_close "$(cs_message_field "$file" from_home)/state" "$ACK_ID" "handled-by-$TASK_ID" || return 1
+        fi
       fi
     fi
     printf 'already acknowledged message=%s task=%s\n' "$ACK_ID" "$TASK_ID"

@@ -104,10 +104,13 @@ wake_message() {
 }
 
 reconcile_settled_child() {
-  local meta=$1 task kind status last generation pane recovery_id marker native_state
+  local meta=$1 task kind status last generation pane recovery_id marker native_state parent_state parent_task child_home
   task=$(basename "$meta" .meta)
   kind=$(cs_meta_get "$meta" kind 2>/dev/null || true)
   [ "$kind" != capo ] || return 0
+  parent_state=$(cs_meta_get "$meta" parent_state 2>/dev/null || true)
+  parent_task=$(cs_meta_get "$meta" parent_task_id 2>/dev/null || true)
+  child_home=$(cs_meta_get "$meta" home 2>/dev/null || true)
   status="$STATE/$task.status"
   generation=$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)
   pane=$(cs_meta_get "$meta" pane 2>/dev/null || true)
@@ -126,17 +129,22 @@ reconcile_settled_child() {
       *) return 0 ;;
     esac
   fi
-  for file in "$STATE"/inbox/*.msg; do
+  for file in "$parent_state"/inbox/*.msg; do
     [ -f "$file" ] || continue
     cs_message_validate_file "$file" || continue
     [ "$(cs_message_field "$file" from_task_id)" = "$task" ] || continue
+    [ "$(cs_message_field "$file" from_home)" = "$child_home" ] || continue
     [ "$(cs_message_field "$file" from_endpoint_generation)" = "$generation" ] || continue
+    [ "$(cs_message_field "$file" to_task_id)" = "$parent_task" ] || continue
     case "$(cs_message_field "$file" kind)" in result|failed) return 0 ;; esac
   done
   recovery_id=$(cs_message_recovery_id "$task" "$generation") || return 1
   marker="$STATE/.report-requested-$recovery_id"
   [ ! -e "$marker" ] || return 0
-  : > "$marker" || return 1
+  if ! (set -C; : > "$marker") 2>/dev/null; then
+    [ -e "$marker" ] && return 0
+    return 1
+  fi
   if endpoint_ready "$meta" "$pane" "settled child '$task'" && cs_herdr_agent_alive "$pane"; then
     cs_herdr_agent_prompt_confirmed "$pane" "CONSIGLIERE_REPORT_REQUIRED v1 task=$task" || {
       rm -f "$marker"
@@ -151,7 +159,7 @@ reconcile_settled_child() {
   CS_HOME="$CS_HOME" CS_ROOT_OVERRIDE="${CS_ROOT:-}" CS_STATE_OVERRIDE="$STATE" \
     CS_DATA_OVERRIDE="$recover_data_dir" CS_TASK_ID="$task" \
     "$SCRIPT_DIR/cs-worker-turnend.sh" >/dev/null 2>&1 || true
-  if [ -f "$(cs_meta_get "$meta" parent_state 2>/dev/null || true)/inbox/$recovery_id.msg" ]; then
+  if [ -f "$parent_state/inbox/$recovery_id.msg" ]; then
     printf 'recover: escalated-gone task=%s message=%s\n' "$task" "$recovery_id"
     requested=$((requested + 1))
     return 0

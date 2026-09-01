@@ -25,13 +25,17 @@ case "$last" in
 esac
 
 parent_state=$(cs_meta_get "$meta" parent_state 2>/dev/null || true)
+parent_task=$(cs_meta_get "$meta" parent_task_id 2>/dev/null || true)
+child_home=$(cs_meta_get "$meta" home 2>/dev/null || true)
 generation=$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)
 [ -d "$parent_state/inbox" ] && [ -n "$generation" ] || exit 0
 for file in "$parent_state/inbox"/*.msg; do
   [ -f "$file" ] || continue
   cs_message_validate_file "$file" || continue
   [ "$(cs_message_field "$file" from_task_id)" = "$task" ] || continue
+  [ "$(cs_message_field "$file" from_home)" = "$child_home" ] || continue
   [ "$(cs_message_field "$file" from_endpoint_generation)" = "$generation" ] || continue
+  [ "$(cs_message_field "$file" to_task_id)" = "$parent_task" ] || continue
   case "$(cs_message_field "$file" kind)" in result|failed) exit 0 ;; esac
 done
 
