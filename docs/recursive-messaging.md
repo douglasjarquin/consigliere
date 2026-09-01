@@ -30,6 +30,10 @@ The message primitive uses a versioned flat key/value record because the reposit
 
 `bin/cs-inbox.sh` is the parent-side operation: it emits only unacknowledged messages addressed to the current task, rejects malformed or stale sender and receiver generations, and acknowledges a message only through an explicit `--ack` operation after handling.
 
+Response-required `question` and `decision-required` messages create an atomic sender-side pending obligation before the inbox record or Herdr doorbell is attempted.
+
+The message carries `from_home` so a parent in another Consigliere home can validate the sender's metadata and close that obligation without guessing which state directory owns it.
+
 Event-driven lifecycle routing, recursive inbox draining, bounded cold reconciliation, polling reduction, and the nested Herdr canary remain later phases.
 
 No issue checkbox for a later phase is complete until its named real-surface evidence exists.

@@ -47,6 +47,7 @@ message() {
     "kind=$kind" \
     "from_task_id=child" \
     "to_task_id=$target" \
+    "from_home=$HOME_DIR" \
     "from_endpoint_generation=$generation" \
     "to_endpoint_generation=current-generation" \
     "summary=$kind summary" \
@@ -60,7 +61,7 @@ if [ ! -x "$INBOX" ]; then
   fail "the parent-scoped inbox drain command must exist"
 fi
 
-message message-current current question child-generation || fail "current message setup"
+message message-current current result child-generation || fail "current message setup"
 message message-other other result child-generation || fail "other message setup"
 message message-stale current blocked old-generation || fail "stale message setup"
 

@@ -67,6 +67,7 @@ valid_message=(
   "kind=result"
   "from_task_id=child"
   "to_task_id=parent"
+  "from_home=$HOME_DIR"
   "from_endpoint_generation=child-generation-1"
   "to_endpoint_generation=parent-generation-1"
   "summary=verified result"
@@ -88,7 +89,7 @@ cs_message_publish "$STATE/inbox" "${valid_message[@]}" || fail "duplicate publi
 pass "duplicate message publication is idempotent"
 
 conflict=("${valid_message[@]}")
-conflict[9]='summary=conflicting result'
+conflict[10]='summary=conflicting result'
 if cs_message_publish "$STATE/inbox" "${conflict[@]}" >/dev/null 2>&1; then
   fail "conflicting duplicate must be refused"
 fi
@@ -96,7 +97,7 @@ fi
 pass "conflicting duplicate is refused without mutation"
 
 oversized=("${valid_message[@]}")
-oversized[9]="summary=$(printf 'x%.0s' $(seq 1 2000))"
+oversized[10]="summary=$(printf 'x%.0s' $(seq 1 2000))"
 if cs_message_publish "$STATE/inbox" "${oversized[@]}" >/dev/null 2>&1; then
   fail "oversized message must be refused"
 fi
@@ -123,6 +124,15 @@ grep -F 'to_task_id=parent' "$report_record" >/dev/null || fail "report must tar
 grep -F 'CONSIGLIERE_WAKE v1 message=' "$TMP/prompts" >/dev/null || fail "report must ring the parent with a bounded wake reference"
 pass "cs-report publishes a verified parent message before its doorbell"
 
+question_report=$(env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
+  CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
+  CS_FAKE_MESSAGE_PROMPTS="$CS_FAKE_MESSAGE_PROMPTS" \
+  "$REPORT" question "choose the local option") || fail "question report should publish"
+question_id=$(printf '%s\n' "$question_report" | sed -n 's/^reported message=\([^ ]*\).*/\1/p')
+[ -n "$question_id" ] || fail "question report did not return a message id"
+[ -f "$STATE/pending/$question_id.pending" ] || fail "question report did not create a pending obligation before delivery"
+pass "response-required reports create a durable pending obligation"
+
 export CS_FAKE_MESSAGE_PARENT_HOME="$TMP/missing-parent"
 if env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
@@ -130,7 +140,7 @@ if env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   "$REPORT" blocked "parent unavailable" >/dev/null 2>&1; then
   fail "an unavailable parent must not receive a wake"
 fi
-[ "$(find "$STATE/inbox" -name '*.msg' -type f | wc -l | tr -d ' ')" = 4 ] || fail "unavailable parent report was not retained"
+[ "$(find "$STATE/inbox" -name '*.msg' -type f | wc -l | tr -d ' ')" = 5 ] || fail "unavailable parent report was not retained"
 pass "report remains durable when the parent endpoint is unavailable"
 export CS_FAKE_MESSAGE_PARENT_HOME="$HOME_DIR"
 

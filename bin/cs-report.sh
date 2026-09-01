@@ -59,21 +59,31 @@ fi
 
 MESSAGE_ID=$(cs_message_new_id)
 [ -n "$CORRELATION" ] || CORRELATION=$MESSAGE_ID
+CREATED_AT=$(cs_message_now)
+case "$KIND" in
+  question|decision-required)
+    cs_message_pending_create "$STATE" "$MESSAGE_ID" "$CORRELATION" "$TASK_ID" "$PARENT_TASK" "$KIND" "$CREATED_AT" || {
+      echo "error: could not create pending obligation for report $MESSAGE_ID" >&2
+      exit 1
+    }
+    ;;
+esac
 FIELDS=(
   "schema=$CS_MESSAGE_SCHEMA"
   "message_id=$MESSAGE_ID"
   "correlation_id=$CORRELATION"
   "sequence=$SEQUENCE"
   "kind=$KIND"
-  "from_task_id=$TASK_ID"
-  "to_task_id=$PARENT_TASK"
-  "from_endpoint_generation=$FROM_GENERATION"
+    "from_task_id=$TASK_ID"
+    "to_task_id=$PARENT_TASK"
+    "from_home=$CS_HOME"
+    "from_endpoint_generation=$FROM_GENERATION"
   "to_endpoint_generation=$TO_GENERATION"
   "summary=$SUMMARY"
   "artifact=$ARTIFACT"
   "commit_sha=$COMMIT"
   "pull_request=$PULL_REQUEST"
-  "created_at=$(cs_message_now)"
+  "created_at=$CREATED_AT"
 )
 cs_message_publish "$PARENT_STATE/inbox" "${FIELDS[@]}" || { echo "error: could not publish report to $PARENT_STATE/inbox" >&2; exit 1; }
 if [ "$PARENT_ROUTE_OK" -ne 1 ]; then

@@ -109,6 +109,7 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
 - `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `kind=` (ship|scout|capo), `harness=` (codex|claude, inherited from the root session). No model or reasoning level is recorded, because the harness selects both.
   Parent-aware tasks also record `parent_task_id=`, `parent_home=`, `parent_state=`, `parent_pane=`, `parent_generation=`, and `endpoint_generation=`; `bin/cs-meta-lib.sh` validates this exact edge and `bin/cs-report.sh` routes only through it.
   A parent drains its durable inbox with `bin/cs-inbox.sh`; the command filters by `to_task_id`, validates the sender's recorded parent edge and endpoint generation, and creates a separate acknowledgement only after explicit handling.
+  `question` and `decision-required` reports also create `state/pending/<message-id>.pending` before delivery; the parent closes that sender-side obligation before writing the inbox acknowledgement.
   A `kind=ship` task also records the posture its spawn stated explicitly: `mode=` (no-mistakes|direct-PR|local-only) and `yolo=` (on|off).
   A `kind=scout` records NEITHER, because a report deliverable has no mode to honour and no approval posture to apply, which is why `cs-promote.sh` is where a promoted scout first states both.
   `kind=capo` records `mode=capo`, `yolo=off`, and `home=`.

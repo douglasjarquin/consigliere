@@ -40,14 +40,15 @@ while [ "$#" -gt 0 ]; do
 done
 
 message_source_valid() {
-  local file=$1 source_task source_meta source_parent source_home source_generation
+  local file=$1 source_task source_meta source_parent source_home source_generation from_home
   cs_message_validate_file "$file" || {
     echo "error: malformed inbox message '$file'" >&2
     return 1
   }
   [ "$(cs_message_field "$file" to_task_id)" = "$TASK_ID" ] || return 2
   source_task=$(cs_message_field "$file" from_task_id)
-  source_meta="$STATE/$source_task.meta"
+  from_home=$(cs_message_field "$file" from_home)
+  source_meta="$from_home/state/$source_task.meta"
   [ -f "$source_meta" ] || {
     echo "error: message '$file' names missing sender metadata '$source_meta'" >&2
     return 1
@@ -74,10 +75,20 @@ message_source_valid() {
 }
 
 ack_message() {
-  local file="$INBOX/$ACK_ID.msg"
+  local file="$INBOX/$ACK_ID.msg" kind from_home
   cs_message_id "$ACK_ID" || { echo "error: invalid message id '$ACK_ID'" >&2; return 1; }
   [ -f "$file" ] || { echo "error: message '$ACK_ID' is missing" >&2; return 1; }
   message_source_valid "$file" || return 1
+  kind=$(cs_message_field "$file" kind)
+  from_home=$(cs_message_field "$file" from_home)
+  case "$kind" in
+    question|decision-required)
+      cs_message_pending_close "$from_home/state" "$ACK_ID" "handled-by-$TASK_ID" || {
+        echo "error: response obligation for message '$ACK_ID' could not be closed" >&2
+        return 1
+      }
+      ;;
+  esac
   cs_message_ack "$INBOX" "$ACK_ID" || {
     echo "error: could not acknowledge message '$ACK_ID'" >&2
     return 1

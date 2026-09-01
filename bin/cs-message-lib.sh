@@ -5,6 +5,7 @@
 # artifact, commit, pull request, and creation time fields.
 
 CS_MESSAGE_SCHEMA='cs-message.v1'
+CS_MESSAGE_PENDING_SCHEMA='cs-message-obligation.v1'
 CS_MESSAGE_MAX_SUMMARY=512
 CS_MESSAGE_MAX_PATH=512
 
@@ -47,11 +48,17 @@ cs_message_path_value() {
   cs_message_scalar "$value" "$CS_MESSAGE_MAX_PATH"
 }
 
+cs_message_absolute_path_value() {
+  local value=$1
+  case "$value" in /*) ;; *) return 1 ;; esac
+  cs_message_scalar "$value" "$CS_MESSAGE_MAX_PATH"
+}
+
 cs_message_validate_fields() {
   local field key value seen='' required
-  local -a required_keys=(schema message_id correlation_id sequence kind from_task_id to_task_id
+  local -a required_keys=(schema message_id correlation_id sequence kind from_task_id to_task_id from_home
     from_endpoint_generation to_endpoint_generation summary created_at)
-  [ "$#" -eq 14 ] || return 1
+  [ "$#" -eq 15 ] || return 1
   for field in "$@"; do
     case "$field" in *=*) ;; *) return 1 ;; esac
     key=${field%%=*}
@@ -67,6 +74,7 @@ cs_message_validate_fields() {
         ;;
       kind) case "$value" in question|blocked|decision-required|checkpoint|result|failed) ;; *) return 1 ;; esac ;;
       from_task_id|to_task_id) cs_message_task "$value" || return 1 ;;
+      from_home) cs_message_absolute_path_value "$value" || return 1 ;;
       from_endpoint_generation|to_endpoint_generation) cs_message_generation "$value" || return 1 ;;
       summary) cs_message_scalar "$value" "$CS_MESSAGE_MAX_SUMMARY" || return 1 ;;
       artifact) cs_message_path_value "$value" || return 1 ;;
@@ -154,4 +162,91 @@ cs_message_ack() {
   if ln "$tmp" "$ack" 2>/dev/null; then rm -f "$tmp"; return 0; fi
   rm -f "$tmp"
   [ -e "$ack" ] && cs_message_validate_ack "$ack"
+}
+
+cs_message_pending_path() { printf '%s/pending/%s.pending\n' "$1" "$2"; }
+
+cs_message_pending_close_path() { printf '%s/pending/%s.closed\n' "$1" "$2"; }
+
+cs_message_pending_validate_file() {
+  local file=$1 line key value seen='' required
+  local -a required_keys=(schema message_id correlation_id task_id parent_task_id kind phase created_at)
+  [ -f "$file" ] || return 1
+  [ "$(wc -l < "$file" | tr -d ' ')" = 8 ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    key=${line%%=*}
+    value=${line#*=}
+    case "$key" in
+      schema) [ "$value" = "$CS_MESSAGE_PENDING_SCHEMA" ] || return 1 ;;
+      message_id|correlation_id|task_id|parent_task_id) cs_message_id "$value" || return 1 ;;
+      kind) case "$value" in question|decision-required) ;; *) return 1 ;; esac ;;
+      phase) [ "$value" = awaiting-response ] || return 1 ;;
+      created_at)
+        case "$value" in ''|*[!0-9]*) return 1 ;; esac
+        [ "${#value}" -le 20 ] || return 1
+        ;;
+      *) return 1 ;;
+    esac
+    case " $seen " in *" $key "*) return 1 ;; esac
+    seen="$seen $key"
+  done < "$file"
+  for required in "${required_keys[@]}"; do
+    case " $seen " in *" $required "*) ;; *) return 1 ;; esac
+  done
+}
+
+cs_message_pending_create() {
+  local state=$1 message_id=$2 correlation_id=$3 task_id=$4 parent_task_id=$5 kind=$6 created_at=$7
+  local dir file tmp same
+  cs_message_id "$message_id" && cs_message_id "$correlation_id" && cs_message_task "$task_id" &&
+    cs_message_task "$parent_task_id" || return 1
+  case "$kind" in question|decision-required) ;; *) return 1 ;; esac
+  case "$created_at" in ''|*[!0-9]*) return 1 ;; esac
+  dir="$state/pending"
+  [ -d "$state" ] || return 1
+  mkdir -p "$dir" || return 1
+  file=$(cs_message_pending_path "$state" "$message_id")
+  tmp="$dir/.$message_id.pending.tmp.$$.$RANDOM"
+  printf 'schema=%s\nmessage_id=%s\ncorrelation_id=%s\ntask_id=%s\nparent_task_id=%s\nkind=%s\nphase=awaiting-response\ncreated_at=%s\n' \
+    "$CS_MESSAGE_PENDING_SCHEMA" "$message_id" "$correlation_id" "$task_id" "$parent_task_id" "$kind" "$created_at" > "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  cs_message_pending_validate_file "$tmp" || { rm -f "$tmp"; return 1; }
+  if [ -e "$file" ]; then
+    cmp -s "$tmp" "$file"; same=$?
+    rm -f "$tmp"
+    [ "$same" -eq 0 ]
+    return
+  fi
+  if ln "$tmp" "$file" 2>/dev/null; then rm -f "$tmp"; return 0; fi
+  if [ -e "$file" ] && cmp -s "$tmp" "$file"; then rm -f "$tmp"; return 0; fi
+  rm -f "$tmp"
+  return 1
+}
+
+cs_message_pending_close() {
+  local state=$1 message_id=$2 reason=$3 pending closed tmp same
+  cs_message_id "$message_id" || return 1
+  cs_message_scalar "$reason" "$CS_MESSAGE_MAX_SUMMARY" || return 1
+  pending=$(cs_message_pending_path "$state" "$message_id")
+  [ -f "$pending" ] || return 1
+  cs_message_pending_validate_file "$pending" || return 1
+  closed=$(cs_message_pending_close_path "$state" "$message_id")
+  tmp="${closed}.tmp.$$.$RANDOM"
+  printf 'schema=%s\nmessage_id=%s\nclosed_at=%s\nreason=%s\n' \
+    "$CS_MESSAGE_PENDING_SCHEMA" "$message_id" "$(cs_message_now)" "$reason" > "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  if [ -e "$closed" ]; then
+    cmp -s "$tmp" "$closed"; same=$?
+    rm -f "$tmp"
+    [ "$same" -eq 0 ]
+    return
+  fi
+  if ln "$tmp" "$closed" 2>/dev/null; then rm -f "$tmp"; return 0; fi
+  if [ -e "$closed" ] && cmp -s "$tmp" "$closed"; then rm -f "$tmp"; return 0; fi
+  rm -f "$tmp"
+  return 1
 }
