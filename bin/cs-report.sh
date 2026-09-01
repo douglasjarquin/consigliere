@@ -39,6 +39,11 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+if [ "$KIND" = result ] && [ -z "$ARTIFACT" ] && [ -z "$COMMIT" ] && [ -z "$PULL_REQUEST" ]; then
+  echo "error: result reports require an artifact, commit, or pull request evidence reference" >&2
+  exit 2
+fi
+
 TASK_ID=${CS_TASK_ID:-}
 [ -n "$TASK_ID" ] || { echo "error: CS_TASK_ID is required" >&2; exit 2; }
 META="$STATE/$TASK_ID.meta"

@@ -10,6 +10,8 @@ HOME_DIR="$TMP/home"
 STATE="$HOME_DIR/state"
 FAKEBIN="$TMP/fakebin"
 mkdir -p "$HOME_DIR/config" "$HOME_DIR/data" "$STATE/inbox" "$FAKEBIN"
+mkdir -p "$HOME_DIR/reports"
+printf '%s\n' 'mate evidence' > "$HOME_DIR/reports/mate.txt"
 
 # shellcheck source=bin/cs-message-lib.sh
 . "$ROOT/bin/cs-message-lib.sh"
@@ -90,7 +92,7 @@ env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
 grep -F "CONSIGLIERE_REPLY v1 message=$worker_id" "$TMP/prompts" >/dev/null || fail "mate reply was not delivered to the child"
 pass "the immediate parent receives and acknowledges the worker message"
 
-mate_report=$(run_report mate result "mate resolved the worker choice" --correlation "$worker_id") || fail "mate result report"
+mate_report=$(run_report mate result "mate resolved the worker choice" --artifact reports/mate.txt --correlation "$worker_id") || fail "mate result report"
 mate_id=$(printf '%s\n' "$mate_report" | sed -n 's/^reported message=\([^ ]*\).*/\1/p')
 [ -n "$mate_id" ] || fail "mate report did not return a message id"
 root_view=$(env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \

@@ -11,7 +11,8 @@ HOME_DIR="$TMP/home"
 STATE="$HOME_DIR/state"
 FAKEBIN="$TMP/fakebin"
 mkdir -p "$FAKEBIN"
-mkdir -p "$HOME_DIR/data/child" "$STATE" "$HOME_DIR/config" "$STATE/inbox"
+mkdir -p "$HOME_DIR/data/child" "$HOME_DIR/reports" "$STATE" "$HOME_DIR/config" "$STATE/inbox"
+printf '%s\n' 'verified result' > "$HOME_DIR/reports/result.md"
 
 if [ ! -f "$MESSAGE_LIB" ] || [ ! -x "$REPORT" ]; then
   fail "the durable message library and report command must exist"
@@ -84,6 +85,15 @@ cs_message_validate_file "$record" || fail "published message should validate"
 [ ! -e "$STATE/inbox/.message-0000000000000001.msg.tmp" ] || fail "staging file must not remain"
 pass "valid message is atomically published and validates"
 
+if env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
+  CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
+  CS_FAKE_MESSAGE_PROMPTS="$CS_FAKE_MESSAGE_PROMPTS" \
+  "$REPORT" result "missing evidence" --message-id message-no-evidence >/dev/null 2>&1; then
+  fail "a result without artifact, commit, or pull request evidence must be refused"
+fi
+[ ! -e "$STATE/inbox/message-no-evidence.msg" ] || fail "evidence-free result was published"
+pass "evidence-free result reports are refused before publication"
+
 cs_message_publish "$STATE/inbox" "${valid_message[@]}" || fail "duplicate publication should be idempotent"
 [ "$(find "$STATE/inbox" -name '*.msg' -type f | wc -l | tr -d ' ')" = 1 ] || fail "duplicate publication created another record"
 pass "duplicate message publication is idempotent"
@@ -137,11 +147,11 @@ retry_id=message-retry-0000000000000001
 env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
   CS_FAKE_MESSAGE_PROMPTS="$CS_FAKE_MESSAGE_PROMPTS" \
-  "$REPORT" result "retryable result" --message-id "$retry_id" >/dev/null || fail "first explicit-id report"
+  "$REPORT" result "retryable result" --artifact reports/result.md --message-id "$retry_id" >/dev/null || fail "first explicit-id report"
 env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
   CS_FAKE_MESSAGE_PROMPTS="$CS_FAKE_MESSAGE_PROMPTS" \
-  "$REPORT" result "retryable result" --message-id "$retry_id" >/dev/null || fail "same-id report retry"
+  "$REPORT" result "retryable result" --artifact reports/result.md --message-id "$retry_id" >/dev/null || fail "same-id report retry"
 [ "$(find "$STATE/inbox" -name "$retry_id.msg" -type f | wc -l | tr -d ' ')" = 1 ] || fail "same-id retry created more than one message record"
 [ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$retry_id" "$CS_FAKE_MESSAGE_PROMPTS")" = 2 ] || fail "same-id retry did not re-ring the same message"
 if env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
