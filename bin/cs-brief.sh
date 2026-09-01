@@ -272,14 +272,16 @@ arm_plan_progress_check() {
 STATUS_FILE=$(shell_quote "$STATE/$ID.status")
 REPORT_COMMAND="$(shell_quote "$CS_ROOT/bin/cs-report.sh")"
 INBOX_COMMAND="$(shell_quote "$CS_ROOT/bin/cs-inbox.sh")"
-REPORTING_SECTION=$(printf '%s\n' \
-'# Semantic parent reporting' \
-'At the beginning of a turn, inspect actionable messages addressed to this task with `CS_TASK_ID='"$ID"' '"$INBOX_COMMAND"'`.' \
-'Use `CS_TASK_ID='"$ID"' '"$REPORT_COMMAND"' question "{question}"` or `decision-required "{decision}"` before guessing outside delegated authority.' \
-'Use `CS_TASK_ID='"$ID"' '"$REPORT_COMMAND"' blocked "{reason}"` when work cannot continue, and use `failed "{reason}"` for terminal failure.' \
-'Use `CS_TASK_ID='"$ID"' '"$REPORT_COMMAND"' checkpoint "{artifact-ready phase}"` only when a concrete artifact or commit lets the parent continue.' \
-'Use `CS_TASK_ID='"$ID"' '"$REPORT_COMMAND"' result "{outcome}" --artifact "{relative report}" --commit "{sha}" --pr "{number}"` only after the bounded report and evidence exist.' \
-'A terminal buffer saying done is not a semantic result. After a parent handles a message, acknowledge it with `CS_TASK_ID='"$ID"' '"$INBOX_COMMAND"' --ack {message-id}`.' )
+IFS= read -r -d '' REPORTING_SECTION <<EOF || true
+# Semantic parent reporting
+At the beginning of a turn, inspect actionable messages addressed to this task with \`CS_TASK_ID=$(shell_quote "$ID") $INBOX_COMMAND\`.
+Use \`CS_TASK_ID=$(shell_quote "$ID") $REPORT_COMMAND question "{question}"\` or \`decision-required "{decision}"\` before guessing outside delegated authority.
+Use \`CS_TASK_ID=$(shell_quote "$ID") $REPORT_COMMAND blocked "{reason}"\` when work cannot continue, and use \`failed "{reason}"\` for terminal failure.
+Use \`CS_TASK_ID=$(shell_quote "$ID") $REPORT_COMMAND checkpoint "{artifact-ready phase}"\` only when a concrete artifact or commit lets the parent continue.
+Use \`CS_TASK_ID=$(shell_quote "$ID") $REPORT_COMMAND result "{outcome}" --artifact "{relative report}" --commit "{sha}" --pr "{number}"\` only after the bounded report and evidence exist.
+A terminal buffer saying done is not a semantic result. After a parent handles a message, acknowledge it with \`CS_TASK_ID=$(shell_quote "$ID") $INBOX_COMMAND --ack {message-id}\`.
+EOF
+REPORTING_SECTION=${REPORTING_SECTION%$'\n'}
 
 if [ "$KIND" = capo ]; then
 CAPO_PROJECTS=""
