@@ -9,6 +9,8 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 # shellcheck source=bin/cs-message-lib.sh
 . "$ROOT/bin/cs-message-lib.sh"
+# shellcheck source=bin/cs-meta-lib.sh
+. "$ROOT/bin/cs-meta-lib.sh"
 
 TMP=$(cs_test_tmproot cs-teardown)
 export CS_DATA_OVERRIDE="$TMP/data"
@@ -585,6 +587,7 @@ fi
 # removing its worktree. A failed recovery keeps the message, obligation, and
 # worktree available for a later explicit resolution.
 make_task msg1 ship
+mkdir -p "$TMP/state/inbox"
 cs_meta_set "$TMP/state/msg1.meta" home "$TMP"
 cs_meta_set "$TMP/state/msg1.meta" parent_task_id root
 cs_meta_set "$TMP/state/msg1.meta" parent_home "$TMP"
