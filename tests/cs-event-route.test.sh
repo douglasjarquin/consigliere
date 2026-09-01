@@ -44,6 +44,23 @@ if ! (
 ); then
   fail "the watcher rejected a valid metadata-backed event route"
 fi
+generation_record=$(printf 'w1:p1\tworkspace-1\t\tblocked\tcodex\tworker-generation')
+if ! (
+  cd "$ROOT" || exit 2
+  CS_STATE_OVERRIDE="$STATE" . "$ROOT/bin/cs-watch.sh"
+  cs_transition_validate_event_generation "$STATE" "$generation_record"
+); then
+  fail "the watcher rejected an event carrying the current endpoint generation"
+fi
+stale_generation_record=$(printf 'w1:p1\tworkspace-1\t\tblocked\tcodex\told-generation')
+if (
+  cd "$ROOT" || exit 2
+  CS_STATE_OVERRIDE="$STATE" . "$ROOT/bin/cs-watch.sh"
+  cs_transition_validate_event_generation "$STATE" "$stale_generation_record"
+); then
+  fail "the watcher accepted a stale endpoint generation from the event spool"
+fi
+pass "the watcher refuses stale native event generations"
 bad_record=$(printf 'w1:p1\twrong-workspace\t\tblocked\tcodex')
 if (
   cd "$ROOT" || exit 2

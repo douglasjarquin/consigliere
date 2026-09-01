@@ -53,7 +53,15 @@ field() {  # <name>
 pane=$(field pane_id) || exit 0
 [ -n "$pane" ] || exit 0
 
+generation=
+for meta in "$STATE"/*.meta; do
+  [ -f "$meta" ] || continue
+  [ "$(awk -F= '$1 == "pane" { value=substr($0, 6) } END { print value }' "$meta")" = "$pane" ] || continue
+  generation=$(awk -F= '$1 == "endpoint_generation" { value=substr($0, 21) } END { print value }' "$meta")
+  break
+done
+
 cs_event_append "$(cs_event_spool_path "$STATE")" \
-  "$(cs_event_record status "$pane" "$(field workspace_id || true)" \
-      "$(field agent_status || true)" "$(field agent || true)")" 2>/dev/null || exit 0
+  "$(cs_event_record_with_generation status "$pane" "$(field workspace_id || true)" \
+      "$(field agent_status || true)" "$(field agent || true)" "$generation")" 2>/dev/null || exit 0
 exit 0

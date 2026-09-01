@@ -30,11 +30,17 @@ The message primitive uses a versioned flat key/value record because the reposit
 
 `bin/cs-inbox.sh` is the parent-side operation: it emits only unacknowledged messages addressed to the current task, rejects malformed or stale sender and receiver generations, and acknowledges a message only through an explicit `--ack` operation after handling.
 
+Result reports must carry an artifact, commit, or pull request reference.
+The parent verifies a referenced regular artifact against the sender worktree and verifies a referenced commit object and artifact path before acknowledging the result.
+
 Response-required `question` and `decision-required` messages create an atomic sender-side pending obligation before the inbox record or Herdr doorbell is attempted.
 
 The message carries `from_home` so a parent in another Consigliere home can validate the sender's metadata and close that obligation without guessing which state directory owns it.
 
 `bin/cs-report.sh --message-id <message-id>` retries a durable report with the same logical identity and refuses changed semantics.
+
+Each message has a separate delivery-route record.
+Recovery may update that route after a verified parent endpoint relaunches, while the immutable message identity and original endpoint generation remain unchanged.
 
 `bin/cs-inbox.sh --ack <message-id> --reply <bounded-answer>` revalidates the sender pane's recorded worktree, delivers a correlated answer, and only then closes the pending obligation and writes the acknowledgement.
 

@@ -147,6 +147,19 @@ test_hook_projects_a_status_event_into_the_spool() {
   pass "the hook projects a live pane.agent_status_changed payload into the spool"
 }
 
+test_hook_carries_the_recorded_endpoint_generation() {
+  local dir out
+  dir=$(mktemp -d "$TMP_ROOT/hook-generation.XXXXXX")
+  printf '%s\n' 'pane=w7Z:p1' 'endpoint_generation=generation-7' > "$dir/worker.meta"
+  HERDR_PLUGIN_EVENT=pane.agent_status_changed \
+  HERDR_PLUGIN_EVENT_JSON="$(status_json w7Z:p1 w7Z blocked claude)" \
+    "$HOOK" "$dir" || fail "the hook failed on a metadata-backed event"
+  out=$(cat "$dir/.herdr-events")
+  [ "$out" = "$(printf 'status\tw7Z:p1\tw7Z\tblocked\tclaude\tgeneration-7')" ] \
+    || fail "hook omitted or changed the endpoint generation: $out"
+  pass "the native event hook carries the recorded endpoint generation"
+}
+
 test_hook_is_silent_on_anything_it_cannot_use() {
   local dir
   dir=$(mktemp -d "$TMP_ROOT/hook-quiet.XXXXXX")
@@ -303,6 +316,7 @@ test_append_caps_the_spool
 test_append_never_recreates_a_retired_home
 test_record_fields_never_break_the_line_shape
 test_hook_projects_a_status_event_into_the_spool
+test_hook_carries_the_recorded_endpoint_generation
 test_hook_is_silent_on_anything_it_cannot_use
 test_plugin_install_writes_a_machine_local_manifest_and_links_it
 test_plugin_install_is_idempotent

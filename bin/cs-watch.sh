@@ -942,6 +942,18 @@ cs_transition_validate_route() { # <state_dir> <record>
   }
 }
 
+cs_transition_validate_event_generation() { # <state_dir> <record>
+  local state=$1 record=$2 pane workspace agent event_generation route expected_generation
+  event_generation=$(printf '%s' "$record" | cut -f6)
+  [ -n "$event_generation" ] || return 0
+  pane=$(cs_transition_pane_id "$record")
+  workspace=$(cs_transition_workspace "$record")
+  agent=$(cs_transition_agent "$record")
+  route=$(cs_meta_event_route "$state" "$pane" "$workspace" "$agent" 2>/dev/null || true)
+  expected_generation=$(printf '%s' "$route" | cut -f7)
+  [ -n "$expected_generation" ] && [ "$event_generation" = "$expected_generation" ]
+}
+
 # cs_transition_policy: THE single-owner status -> supervision-action table.
 #   actionable - escalate IMMEDIATELY. `blocked` is the only immediately-
 #                actionable status: herdr reports it precisely when a harness
@@ -1059,7 +1071,7 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
   cursor=$(cs_event_cursor_path "$state")
   [ -e "$spool" ] || return 2
 
-  local p raw record hit line kind ws status agent mine=
+  local p raw record hit line kind ws status agent event_generation route expected_generation mine=
   for p in "${panes[@]}"; do
     mine="$mine|$p|"
   done
@@ -1120,8 +1132,10 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
       ws=$(printf '%s' "$line" | cut -f3)
       status=$(printf '%s' "$line" | cut -f4)
       agent=$(printf '%s' "$line" | cut -f5)
+      event_generation=$(printf '%s' "$line" | cut -f6)
       record=$(cs_transition_normalize "$p" "$ws" "$status" "$agent")
       cs_transition_validate_route "$state" "$record" || continue
+      cs_transition_validate_event_generation "$state" "$line" || continue
       idx=-1
       n=${#pending_panes[@]}
       for ((i = 0; i < n; i++)); do
