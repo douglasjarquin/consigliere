@@ -43,6 +43,7 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 | `config/backlog-backend.conf` | portable | absent or `tasks-axi` = tasks-axi against `config/backlog.md`; `manual` = hand-edit the markdown |
 | `config/permission-mode.conf` | portable | optional narrower claude launch permission mode; absent = full autonomy; `bin/cs-harness-lib.sh` owns the two-column schema below. This is a Claude ACCOUNT policy, not a machine property - the record is `<harness> <mode>` with no machine-specific content, so the same file is correct verbatim on every machine that account uses; do not re-derive it as host-specific |
 | `config/wedge-alarm.conf` | portable | wedge-alarm active-alert directives, read through `bin/cs-prompt-lib.sh` by every guarded-prompt caller (currently `bin/cs-activate.sh`, for a failing stretch past `CS_ACTIVATE_WEDGE_MAX_SECS`); absent = auto (macOS Notification Center when available, degrading elsewhere). A boss preference, boss-authored only; the directives are channel selectors that adapt per OS, so the file is portable. The one non-portable use is a `command:` directive naming a machine-local path - keep such a value out of shared dotfiles |
+| `config/vault-pass-horizon.conf` | portable | optional presence flag opting this home in to the pass-count decay horizon in `skills/vault`; absent = wall-clock-only decay; present = aging entries also stale after 10 unreinforced passes and perishable entries after 3, judged against whichever horizon hits first |
 | `host/capos.md` | host | capo routing table; every record embeds an absolute machine-local home path |
 | `host/harness.conf` | host | pins the root harness (`codex` or `claude`) regardless of environment |
 | `host/upstream.conf` | host | path of the firstmate checkout for `/upstream-review`; absent = `../firstmate` |
@@ -52,7 +53,7 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 
 Symlink policy, established empirically (2026-08-06, tasks-axi 0.2.x):
 
-- `boss.md`, `boss-shared.md`, `learnings.md`, `memory-archive.md`, `projects.md`, `boards.md`, and the three portable `.conf` files are read-only to scripts and safe to symlink out to a dotfiles repository.
+- `boss.md`, `boss-shared.md`, `learnings.md`, `memory-archive.md`, `projects.md`, `boards.md`, `vault-pass-horizon.conf`, and the three portable `.conf` files are read-only to scripts and safe to symlink out to a dotfiles repository.
 - `backlog.md`, `done-archive.md`, `note-archive.md`, and `host/capos.md` are rewritten by rename (tasks-axi and the registry writers), which replaces a symlink with a regular file and silently forks the content; they must be real files, and the doctor fails when one is a symlink.
 - A `host/` entry whose symlink target resolves outside the home defeats the host tier (the `capos.md`-across-two-machines mistake); the doctor fails on it.
 
