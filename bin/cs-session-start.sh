@@ -677,6 +677,26 @@ else
   fi
 fi
 
+# Reconcile durable parent/child messages after the queue drain and before the
+# foreground supervision instructions. Recovery is one bounded pass: it may
+# re-wake an exact durable record, but it never starts a retry loop.
+stage message-recovery
+subsection "MESSAGE RECOVERY"
+if [ "$READ_ONLY" -eq 1 ]; then
+  printf 'skipped (read-only session) - the session holding the lock owns message recovery.\n'
+else
+  RECOVERY_OUT=$("$SCRIPT_DIR/cs-recover.sh" 2>&1) || RECOVERY_RC=$?
+  RECOVERY_RC=${RECOVERY_RC:-0}
+  if [ -n "$RECOVERY_OUT" ]; then
+    printf '%s\n' "$RECOVERY_OUT"
+  else
+    printf 'recover: checked=0 re-woke=0\n'
+  fi
+  if [ "$RECOVERY_RC" -ne 0 ]; then
+    printf 'recovery: unresolved records remain; inspect the errors above before acting on them.\n'
+  fi
+fi
+
 # --- 4. supervision operating instructions ----------------------------------
 stage supervision
 AFK_PRESENT=0
