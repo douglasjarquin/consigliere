@@ -109,9 +109,27 @@ That is the whole point: a clock that resets on every read measures nothing, and
 **The decay pass**, run on every sweep before any budget judgment:
 
 1. For each aging and perishable entry, compare today against its `reinforced` date, and check every perishable entry's expiry condition against what is actually true now.
-2. Reinforce the entries this session used or re-verified.
-3. Retire the rest of the stale ones to the archive.
-4. A stale entry whose fact was found to be WRONG is retired as obsolete, and the corrected fact is written as a new entry rather than edited into the retired one.
+2. Where the optional pass horizon is enabled (below), increment the unreinforced-pass counter on every dated entry step 4 did not reinforce, then judge each entry against both horizons and treat it as stale at whichever it reaches first.
+3. Reinforce the entries this session used or re-verified.
+4. Retire the rest of the stale ones to the archive.
+5. A stale entry whose fact was found to be WRONG is retired as obsolete, and the corrected fact is written as a new entry rather than edited into the retired one.
+
+### Optional pass horizon (`config/vault-pass-horizon.conf`)
+
+The wall-clock horizons above are the default contract, and a home gets exactly them unless it opts in.
+A home may opt in to a second, per-pass horizon by creating the local, gitignored `config/vault-pass-horizon.conf` presence flag (an empty file is enough).
+While that file is absent nothing in this section applies: no counter is written, no counter already in a marker is read, and every entry decays on its date alone.
+
+While the flag is present:
+
+- An `aging` entry is stale at whichever horizon it reaches first: 10 passes that evaluated it without reinforcing it, or 30 days since its last-reinforced date.
+- A `perishable` entry is stale at whichever it reaches first: 3 unreinforced passes, or 7 days.
+- Reinforcement refreshes the date and clears any `/N` unreinforced-pass counter on the marker, and nothing else clears it.
+- An existing marker with no `/N` suffix reads as counter zero, so opting in migrates nothing.
+- Removing the flag returns the home to the default contract on its next pass: any `/N` already written is then neither read nor advanced, and is left in place rather than rewritten.
+
+Express the counter as an optional `/N` suffix on the `reinforced` date inside the trailing vault marker, for example `<!-- vault: aging; reinforced 2026-08-11/3 -->`.
+Include the unreinforced-pass counter in the archive reason only when the pass horizon itself made the entry stale, using the exact reason `unreinforced <N>p`; omit the counter when the wall-clock horizon or any other reason caused archival.
 
 Stale is a prompt to decide, not an automatic verdict: an aging entry that is plainly still true and still belongs here is reinforced and stays.
 What stale forbids is leaving it unexamined for another 30 days.

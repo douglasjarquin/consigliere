@@ -41,6 +41,8 @@ esac
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
+# shellcheck source=bin/cs-meta-lib.sh
+. "$SCRIPT_DIR/cs-meta-lib.sh"
 # Optional turn telemetry (off unless host/telemetry.conf enables it).
 # shellcheck source=bin/cs-telemetry-lib.sh
 . "$SCRIPT_DIR/cs-telemetry-lib.sh"
@@ -116,7 +118,11 @@ TMP="$META.tmp"
   echo "mode=$MODE"
   echo "yolo=$YOLO"
 } >> "$TMP"
-mv "$TMP" "$META"
+if ! cs_meta_publish_contained "$TMP" "$META" "task record" "$STATE"; then
+  rm -f "$TMP"
+  echo "error: task record for $ID could not be published (${CS_META_ERROR:-publication failed})" >&2
+  exit 1
+fi
 # TELEMETRY, measurement only, recorded once the promotion is durable.
 cs_telemetry_crumb promote "$MODE" || true
 

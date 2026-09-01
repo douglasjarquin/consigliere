@@ -43,8 +43,9 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 | `config/backlog-backend.conf` | portable | absent or `tasks-axi` = tasks-axi against `config/backlog.md`; `manual` = hand-edit the markdown |
 | `config/permission-mode.conf` | portable | optional narrower claude launch permission mode; absent = full autonomy; `bin/cs-harness-lib.sh` owns the two-column schema below. This is a Claude ACCOUNT policy, not a machine property - the record is `<harness> <mode>` with no machine-specific content, so the same file is correct verbatim on every machine that account uses; do not re-derive it as host-specific |
 | `config/wedge-alarm.conf` | portable | wedge-alarm active-alert directives, read through `bin/cs-prompt-lib.sh` by every guarded-prompt caller (currently `bin/cs-activate.sh`, for a failing stretch past `CS_ACTIVATE_WEDGE_MAX_SECS`); absent = auto (macOS Notification Center when available, degrading elsewhere). A boss preference, boss-authored only; the directives are channel selectors that adapt per OS, so the file is portable. The one non-portable use is a `command:` directive naming a machine-local path - keep such a value out of shared dotfiles |
+| `config/vault-pass-horizon.conf` | portable | optional presence flag opting this home in to the pass-count decay horizon in `skills/vault`; absent = wall-clock-only decay; present = aging entries also stale after 10 unreinforced passes and perishable entries after 3, judged against whichever horizon hits first |
 | `host/capos.md` | host | capo routing table; every record embeds an absolute machine-local home path |
-| `host/harness.conf` | host | pins the root harness (`codex` or `claude`) regardless of environment |
+| `host/harness.conf` | host | pins the root harness (`codex`, `claude`, `grok`, or `cursor`) regardless of environment |
 | `host/upstream.conf` | host | path of the firstmate checkout for `/upstream-review`; absent = `../firstmate` |
 | `host/activation.conf` | host | per-home activation scope: `always`, `afk-only`, or `off`; absent = `always`, because a turn that ends depends on activation to start the next one; `bin/cs-activate.sh` owns the policy, and `bin/cs-home-seed.sh --help` owns capo seed and bootstrap convergence |
 | `host/herdr-plugin/herdr-plugin.toml` | host | generated manifest for this home's herdr push-event plugin, written and linked by `bin/cs-herdr-event-plugin.sh` (its header owns the mechanics). Machine-local by nature: herdr's plugin registry is global to the user and lives in `~/.config/herdr`. Never hand-edited; re-run `install` to regenerate |
@@ -52,7 +53,7 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 
 Symlink policy, established empirically (2026-08-06, tasks-axi 0.2.x):
 
-- `boss.md`, `boss-shared.md`, `learnings.md`, `memory-archive.md`, `projects.md`, `boards.md`, and the three portable `.conf` files are read-only to scripts and safe to symlink out to a dotfiles repository.
+- `boss.md`, `boss-shared.md`, `learnings.md`, `memory-archive.md`, `projects.md`, `boards.md`, `vault-pass-horizon.conf`, and the three portable `.conf` files are read-only to scripts and safe to symlink out to a dotfiles repository.
 - `backlog.md`, `done-archive.md`, `note-archive.md`, and `host/capos.md` are rewritten by rename (tasks-axi and the registry writers), which replaces a symlink with a regular file and silently forks the content; they must be real files, and the doctor fails when one is a symlink.
 - A `host/` entry whose symlink target resolves outside the home defeats the host tier (the `capos.md`-across-two-machines mistake); the doctor fails on it.
 
@@ -106,7 +107,7 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
   Each record arms `state/sweep-<project>.check.sh`, an ordinary hash-bound custom watcher check that reports column depth and never moves a card.
   `cs-board-watch.sh sync` converges the two in both directions and runs at every locked session start.
 - `state/sweep-<project>.board-seen` - the sweep poll's own memory: last reported Ready count, Inbox count, and epoch, one per line. It is what makes the poll silent on a column consigliere shrank and loud on one the boss grew. Deleted on arm and disarm; safe to delete by hand, which only costs one extra report.
-- `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `kind=` (ship|scout|capo), `harness=` (codex|claude, inherited from the root session), and `herdr_session=` (the task endpoint's Herdr session).
+- `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `kind=` (ship|scout|capo), `harness=` (codex|claude|grok|cursor, inherited from the root session), and `herdr_session=` (the task endpoint's Herdr session).
   No model or reasoning level is recorded, because the harness selects both.
   Parent-aware tasks also record `parent_task_id=`, `parent_home=`, `parent_state=`, `parent_pane=`, `parent_generation=`, `parent_herdr_session=`, and `endpoint_generation=`; `bin/cs-meta-lib.sh` validates this exact edge and `bin/cs-report.sh` routes only through it.
   A parent drains its durable inbox with `bin/cs-inbox.sh`; the command filters by `to_task_id`, validates the sender's recorded parent edge and endpoint generation, and creates a separate acknowledgement only after explicit handling.
@@ -223,6 +224,7 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_SESSION_START_STATUS_TAIL` | cs-session-start | `state/*.status` lines printed per task in the session-start digest; default 5; each line is capped by `bin/cs-line-cap-lib.sh` |
 | `CS_SESSION_START_QUEUED_LIMIT` | cs-session-start | plain queued backlog rows in the session-start digest; default 20; done rows are never listed |
 | `CS_SESSION_START_ACTIVE_LIMIT` | cs-session-start | in-flight, held, and blocked backlog rows per group in the session-start digest; default 40; each row is shown in full and any remainder is disclosed with the targeted follow-up that prints the rest; queued public-followup rows are outside this bound and always print in full |
+| `CS_CAPO_WAKE_STALL_SECS` | cs-watch | minimum age of the oldest valid wake-queue row in a registered capo home before the main watcher publishes one durable parent capo wake-loop stall notification; zero or invalid values use 60 |
 | `CS_PAUSE_RESURFACE_SECS` | cs-watch | declared external-wait recheck cadence |
 | `CS_EVENT_SPOOL_TICK` | cs-watch | how often the bounded event wait re-reads the spool, in seconds; default 0.5. The direct trade between blocked-escalation latency and the idle cost of a watcher with panes but no events - each tick is one `stat` plus the `sleep` |
 | `CS_EVENT_SPOOL_MAX_BYTES` | cs-herdr-event-lib | size cap for `state/.herdr-events`; default 262144. An append past the cap TRUNCATES the spool, so the edges in it are dropped rather than delivered; the watcher's level reconcile is what covers that gap |
@@ -255,15 +257,15 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_PROCEVENT_CLAIM_ROOT` | cs-procevent | machine-wide process-event claim root; default `${XDG_STATE_HOME:-~/.local/state}/consigliere/procevent-claims` |
 | `CS_PROCEVENT_MAX_OUTPUT_BYTES` | cs-procevent | cap on one captured result; default 1048576. Over the cap the result is truncated and still captured |
 | `CS_LOCK_HARNESS_RE` | cs-session-pid-lib | test-only harness ancestry override, honored by every caller of that lib (the home lock and the telemetry breadcrumb key) |
-| `CS_HARNESS_OVERRIDE` | cs-harness-lib | force the root harness (codex\|claude); highest precedence, test/escape seam |
+| `CS_HARNESS_OVERRIDE` | cs-harness-lib | force the root harness (codex\|claude\|grok\|cursor); highest precedence, test/escape seam |
 | `CS_CLAUDE_JSON`, `CS_CODEX_TOML` | cs-harness-lib | test/escape seam pointing a harness's folder-trust store at a throwaway file instead of `~/.claude.json` / `~/.codex/config.toml`; `tests/lib.sh` defaults both for every suite that drives `cs-spawn.sh`, and the two live lifecycle suites clear them to exercise the real store (docs/codex.md) |
 | `CS_TELEMETRY_DISABLE` | cs-telemetry-lib | test/escape seam, unset in production: `1` forces turn telemetry off whatever `host/telemetry.conf` says. `tests/lib.sh` pins it for every suite, because most suites resolve `DATA` to the real repo checkout and would otherwise append synthetic test turns to a developer's own dataset |
 | `CS_ROOT_OVERRIDE` `CS_STATE_OVERRIDE` | single scripts | test-only resolution overrides |
 
-Root harness resolution (`cs_harness_detect_root`): `CS_HARNESS_OVERRIDE` → `host/harness.conf` file → `CLAUDECODE=1` ⇒ claude → default codex. A soldier inherits the resolved value (persisted as `harness=` in meta).
+Root harness resolution (`cs_harness_detect_root`): `CS_HARNESS_OVERRIDE` → `host/harness.conf` file → cursor markers → `GROK_AGENT=1` ⇒ grok → `CLAUDECODE=1` ⇒ claude → default codex. A soldier inherits the resolved value (persisted as `harness=` in meta).
 
 
-Per-harness launch flags and hook facts: `docs/codex.md`, `docs/claude.md`.
+Per-harness launch flags and hook facts: `docs/codex.md`, `docs/claude.md`, `docs/grok.md`.
 Verified `lavish-axi` facts: `docs/lavish.md`.
 Supervision protocol: `docs/supervision.md`.
 Optional turn telemetry: `docs/telemetry.md`.

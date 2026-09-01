@@ -117,6 +117,33 @@ cs_procevent_source_lock_release() {
   cs_lock_release "$(cs_procevent_source_lock_path "$1")"
 }
 
+# Publish a source registration while the caller holds the source lock.
+cs_procevent_registration_publish_locked() {  # <state> <adapter> <source-id> <argv...>
+  local state=$1 adapter=$2 id=$3 reg dest tmp arg
+  shift 3
+  cs_procevent_adapter_valid "$adapter" || return 1
+  cs_procevent_source_id_valid "$id" || return 1
+  [ "$#" -ge 1 ] || return 1
+  for arg in "$@"; do
+    case "$arg" in *$'\n'*) return 1 ;; esac
+  done
+  reg=$(cs_procevent_registry_dir "$state")
+  (umask 077; mkdir -p "$reg") || return 1
+  [ -d "$reg" ] && [ ! -L "$reg" ] || return 1
+  dest="$reg/$id.source"
+  tmp=$(umask 077; mktemp "$reg/.source.XXXXXX") || return 1
+  if {
+    printf 'adapter=%s\n' "$adapter"
+    printf 'argc=%s\n' "$#"
+    printf 'argv:\n'
+    printf '%s\n' "$@"
+  } > "$tmp" && chmod 0600 "$tmp" && mv -f -- "$tmp" "$dest"; then
+    return 0
+  fi
+  rm -f -- "$tmp"
+  return 1
+}
+
 # One claim record: home, pid, token, pid-identity, registration dir,
 # registration file identity, retirement state. Exactly seven lines, all
 # required - consigliere ships one claim format, so an unreadable claim is a

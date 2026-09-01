@@ -4,8 +4,8 @@
 # never executed. Requires bin/cs-herdr-lib.sh to be sourced first
 # (cs_herdr_capture).
 #
-# HARNESSES: recognizes both agent prompt glyphs - codex `›` and claude `❯`
-# (distinct codepoints, so recognition is universal, no harness plumbing). codex
+# HARNESSES: recognizes agent prompt glyphs - codex `›`, claude `❯`, cursor `→`
+# (distinct codepoints, so recognition is universal, no harness plumbing).
 # fills an empty composer with a dim ghost suggestion (stripped below); claude's
 # empty composer (verified 2.1.218, 2026-07-24) is a bare `❯` between horizontal
 # rules with NO ghost text, so the ghost strip is a no-op there and harmless.
@@ -222,8 +222,8 @@ _cs_composer_trim() {  # <text>
 cs_composer_classify_content() {  # <bordered> <content>
   local bordered=$1 content=$2
   case "$content" in
-    '›'|'❯')
-      printf 'empty'; return 0 ;;          # agent glyph (codex ›, claude ❯): empty either way
+    '›'|'❯'|$'\xe2\x86\x92')
+      printf 'empty'; return 0 ;;          # agent glyph (codex ›, claude ❯, cursor →): empty either way
     '>'|'$'|'%'|'#')
       # Shell glyph: empty ONLY inside a composer box (the harness's own
       # prompt). Bare, it is a dead-shell prompt - never a safe target.
@@ -233,8 +233,8 @@ cs_composer_classify_content() {  # <bordered> <content>
   [ -n "$content" ] || { printf 'empty'; return 0; }
   # Strip one leading prompt glyph, then re-judge the remainder.
   case "$content" in
-    '› '*|'❯ '*|'> '*|'$ '*|'% '*|'# '*) content=${content#??} ;;
-    '›'*|'❯'*|'>'*|'$'*|'%'*|'#'*) content=${content#?} ;;
+    '› '*|'❯ '*| $'\xe2\x86\x92 '*|'> '*|'$ '*|'% '*|'# '*) content=${content#??} ;;
+    '›'*|'❯'*|$'\xe2\x86\x92'*|'>'*|'$'*|'%'*|'#'*) content=${content#?} ;;
   esac
   content=$(_cs_composer_trim "$content")
   [ -n "$content" ] || { printf 'empty'; return 0; }
@@ -271,6 +271,8 @@ cs_composer_state() {  # <pane_id>
       '│'*'│'|'┃'*'┃'|'|'*'|')
         bordered=1; raw_match=$line; found=1; proven=1 ;;
       '›'*)
+        bordered=0; raw_match=$line; found=1; proven=1 ;;
+      $'\xe2\x86\x92'*)
         bordered=0; raw_match=$line; found=1; proven=1 ;;
       '❯'*)
         bordered=0; raw_match=$line; found=1; proven=$prev_rule ;;

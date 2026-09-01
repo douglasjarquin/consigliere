@@ -38,6 +38,13 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CURSOR_MODE=0
+for arg in "$@"; do
+  case "$arg" in
+    --cursor) CURSOR_MODE=1 ;;
+    --cursor=*) CURSOR_MODE=1 ;;
+  esac
+done
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 cs_resolve_root
@@ -53,6 +60,8 @@ GRACE=${CS_GUARD_GRACE:-300}
 . "$SCRIPT_DIR/cs-meta-lib.sh"
 # shellcheck source=bin/cs-message-lib.sh
 . "$SCRIPT_DIR/cs-message-lib.sh"
+# shellcheck source=bin/cs-hook-host-lib.sh
+. "$SCRIPT_DIR/cs-hook-host-lib.sh"
 # Optional turn telemetry (off unless host/telemetry.conf enables it). The
 # library is pure function definitions with no side effects on source, and every
 # telemetry entry point swallows its own failures, so sourcing it cannot change
@@ -85,6 +94,38 @@ rm -f "$STATE/.checkpoint-turn" 2>/dev/null || true
 # Without jq we cannot safely read the loop-guard field, so we must never
 # block - fail open, not noisy.
 command -v jq >/dev/null 2>&1 || exit 0
+
+if [ "$CURSOR_MODE" -eq 0 ] && cs_hook_payload_is_foreign_host "$PAYLOAD"; then
+  exit 0
+fi
+
+if [ "$CURSOR_MODE" -eq 1 ]; then
+  # shellcheck source=bin/cs-wake-lib.sh
+  . "$SCRIPT_DIR/cs-wake-lib.sh"
+  # shellcheck source=bin/cs-monitor-lib.sh
+  . "$SCRIPT_DIR/cs-monitor-lib.sh"
+  WATCH="$SCRIPT_DIR/cs-watch.sh"
+  cs_supervision_status "$STATE" "$GRACE"
+  [ "$CS_SUP_SUPERVISED" -gt 0 ] || exit 0
+  if cs_watcher_healthy "$STATE" "$WATCH" "$GRACE" "$CS_HOME"; then
+    exit 0
+  fi
+  if cs_monitor_alive "$STATE" && [ "$CS_SUP_WATCHER_FRESH" = true ]; then
+    exit 0
+  fi
+  rule='━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+  GUARD_BODY=$(
+    printf '●%s\n' "$rule"
+    printf '●  THIS HOME CANNOT SUPERVISE WORK - DO NOT END THE TURN YET\n'
+    printf '●  %s, but no live watcher holds this home (last beat: %s).\n' \
+      "$(cs_supervision_work_desc)" "$CS_SUP_BEACON_DESC"
+    printf '●  Run bin/cs-watch-checkpoint.sh or ensure bin/cs-monitor.sh is alive, then end the turn.\n'
+    printf '●%s\n' "$rule"
+  )
+  cs_operational_input_construct turn-end-guard "$GUARD_BODY" GUARD_INPUT
+  printf '%s\n' "$GUARD_INPUT" >&2
+  exit 2
+fi
 
 STOP_HOOK_ACTIVE=$(printf '%s' "$PAYLOAD" | jq -r '.stop_hook_active // false' 2>/dev/null) || exit 0
 

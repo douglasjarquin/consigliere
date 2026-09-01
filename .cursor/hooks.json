@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "command": "\"$CURSOR_PROJECT_DIR\"/bin/cs-sessionstart-cursor.sh --source startup",
+        "timeout": 180
+      }
+    ],
+    "stop": [
+      {
+        "type": "command",
+        "command": "\"$CURSOR_PROJECT_DIR\"/bin/cs-turnend-guard-cursor.sh",
+        "timeout": 28800,
+        "loop_limit": 200
+      }
+    ]
+  }
+}

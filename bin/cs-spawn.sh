@@ -701,7 +701,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   R_TURNEND="$STATE/$ID.turn-ended"
   R_TELEMETRY=
   case "$R_HARNESS" in
-    claude) R_TELEMETRY=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" stdin) ;;
+    claude|grok) R_TELEMETRY=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" stdin) ;;
     codex) R_TELEMETRY=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" nostdin) ;;
   esac
   R_WORKER_HOOK=$(shell_quote "$SCRIPT_DIR/cs-worker-turnend.sh")
@@ -727,6 +727,13 @@ if [ "$RELAUNCH" -eq 1 ]; then
       echo "error: could not pre-trust codex worktree $R_WT_REAL; the pane is untouched" >&2
       exit 1
     }
+  elif [ "$R_HARNESS" = grok ]; then
+    cs_grok_turnend_arm "$R_TURNEND" "$STATE" "$ID" "$R_WT_REAL" "$R_TELEMETRY" || {
+      echo "error: could not arm grok turn-end wiring for $ID; the pane is untouched" >&2
+      exit 1
+    }
+  elif [ "$R_HARNESS" = cursor ]; then
+    cs_cursor_write_session_sidecar "$STATE" "$ID" "$R_WT_REAL"
   fi
 
   spawn_codegraph_prep "$R_PROJ_REAL" "$R_WT_REAL"
@@ -769,6 +776,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
       echo "error: turn-end path $R_TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash); no replacement agent was started" >&2
       exit 1
     }
+  elif [ "$R_HARNESS" = cursor ]; then
+    cs_harness_cursor_workspace_argv RESUME_ARGV "$R_WT_REAL" || {
+      echo "error: could not bind cursor workspace for $ID" >&2
+      exit 1
+    }
   fi
   # A short trigger timeout on purpose: its own result is not the resume
   # decision (the loop below is), so it must not block waiting for the
@@ -806,6 +818,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
     elif [ "$R_HARNESS" = codex ]; then
       cs_harness_codex_notify_argv COLD_ARGV "$R_TURNEND" "$R_TELEMETRY" || {
         echo "error: turn-end path $R_TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash); no cold launch was attempted" >&2
+        exit 1
+      }
+    elif [ "$R_HARNESS" = cursor ]; then
+      cs_harness_cursor_workspace_argv COLD_ARGV "$R_WT_REAL" || {
+        echo "error: could not bind cursor workspace for $ID" >&2
         exit 1
       }
     fi
@@ -1107,7 +1124,7 @@ sq_brief=$(shell_quote "$BRIEF")
 TELEMETRY_HOOK=
 if [ "$HEADLESS" -eq 0 ]; then
   case "$HARNESS" in
-    claude) TELEMETRY_HOOK=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" stdin) ;;
+    claude|grok) TELEMETRY_HOOK=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" stdin) ;;
     codex) TELEMETRY_HOOK=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" nostdin) ;;
   esac
   WORKER_HOOK=$(shell_quote "$SCRIPT_DIR/cs-worker-turnend.sh")
@@ -1121,7 +1138,7 @@ if [ "$HEADLESS" -eq 1 ]; then
   # A headless process has no composer or agent_status lifecycle, so it stays
   # on the shell-string mechanism permanently; `agent start` does not apply.
   sq_status=$(shell_quote "$STATE/$ID.status")
-  LAUNCH=$(cs_harness_scout_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_status")
+  LAUNCH=$(cs_harness_scout_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_status" "$WT_REAL")
   cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
   # No launch verification follows, deliberately. `pane run` hands the line to
   # the pane's SHELL and reports success whether or not the shell was ready to
@@ -1149,6 +1166,13 @@ else
     # either. A codex parked there takes no turn until a human answers, so an
     # unattended soldier needs the dialog gone before launch, not escalated after.
     cs_harness_codex_trust_dir "$WT_REAL" || abort_task "could not pre-trust codex worktree $WT_REAL"
+  elif [ "$HARNESS" = grok ]; then
+    cs_grok_turnend_arm "$TURNEND" "$STATE" "$ID" "$WT_REAL" "$TELEMETRY_HOOK" ||
+      abort_task "could not arm grok turn-end wiring for $ID"
+  elif [ "$HARNESS" = cursor ]; then
+    cs_cursor_resolve_binary >/dev/null ||
+      abort_task "cursor-agent is not installed or not reachable"
+    cs_cursor_write_session_sidecar "$STATE" "$ID" "$WT_REAL"
   fi
   spawn_codegraph_prep "$PROJ_ABS" "$WT_REAL"
 
@@ -1171,6 +1195,9 @@ else
   elif [ "$HARNESS" = codex ]; then
     cs_harness_codex_notify_argv AGENT_ARGV "$TURNEND" "$TELEMETRY_HOOK" ||
       abort_task "turn-end path $TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash)"
+  elif [ "$HARNESS" = cursor ]; then
+    cs_harness_cursor_workspace_argv AGENT_ARGV "$WT_REAL" ||
+      abort_task "could not bind cursor workspace for $ID"
   fi
 
   # Verify the launch actually started an agent. Native `agent start` waits

@@ -1,8 +1,8 @@
 # shellcheck shell=bash
 # cs-harness-lib.sh - the single owner of every per-harness fact.
 #
-# Consigliere drives soldiers on one of two harnesses: `codex` (the default,
-# home/personal/business) and `claude` (Claude Code CLI, work). A root session
+# Consigliere drives soldiers on codex (the default), claude (Claude Code CLI),
+# grok (Grok Build TUI), or cursor (Cursor Agent CLI). A root session
 # spawns soldiers on its OWN harness; the resolved value is persisted per-soldier
 # as `harness=` in state/<id>.meta and read back by the watcher/send/crew-state.
 #
@@ -13,6 +13,11 @@
 # byte-identical behavior; claude is purely additive.
 #
 # Usage: . bin/cs-harness-lib.sh
+#
+# shellcheck source=bin/cs-cursor-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cs-cursor-lib.sh"
+# shellcheck source=bin/cs-grok-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cs-grok-lib.sh"
 #
 # Verified live 2026-07-24 (claude 2.1.218): `claude --settings <file>
 # --dangerously-skip-permissions` honors a Stop hook with no trust prompt; a
@@ -31,7 +36,7 @@ cs_harness_shell_quote() {
 # cs_harness_valid <h> - true if <h> is a supported harness name.
 cs_harness_valid() {
   case "${1:-}" in
-    codex|claude) return 0 ;;
+    codex|claude|cursor|grok) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -41,6 +46,8 @@ cs_harness_binary() {
   case "$1" in
     codex) printf 'codex\n' ;;
     claude) printf 'claude\n' ;;
+    grok) printf 'grok\n' ;;
+    cursor) cs_cursor_resolve_binary ;;
     *) return 1 ;;
   esac
 }
@@ -59,9 +66,11 @@ cs_harness_host_dir() {
 
 # cs_harness_detect_root - resolve the ROOT session's harness.
 # Precedence: CS_HARNESS_OVERRIDE (test/escape seam) -> host/harness.conf ->
-# CLAUDECODE=1 (a Claude Code session) -> CS_HARNESS_DEFAULT (codex).
+# CURSOR_AGENT / CURSOR_INVOKED_AS (Cursor, before CLAUDECODE because cursor
+# does not clear an inherited CLAUDECODE) -> GROK_AGENT=1 -> CLAUDECODE=1 ->
+# default (codex).
 cs_harness_detect_root() {
-  local override config_dir file value
+  local override config_dir file value pid comm argv0
   override=${CS_HARNESS_OVERRIDE:-}
   if [ -n "$override" ]; then
     cs_harness_valid "$override" && { printf '%s\n' "$override"; return 0; }
@@ -71,6 +80,18 @@ cs_harness_detect_root() {
   if [ -f "$file" ]; then
     value=$(tr -d '[:space:]' < "$file" 2>/dev/null || true)
     cs_harness_valid "$value" && { printf '%s\n' "$value"; return 0; }
+  fi
+  if [ "${CURSOR_AGENT:-}" = 1 ]; then
+    printf 'cursor\n'
+    return 0
+  fi
+  if [ "${CURSOR_INVOKED_AS:-}" = cursor-agent ]; then
+    printf 'cursor\n'
+    return 0
+  fi
+  if [ "${GROK_AGENT:-}" = 1 ]; then
+    printf 'grok\n'
+    return 0
   fi
   if [ "${CLAUDECODE:-}" = 1 ]; then
     printf 'claude\n'
@@ -90,6 +111,12 @@ cs_harness_permission_mode_valid() {
     claude)
       case "$mode" in
         auto|acceptEdits|bypassPermissions) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    grok)
+      case "$mode" in
+        default|auto|acceptEdits|bypassPermissions) return 0 ;;
         *) return 1 ;;
       esac
       ;;
@@ -115,7 +142,7 @@ cs_harness_permission_mode() {
       return 1
     fi
     case "$key" in
-      claude) ;;
+      claude|grok) ;;
       codex)
         printf 'cs-harness: config/permission-mode.conf does not configure codex; its autonomy flag is fixed\n' >&2
         return 1
@@ -126,7 +153,17 @@ cs_harness_permission_mode() {
         ;;
     esac
     if ! cs_harness_permission_mode_valid "$key" "$mode"; then
-      printf 'cs-harness: "%s" is not a usable %s launch permission mode (auto|acceptEdits|bypassPermissions)\n' "$mode" "$key" >&2
+      case "$key" in
+        claude)
+          printf 'cs-harness: "%s" is not a usable %s launch permission mode (auto|acceptEdits|bypassPermissions)\n' "$mode" "$key" >&2
+          ;;
+        grok)
+          printf 'cs-harness: "%s" is not a usable %s launch permission mode (default|auto|acceptEdits|bypassPermissions)\n' "$mode" "$key" >&2
+          ;;
+        *)
+          printf 'cs-harness: "%s" is not a usable %s launch permission mode\n' "$mode" "$key" >&2
+          ;;
+      esac
       return 1
     fi
     if [ "$key" = "$h" ]; then
@@ -156,6 +193,8 @@ cs_harness_autonomy_flag() {
   case "$h" in
     codex) printf -- '--dangerously-bypass-approvals-and-sandbox' ;;
     claude) printf -- '--dangerously-skip-permissions' ;;
+    grok) printf -- '--always-approve' ;;
+    cursor) printf -- '--trust --yolo' ;;
     *) return 1 ;;
   esac
 }
@@ -178,6 +217,8 @@ cs_harness_autonomy_argv() {
   case "$h" in
     codex) _cs_autonomy_argv_out+=(--dangerously-bypass-approvals-and-sandbox) ;;
     claude) _cs_autonomy_argv_out+=(--dangerously-skip-permissions) ;;
+    grok) _cs_autonomy_argv_out+=(--always-approve) ;;
+    cursor) _cs_autonomy_argv_out+=(--trust --yolo) ;;
     *) return 1 ;;
   esac
 }
@@ -190,6 +231,8 @@ cs_harness_resume_argv() {
   case "$2" in
     codex) _cs_resume_argv_out+=(resume --last) ;;
     claude) _cs_resume_argv_out+=(--continue) ;;
+    grok) _cs_resume_argv_out+=(--continue) ;;
+    cursor) _cs_resume_argv_out+=(--continue) ;;
     *) return 1 ;;
   esac
 }
@@ -540,12 +583,18 @@ PY
 # cs_harness_claude_json_path already resolves folder-trust against, so trust
 # and credentials cannot land in two different config directories.
 #
+# cursor: clear foreign harness markers inherited from the pane shell before
+# launching cursor-agent; cursor does not clear an inherited CLAUDECODE.
+#
 # codex: nothing. Its credential store is not environment-selected here.
 cs_harness_launch_env() {
   case "$1" in
     claude)
       [ -n "${CLAUDE_CONFIG_DIR:-}" ] || return 0
       printf 'CLAUDE_CONFIG_DIR=%s ' "$(cs_harness_shell_quote "$CLAUDE_CONFIG_DIR")"
+      ;;
+    cursor)
+      printf 'env -u CLAUDECODE -u GROK_AGENT -u PI_CODING_AGENT -u CURSOR_INVOKED_AS '
       ;;
     *) return 0 ;;
   esac
@@ -555,18 +604,24 @@ cs_harness_launch_env() {
 # Fire-and-forget headless scout: process exit IS the turn end; the launch line
 # appends the terminal done/failed status event.
 cs_harness_scout_launch() {
-  local h=$1 sq_op=$2 sq_brief=$3 sq_status=$4
-  local auto bin env
+  local h=$1 sq_op=$2 sq_brief=$3 sq_status=$4 wt=${5:-}
+  local auto bin env ws
   auto=$(cs_harness_autonomy_flag "$h") || return 1
   env=$(cs_harness_launch_env "$h")
   case "$h" in
     codex) bin='codex exec' ;;
     claude) bin='claude -p' ;;
+    grok) bin='grok -p' ;;
+    cursor) bin='cursor-agent -p' ;;
     *) return 1 ;;
   esac
+  ws=
+  if [ "$h" = cursor ] && [ -n "$wt" ]; then
+    ws=" --workspace $(cs_harness_shell_quote "$wt")"
+  fi
   # shellcheck disable=SC2016
-  printf 'if %s%s %s "$(%s encode launch-brief < %s)"; then echo '\''done: headless scout finished; read the report'\'' >> %s; else echo "failed: %s exited $?" >> %s; fi' \
-    "$env" "$bin" "$auto" "$sq_op" "$sq_brief" "$sq_status" "$bin" "$sq_status"
+  printf 'if %s%s %s%s "$(%s encode launch-brief < %s)"; then echo '\''done: headless scout finished; read the report'\'' >> %s; else echo "failed: %s exited $?" >> %s; fi' \
+    "$env" "$bin" "$auto" "$ws" "$sq_op" "$sq_brief" "$sq_status" "$bin" "$sq_status"
 }
 
 # cs_harness_busy_re <h> - the rendered-banner busy signature used ONLY to
@@ -575,6 +630,8 @@ cs_harness_scout_launch() {
 cs_harness_busy_re() {
   case "$1" in
     codex|claude) printf '%s\n' '[Ee]sc to interrupt' ;;
+    grok) printf '%s\n' '[Cc]trl\+c.*cancel' ;;
+    cursor) printf '%s\n' 'ctrl\+c to stop' ;;
     *) return 1 ;;
   esac
 }
@@ -591,6 +648,8 @@ cs_harness_trust_prompt_re() {
   case "$1" in
     codex) printf '%s\n' 'Do you trust the contents of this directory\?' ;;
     claude) printf '%s\n' 'Is this a project you created or one you trust\?' ;;
+    grok) printf '%s\n' 'Run Grok Build in a project directory\?' ;;
+    cursor) printf '%s\n' 'Do you trust the authors of the files in this folder\?' ;;
     *) return 1 ;;
   esac
 }
@@ -599,7 +658,7 @@ cs_harness_trust_prompt_re() {
 cs_harness_skill_prefix() {
   case "$1" in
     codex) printf '$\n' ;;
-    claude) printf '/\n' ;;
+    claude|grok|cursor) printf '/\n' ;;
     *) return 1 ;;
   esac
 }
@@ -613,7 +672,7 @@ cs_harness_skill_prefix() {
 # invocation and bin/cs-control-lib.sh for the exit command.
 cs_harness_composer_command_settle() {
   case "$1" in
-    codex) printf '1\n' ;;
+    codex|grok|cursor) printf '1\n' ;;
     claude) printf '0\n' ;;
     *) return 1 ;;
   esac
@@ -628,6 +687,8 @@ cs_harness_composer_command_settle() {
 cs_harness_interrupt_key() {
   case "$1" in
     codex|claude) printf 'esc\n' ;;
+    grok) printf 'C-c\n' ;;
+    cursor) printf 'esc\n' ;;
     *) return 1 ;;
   esac
 }
@@ -639,7 +700,7 @@ cs_harness_interrupt_key() {
 cs_harness_exit_command() {
   case "$1" in
     codex) printf '/quit\n' ;;
-    claude) printf '/exit\n' ;;
+    claude|grok|cursor) printf '/exit\n' ;;
     *) return 1 ;;
   esac
 }
@@ -649,7 +710,7 @@ cs_harness_exit_command() {
 # symlink to AGENTS.md).
 cs_harness_instruction_file() {
   case "$1" in
-    codex) printf 'AGENTS.md\n' ;;
+    codex|grok|cursor) printf 'AGENTS.md\n' ;;
     claude) printf 'CLAUDE.md\n' ;;
     *) return 1 ;;
   esac
@@ -663,7 +724,8 @@ cs_harness_instruction_file() {
 cs_harness_plan_skill() {
   case "$1" in
     codex) printf 'ulw-plan\n' ;;
-    claude) printf 'omo:planing-prometheustic\n' ;;
+    claude|grok) printf 'omo:planing-prometheustic\n' ;;
+    cursor) printf 'ulw-plan\n' ;;
     *) return 1 ;;
   esac
 }
@@ -675,7 +737,8 @@ cs_harness_plan_skill() {
 cs_harness_start_work_skill() {
   case "$1" in
     codex) printf 'start-work\n' ;;
-    claude) printf 'omo:start-work\n' ;;
+    claude|grok) printf 'omo:start-work\n' ;;
+    cursor) printf 'start-work\n' ;;
     *) return 1 ;;
   esac
 }
@@ -693,7 +756,19 @@ cs_harness_omo_installed() {
   case "$h" in
     codex) base=${CODEX_HOME:-$HOME/.codex} ;;
     claude) base=${CLAUDE_CONFIG_DIR:-$HOME/.claude} ;;
+    grok) base=$(cs_grok_home) ;;
+    cursor) return 1 ;;
     *) return 1 ;;
   esac
   [ -d "$base/plugins/cache/sisyphuslabs/omo" ]
+}
+
+# cs_harness_cursor_workspace_argv <out-array-name> <abs-worktree>
+# Append cursor-agent's required workspace binding. Never pass -w/--worktree:
+# cursor allocates a second worktree under ~/.cursor/worktrees.
+cs_harness_cursor_workspace_argv() {
+  local -n _cs_cursor_ws_out=$1
+  local wt=$2
+  [ -n "$wt" ] || return 1
+  _cs_cursor_ws_out+=(--workspace "$wt")
 }

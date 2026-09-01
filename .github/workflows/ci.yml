@@ -70,8 +70,15 @@ jobs:
           set -eu
           bin/cs-install-shellcheck.sh "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-      # Single owner of the lint definition (file set + config + version). Do not
-      # re-spell the shellcheck command here; keep CI and local on this script.
+      - name: Install pinned actionlint
+        run: |
+          set -eu
+          bin/cs-install-actionlint.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # Single owner of the lint definition (shell file set, config, version,
+      # and GitHub workflow lint). Do not re-spell the checks here; keep CI
+      # and local on this script so a self-broken ci.yml still fails locally
+      # before merge.
       - run: bin/cs-lint.sh
 
   # Prove that portable + real-herdr + live-codex partition tests/*.test.sh with

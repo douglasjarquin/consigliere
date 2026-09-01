@@ -126,6 +126,21 @@ esac
 SH
 chmod +x "$FAKEBIN/herdr"
 
+cat > "$FAKEBIN/cursor-agent" <<'SH'
+#!/usr/bin/env bash
+echo "Start the Cursor Agent"
+SH
+chmod +x "$FAKEBIN/cursor-agent"
+
+cat > "$FAKEBIN/grok" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --help) printf 'Grok Build TUI\nUsage: grok [OPTIONS]\n'; exit 0 ;;
+esac
+exit 0
+SH
+chmod +x "$FAKEBIN/grok"
+
 HOME_DIR="$TMP/home"
 mkdir -p "$HOME_DIR/data" "$HOME_DIR/state" "$HOME_DIR/config"
 printf -- '- project [local-only] - fixture\n' > "$HOME_DIR/config/projects.md"
@@ -155,7 +170,7 @@ spawn_one() {
   # env pre-step these launch assertions do not expect.
   env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE="$harness" CLAUDE_CONFIG_DIR= \
     CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
-    CS_CLAUDE_JSON="$TMP/claude.json" \
+    CS_CLAUDE_JSON="$TMP/claude.json" GROK_HOME="$TMP/grok-home-$id" \
     CS_FAKE_SPAWN_WORKTREE="$wt" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-$id" \
     CS_FAKE_SPAWN_PANE_RUN="$TMP/panerun-$id" \
     CS_FAKE_SPAWN_METADATA="$TMP/metadata-$id" \
@@ -392,6 +407,34 @@ assert_contains "$(cat "$TMP/panerun-t-claude")" \
   "export CS_ROOT_OVERRIDE='$ROOT' CS_HOME='$HOME_DIR' CS_DATA_OVERRIDE='$HOME_DIR/data' CS_STATE_OVERRIDE='$HOME_DIR/state' CS_TASK_ID='t-claude'" \
   "a claude soldier receives its explicit home and task identity before agent start"
 pass "claude root: harness=claude, --settings launch, settings file written"
+
+# --- grok root: global Stop hook, harness=grok, pointer + registry -----------
+launch=$(spawn_one grok t-grok --mode made --yolo off)
+[ "$(cs_meta_get "$HOME_DIR/state/t-grok.meta" harness)" = grok ] || fail "grok meta harness"
+assert_contains "$launch" "kind=grok" "grok root launches grok"
+assert_contains "$launch" "--always-approve" "grok root autonomy flag"
+assert_not_contains "$launch" 'notify=' "grok root does not use codex notify"
+assert_not_contains "$launch" '--settings' "grok root does not use claude settings"
+assert_present "$TMP/grok-home-t-grok/hooks/cs-turn-end.sh" "grok spawn installs global hook script"
+assert_present "$TMP/grok-home-t-grok/hooks/cs-turn-end.json" "grok spawn installs global hook json"
+assert_present "$TMP/wt-t-grok/.cs-grok-turnend" "grok spawn writes worktree pointer"
+assert_present "$HOME_DIR/state/t-grok.grok-turnend-token" "grok spawn writes state token"
+pass "grok root: harness=grok, global Stop hook wired, no inline notify/settings"
+
+# --- cursor root: workspace launch, sidecar, no inline turn-end wiring --------
+launch=$(spawn_one cursor t-cursor --mode made --yolo off)
+[ "$(cs_meta_get "$HOME_DIR/state/t-cursor.meta" harness)" = cursor ] || fail "cursor meta harness"
+assert_contains "$launch" "kind=cursor" "cursor root launches cursor"
+assert_contains "$launch" "--trust" "cursor root trust flag"
+assert_contains "$launch" "--yolo" "cursor root yolo flag"
+assert_contains "$launch" "--workspace" "cursor root workspace flag"
+assert_contains "$launch" "$TMP/wt-t-cursor" "cursor workspace is the isolated worktree"
+assert_not_contains "$launch" 'notify=' "cursor root does not use codex notify"
+assert_not_contains "$launch" '--settings' "cursor root does not use claude settings"
+assert_present "$HOME_DIR/state/t-cursor.cursor-session" "cursor spawn writes session sidecar"
+assert_contains "$(cat "$TMP/panerun-t-cursor")" 'env -u CLAUDECODE' \
+  "cursor spawn clears inherited foreign harness markers"
+pass "cursor root: harness=cursor, workspace launch, session sidecar, no inline turn-end"
 
 # --- a credential-store split reaches the pane before the agent starts -------
 # The pane's shell is spawned by the herdr daemon and does NOT inherit

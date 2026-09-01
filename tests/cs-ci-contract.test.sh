@@ -85,6 +85,16 @@ assert_no_grep 'REQUIRED_SHELLCHECK=' "$ROOT/bin/cs-install-shellcheck.sh" \
   "cs-install-shellcheck.sh must not re-declare the ShellCheck version"
 pass "ShellCheck version has one owner (cs-lint.sh)"
 
+# actionlint version: cs-lint-workflows.sh owns it; the installer reads it.
+al_version=$("$ROOT/bin/cs-lint-workflows.sh" --required-version)
+[ -n "$al_version" ] || fail "cs-lint-workflows.sh --required-version must print a version"
+# shellcheck disable=SC2016
+assert_grep '"$ROOT/bin/cs-lint-workflows.sh" --required-version' "$ROOT/bin/cs-install-actionlint.sh" \
+  "cs-install-actionlint.sh must read the version from cs-lint-workflows.sh"
+assert_no_grep 'REQUIRED_ACTIONLINT=' "$ROOT/bin/cs-install-actionlint.sh" \
+  "cs-install-actionlint.sh must not re-declare the actionlint version"
+pass "actionlint version has one owner (cs-lint-workflows.sh)"
+
 # Herdr protocol floor: cs-herdr-lib.sh owns it; the installer reads it.
 floor=$(awk -F= '/^CS_HERDR_MIN_PROTOCOL=/ { gsub(/[^0-9]/, "", $2); print $2; exit }' \
   "$ROOT/bin/cs-herdr-lib.sh")
@@ -111,6 +121,7 @@ pass "Herdr version pinned and protocol floor has one owner (cs-herdr-lib.sh)"
 for entry in \
   'bin/cs-lint.sh' \
   'bin/cs-install-shellcheck.sh' \
+  'bin/cs-install-actionlint.sh' \
   'bin/cs-install-herdr.sh' \
   'bin/cs-herdr-ci-cleanup.sh' \
   'bin/cs-ci-lanes.sh' \

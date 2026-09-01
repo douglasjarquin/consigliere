@@ -302,6 +302,9 @@ if [ "$DETECT_ONLY" != 1 ]; then
     capo_out=$("$SCRIPT_DIR/cs-home-seed.sh" --sweep 2>&1) || true
     [ -z "$capo_out" ] || printf '%s\n' "$capo_out"
   fi
+  if local_phase && [ -x "$SCRIPT_DIR/cs-backlog-handoff.sh" ]; then
+    "$SCRIPT_DIR/cs-backlog-handoff.sh" --resume-pending >/dev/null 2>&1 || true
+  fi
 fi
 
 exit 0

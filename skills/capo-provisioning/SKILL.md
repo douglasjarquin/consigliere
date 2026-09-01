@@ -140,6 +140,7 @@ It accepts in-scope `## Queued` entries only and refuses `## In flight` and hist
 It refuses a selected item with a single-space or tab-indented continuation rather than risk leaving content orphaned.
 It is idempotent; an item already in the capo backlog is skipped.
 It refuses any destination that is not a genuine seeded consigliere home with safe operational directories and a matching `.cs-capo-home` marker, so a move can never land in a project.
+After a successful move it durably wakes the capo's recorded receiver when one exists; if the wake fails, rerun the same handoff or `bin/cs-backlog-handoff.sh --resume-pending` to retry delivery while the moved backlog stays durable.
 Do not hand off `local-only` items.
 
 ## Recovery

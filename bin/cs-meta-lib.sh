@@ -22,15 +22,95 @@ cs_meta_set() { # <meta-file> <key> <value>  - append; last occurrence wins
   printf '%s=%s\n' "$2" "$3" >> "$1"
 }
 
+CS_META_ERROR=
+
+cs_meta_canonical_existing() {
+  LC_ALL=C perl -MCwd=realpath -e '
+    my $resolved = realpath($ARGV[0]);
+    exit 1 unless defined $resolved;
+    print $resolved;
+  ' "$1" 2>/dev/null
+}
+
+cs_meta_record_parent_authorized() {
+  local path=$1 label=$2 root=$3 parent base parent_resolved expected_path
+  local path_resolved root_resolved final_matches=1
+  parent=${path%/*}
+  [ "$parent" != "$path" ] || parent=.
+  base=${path##*/}
+  root_resolved=$(cs_meta_canonical_existing "$root") || {
+    CS_META_ERROR="$label authorized directory cannot be resolved at $root"
+    return 1
+  }
+  [ -d "$root_resolved" ] || {
+    CS_META_ERROR="$label authorized directory is not a directory at $root"
+    return 1
+  }
+  parent_resolved=$(cs_meta_canonical_existing "$parent") || {
+    CS_META_ERROR="$label parent directory cannot be resolved at $path"
+    return 1
+  }
+  expected_path=${parent_resolved%/}/$base
+  if [ -e "$path" ] || [ -L "$path" ]; then
+    path_resolved=$(cs_meta_canonical_existing "$path") || {
+      CS_META_ERROR="$label cannot be resolved at $path"
+      return 1
+    }
+    [ "$path_resolved" = "$expected_path" ] || final_matches=0
+  else
+    path_resolved=$expected_path
+  fi
+  case "$path_resolved" in
+    "$root_resolved"/*) ;;
+    *)
+      CS_META_ERROR="$label resolves outside its authorized directory at $path"
+      return 1
+      ;;
+  esac
+  if [ "$final_matches" != 1 ]; then
+    CS_META_ERROR="$label resolves through a different final path at $path"
+    return 1
+  fi
+}
+
+cs_meta_record_present() {
+  local path=$1 label=${2:-record} root=$3
+  cs_meta_record_parent_authorized "$path" "$label" "$root" || return 1
+  if [ ! -f "$path" ]; then
+    CS_META_ERROR="$label is not a regular file at $path"
+    return 1
+  fi
+  return 0
+}
+
+cs_meta_publish_contained() {
+  local source=$1 target=$2 label=${3:-record} root=$4
+  cs_meta_record_present "$source" "$label staged record" "$root" || return 1
+  cs_meta_record_parent_authorized "$target" "$label target" "$root" || return 1
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    cs_meta_record_present "$target" "$label target" "$root" || return 1
+  fi
+  if ! mv -f "$source" "$target" 2>/dev/null || ! cs_meta_record_present "$target" "$label" "$root"; then
+    [ -n "$CS_META_ERROR" ] \
+      || CS_META_ERROR="$label publication failed at $target"
+    return 1
+  fi
+  return 0
+}
+
 cs_meta_write() { # <meta-file> <key=val>...  - atomic full write
-  local file=$1 tmp kv
+  local file=$1 tmp kv root
   shift
+  root=${file%/*}
   tmp="$file.tmp.$$"
   : > "$tmp"
   for kv in "$@"; do
     printf '%s\n' "$kv" >> "$tmp"
   done
-  mv "$tmp" "$file"
+  cs_meta_publish_contained "$tmp" "$file" "task record" "$root" || {
+    rm -f "$tmp"
+    return 1
+  }
 }
 
 cs_meta_list_ids() { # <state-dir> -> task ids with meta files, one per line

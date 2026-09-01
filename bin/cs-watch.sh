@@ -105,6 +105,7 @@ fi
 WATCH_LOCK="$STATE/.watch.lock"
 WATCH_PATH="$SCRIPT_DIR/cs-watch.sh"
 WATCHER_STALE_GRACE=${CS_WATCHER_STALE_GRACE:-${CS_GUARD_GRACE:-300}}
+CAPO_WAKE_STALL_SECS=${CS_CAPO_WAKE_STALL_SECS:-60}
 # The singleton-lock acquisition, EXIT trap, and the blocking supervision loop
 # all live below the source guard at the very bottom of this file (see "Main
 # entry"). Sourcing this file for unit tests therefore loads the functions -
@@ -530,6 +531,74 @@ surface_nonterminal_stale() {  # <pane> <hash>
     rm -f "$STATE/.paused-$key" "$STATE/.paused-rechecked-$key" "$STATE/.paused-resurfaced-$key"
   fi
   wake "stale: $win"
+}
+
+capo_oldest_queue_row() {  # <queue-path>
+  local queue=$1
+  [ -f "$queue" ] && [ ! -L "$queue" ] || return 0
+  awk -F '\t' '
+    NF >= 5 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {
+      if (!found || $2 < seq) {
+        found = 1
+        seq = $2
+        row = $0
+      }
+    }
+    END { if (found) print row }
+  ' "$queue" 2>/dev/null || true
+}
+
+capo_wake_stall_tick() {
+  local now=$(( $(date +%s) )) threshold=$CAPO_WAKE_STALL_SECS
+  local meta task kind home queue row epoch seq row_key marker receipt receipt_dir notify_key queued age reason
+  case "$threshold" in ''|*[!0-9]*|0) threshold=60 ;; esac
+  for meta in "$STATE"/*.meta; do
+    [ -e "$meta" ] || continue
+    kind=$(cs_meta_get "$meta" kind 2>/dev/null || true)
+    [ "$kind" = capo ] || continue
+    task=${meta##*/}
+    task=${task%.meta}
+    case "$task" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
+    home=$(cs_meta_get "$meta" home 2>/dev/null || true)
+    [ -n "$home" ] || continue
+    [ -f "$home/.cs-capo-home" ] && [ ! -L "$home/.cs-capo-home" ] || continue
+    [ "$(cat "$home/.cs-capo-home" 2>/dev/null || true)" = "$task" ] || continue
+    queue="$home/state/.wake-queue"
+    row=$(capo_oldest_queue_row "$queue")
+    marker="$STATE/.capo-wake-stall-$task"
+    receipt_dir="$STATE/.capo-wake-stall-receipts/$task"
+    if [ -z "$row" ]; then
+      rm -f "$marker"
+      if [ -e "$receipt_dir" ] || [ -L "$receipt_dir" ]; then
+        [ -d "$receipt_dir" ] && [ ! -L "$receipt_dir" ] || return 1
+        rm -rf -- "$receipt_dir" || return 1
+      fi
+      continue
+    fi
+    IFS=$(printf '\t') read -r epoch seq _row_kind _row_key _row_payload <<EOF
+$row
+EOF
+    case "$epoch" in ''|*[!0-9]*) continue ;; esac
+    case "$seq" in ''|*[!0-9]*) continue ;; esac
+    age=$((now - epoch))
+    [ "$age" -ge "$threshold" ] || continue
+    row_key="$epoch-$seq"
+    receipt="$receipt_dir/$row_key"
+    if [ -e "$marker" ] || [ -L "$marker" ]; then
+      [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+    fi
+    [ "$(cat "$marker" 2>/dev/null || true)" = "$row_key" ] && continue
+    [ "$(cat "$receipt" 2>/dev/null || true)" = "$row_key" ] && continue
+    notify_key="capo-wake-loop-$task-$row_key"
+    reason="check: capo wake-loop stalled: capo=$task row=$seq age=${age}s"
+    queued=$(cs_wake_queued_keys check)
+    if ! printf '%s\n' "$queued" | grep -Fx "$notify_key" >/dev/null 2>&1; then
+      cs_wake_append check "$notify_key" "$reason" || return 1
+    fi
+    cs_wake_capo_stall_receipt_write "$task" "$row_key" || return 1
+    cs_wake_capo_stall_marker_write "$task" "$row_key" || return 1
+    wake "$reason"
+  done
 }
 
 # Check and heartbeat cadence must survive actionable exits and restarts: the
@@ -1207,6 +1276,11 @@ while :; do
     cs_pending_reply_tick "$STATE" || true
   fi
 
+  capo_wake_stall_tick || {
+    echo "watcher: capo wake-loop observation failed" >&2
+    exit 1
+  }
+
   # Armed blocking sources (bin/cs-procevent.sh). Liveness repair only: it
   # republishes captured results that have no durable acknowledgement yet and
   # restarts a source with no live owner. It never polls a source and never
@@ -1436,7 +1510,10 @@ EOF
     # otherwise reach is unreachable by construction. A capo's pane is a
     # supervisor's, not a supervised turn-taker's, so it is exempt.
     if [ "$kind" != capo ] && pane_is_busy "$bs" "$tail40"; then
-      if bage=$(busy_turn_age "$task") && [ "$bage" -ge "$BUSY_TURN_MAX_SECS" ]; then
+      if status_is_paused_or_boss_held "$(last_status_line "$STATE/$task.status")"; then
+        rm -f "$btf"
+        handle_paused_stale "$w" "$task" "$h"
+      elif bage=$(busy_turn_age "$task") && [ "$bage" -ge "$BUSY_TURN_MAX_SECS" ]; then
         wedge_timer_check "$w" "$btf" "busy ${bage}s with no completed turn" "$ewf"
       else
         # Within the bound, or unreadable: no wedge in progress.

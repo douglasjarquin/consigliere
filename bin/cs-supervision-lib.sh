@@ -87,6 +87,13 @@ cs_supervision_unhealthy() {
   [ "$CS_SUP_SUPERVISED" -gt 0 ] && [ "$CS_SUP_WATCHER_FRESH" = false ]
 }
 
+# cs_supervision_needed <state-dir> [grace-seconds]
+# Exit 0 (true) exactly when the home has work needing supervision.
+cs_supervision_needed() {
+  cs_supervision_status "$@"
+  [ "$CS_SUP_SUPERVISED" -gt 0 ]
+}
+
 # cs_supervision_work_desc
 # One human phrase naming what is riding on the watcher, for a guard banner.
 # Read after cs_supervision_status.
