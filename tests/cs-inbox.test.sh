@@ -178,6 +178,7 @@ if "$INBOX" --ack message-current >/dev/null 2>&1; then
 fi
 pass "acknowledgement is explicit, scoped, and idempotent"
 
+printf '%s\n' 'current-generation' > "$STATE/.home-endpoint-generation"
 {
   printf '%s\n' 'parent_task_id=root'
   printf '%s\n' 'parent_home='"$HOME_DIR"

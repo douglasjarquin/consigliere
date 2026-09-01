@@ -677,6 +677,15 @@ else
   fi
 fi
 
+# Refresh root's endpoint identity before message recovery can use it.
+if [ "$READ_ONLY" -eq 0 ] && [ -n "${HERDR_PANE_ID:-}" ]; then
+  ROOT_ENDPOINT_GENERATION="root-$(date +%s)-$RANDOM"
+  ROOT_ENDPOINT_TMP="$STATE/.home-endpoint-generation.tmp.$$"
+  printf '%s\n' "$ROOT_ENDPOINT_GENERATION" > "$ROOT_ENDPOINT_TMP" 2>/dev/null &&
+    mv -f "$ROOT_ENDPOINT_TMP" "$STATE/.home-endpoint-generation" 2>/dev/null ||
+    rm -f "$ROOT_ENDPOINT_TMP" 2>/dev/null || true
+fi
+
 # Reconcile durable parent/child messages after the queue drain and before the
 # foreground supervision instructions. Recovery is one bounded pass: it may
 # re-wake an exact durable record, but it never starts a retry loop.
@@ -754,18 +763,6 @@ fi
 # before it will prompt anything.
 if [ -n "${HERDR_PANE_ID:-}" ]; then
   printf '%s\n' "$HERDR_PANE_ID" > "$STATE/.home-pane" 2>/dev/null || true
-fi
-
-# Root has no parent edge, so its own endpoint identity lives beside the home
-# pane hint rather than in a synthetic state/root.meta record. Refresh it when
-# this session owns the home; child spawns and recovery use the same generation
-# to reject messages aimed at the previous root endpoint.
-if [ "$READ_ONLY" -eq 0 ] && [ -n "${HERDR_PANE_ID:-}" ]; then
-  ROOT_ENDPOINT_GENERATION="root-$(date +%s)-$RANDOM"
-  ROOT_ENDPOINT_TMP="$STATE/.home-endpoint-generation.tmp.$$"
-  printf '%s\n' "$ROOT_ENDPOINT_GENERATION" > "$ROOT_ENDPOINT_TMP" 2>/dev/null &&
-    mv -f "$ROOT_ENDPOINT_TMP" "$STATE/.home-endpoint-generation" 2>/dev/null ||
-    rm -f "$ROOT_ENDPOINT_TMP" 2>/dev/null || true
 fi
 
 # --- 5. read-once contract -------------------------------------------------

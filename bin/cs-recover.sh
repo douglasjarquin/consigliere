@@ -14,6 +14,8 @@ STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 . "$SCRIPT_DIR/cs-meta-lib.sh"
 # shellcheck source=bin/cs-herdr-lib.sh
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
+# shellcheck source=bin/cs-harness-lib.sh
+. "$SCRIPT_DIR/cs-harness-lib.sh"
 # shellcheck source=bin/cs-message-lib.sh
 . "$SCRIPT_DIR/cs-message-lib.sh"
 
@@ -85,7 +87,7 @@ wake_root_message() {
   source_task=$(cs_message_field "$file" from_task_id)
   source_home=$(cs_message_field "$file" from_home)
   source_meta="$source_home/state/$source_task.meta"
-  expected_agent=$(cs_meta_get "$source_meta" harness 2>/dev/null || true)
+  expected_agent=$(cs_harness_detect_root)
   if [ -n "$expected_agent" ] && ! cs_herdr_agent_kind_matches "$pane" "$expected_agent"; then
     echo "error: message '$message_id' root endpoint '$pane' does not contain the recorded $expected_agent agent" >&2
     return 1
@@ -212,7 +214,7 @@ for pending in "$STATE"/pending/*.pending; do
     continue
   fi
   recipient_meta="$parent_state/$parent_task.meta"
-  if [ "$parent_task" = root ] && [ ! -f "$recipient_meta" ]; then
+  if [ "$parent_task" = root ]; then
     if wake_root_message "$message_file"; then
       rewoken=$((rewoken + 1))
     else
@@ -269,7 +271,7 @@ for message_file in "$STATE"/inbox/*.msg; do
     continue
   fi
   recipient_meta="$STATE/$task.meta"
-  if [ "$task" = root ] && [ ! -f "$recipient_meta" ]; then
+  if [ "$task" = root ]; then
     if wake_root_message "$message_file"; then
       rewoken=$((rewoken + 1))
     else

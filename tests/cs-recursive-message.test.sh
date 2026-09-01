@@ -41,6 +41,7 @@ kind=capo
 home=$HOME_DIR
 endpoint_generation=root-generation
 EOF
+printf '%s\n' 'root-generation' > "$STATE/.home-endpoint-generation"
 cat > "$STATE/mate.meta" <<EOF
 task_id=mate
 kind=capo

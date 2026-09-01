@@ -1082,6 +1082,11 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
   for p in "${panes[@]}"; do
     raw=$(cs_herdr_agent_status_raw "$p")
     [ -n "$raw" ] || continue
+    meta=$(meta_for_pane "$p" 2>/dev/null || true)
+    if [ -n "$meta" ]; then
+      expected_agent=$(cs_meta_get "$meta" harness 2>/dev/null || true)
+      [ -z "$expected_agent" ] || cs_herdr_agent_kind_matches "$p" "$expected_agent" || continue
+    fi
     record=$(cs_transition_normalize "$p" "" "$raw" "")
     if hit=$(cs_transition_apply "$state" "$record"); then
       printf '%s' "$hit"

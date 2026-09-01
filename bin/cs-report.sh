@@ -13,6 +13,8 @@ case "${1:-}" in -h|--help) usage; exit 0 ;; esac
 . "$SCRIPT_DIR/cs-meta-lib.sh"
 # shellcheck source=bin/cs-herdr-lib.sh
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
+# shellcheck source=bin/cs-harness-lib.sh
+. "$SCRIPT_DIR/cs-harness-lib.sh"
 # shellcheck source=bin/cs-message-lib.sh
 . "$SCRIPT_DIR/cs-message-lib.sh"
 cs_resolve_root
@@ -65,7 +67,9 @@ else
 fi
 PARENT_META="$PARENT_STATE/$PARENT_TASK.meta"
 PARENT_AGENT=$(cs_meta_get "$PARENT_META" harness 2>/dev/null || true)
-[ -n "$PARENT_AGENT" ] || PARENT_AGENT=$(cs_meta_get "$META" harness 2>/dev/null || true)
+if [ -z "$PARENT_AGENT" ] && [ "$PARENT_TASK" = root ]; then
+  PARENT_AGENT=$(cs_harness_detect_root)
+fi
 if [ "$PARENT_ROUTE_OK" -eq 1 ] && [ -n "$PARENT_AGENT" ] &&
   ! cs_herdr_agent_kind_matches "$PARENT_PANE" "$PARENT_AGENT"; then
   echo "warning: parent pane '$PARENT_PANE' does not contain the recorded $PARENT_AGENT agent; the durable report remains in $PARENT_STATE/inbox" >&2

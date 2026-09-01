@@ -89,7 +89,10 @@ cs_message_validate_fields() {
       summary) cs_message_scalar "$value" "$CS_MESSAGE_MAX_SUMMARY" || return 1 ;;
       artifact) cs_message_path_value "$value" || return 1 ;;
       commit_sha) printf '%s\n' "$value" | grep -Eq '^$|^[0-9a-fA-F]{40}$' || return 1 ;;
-      pull_request) case "$value" in *[!0-9]*) return 1 ;; esac ;;
+      pull_request)
+        case "$value" in *[!0-9]*) return 1 ;; esac
+        [ "${#value}" -le 20 ] || return 1
+        ;;
       *) return 1 ;;
     esac
   done
