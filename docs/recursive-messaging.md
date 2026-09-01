@@ -34,6 +34,10 @@ Response-required `question` and `decision-required` messages create an atomic s
 
 The message carries `from_home` so a parent in another Consigliere home can validate the sender's metadata and close that obligation without guessing which state directory owns it.
 
+`bin/cs-report.sh --message-id <message-id>` retries a durable report with the same logical identity and refuses changed semantics.
+
+`bin/cs-inbox.sh --ack <message-id> --reply <bounded-answer>` revalidates the sender pane's recorded worktree, delivers a correlated answer, and only then closes the pending obligation and writes the acknowledgement.
+
 Event-driven lifecycle routing, recursive inbox draining, bounded cold reconciliation, polling reduction, and the nested Herdr canary remain later phases.
 
 No issue checkbox for a later phase is complete until its named real-surface evidence exists.

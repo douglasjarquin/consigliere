@@ -144,6 +144,13 @@ env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   "$REPORT" result "retryable result" --message-id "$retry_id" >/dev/null || fail "same-id report retry"
 [ "$(find "$STATE/inbox" -name "$retry_id.msg" -type f | wc -l | tr -d ' ')" = 1 ] || fail "same-id retry created more than one message record"
 [ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$retry_id" "$CS_FAKE_MESSAGE_PROMPTS")" = 2 ] || fail "same-id retry did not re-ring the same message"
+if env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
+  CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
+  CS_FAKE_MESSAGE_PROMPTS="$CS_FAKE_MESSAGE_PROMPTS" \
+  "$REPORT" result "changed retry semantics" --message-id "$retry_id" >/dev/null 2>&1; then
+  fail "same-id retry with changed semantics must be refused"
+fi
+grep -F 'summary=retryable result' "$STATE/inbox/$retry_id.msg" >/dev/null || fail "conflicting retry mutated the durable message"
 pass "same-id report retry preserves one logical message and repeats only the doorbell"
 
 export CS_FAKE_MESSAGE_PARENT_HOME="$TMP/missing-parent"
