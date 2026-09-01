@@ -122,6 +122,11 @@ while IFS= read -r tool; do
       problem
     else
       report ok "$tool" "$version" "$(cs_deps_purpose "$tool")"
+      if shadow=$(cs_deps_path_shadow_gap "$tool" 2>/dev/null); then
+        IFS=$'\t' read -r rpath rver bpath bver <<< "$shadow"
+        report WARN "$tool" "$rver" "update not in effect: PATH resolves $rpath but $bver is installed at $bpath"
+        suggest "reorder PATH or remove the older copy that PATH resolves first"
+      fi
     fi
   else
     report MISSING "$tool" - "$(cs_deps_purpose "$tool")"
