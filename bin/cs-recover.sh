@@ -34,24 +34,26 @@ seen_message() {
 }
 
 endpoint_ready() {
-  local meta=$1 pane=$2 label=$3 expected actual
+  local meta=$1 pane=$2 label=$3 expected actual session
+  session=$(cs_meta_get "$meta" herdr_session 2>/dev/null || true)
+  [ -n "$session" ] || session=$(cs_herdr_session)
   expected=$(cs_meta_get "$meta" worktree 2>/dev/null || true)
   expected=${expected:-$(cs_meta_get "$meta" home 2>/dev/null || true)}
-  actual=$(cs_herdr_pane_cwd "$pane" 2>/dev/null || true)
+  actual=$(CS_HERDR_SESSION="$session" cs_herdr_pane_cwd "$pane" 2>/dev/null || true)
   if [ -z "$actual" ] || [ -z "$expected" ] ||
     [ "$(cd "$actual" 2>/dev/null && pwd -P)" != "$(cd "$expected" 2>/dev/null && pwd -P)" ]; then
     echo "error: $label endpoint '$pane' is unavailable or belongs to the wrong worktree" >&2
     return 1
   fi
   expected_agent=$(cs_meta_get "$meta" harness 2>/dev/null || true)
-  if [ -n "$expected_agent" ] && ! cs_herdr_agent_kind_matches "$pane" "$expected_agent"; then
+  if [ -n "$expected_agent" ] && ! CS_HERDR_SESSION="$session" cs_herdr_agent_kind_matches "$pane" "$expected_agent"; then
     echo "error: $label endpoint '$pane' does not contain the recorded $expected_agent agent" >&2
     return 1
   fi
 }
 
 wake_message() {
-  local file=$1 recipient_meta=$2 message_id to_generation pane recipient_task
+  local file=$1 recipient_meta=$2 message_id to_generation pane recipient_task session
   message_id=$(cs_message_field "$file" message_id)
   recipient_task=$(cs_message_field "$file" to_task_id)
   pane=$(cs_meta_get "$recipient_meta" pane 2>/dev/null || true)
@@ -63,15 +65,17 @@ wake_message() {
     echo "error: message '$message_id' route could not be repaired" >&2
     return 1
   }
-  cs_herdr_agent_prompt_confirmed "$pane" "CONSIGLIERE_WAKE v1 message=$message_id" || {
+  session=$(cs_meta_get "$recipient_meta" herdr_session 2>/dev/null || true)
+  [ -n "$session" ] || session=$(cs_herdr_session)
+  CS_HERDR_SESSION="$session" cs_herdr_agent_prompt_confirmed "$pane" "CONSIGLIERE_WAKE v1 message=$message_id" || {
     echo "error: message '$message_id' wake was not confirmed" >&2
     return 1
   }
   printf 'recover: re-woke message=%s task=%s\n' "$message_id" "$(cs_message_field "$file" to_task_id)"
 }
 
- wake_root_message() {
-  local file=$1 root_state=$2 root_home=$3 message_id pane root_generation cwd source_task source_home source_meta expected_agent
+wake_root_message() {
+  local file=$1 root_state=$2 root_home=$3 message_id pane root_generation cwd source_task source_home source_meta expected_agent session
   message_id=$(cs_message_field "$file" message_id)
   pane=$(sed -n '1p' "$root_state/.home-pane" 2>/dev/null || true)
   root_generation=$(sed -n '1p' "$root_state/.home-endpoint-generation" 2>/dev/null || true)
@@ -79,16 +83,18 @@ wake_message() {
     echo "error: message '$message_id' root endpoint identity is unavailable" >&2
     return 1
   }
-  cwd=$(cs_herdr_pane_cwd "$pane" 2>/dev/null || true)
+  source_task=$(cs_message_field "$file" from_task_id)
+  source_home=$(cs_message_field "$file" from_home)
+  source_meta="$source_home/state/$source_task.meta"
+  session=$(cs_meta_get "$source_meta" parent_herdr_session 2>/dev/null || true)
+  [ -n "$session" ] || session=$(cs_herdr_session)
+  cwd=$(CS_HERDR_SESSION="$session" cs_herdr_pane_cwd "$pane" 2>/dev/null || true)
   [ -n "$cwd" ] && [ "$(cd "$cwd" 2>/dev/null && pwd -P)" = "$(cd "$root_home" 2>/dev/null && pwd -P)" ] || {
     echo "error: message '$message_id' root endpoint '$pane' is unavailable or belongs to another home" >&2
     return 1
   }
-  source_task=$(cs_message_field "$file" from_task_id)
-  source_home=$(cs_message_field "$file" from_home)
-  source_meta="$source_home/state/$source_task.meta"
   expected_agent=$(CS_HOME="$root_home" cs_harness_detect_root)
-  if [ -n "$expected_agent" ] && ! cs_herdr_agent_kind_matches "$pane" "$expected_agent"; then
+  if [ -n "$expected_agent" ] && ! CS_HERDR_SESSION="$session" cs_herdr_agent_kind_matches "$pane" "$expected_agent"; then
     echo "error: message '$message_id' root endpoint '$pane' does not contain the recorded $expected_agent agent" >&2
     return 1
   fi
@@ -96,7 +102,7 @@ wake_message() {
     echo "error: message '$message_id' root route could not be repaired" >&2
     return 1
   }
-  cs_herdr_agent_prompt_confirmed "$pane" "CONSIGLIERE_WAKE v1 message=$message_id" || {
+  CS_HERDR_SESSION="$session" cs_herdr_agent_prompt_confirmed "$pane" "CONSIGLIERE_WAKE v1 message=$message_id" || {
     echo "error: message '$message_id' root wake was not confirmed" >&2
     return 1
   }
@@ -171,9 +177,9 @@ reconcile_settled_child() {
 
 for pending in "$STATE"/pending/*.pending; do
   [ -f "$pending" ] || continue
-  [ "$checked" -lt "$MAX_RECORDS" ] || break
-  checked=$((checked + 1))
   if ! cs_message_pending_validate_file "$pending"; then
+    [ "$checked" -lt "$MAX_RECORDS" ] || break
+    checked=$((checked + 1))
     echo "error: malformed pending obligation '$pending'" >&2
     failed=1
     continue
@@ -218,9 +224,24 @@ for pending in "$STATE"/pending/*.pending; do
     cs_message_validate_ack "$ack_file" "$message_id" || {
       echo "error: malformed acknowledgement '$ack_file'" >&2
       failed=1
+      checked=$((checked + 1))
+      continue
     }
+    closed_file="${pending%.pending}.closed"
+    if [ -e "$closed_file" ]; then
+      cs_message_pending_close_validate_file "$closed_file" "$message_id" || {
+        echo "error: malformed closure '$closed_file'" >&2
+        failed=1
+      }
+      continue
+    fi
+    echo "error: acknowledgement '$ack_file' has no matching closure" >&2
+    failed=1
+    checked=$((checked + 1))
     continue
   fi
+  [ "$checked" -lt "$MAX_RECORDS" ] || break
+  checked=$((checked + 1))
   recipient_meta="$parent_state/$parent_task.meta"
   if [ "$parent_task" = root ]; then
     if wake_root_message "$message_file" "$parent_state" "$(cs_meta_get "$child_meta" parent_home)"; then

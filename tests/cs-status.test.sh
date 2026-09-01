@@ -23,6 +23,7 @@ cs_message_publish "$STATE/inbox" \
   "to_endpoint_generation=root-generation" "summary=needs answer" "artifact=" \
   "commit_sha=" "pull_request=" "created_at=1700000000" || fail "message setup"
 cs_message_pending_create "$STATE" "$message_id" "$message_id" child root question 1700000000 \
+  "$HOME_DIR" child-generation root-generation \
   || fail "pending setup"
 printf '%s\n' 'schema=invalid' > "$STATE/inbox/malformed.msg"
 

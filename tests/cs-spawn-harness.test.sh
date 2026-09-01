@@ -192,6 +192,10 @@ assert_contains "$(cat "$TMP/panerun-t-codex")" \
   "a regular soldier receives its explicit home and task identity before agent start"
 pass "codex root: harness=codex, codex notify launch, no settings file"
 
+cs_meta_write "$HOME_DIR/state/parent.meta" \
+  task_id=parent kind=capo home="$HOME_DIR" worktree="$HOME_DIR" \
+  pane=w1:p1 endpoint_generation=parent-generation-1 harness=codex herdr_session=test
+
 launch=$(spawn_one codex t-nested --mode made --yolo off --parent parent --parent-home "$HOME_DIR" --parent-pane w1:p1 --parent-generation parent-generation-2)
 [ "$(cs_meta_get "$HOME_DIR/state/t-nested.meta" parent_task_id)" = parent ] || fail "nested spawn parent task"
 [ "$(cs_meta_get "$HOME_DIR/state/t-nested.meta" parent_home)" = "$HOME_DIR" ] || fail "nested spawn parent home"

@@ -173,6 +173,7 @@ pass "inbox rejects a filename and embedded message identity mismatch"
 
 message message-mismatched-pending current question child-generation
 cs_message_pending_create "$STATE" message-mismatched-pending different-correlation child current question 1700000000 \
+  "$HOME_DIR" child-generation current-generation \
   || fail "mismatched pending setup"
 if "$INBOX" --ack message-mismatched-pending --reply "answer" >/dev/null 2>"$TMP/mismatched-pending.err"; then
   fail "a response obligation with mismatched correlation must not be acknowledged"

@@ -943,11 +943,18 @@ cs_transition_validate_route() { # <state_dir> <record>
 }
 
 cs_transition_validate_event_generation() { # <state_dir> <record>
-  local state=$1 record=$2 pane workspace agent event_generation route expected_generation
+  local state=$1 record=$2 pane workspace agent event_generation route expected_generation first
+  first=$(printf '%s' "$record" | cut -f1)
   event_generation=$(printf '%s' "$record" | cut -f6)
-  pane=$(cs_transition_pane_id "$record")
-  workspace=$(cs_transition_workspace "$record")
-  agent=$(cs_transition_agent "$record")
+  if [ "$first" = status ]; then
+    pane=$(printf '%s' "$record" | cut -f2)
+    workspace=$(printf '%s' "$record" | cut -f3)
+    agent=$(printf '%s' "$record" | cut -f5)
+  else
+    pane=$first
+    workspace=$(printf '%s' "$record" | cut -f2)
+    agent=$(printf '%s' "$record" | cut -f5)
+  fi
   [ -n "$workspace" ] && [ -n "$agent" ] && [ -n "$event_generation" ] || return 1
   route=$(cs_meta_event_route "$state" "$pane" "$workspace" "$agent" 2>/dev/null || true)
   expected_generation=$(printf '%s' "$route" | cut -f7)
@@ -1072,6 +1079,7 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
   [ -e "$spool" ] || return 2
 
   local p raw record hit line kind ws status agent event_generation route expected_generation mine=
+  local expected_agent expected_workspace expected_generation actual_worktree session event_line
   for p in "${panes[@]}"; do
     mine="$mine|$p|"
   done
@@ -1080,20 +1088,26 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
   # because the edge predates the plugin install, or was lost to a spool
   # rotation - is returned now, once. `working` panes clear their marker here too.
   for p in "${panes[@]}"; do
-    raw=$(cs_herdr_agent_status_raw "$p")
-    [ -n "$raw" ] || continue
     meta=$(meta_for_pane "$p" 2>/dev/null || true)
-    if [ -n "$meta" ]; then
-      expected_agent=$(cs_meta_get "$meta" harness 2>/dev/null || true)
-      [ -z "$expected_agent" ] || cs_herdr_agent_kind_matches "$p" "$expected_agent" || continue
-      expected_worktree=$(cs_meta_get "$meta" worktree 2>/dev/null || true)
-      if [ -n "$expected_worktree" ]; then
-        actual_worktree=$(cs_herdr_pane_cwd "$p" 2>/dev/null || true)
-        [ -n "$actual_worktree" ] &&
-          [ "$(cd "$actual_worktree" 2>/dev/null && pwd -P)" = "$(cd "$expected_worktree" 2>/dev/null && pwd -P)" ] || continue
-      fi
-    fi
-    record=$(cs_transition_normalize "$p" "" "$raw" "")
+    [ -n "$meta" ] || continue
+    session=$(cs_meta_get "$meta" herdr_session 2>/dev/null || true)
+    expected_agent=$(cs_meta_get "$meta" harness 2>/dev/null || true)
+    expected_workspace=$(cs_meta_get "$meta" workspace 2>/dev/null || true)
+    expected_generation=$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)
+    [ -n "$session" ] && [ -n "$expected_agent" ] && [ -n "$expected_workspace" ] &&
+      [ -n "$expected_generation" ] || continue
+    CS_HERDR_SESSION="$session" cs_herdr_agent_kind_matches "$p" "$expected_agent" || continue
+    expected_worktree=$(cs_meta_get "$meta" worktree 2>/dev/null || true)
+    actual_worktree=$(CS_HERDR_SESSION="$session" cs_herdr_pane_cwd "$p" 2>/dev/null || true)
+    [ -n "$actual_worktree" ] && [ -n "$expected_worktree" ] &&
+      [ "$(cd "$actual_worktree" 2>/dev/null && pwd -P)" = "$(cd "$expected_worktree" 2>/dev/null && pwd -P)" ] || continue
+    raw=$(CS_HERDR_SESSION="$session" cs_herdr_agent_status_raw "$p")
+    [ -n "$raw" ] || continue
+    record=$(cs_transition_normalize "$p" "$expected_workspace" "$raw" "$expected_agent")
+    cs_transition_validate_route "$state" "$record" || continue
+    event_line=$(printf 'status\t%s\t%s\t%s\t%s\t%s' \
+      "$p" "$expected_workspace" "$raw" "$expected_agent" "$expected_generation")
+    cs_transition_validate_event_generation "$state" "$event_line" || continue
     if hit=$(cs_transition_apply "$state" "$record"); then
       printf '%s' "$hit"
       return 0

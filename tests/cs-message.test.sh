@@ -57,6 +57,16 @@ harness=codex
 EOF
 }
 write_meta child
+cat > "$STATE/parent.meta" <<EOF
+task_id=parent
+kind=capo
+home=$HOME_DIR
+worktree=$HOME_DIR
+pane=w1:p1
+endpoint_generation=parent-generation-1
+harness=codex
+herdr_session=test
+EOF
 
 export PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE"
 export CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child

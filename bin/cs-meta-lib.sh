@@ -53,8 +53,15 @@ cs_meta_validate_parent_values() {
   case "$endpoint_generation" in ''|*[!A-Za-z0-9._:-]*) return 1 ;; esac
 }
 
+cs_meta_validate_herdr_session() {
+  case "${1:-}" in
+    [A-Za-z0-9._-][A-Za-z0-9._-]*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 cs_meta_validate_parent_edge() {
-  local meta=$1
+  local meta=$1 child_home parent_home parent_session
   [ -f "$meta" ] || return 1
   cs_meta_validate_parent_values \
     "$(cs_meta_get "$meta" parent_task_id 2>/dev/null || true)" \
@@ -62,7 +69,15 @@ cs_meta_validate_parent_edge() {
     "$(cs_meta_get "$meta" parent_state 2>/dev/null || true)" \
     "$(cs_meta_get "$meta" parent_pane 2>/dev/null || true)" \
     "$(cs_meta_get "$meta" parent_generation 2>/dev/null || true)" \
-    "$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)"
+    "$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)" || return 1
+  child_home=$(cs_meta_get "$meta" home 2>/dev/null || true)
+  parent_home=$(cs_meta_get "$meta" parent_home 2>/dev/null || true)
+  parent_session=$(cs_meta_get "$meta" parent_herdr_session 2>/dev/null || true)
+  if [ -n "$parent_session" ]; then
+    cs_meta_validate_herdr_session "$parent_session" || return 1
+  elif [ -n "$child_home" ] && [ "$child_home" != "$parent_home" ]; then
+    return 1
+  fi
 }
 
 cs_meta_endpoint_generation_known() {

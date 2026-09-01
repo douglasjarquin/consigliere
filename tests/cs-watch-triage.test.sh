@@ -830,9 +830,31 @@ test_beacon_stays_fresh_while_absorbing() {
 
 spool_append() {  # <state> <kind> <pane> <workspace> <field3> <field4>
   local state=$1; shift
+  local pane=$2 workspace=$3 agent=$5 home meta
+  home=${state%/state}
+  meta="$state/$pane.meta"
+  if [ ! -e "$meta" ] && [ "$pane" != pane-other-1 ]; then
+    cat > "$meta" <<EOF
+task_id=$pane
+kind=ship
+home=$home
+worktree=$home
+workspace=$workspace
+pane=$pane
+harness=$agent
+parent_task_id=root
+parent_home=$home
+parent_state=$state
+parent_pane=unknown
+parent_generation=event-parent-generation
+endpoint_generation=event-generation
+herdr_session=default
+EOF
+  fi
   # shellcheck source=bin/cs-herdr-event-lib.sh
   . "$ROOT/bin/cs-herdr-event-lib.sh"
-  cs_event_append "$(cs_event_spool_path "$state")" "$(cs_event_record "$@")"
+  cs_event_append "$(cs_event_spool_path "$state")" \
+    "$(cs_event_record_with_generation "$@" event-generation)"
 }
 
 test_event_splice_blocked_edge_and_dedupe_clear() {
@@ -992,7 +1014,9 @@ test_event_splice_level_reconcile_catches_already_blocked() {
   # The spool stays empty; the pane is ALREADY blocked when the wait starts (an
   # edge lost while the plugin was absent). The level reconcile must return it.
   spool_append "$state" status pane-other-1 ws-1 working codex
+  spool_append "$state" status pane-lvl-1 ws-1 working codex
   export CS_FAKE_HERDR_AGENT_STATUS=blocked
+  export CS_FAKE_HERDR_PANE_CWD="$dir"
   rec=$(
     cd "$dir" || exit 2
     # shellcheck disable=SC1090,SC1091
@@ -1003,6 +1027,7 @@ test_event_splice_level_reconcile_catches_already_blocked() {
   [ "$(printf '%s' "$rec" | cut -f1)" = pane-lvl-1 ] || fail "level record pane_id wrong: $rec"
   [ "$(printf '%s' "$rec" | cut -f4)" = blocked ] || fail "level record to_status wrong: $rec"
   unset CS_FAKE_HERDR_AGENT_STATUS
+  unset CS_FAKE_HERDR_PANE_CWD
   pass "the level reconcile catches a pane already blocked when the wait starts"
 }
 

@@ -606,6 +606,7 @@ cs_message_publish "$TMP/state/inbox" \
   "to_endpoint_generation=root-generation" "summary=needs answer" "artifact=" \
   "commit_sha=" "pull_request=" "created_at=1700000000" || fail "teardown message setup"
 cs_message_pending_create "$TMP/state" "$message_id" "$message_id" msg1 root question 1700000000 \
+  "$TMP" msg1-generation root-generation \
   || fail "teardown obligation setup"
 out=$("$BIN" msg1 2>&1) && fail "teardown must refuse with an unresolved message obligation"
 assert_contains "$out" "message reconciliation" "teardown refusal names unresolved message reconciliation"

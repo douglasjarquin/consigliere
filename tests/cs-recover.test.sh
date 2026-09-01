@@ -61,7 +61,8 @@ cs_message_publish "$STATE/inbox" \
   "from_home=$HOME_DIR" "from_endpoint_generation=child-generation" \
   "to_endpoint_generation=root-generation" "summary=needs recovery" "artifact=" \
   "commit_sha=" "pull_request=" "created_at=1700000000" || fail "message setup"
-cs_message_pending_create "$STATE" "$message_id" "$message_id" child root question 1700000000 || fail "pending setup"
+cs_message_pending_create "$STATE" "$message_id" "$message_id" child root question 1700000000 \
+  "$HOME_DIR" child-generation root-generation || fail "pending setup"
 
 export PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   CS_HERDR_SESSION=test CS_FAKE_PANE_CWD="$HOME_DIR" CS_FAKE_PROMPTS="$TMP/prompts" CS_FAKE_AGENT_LIVE=1
@@ -86,6 +87,7 @@ cs_message_publish "$STATE/inbox" \
   "to_endpoint_generation=root-generation" "summary=survives relaunch" "artifact=" \
   "commit_sha=" "pull_request=" "created_at=1700000000" || fail "relaunch message setup"
 cs_message_pending_create "$STATE" "$relaunch_id" "$relaunch_id" child root question 1700000000 \
+  "$HOME_DIR" child-generation root-generation \
   || fail "relaunch pending setup"
 output=$("$ROOT/bin/cs-recover.sh") || fail "recover should repair a relaunched parent route"
 printf '%s\n' "$output" | grep -F "re-woke message=$relaunch_id" >/dev/null \
@@ -115,6 +117,7 @@ cs_message_publish "$STATE/inbox" \
   "to_endpoint_generation=root-generation-2" "summary=bad acknowledgement" "artifact=" \
   "commit_sha=" "pull_request=" "created_at=1700000000" || fail "bad acknowledgement message setup"
 cs_message_pending_create "$STATE" "$bad_ack_id" "$bad_ack_id" child root question 1700000000 \
+  "$HOME_DIR" child-generation root-generation-2 \
   || fail "bad acknowledgement pending setup"
 printf '%s\n' 'schema=cs-message.v1' 'message_id=another-message' 'acked_at=1700000000' \
   > "$STATE/inbox/$bad_ack_id.ack"

@@ -54,15 +54,28 @@ cs_meta_validate_parent_edge "$META" || { echo "error: task '$TASK_ID' has no va
 PARENT_TASK=$(cs_meta_get "$META" parent_task_id)
 PARENT_STATE=$(cs_meta_get "$META" parent_state)
 PARENT_PANE=$(cs_meta_get "$META" parent_pane)
+PARENT_HOME=$(cs_meta_get "$META" parent_home)
+PARENT_HERDR_SESSION=$(cs_meta_get "$META" parent_herdr_session 2>/dev/null || true)
+if [ -z "$PARENT_HERDR_SESSION" ] && [ "$PARENT_HOME" = "$CS_HOME" ]; then
+  PARENT_HERDR_SESSION=$(cs_herdr_session)
+fi
+[ -n "$PARENT_HERDR_SESSION" ] || {
+  echo "error: cross-home parent '$PARENT_TASK' has no recorded Herdr session" >&2
+  exit 1
+}
 FROM_GENERATION=$(cs_meta_get "$META" endpoint_generation)
 TO_GENERATION=$(cs_meta_get "$META" parent_generation)
 [ -d "$PARENT_STATE/inbox" ] || mkdir -p "$PARENT_STATE/inbox"
 PARENT_META="$PARENT_STATE/$PARENT_TASK.meta"
+if [ "$PARENT_TASK" != root ] && [ ! -f "$PARENT_META" ]; then
+  echo "error: immediate parent metadata is missing at $PARENT_META" >&2
+  exit 1
+fi
 PARENT_HOME_REAL=$(cd "$(cs_meta_get "$META" parent_home)" && pwd -P)
 PARENT_WORKTREE=$(cs_meta_get "$PARENT_META" worktree 2>/dev/null || true)
 PARENT_WORKTREE=${PARENT_WORKTREE:-$PARENT_HOME_REAL}
 PARENT_WORKTREE_REAL=$(cd "$PARENT_WORKTREE" 2>/dev/null && pwd -P) || PARENT_WORKTREE_REAL="$PARENT_HOME_REAL"
-PARENT_CWD=$(cs_herdr_pane_cwd "$PARENT_PANE" || true)
+PARENT_CWD=$(CS_HERDR_SESSION="$PARENT_HERDR_SESSION" cs_herdr_pane_cwd "$PARENT_PANE" || true)
 if [ -z "$PARENT_CWD" ] || [ "$(cd "$PARENT_CWD" 2>/dev/null && pwd -P)" != "$PARENT_WORKTREE_REAL" ]; then
   echo "warning: parent pane '$PARENT_PANE' is unavailable or belongs to another home; the durable report remains in $PARENT_STATE/inbox" >&2
   PARENT_ROUTE_OK=0
@@ -71,10 +84,10 @@ else
 fi
 PARENT_AGENT=$(cs_meta_get "$PARENT_META" harness 2>/dev/null || true)
 if [ -z "$PARENT_AGENT" ] && [ "$PARENT_TASK" = root ]; then
-  PARENT_AGENT=$(cs_harness_detect_root)
+  PARENT_AGENT=$(CS_HOME="$PARENT_HOME" cs_harness_detect_root)
 fi
 if [ "$PARENT_ROUTE_OK" -eq 1 ] && [ -n "$PARENT_AGENT" ] &&
-  ! cs_herdr_agent_kind_matches "$PARENT_PANE" "$PARENT_AGENT"; then
+  ! CS_HERDR_SESSION="$PARENT_HERDR_SESSION" cs_herdr_agent_kind_matches "$PARENT_PANE" "$PARENT_AGENT"; then
   echo "warning: parent pane '$PARENT_PANE' does not contain the recorded $PARENT_AGENT agent; the durable report remains in $PARENT_STATE/inbox" >&2
   PARENT_ROUTE_OK=0
 fi
@@ -108,7 +121,8 @@ if [ -e "$MESSAGE_FILE" ]; then
 fi
 case "$KIND" in
   question|decision-required)
-    cs_message_pending_create "$STATE" "$MESSAGE_ID" "$CORRELATION" "$TASK_ID" "$PARENT_TASK" "$KIND" "$CREATED_AT" || {
+    cs_message_pending_create "$STATE" "$MESSAGE_ID" "$CORRELATION" "$TASK_ID" "$PARENT_TASK" "$KIND" "$CREATED_AT" \
+      "$CS_HOME" "$FROM_GENERATION" "$TO_GENERATION" || {
       echo "error: could not create pending obligation for report $MESSAGE_ID" >&2
       exit 1
     }
@@ -133,6 +147,7 @@ FIELDS=(
 )
 cs_message_publish "$PARENT_STATE/inbox" "${FIELDS[@]}" || { echo "error: could not publish report to $PARENT_STATE/inbox" >&2; exit 1; }
 ROUTE_FILE=$(cs_message_route_path "$PARENT_STATE/inbox/$MESSAGE_ID.msg")
+ROUTE_GENERATION=
 if [ -e "$ROUTE_FILE" ]; then
   cs_message_route_validate_file "$ROUTE_FILE" || {
     echo "error: existing report route is malformed" >&2
@@ -143,7 +158,9 @@ if [ -e "$ROUTE_FILE" ]; then
       echo "error: existing report route does not match the durable message" >&2
       exit 1
     }
-else
+  ROUTE_GENERATION=$(awk -F= '$1 == "endpoint_generation" { print substr($0, 21) }' "$ROUTE_FILE")
+fi
+if [ -z "$ROUTE_GENERATION" ]; then
   cs_message_route_write "$PARENT_STATE/inbox/$MESSAGE_ID.msg" "$PARENT_TASK" "$TO_GENERATION" || {
     echo "error: could not record report route" >&2
     exit 1
@@ -152,7 +169,7 @@ fi
 if [ "$PARENT_ROUTE_OK" -ne 1 ]; then
   exit 1
 fi
-if ! cs_herdr_agent_prompt_confirmed "$PARENT_PANE" "CONSIGLIERE_WAKE v1 message=$MESSAGE_ID"; then
+if ! CS_HERDR_SESSION="$PARENT_HERDR_SESSION" cs_herdr_agent_prompt_confirmed "$PARENT_PANE" "CONSIGLIERE_WAKE v1 message=$MESSAGE_ID"; then
   echo "warning: report $MESSAGE_ID is durable but the parent doorbell was not confirmed" >&2
   exit 1
 fi

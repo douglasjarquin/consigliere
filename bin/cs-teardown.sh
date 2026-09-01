@@ -140,7 +140,7 @@ message_state_has_open_records() {
   local state=$1 target=$2 file id ack
   for file in "$state"/pending/*.pending; do
     [ -f "$file" ] || continue
-    id=$(cs_message_field "$file" message_id 2>/dev/null || true)
+    id=$(cs_message_pending_field "$file" message_id 2>/dev/null || true)
     [ -n "$id" ] || return 1
     cs_message_pending_close_validate_file "$state/pending/$id.closed" "$id" || return 1
   done

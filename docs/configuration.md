@@ -106,8 +106,9 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
   Each record arms `state/sweep-<project>.check.sh`, an ordinary hash-bound custom watcher check that reports column depth and never moves a card.
   `cs-board-watch.sh sync` converges the two in both directions and runs at every locked session start.
 - `state/sweep-<project>.board-seen` - the sweep poll's own memory: last reported Ready count, Inbox count, and epoch, one per line. It is what makes the poll silent on a column consigliere shrank and loud on one the boss grew. Deleted on arm and disarm; safe to delete by hand, which only costs one extra report.
-- `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `kind=` (ship|scout|capo), `harness=` (codex|claude, inherited from the root session). No model or reasoning level is recorded, because the harness selects both.
-  Parent-aware tasks also record `parent_task_id=`, `parent_home=`, `parent_state=`, `parent_pane=`, `parent_generation=`, and `endpoint_generation=`; `bin/cs-meta-lib.sh` validates this exact edge and `bin/cs-report.sh` routes only through it.
+- `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `kind=` (ship|scout|capo), `harness=` (codex|claude, inherited from the root session), and `herdr_session=` (the task endpoint's Herdr session).
+  No model or reasoning level is recorded, because the harness selects both.
+  Parent-aware tasks also record `parent_task_id=`, `parent_home=`, `parent_state=`, `parent_pane=`, `parent_generation=`, `parent_herdr_session=`, and `endpoint_generation=`; `bin/cs-meta-lib.sh` validates this exact edge and `bin/cs-report.sh` routes only through it.
   A parent drains its durable inbox with `bin/cs-inbox.sh`; the command filters by `to_task_id`, validates the sender's recorded parent edge and endpoint generation, and creates a separate acknowledgement only after explicit handling.
   `question` and `decision-required` reports also create `state/pending/<message-id>.pending` before delivery; the parent closes that sender-side obligation before writing the inbox acknowledgement.
   A sender may retry with `bin/cs-report.sh --message-id <message-id>`; matching bytes remain one logical record while the Herdr doorbell may be retried.

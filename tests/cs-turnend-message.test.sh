@@ -42,7 +42,8 @@ cs_write_meta "$STATE/child.meta" \
   task_id=child kind=ship home="$HOME_DIR" worktree="$HOME_DIR" pane=w2:p2 \
   endpoint_generation=child-generation parent_task_id=root \
   parent_home="$TMP" parent_state="$PARENT_STATE" parent_pane=w1:p1 \
-  parent_generation=root-generation harness=codex
+  parent_generation=root-generation parent_herdr_session=test harness=codex \
+  herdr_session=test
 printf '%s\n' 'done: terminal buffer only' > "$STATE/child.status"
 touch "$STATE/.last-monitor-beat"
 printf '%s\n' 'w1:p1' > "$STATE/.home-pane"
@@ -82,7 +83,8 @@ pass "cs-turnend-guard: recovers a settled child without semantic reporting exac
 printf '%s\n' 'task_id=worker' 'kind=ship' 'home='"$HOME_DIR" 'worktree='"$HOME_DIR" \
   'pane=w3:p3' 'endpoint_generation=worker-generation' 'parent_task_id=root' \
   'parent_home='"$TMP" 'parent_state='"$PARENT_STATE" 'parent_pane=w1:p1' \
-  'parent_generation=root-generation' > "$STATE/worker.meta"
+  'parent_generation=root-generation' 'parent_herdr_session=test' \
+  'harness=codex' 'herdr_session=test' > "$STATE/worker.meta"
 printf '%s\n' 'done: worker terminal buffer only' > "$STATE/worker.status"
 worker_id=$(cs_message_recovery_id worker worker-generation) || fail "worker recovery id derivation"
 rm -f "$STATE/.message-recovery-$worker_id"

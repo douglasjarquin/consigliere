@@ -105,8 +105,27 @@ cs_message_path() { printf '%s/%s.msg\n' "$1" "$2"; }
 
 cs_message_route_path() { printf '%s.route\n' "${1%.msg}"; }
 
+cs_message_filename_id() {
+  local file=$1 suffix=$2 filename expected temp
+  filename=${file##*/}
+  case "$filename" in
+    *"$suffix") expected=${filename%$suffix} ;;
+    .*)
+      temp=${filename#.}
+      case "$temp" in
+        *"$suffix".tmp.*) expected=${temp%"$suffix".tmp.*} ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *"$suffix".tmp.*) expected=${filename%"$suffix".tmp.*} ;;
+    *) return 1 ;;
+  esac
+  cs_message_id "$expected" || return 1
+  printf '%s\n' "$expected"
+}
+
 cs_message_route_validate_file() {
-  local file=$1 line key value seen='' required
+  local file=$1 line key value seen='' required filename_id
   local -a required_keys=(schema message_id to_task_id endpoint_generation updated_at)
   [ -f "$file" ] || return 1
   [ "$(wc -l < "$file" | tr -d ' ')" = 5 ] || return 1
@@ -129,6 +148,8 @@ cs_message_route_validate_file() {
   for required in "${required_keys[@]}"; do
     case " $seen " in *" $required "*) ;; *) return 1 ;; esac
   done
+  filename_id=$(cs_message_filename_id "$file" .route) || return 1
+  [ "$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$file")" = "$filename_id" ] || return 1
 }
 
 cs_message_route_generation() {
@@ -147,7 +168,8 @@ cs_message_route_generation() {
 }
 
 cs_message_route_write() {
-  local file=$1 target=$2 generation=$3 route tmp existing_message existing_target existing_generation
+  local file=$1 target=$2 generation=$3 preserve_existing=${4:-0}
+  local route tmp existing_message existing_target existing_generation
   cs_message_validate_file "$file" || return 1
   cs_message_task "$target" && cs_message_generation "$generation" || return 1
   [ "$(cs_message_field "$file" to_task_id)" = "$target" ] || return 1
@@ -160,6 +182,7 @@ cs_message_route_write() {
     [ "$existing_message" = "$(cs_message_field "$file" message_id)" ] || return 1
     [ "$existing_target" = "$target" ] || return 1
     [ "$existing_generation" = "$generation" ] && return 0
+    [ "$preserve_existing" = 1 ] && return 0
   fi
   tmp="$route.tmp.$$.$RANDOM"
   printf 'schema=%s\nmessage_id=%s\nto_task_id=%s\nendpoint_generation=%s\nupdated_at=%s\n' \
@@ -266,13 +289,15 @@ cs_message_verify_result() {
 }
 
 cs_message_validate_ack() {
-  local file=$1 expected=${2:-} embedded
+  local file=$1 expected=${2:-} embedded filename_id
   [ -f "$file" ] || return 1
   [ "$(wc -l < "$file" | tr -d ' ')" = 3 ] || return 1
   grep -Eq '^schema=cs-message\.v1$' "$file" || return 1
   grep -Eq '^message_id=[A-Za-z0-9._-]{1,96}$' "$file" || return 1
   grep -Eq '^acked_at=[0-9]{1,20}$' "$file" || return 1
   embedded=$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$file")
+  filename_id=$(cs_message_filename_id "$file" .ack) || return 1
+  [ "$embedded" = "$filename_id" ] || return 1
   [ -z "$expected" ] || [ "$embedded" = "$expected" ]
 }
 
@@ -326,10 +351,10 @@ cs_message_pending_path() { printf '%s/pending/%s.pending\n' "$1" "$2"; }
 cs_message_pending_close_path() { printf '%s/pending/%s.closed\n' "$1" "$2"; }
 
 cs_message_pending_validate_file() {
-  local file=$1 line key value seen='' required
-  local -a required_keys=(schema message_id correlation_id task_id parent_task_id kind phase created_at)
+  local file=$1 line key value seen='' required filename_id
+  local -a required_keys=(schema message_id correlation_id task_id parent_task_id kind phase from_home from_endpoint_generation to_endpoint_generation created_at)
   [ -f "$file" ] || return 1
-  [ "$(wc -l < "$file" | tr -d ' ')" = 8 ] || return 1
+  [ "$(wc -l < "$file" | tr -d ' ')" = 11 ] || return 1
   while IFS= read -r line || [ -n "$line" ]; do
     key=${line%%=*}
     value=${line#*=}
@@ -338,6 +363,8 @@ cs_message_pending_validate_file() {
       message_id|correlation_id|task_id|parent_task_id) cs_message_id "$value" || return 1 ;;
       kind) case "$value" in question|decision-required) ;; *) return 1 ;; esac ;;
       phase) [ "$value" = awaiting-response ] || return 1 ;;
+      from_home) cs_message_absolute_path_value "$value" || return 1 ;;
+      from_endpoint_generation|to_endpoint_generation) cs_message_generation "$value" || return 1 ;;
       created_at)
         case "$value" in ''|*[!0-9]*) return 1 ;; esac
         [ "${#value}" -le 20 ] || return 1
@@ -350,6 +377,8 @@ cs_message_pending_validate_file() {
   for required in "${required_keys[@]}"; do
     case " $seen " in *" $required "*) ;; *) return 1 ;; esac
   done
+  filename_id=$(cs_message_filename_id "$file" .pending) || return 1
+  [ "$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$file")" = "$filename_id" ] || return 1
 }
 
 cs_message_pending_field() {
@@ -366,23 +395,31 @@ cs_message_pending_matches_message() {
     [ "$(cs_message_pending_field "$pending" correlation_id)" = "$(cs_message_field "$message" correlation_id)" ] &&
     [ "$(cs_message_pending_field "$pending" task_id)" = "$(cs_message_field "$message" from_task_id)" ] &&
     [ "$(cs_message_pending_field "$pending" parent_task_id)" = "$(cs_message_field "$message" to_task_id)" ] &&
-    [ "$(cs_message_pending_field "$pending" kind)" = "$(cs_message_field "$message" kind)" ]
+    [ "$(cs_message_pending_field "$pending" kind)" = "$(cs_message_field "$message" kind)" ] &&
+    [ "$(cs_message_pending_field "$pending" from_home)" = "$(cs_message_field "$message" from_home)" ] &&
+    [ "$(cs_message_pending_field "$pending" from_endpoint_generation)" = "$(cs_message_field "$message" from_endpoint_generation)" ] &&
+    [ "$(cs_message_pending_field "$pending" to_endpoint_generation)" = "$(cs_message_field "$message" to_endpoint_generation)" ] &&
+    [ "$(cs_message_pending_field "$pending" created_at)" = "$(cs_message_field "$message" created_at)" ]
 }
 
 cs_message_pending_create() {
   local state=$1 message_id=$2 correlation_id=$3 task_id=$4 parent_task_id=$5 kind=$6 created_at=$7
+  local from_home=${8:-} from_endpoint_generation=${9:-} to_endpoint_generation=${10:-}
   local dir file tmp same
   cs_message_id "$message_id" && cs_message_id "$correlation_id" && cs_message_task "$task_id" &&
     cs_message_task "$parent_task_id" || return 1
   case "$kind" in question|decision-required) ;; *) return 1 ;; esac
+  cs_message_absolute_path_value "$from_home" && cs_message_generation "$from_endpoint_generation" &&
+    cs_message_generation "$to_endpoint_generation" || return 1
   case "$created_at" in ''|*[!0-9]*) return 1 ;; esac
   dir="$state/pending"
   [ -d "$state" ] || return 1
   mkdir -p "$dir" || return 1
   file=$(cs_message_pending_path "$state" "$message_id")
   tmp="$dir/.$message_id.pending.tmp.$$.$RANDOM"
-  printf 'schema=%s\nmessage_id=%s\ncorrelation_id=%s\ntask_id=%s\nparent_task_id=%s\nkind=%s\nphase=awaiting-response\ncreated_at=%s\n' \
-    "$CS_MESSAGE_PENDING_SCHEMA" "$message_id" "$correlation_id" "$task_id" "$parent_task_id" "$kind" "$created_at" > "$tmp" || {
+  printf 'schema=%s\nmessage_id=%s\ncorrelation_id=%s\ntask_id=%s\nparent_task_id=%s\nkind=%s\nphase=awaiting-response\nfrom_home=%s\nfrom_endpoint_generation=%s\nto_endpoint_generation=%s\ncreated_at=%s\n' \
+    "$CS_MESSAGE_PENDING_SCHEMA" "$message_id" "$correlation_id" "$task_id" "$parent_task_id" "$kind" \
+    "$from_home" "$from_endpoint_generation" "$to_endpoint_generation" "$created_at" > "$tmp" || {
     rm -f "$tmp"
     return 1
   }
@@ -433,7 +470,7 @@ cs_message_reply_path() { printf '%s/pending/%s.reply\n' "$1" "$2"; }
 cs_message_reply_delivery_path() { printf '%s/pending/%s.reply-delivered\n' "$1" "$2"; }
 
 cs_message_reply_validate_file() {
-  local file=$1 expected=${2:-} line key value seen='' required embedded
+  local file=$1 expected=${2:-} line key value seen='' required embedded filename_id
   local -a required_keys=(schema message_id correlation_id summary replied_at)
   [ -f "$file" ] || return 1
   [ "$(wc -l < "$file" | tr -d ' ')" = 5 ] || return 1
@@ -457,6 +494,8 @@ cs_message_reply_validate_file() {
     case " $seen " in *" $required "*) ;; *) return 1 ;; esac
   done
   embedded=$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$file")
+  filename_id=$(cs_message_filename_id "$file" .reply) || return 1
+  [ "$embedded" = "$filename_id" ] || return 1
   [ -z "$expected" ] || [ "$embedded" = "$expected" ]
 }
 
@@ -521,18 +560,20 @@ cs_message_reply_delivery_exists() {
 }
 
 cs_message_reply_delivery_validate_file() {
-  local file=$1 expected=${2:-} embedded
+  local file=$1 expected=${2:-} embedded filename_id
   [ -f "$file" ] || return 1
   [ "$(wc -l < "$file" | tr -d ' ')" = 3 ] || return 1
   grep -Eq "^schema=$CS_MESSAGE_REPLY_SCHEMA$" "$file" || return 1
   grep -Eq '^message_id=[A-Za-z0-9._-]{1,96}$' "$file" || return 1
   grep -Eq '^delivered_at=[0-9]{1,20}$' "$file" || return 1
   embedded=$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$file")
+  filename_id=$(cs_message_filename_id "$file" .reply-delivered) || return 1
+  [ "$embedded" = "$filename_id" ] || return 1
   [ -z "$expected" ] || [ "$embedded" = "$expected" ]
 }
 
 cs_message_pending_close_validate_file() {
-  local file=$1 expected=${2:-} line key value seen='' required embedded
+  local file=$1 expected=${2:-} line key value seen='' required embedded filename_id
   local -a required_keys=(schema message_id closed_at reason)
   [ -f "$file" ] || return 1
   [ "$(wc -l < "$file" | tr -d ' ')" = 4 ] || return 1
@@ -556,5 +597,7 @@ cs_message_pending_close_validate_file() {
     case " $seen " in *" $required "*) ;; *) return 1 ;; esac
   done
   embedded=$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$file")
+  filename_id=$(cs_message_filename_id "$file" .closed) || return 1
+  [ "$embedded" = "$filename_id" ] || return 1
   [ -z "$expected" ] || [ "$embedded" = "$expected" ]
 }

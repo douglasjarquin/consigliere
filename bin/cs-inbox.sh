@@ -76,7 +76,7 @@ done
 }
 
 message_source_valid() {
-  local file=$1 source_task source_meta source_parent source_home source_recorded_home from_home
+  local file=$1 source_task source_meta source_parent source_home source_recorded_home from_home source_session
   cs_message_validate_file "$file" || {
     echo "error: malformed inbox message '$file'" >&2
     return 1
@@ -104,6 +104,14 @@ message_source_valid() {
     echo "error: message '$file' is not owned by task '$TASK_ID'" >&2
     return 1
   }
+  source_session=$(cs_meta_get "$source_meta" herdr_session 2>/dev/null || true)
+  if [ -z "$source_session" ] && [ "$from_home" = "$CS_HOME" ]; then
+    source_session=$(cs_herdr_session)
+  fi
+  [ -n "$source_session" ] && cs_meta_validate_herdr_session "$source_session" || {
+    echo "error: message '$file' has no valid sender Herdr session" >&2
+    return 1
+  }
   cs_meta_endpoint_generation_known "$source_meta" \
     "$(cs_message_field "$file" from_endpoint_generation)" "$(cs_message_field "$file" created_at)" || {
     echo "error: stale sender generation in '$file'" >&2
@@ -127,7 +135,7 @@ message_source_valid() {
 }
 
 deliver_reply() {
-  local file=$1 kind from_home source_task source_meta source_pane source_worktree source_cwd corr state source_agent
+  local file=$1 kind from_home source_task source_meta source_pane source_worktree source_cwd corr state source_agent source_session
   kind=$(cs_message_field "$file" kind)
   case "$kind" in
     question|decision-required) ;;
@@ -144,8 +152,16 @@ deliver_reply() {
     echo "error: sender metadata for message '$ACK_ID' has no worktree" >&2
     return 1
   }
+  source_session=$(cs_meta_get "$source_meta" herdr_session 2>/dev/null || true)
+  if [ -z "$source_session" ] && [ "$from_home" = "$CS_HOME" ]; then
+    source_session=$(cs_herdr_session)
+  fi
+  [ -n "$source_session" ] && cs_meta_validate_herdr_session "$source_session" || {
+    echo "error: sender metadata for message '$ACK_ID' has no valid Herdr session" >&2
+    return 1
+  }
   source_agent=$(cs_meta_get "$source_meta" harness 2>/dev/null || true)
-  if [ -n "$source_agent" ] && ! cs_herdr_agent_kind_matches "$source_pane" "$source_agent"; then
+  if [ -n "$source_agent" ] && ! CS_HERDR_SESSION="$source_session" cs_herdr_agent_kind_matches "$source_pane" "$source_agent"; then
     echo "error: sender pane '$source_pane' does not contain the recorded $source_agent agent; message '$ACK_ID' remains open" >&2
     return 1
   fi
@@ -162,12 +178,12 @@ deliver_reply() {
   if cs_message_reply_delivery_exists "$state" "$ACK_ID"; then
     return 0
   fi
-  source_cwd=$(cs_herdr_pane_cwd "$source_pane" || true)
+  source_cwd=$(CS_HERDR_SESSION="$source_session" cs_herdr_pane_cwd "$source_pane" || true)
   [ -n "$source_cwd" ] && [ "$(cd "$source_cwd" 2>/dev/null && pwd -P)" = "$(cd "$source_worktree" 2>/dev/null && pwd -P)" ] || {
     echo "error: sender pane '$source_pane' is unavailable or belongs to another worktree; message '$ACK_ID' remains open" >&2
     return 1
   }
-  cs_herdr_agent_prompt_confirmed "$source_pane" "CONSIGLIERE_REPLY v1 message=$ACK_ID correlation=$corr summary=$REPLY" || {
+  CS_HERDR_SESSION="$source_session" cs_herdr_agent_prompt_confirmed "$source_pane" "CONSIGLIERE_REPLY v1 message=$ACK_ID correlation=$corr summary=$REPLY" || {
     echo "error: reply for message '$ACK_ID' was not confirmed; obligation remains open" >&2
     return 1
   }
@@ -179,31 +195,30 @@ deliver_reply() {
 
 ack_message() {
   local file="$INBOX/$ACK_ID.msg" kind from_home source_task source_meta source_pane source_worktree
-  local source_cwd corr
+  local source_cwd corr ack pending_file closed_file
   cs_message_id "$ACK_ID" || { echo "error: invalid message id '$ACK_ID'" >&2; return 1; }
   [ -f "$file" ] || { echo "error: message '$ACK_ID' is missing" >&2; return 1; }
   ack="$INBOX/$ACK_ID.ack"
   if [ -e "$ack" ]; then
     cs_message_validate_ack "$ack" "$ACK_ID" || { echo "error: malformed acknowledgement '$ack'" >&2; return 1; }
+    cs_message_validate_file "$file" || { echo "error: malformed inbox message '$file'" >&2; return 1; }
+    kind=$(cs_message_field "$file" kind)
+    if [ "$kind" = question ] || [ "$kind" = decision-required ]; then
+      from_home=$(cs_message_field "$file" from_home)
+      pending_file=$(cs_message_pending_path "$from_home/state" "$ACK_ID")
+      cs_message_pending_matches_message "$pending_file" "$file" || {
+        echo "error: response obligation '$ACK_ID' does not match its inbox message; acknowledgement remains absent" >&2
+        return 1
+      }
+      closed_file="${pending_file%.pending}.closed"
+      cs_message_pending_close_validate_file "$closed_file" "$ACK_ID" || {
+        echo "error: acknowledgement '$ack' has no valid matching closure; acknowledgement remains untrusted" >&2
+        return 1
+      }
+    fi
     if [ -n "$REPLY" ]; then
       message_source_valid "$file" || return 1
-      case "$(cs_message_field "$file" kind)" in
-        question|decision-required)
-          pending_file=$(cs_message_pending_path "$(cs_message_field "$file" from_home)/state" "$ACK_ID")
-          cs_message_pending_matches_message "$pending_file" "$file" || {
-            echo "error: response obligation '$ACK_ID' does not match its inbox message; acknowledgement remains absent" >&2
-            return 1
-          }
-          ;;
-      esac
       deliver_reply "$file" || return 1
-      if [ -f "${pending_file:-}" ]; then
-        if [ -e "${pending_file%.pending}.closed" ]; then
-          cs_message_pending_close_validate_file "${pending_file%.pending}.closed" "$ACK_ID" || return 1
-        else
-          cs_message_pending_close "$(cs_message_field "$file" from_home)/state" "$ACK_ID" "handled-by-$TASK_ID" || return 1
-        fi
-      fi
     fi
     printf 'already acknowledged message=%s task=%s\n' "$ACK_ID" "$TASK_ID"
     return 0
