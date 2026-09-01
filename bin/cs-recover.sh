@@ -41,6 +41,11 @@ endpoint_ready() {
     echo "error: $label endpoint '$pane' is unavailable or belongs to the wrong worktree" >&2
     return 1
   fi
+  expected_agent=$(cs_meta_get "$meta" harness 2>/dev/null || true)
+  if [ -n "$expected_agent" ] && ! cs_herdr_agent_kind_matches "$pane" "$expected_agent"; then
+    echo "error: $label endpoint '$pane' does not contain the recorded $expected_agent agent" >&2
+    return 1
+  fi
 }
 
 wake_message() {

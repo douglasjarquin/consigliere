@@ -46,6 +46,7 @@ parent_state=$STATE
 parent_pane=unknown
 parent_generation=current-generation
 endpoint_generation=child-generation
+harness=codex
 EOF
 
 message() {

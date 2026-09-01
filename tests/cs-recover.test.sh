@@ -44,6 +44,7 @@ home=$HOME_DIR
 worktree=$HOME_DIR
 pane=w-root:p1
 endpoint_generation=root-generation
+harness=codex
 EOF
 cat > "$STATE/child.meta" <<EOF
 task_id=child
@@ -57,6 +58,7 @@ parent_state=$STATE
 parent_pane=w-root:p1
 parent_generation=root-generation
 endpoint_generation=child-generation
+harness=codex
 EOF
 
 message_id=message-recover-0000000000000001
@@ -69,7 +71,7 @@ cs_message_publish "$STATE/inbox" \
 cs_message_pending_create "$STATE" "$message_id" "$message_id" child root question 1700000000 || fail "pending setup"
 
 export PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
-  CS_HERDR_SESSION=test CS_FAKE_PANE_CWD="$HOME_DIR" CS_FAKE_PROMPTS="$TMP/prompts"
+  CS_HERDR_SESSION=test CS_FAKE_PANE_CWD="$HOME_DIR" CS_FAKE_PROMPTS="$TMP/prompts" CS_FAKE_AGENT_LIVE=1
 if output=$("$ROOT/bin/cs-recover.sh" 2>"$TMP/err"); then
   :
 else

@@ -32,6 +32,9 @@ case "${1:-} ${2:-}" in
   "pane get")
     printf '%s\n' '{"result":{"pane":{"cwd":"'"$CS_FAKE_MESSAGE_PARENT_HOME"'"}}}'
     ;;
+  "agent get")
+    printf '%s\n' '{"result":{"agent":{"agent":"codex"}}}'
+    ;;
   *) printf '%s\n' '{}';;
 esac
 SH
@@ -50,6 +53,7 @@ parent_state=$STATE
 parent_pane=w1:p1
 parent_generation=parent-generation-1
 endpoint_generation=child-generation-1
+harness=codex
 EOF
 }
 write_meta child

@@ -25,6 +25,9 @@ case "${1:-} ${2:-}" in
   "agent prompt")
     printf '%s\n' "${4:-}" >> "$CS_FAKE_PROMPTS"
     ;;
+  "agent get")
+    printf '%s\n' '{"result":{"agent":{"agent":"codex"}}}'
+    ;;
   *)
     printf '%s\n' '{}'
     ;;
@@ -39,7 +42,7 @@ cs_write_meta "$STATE/child.meta" \
   task_id=child kind=ship home="$HOME_DIR" worktree="$HOME_DIR" pane=w2:p2 \
   endpoint_generation=child-generation parent_task_id=root \
   parent_home="$TMP" parent_state="$PARENT_STATE" parent_pane=w1:p1 \
-  parent_generation=root-generation
+  parent_generation=root-generation harness=codex
 printf '%s\n' 'done: terminal buffer only' > "$STATE/child.status"
 touch "$STATE/.last-monitor-beat"
 printf '%s\n' 'w1:p1' > "$STATE/.home-pane"

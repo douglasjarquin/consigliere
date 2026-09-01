@@ -108,7 +108,7 @@ message_source_valid() {
 }
 
 deliver_reply() {
-  local file=$1 kind from_home source_task source_meta source_pane source_worktree source_cwd corr state
+  local file=$1 kind from_home source_task source_meta source_pane source_worktree source_cwd corr state source_agent
   kind=$(cs_message_field "$file" kind)
   case "$kind" in
     question|decision-required) ;;
@@ -125,6 +125,11 @@ deliver_reply() {
     echo "error: sender metadata for message '$ACK_ID' has no worktree" >&2
     return 1
   }
+  source_agent=$(cs_meta_get "$source_meta" harness 2>/dev/null || true)
+  if [ -n "$source_agent" ] && ! cs_herdr_agent_kind_matches "$source_pane" "$source_agent"; then
+    echo "error: sender pane '$source_pane' does not contain the recorded $source_agent agent; message '$ACK_ID' remains open" >&2
+    return 1
+  fi
   cs_message_scalar "$REPLY" "$CS_MESSAGE_MAX_SUMMARY" || {
     echo "error: reply for message '$ACK_ID' exceeds the bounded message field or contains control characters" >&2
     return 1

@@ -27,6 +27,9 @@ case "${1:-} ${2:-}" in
     printf '%s\n' "${4:-}" >> "${CS_FAKE_PROMPTS:?}"
     printf '{"result":{"type":"agent_prompted"}}\n'
     ;;
+  "agent get")
+    printf '%s\n' '{"result":{"agent":{"agent":"codex"}}}'
+    ;;
   *) printf '{}\n' ;;
 esac
 SH
@@ -50,6 +53,7 @@ parent_state=$STATE
 parent_pane=w-root:p1
 parent_generation=root-generation
 endpoint_generation=mate-generation
+harness=codex
 EOF
 cat > "$STATE/worker.meta" <<EOF
 task_id=worker
@@ -63,6 +67,7 @@ parent_state=$STATE
 parent_pane=w-mate:p1
 parent_generation=mate-generation
 endpoint_generation=worker-generation
+harness=codex
 EOF
 
 run_report() {

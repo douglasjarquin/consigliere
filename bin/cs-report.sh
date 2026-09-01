@@ -63,6 +63,12 @@ if [ -z "$PARENT_CWD" ] || [ "$(cd "$PARENT_CWD" 2>/dev/null && pwd -P)" != "$PA
 else
   PARENT_ROUTE_OK=1
 fi
+PARENT_AGENT=$(cs_meta_get "$META" harness 2>/dev/null || true)
+if [ "$PARENT_ROUTE_OK" -eq 1 ] && [ -n "$PARENT_AGENT" ] &&
+  ! cs_herdr_agent_kind_matches "$PARENT_PANE" "$PARENT_AGENT"; then
+  echo "warning: parent pane '$PARENT_PANE' does not contain the recorded $PARENT_AGENT agent; the durable report remains in $PARENT_STATE/inbox" >&2
+  PARENT_ROUTE_OK=0
+fi
 
 if [ -n "$MESSAGE_ID" ]; then
   cs_message_id "$MESSAGE_ID" || { echo "error: invalid message id '$MESSAGE_ID'" >&2; exit 2; }

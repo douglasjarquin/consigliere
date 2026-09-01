@@ -396,6 +396,13 @@ cs_herdr_agent_alive() { # <pane_id>  - is a real agent (codex or claude) in the
   printf '%s' "$out" | jq -e '.result.agent.agent // empty | select(. != "")' >/dev/null 2>&1
 }
 
+cs_herdr_agent_kind_matches() { # <pane_id> <expected-kind>
+  local out kind
+  out=$(cs_herdr agent get "$1" 2>/dev/null) || return 1
+  kind=$(printf '%s' "$out" | jq -er '.result.agent.agent // empty' 2>/dev/null) || return 1
+  [ "$kind" = "$2" ]
+}
+
 # cs_herdr_agent_start_timeout_ms <seconds> - seconds converted to milliseconds
 # for `agent start --timeout`, clamped to herdr's own documented ceiling
 # (`herdr agent start --help`: max 300000). LAUNCH_WAIT and its
