@@ -38,6 +38,8 @@ The message carries `from_home` so a parent in another Consigliere home can vali
 
 `bin/cs-inbox.sh --ack <message-id> --reply <bounded-answer>` revalidates the sender pane's recorded worktree, delivers a correlated answer, and only then closes the pending obligation and writes the acknowledgement.
 
+`bin/cs-recover.sh` is the cold backstop: it makes one bounded pass over durable pending and unacknowledged messages, revalidates the current endpoint, and either re-wakes the exact message ID or reports the concrete repair action.
+
 Event-driven lifecycle routing, recursive inbox draining, bounded cold reconciliation, polling reduction, and the nested Herdr canary remain later phases.
 
 No issue checkbox for a later phase is complete until its named real-surface evidence exists.
