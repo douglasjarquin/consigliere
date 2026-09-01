@@ -96,6 +96,10 @@ STATE="${CS_STATE_OVERRIDE:-$CS_HOME/state}"
 . "$SCRIPT_DIR/cs-composer-lib.sh"
 # shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# Self-announced status appends: a --resolve-key close is this home's own
+# bookkeeping and must not re-wake the session that wrote it.
+# shellcheck source=bin/cs-wake-lib.sh
+. "$SCRIPT_DIR/cs-wake-lib.sh"
 # shellcheck source=bin/cs-operational-input.sh
 . "$SCRIPT_DIR/cs-operational-input.sh"
 # shellcheck source=bin/cs-marker-lib.sh
@@ -231,7 +235,7 @@ cs_send_close_resolved_keys() {  # <answer-text>
   for k in $RESOLVE_KEYS; do
     prefix="resolved [key=$k]: ${verb} via cs-send: "
     cs_cap_line_var "$note" "$((CS_LINE_CAP_DEFAULT - ${#prefix}))"
-    if ! printf '%s\n' "$prefix$CS_LINE_CAP_LINE" >> "$RESOLVE_STATUS_FILE"; then
+    if ! cs_wake_status_append_self_announced "$(dirname "$RESOLVE_STATUS_FILE")" "$RESOLVE_STATUS_FILE" "$prefix$CS_LINE_CAP_LINE"; then
       echo "error: the answer was delivered to '$RAW' ($PANE), but decision key '$k' could not be closed in $RESOLVE_STATUS_FILE. Close it manually with: echo 'resolved [key=$k]: <how it was answered>' >> $RESOLVE_STATUS_FILE - do not resend the answer." >&2
       return 1
     fi

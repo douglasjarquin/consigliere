@@ -465,7 +465,7 @@ It tracks work items only, never agents; persistent capos never appear as backlo
 Work routed to a capo is recorded in that capo home's own backlog, not the main backlog.
 When a main-side thread such as a pending boss decision or relay reminder is worth durable tracking, file it as its own work item; use `tasks-axi hold <id> --reason "<reason>" --kind captain` for a boss-gated thread.
 Unresolved decisions discovered by investigations or visual reviews follow `decision-hold-lifecycle`, which owns their mandatory backlog lifecycle.
-Update the backlog on every dispatch, completion, and decision for a work item.
+Dispatch and completion transitions ride with the physical change itself: pass the item to `bin/cs-spawn.sh --backlog-item <id>` so dispatch marks it in flight and successful teardown records it done, and update the backlog by hand only for decisions and whenever those scripts print a reminder instead.
 Re-evaluate queued work after every teardown and heartbeat, dispatching items only when dependencies and time gates have cleared.
 
 `.tasks.toml`, `docs/configuration.md`, and current `tasks-axi --help` own the backlog schema, compatibility, retention, and routine command syntax.

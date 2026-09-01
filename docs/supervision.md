@@ -62,7 +62,10 @@ Restoring an interrupted drain's queue removes the batch it restored from, becau
 
 ## Wake vocabulary
 
-- `signal: <files>` - status/turn-end signals; surfaced when a listed status has a boss-relevant verb OR a no-verb signal's soldier is not provably working.
+- `signal: <files>` - status/turn-end signals; surfaced when a listed status carries a boss-relevant verb anywhere in its unread appended span OR a no-verb signal's soldier is not provably working.
+  The span read (not last-line-wins) is what keeps a decision, blocker, failure, or finish visible when a later routine append lands inside the coalescing grace.
+  A no-verb wake carrying only turn-end markers is also absorbed when the task's pane content changed since the previous poll, so a harness with no verified busy source does not surface a contentless wake at every turn boundary; a stopped soldier's now-static pane still surfaces through the staleness backbone.
+  The drain presents every unread status line since its per-task presentation cursor, so an older `note:` is never dropped because a newer line followed it, and this home's own bookkeeping closes (a `cs-send --resolve-key` resolved line) advance the seen marker over exactly their own bytes and do not re-wake the session that wrote them.
 - `stale: <pane>` - endpoint went quiet; absorb-only-when-provably-working, wedge escalation past `CS_STALE_ESCALATE_SECS` with an escalation count and a `demand-deep-inspection` marker at `CS_WEDGE_DEMAND_INSPECT_COUNT` consecutive escalations.
   A pane that stays *busy* is bounded too: past `CS_BUSY_TURN_MAX_SECS` (default 3600) with no completed turn it enters the same wedge timer, because a busy signal alone cannot distinguish real work from a hung foreground tool call.
   The escalation is for inspection only and never interrupts or restarts the soldier; any completed turn resets the age.

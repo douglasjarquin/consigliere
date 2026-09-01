@@ -277,6 +277,99 @@ test_resolved_pending_reply_escalation_leaves_the_section() {
   pass "a resolved capo escalation leaves the OPEN DECISIONS section"
 }
 
+# A key stated AFTER the verb colon (needs-decision: [key=x] note) must open
+# and close key x, not fold into the "default" bucket - the common worker shape
+# that let two decisions collapse into one record and refused --resolve-key.
+test_note_head_key_opens_and_closes() {
+  local dir state f rows
+  dir=$(make_case note-head-key); state="$dir/state"
+  f="$state/nh.status"
+  printf 'needs-decision: [key=api-shape] pick a shape\nneeds-decision [key=other]: second\n' > "$f"
+  rows=$(fold_one "$f")
+  assert_contains "$rows" "$(printf 'api-shape\tneeds-decision\tpick a shape')" \
+    "a note-head [key=] token must open its stated key with the token stripped from the note"
+  assert_contains "$rows" "$(printf 'other\tneeds-decision\tsecond')" \
+    "the before-colon key position must keep working alongside"
+  printf 'resolved: [key=api-shape] chosen\n' >> "$f"
+  rows=$(fold_one "$f")
+  case "$rows" in
+    *api-shape*) fail "a note-head [key=] resolve did not close its stated key" ;;
+  esac
+  printf 'needs-decision: [key=bad slug] malformed\n' >> "$f"
+  rows=$(fold_one "$f")
+  case "$rows" in
+    *default*malformed*) fail "a malformed note-head slug must reject the line, not fold to default" ;;
+  esac
+  pass "a [key=] token at the head of the note opens and closes its stated key"
+}
+
+# Bracket tags and the bare pending-reply corr token between the verb and the
+# colon must not hide the verb: a correlated opener opens and a correlated
+# closer closes, in both tag orders and both token shapes.
+test_metadata_tags_do_not_hide_the_verb() {
+  local dir state f rows
+  dir=$(make_case corr-tags); state="$dir/state"
+  f="$state/ct.status"
+  printf 'needs-decision [corr=0123456789abcdef] [key=x]: pick\nblocked corr=0123456789abcdef: stuck on creds\n' > "$f"
+  rows=$(fold_one "$f")
+  assert_contains "$rows" "$(printf 'x\tneeds-decision\tpick')" \
+    "a bracketed corr tag before the key token must not hide the opener verb"
+  assert_contains "$rows" "$(printf 'default\tblocked\tstuck on creds')" \
+    "a bare corr token must not hide the opener verb"
+  printf 'resolved [key=x] corr=0123456789abcdef: answered\nresolved [corr=0123456789abcdef]: unblocked\n' >> "$f"
+  rows=$(fold_one "$f")
+  [ -z "$rows" ] || fail "correlated closers did not close their decisions: $rows"
+  printf 'needs-decision free text with a=b equals: prose\n' >> "$f"
+  rows=$(fold_one "$f")
+  [ -z "$rows" ] || fail "free text carrying an equals sign must not fold as a verb: $rows"
+  pass "correlation tags in either shape fold openers and closers correctly"
+}
+
+# A cursor persisted under the previous fold contract carries an open set
+# computed while note-head keys and tagged verbs were invisible; the version
+# in the fold contract must force a clean full re-fold from the log.
+test_stale_fold_contract_cursor_is_rebuilt() {
+  local dir state f rows
+  dir=$(make_case stale-fold-cursor); state="$dir/state"
+  f="$state/sc.status"
+  printf 'needs-decision [corr=0123456789abcdef]: correlated question\n' > "$f"
+  printf 'offset=%s\nident=%s\nfold-contract=resolve:resolved\theld:captain-held\n' \
+    "$(wc -c < "$f" | tr -d '[:space:]')" \
+    "$(bash -c '. "$1"; _cs_decision_file_ident "$2"' _ "$CLASSIFY" "$f")" \
+    > "$state/.decision-cursor-sc"
+  rows=$(bash -c '. "$1"; status_open_decisions_incremental "$2"' _ "$CLASSIFY" "$f")
+  assert_contains "$rows" "$(printf 'default\tneeds-decision\tcorrelated question')" \
+    "an old-contract cursor must be rebuilt from byte 0 so the correlated opener is visible"
+  pass "a cursor persisted under the old fold contract is invalidated and re-folded"
+}
+
+# Every unread status line since the presentation cursor is surfaced on drain:
+# an older note followed by a newer line must not vanish because only the
+# newest was annotated, and an already-presented span stays quiet.
+test_drain_presents_every_unread_status_line() {
+  local dir state out err f
+  dir=$(make_case unread-notes); state="$dir/state"
+  out="$dir/out"; err="$dir/err"
+  f="$state/notes.status"
+  printf 'note: the answer you asked for\nworking: moving on\n' > "$f"
+  printf 0 > "$state/.last-presented-notes"
+  append_wake "$state" signal notes.status "signal: $f" || fail "enqueue failed"
+  run_drain "$state" "$out" "$err" || fail "drain failed"
+  assert_grep "unread status event: notes.status: note: the answer you asked for" "$out" \
+    "the older note: line must be presented, not dropped for the newer line"
+  assert_grep "unread status event: notes.status: working: moving on" "$out" \
+    "the newer line must be presented too"
+  append_wake "$state" signal notes.status "signal: $f" || fail "second enqueue failed"
+  run_drain "$state" "$out" "$err" || fail "second drain failed"
+  assert_no_grep "note: the answer you asked for" "$out" \
+    "an already-presented span must not be re-announced"
+  pass "the drain presents every unread status line exactly once"
+}
+
+test_note_head_key_opens_and_closes
+test_metadata_tags_do_not_hide_the_verb
+test_stale_fold_contract_cursor_is_rebuilt
+test_drain_presents_every_unread_status_line
 test_buried_decision_surfaces_on_empty_drain
 test_over_long_decision_note_is_capped_with_a_marker
 test_section_prints_the_answer_with_close_hint

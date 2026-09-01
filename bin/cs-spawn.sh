@@ -42,6 +42,16 @@
 #   --issue <n> records issue=<n> in meta for board-driven work (the Closes-#n
 #     contract itself lives in the brief via cs-brief.sh --issue). Correlates
 #     the task to a GitHub issue for the fleet view and the contracts skill.
+#   --backlog-item <id> (ship/scout) names the backlog work item this dispatch
+#     begins. The spawn records backlog_item=<id> in meta and moves the item to
+#     In flight through tasks-axi as part of dispatch, under the spawn lock and
+#     before reporting success, so the task record and the backlog row cannot
+#     drift apart. A failed transition fails the spawn loudly and removes the
+#     provisional record. With a manual backend or no compatible tasks-axi the
+#     transition is skipped with a printed hand-edit reminder; with no
+#     --backlog-item the spawn prints a reminder to move the item yourself.
+#     Refused on --capo (a capo is never a backlog item) and --relaunch (the
+#     dispatch transition already happened).
 #
 # Ship/scout mechanics:
 #   - Requires the brief at data/<id>/brief.md (scaffold with cs-brief.sh first).
@@ -153,6 +163,9 @@ esac
 # spawn-lock staleness check.
 # shellcheck source=bin/cs-lock-lib.sh
 . "$SCRIPT_DIR/cs-lock-lib.sh"
+# Backlog backend selection and the dispatch transition (--backlog-item).
+# shellcheck source=bin/cs-tasks-lib.sh
+. "$SCRIPT_DIR/cs-tasks-lib.sh"
 cs_resolve_root
 # Optional turn telemetry (off unless host/telemetry.conf enables it). Sourced
 # after cs_resolve_root so it sees this home's resolved DATA/STATE/HOST_DIR.
@@ -290,6 +303,7 @@ case "$BRIEF_DELIVER_WAIT" in ''|*[!0-9]*|0) BRIEF_DELIVER_WAIT=50 ;; esac
 BRIEF_DELIVER_RETRY_SECS=${CS_SPAWN_BRIEF_DELIVER_RETRY_SECS:-5}
 case "$BRIEF_DELIVER_RETRY_SECS" in ''|*[!0-9]*|0) BRIEF_DELIVER_RETRY_SECS=5 ;; esac
 ISSUE=
+BACKLOG_ITEM=
 RELAUNCH=0
 POS=()
 while [ "$#" -gt 0 ]; do
@@ -302,6 +316,7 @@ while [ "$#" -gt 0 ]; do
     --yolo) YOLO=${2:?--yolo requires a value}; shift ;;
     --base) BASE=${2:?--base requires a value}; shift ;;
     --issue) ISSUE=${2:?--issue requires a value}; shift ;;
+    --backlog-item) BACKLOG_ITEM=${2:?--backlog-item requires a value}; shift ;;
     --parent) PARENT_TASK=${2:?--parent requires a task id}; shift ;;
     --parent-home) PARENT_HOME=${2:?--parent-home requires a path}; shift ;;
     --parent-pane) PARENT_PANE=${2:?--parent-pane requires a pane}; shift ;;
@@ -331,6 +346,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   relaunch_refuse_flag --yolo "$YOLO"
   relaunch_refuse_flag --base "$BASE"
   relaunch_refuse_flag --issue "$ISSUE"
+  relaunch_refuse_flag --backlog-item "$BACKLOG_ITEM"
   relaunch_refuse_flag --parent "$PARENT_TASK"
   relaunch_refuse_flag --parent-home "$PARENT_HOME"
   relaunch_refuse_flag --parent-pane "$PARENT_PANE"
@@ -427,6 +443,10 @@ else
   fi
   if [ -n "$YOLO" ]; then
     echo "error: --yolo applies only to ship spawns; approval posture belongs to a ship task's contract" >&2
+    exit 2
+  fi
+  if [ "$KIND" = capo ] && [ -n "$BACKLOG_ITEM" ]; then
+    echo "error: --backlog-item applies only to ship and scout spawns; a capo is never a backlog item" >&2
     exit 2
   fi
 fi
@@ -1054,7 +1074,23 @@ META_LINES=(
 META_LINES+=("harness=$HARNESS" "herdr_session=$(cs_herdr_session)")
 [ "$HEADLESS" -eq 1 ] && META_LINES+=("headless=1")
 [ -n "$ISSUE" ] && META_LINES+=("issue=$ISSUE")
+[ -n "$BACKLOG_ITEM" ] && META_LINES+=("backlog_item=$BACKLOG_ITEM")
 cs_meta_write "$STATE/$ID.meta" "${META_LINES[@]}"
+
+# The dispatch backlog transition, folded into the same physical change under
+# the same spawn lock: the record above and the In-flight row land together,
+# before this spawn can report success. A write failure fails the dispatch and
+# removes the provisional record, so the two can never disagree.
+if [ -n "$BACKLOG_ITEM" ]; then
+  backlog_rc=0
+  cs_tasks_backlog_transition "$CONFIG" start "$BACKLOG_ITEM" || backlog_rc=$?
+  if [ "$backlog_rc" -eq 1 ]; then
+    rm -f "$STATE/$ID.meta"
+    abort_task "backlog item '$BACKLOG_ITEM' could not be moved to In flight, so dispatch of '$ID' failed; its provisional record was removed"
+  fi
+else
+  echo "reminder: no --backlog-item was named; move the backlog work item for '$ID' to In flight yourself" >&2
+fi
 DISPLAY_MODE=$KIND
 [ "$KIND" = ship ] && DISPLAY_MODE=$MODE
 report_task_metadata "$PANE" "$ID" "$DISPLAY_MODE"

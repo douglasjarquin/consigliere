@@ -58,6 +58,15 @@
 # is a fail-closed refusal naming what survived, downgraded to a named warning
 # only under --force.
 #
+# When the task's metadata records backlog_item= (cs-spawn.sh --backlog-item),
+# a successful ship/scout teardown also records that item done through
+# tasks-axi (with the PR and scout report attached when known), before the
+# final success line, so a finished task never lingers as in flight. A failed
+# backlog write is a loud non-zero exit naming the item still shown in flight;
+# with a manual backend or no compatible tasks-axi the close is skipped with a
+# hand-edit reminder, and with no recorded item the old record-completion
+# reminder is printed instead.
+#
 # Usage: cs-teardown.sh <task-id> [--force]
 #   --force skips ordinary-task dirty and landed-work checks, skips scout
 #   report checks, and discards capo child work for kind=capo. Only use it
@@ -96,6 +105,10 @@ CS_LOCK_LOG_PREFIX="cs-teardown" . "$SCRIPT_DIR/cs-lock-lib.sh"
 # shellcheck source=bin/cs-capo-registry-lib.sh
 . "$SCRIPT_DIR/cs-capo-registry-lib.sh"
 
+# Backlog backend selection and the completion transition (backlog_item=).
+# shellcheck source=bin/cs-tasks-lib.sh
+. "$SCRIPT_DIR/cs-tasks-lib.sh"
+
 # Optional turn telemetry (off unless host/telemetry.conf enables it).
 # shellcheck source=bin/cs-telemetry-lib.sh
 . "$SCRIPT_DIR/cs-telemetry-lib.sh"
@@ -121,6 +134,7 @@ MODE=$(cs_meta_get "$META" mode || echo made)
 PR_URL=$(cs_meta_get "$META" pr || true)
 HOME_PATH=$(cs_meta_get "$META" home || true)
 HARNESS=$(cs_meta_get "$META" harness 2>/dev/null || true)
+BACKLOG_ITEM=$(cs_meta_get "$META" backlog_item 2>/dev/null || true)
 
 # Minimum age before a git lock with no live holder is considered abandoned.
 STALE_LOCK_MIN_AGE=${CS_TEARDOWN_STALE_LOCK_MIN_AGE:-30}
@@ -987,9 +1001,31 @@ if [ "$KIND" != scout ] && [ "$MODE" != local-only ] && [ -x "$SCRIPT_DIR/cs-fle
   "$SCRIPT_DIR/cs-fleet-sync.sh" "$PROJ" || true
 fi
 
+# The completion backlog transition, folded into the same cleanup that removed
+# the task's physical record, before the success line below: a torn-down task
+# must never keep showing as in flight. A write failure is a loud non-zero
+# exit - the cleanup itself already happened and is not undone, but the result
+# is not clean until the item is closed by hand.
+BACKLOG_LINE="reminder: record completion in the backlog and re-evaluate queued work."
+if [ -n "$BACKLOG_ITEM" ]; then
+  DONE_ARGS=()
+  [ -n "$PR_URL" ] && DONE_ARGS+=(--pr "$PR_URL")
+  [ "$KIND" = scout ] && [ -f "$DATA/$ID/report.md" ] && DONE_ARGS+=(--report "$DATA/$ID/report.md")
+  backlog_rc=0
+  cs_tasks_backlog_transition "$CONFIG" "done" "$BACKLOG_ITEM" ${DONE_ARGS[@]+"${DONE_ARGS[@]}"} || backlog_rc=$?
+  case "$backlog_rc" in
+    0) BACKLOG_LINE="backlog item '$BACKLOG_ITEM' recorded done; re-evaluate queued work." ;;
+    2) BACKLOG_LINE="reminder: record completion of backlog item '$BACKLOG_ITEM' by hand and re-evaluate queued work." ;;
+    *)
+      echo "error: cleanup for '$ID' finished, but backlog item '$BACKLOG_ITEM' could not be recorded done and still shows as in flight; close it by hand, then re-evaluate queued work." >&2
+      exit 1
+      ;;
+  esac
+fi
+
 # TELEMETRY, measurement only, on a teardown that actually completed. A refusal
 # never reaches this line, so a task cleaned up under protest is never counted as
 # a supervision turn that closed the loop.
 cs_telemetry_crumb teardown "$KIND" || true
 echo "teardown $ID complete (pane ${PANE:-<none>}, worktree ${WT:-<none>})"
-echo "reminder: record completion in the backlog and re-evaluate queued work."
+echo "$BACKLOG_LINE"

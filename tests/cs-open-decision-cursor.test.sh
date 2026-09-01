@@ -82,7 +82,7 @@ test_new_task_without_cursor_matches_full_fold() {
   assert_present "$(cursor_of "$state" t1)" "the first call must persist a cursor"
   assert_grep "offset=" "$(cursor_of "$state" t1)" "the cursor must record a byte offset"
   assert_grep "ident=" "$(cursor_of "$state" t1)" "the cursor must record a device:inode identity"
-  assert_grep "$(printf 'fold-contract=resolve:resolved\theld:captain-held')" \
+  assert_grep "$(printf 'fold-contract=fold:2\tresolve:resolved\theld:captain-held')" \
     "$(cursor_of "$state" t1)" "the cursor must record its effective fold contract"
   pass "a new task with no cursor takes the full re-fold path and writes the cursor"
 }
@@ -208,7 +208,7 @@ test_fold_contract_change_invalidates_cursor() {
   out=$(CS_CLASSIFY_RESOLVE_VERB=closed \
     CS_CLASSIFY_BOSS_HELD_VERB=parked fold_inc "$f")
   [ -z "$out" ] || fail "the configured close verbs must close both decisions (got: '$out')"
-  assert_grep "$(printf 'fold-contract=resolve:closed\theld:parked')" "$cursor" \
+  assert_grep "$(printf 'fold-contract=fold:2\tresolve:closed\theld:parked')" "$cursor" \
     "the cursor must persist the configured fold contract"
 
   out=$(CS_CLASSIFY_RESOLVE_VERB=resolved \
@@ -220,7 +220,7 @@ test_fold_contract_change_invalidates_cursor() {
     "the old resolve verb must stop closing decisions after the contract changes"
   assert_contains "$out" "$(printf 'quota\tblocked\twaiting')" \
     "the old held verb must stop closing decisions after the contract changes"
-  assert_grep "$(printf 'fold-contract=resolve:resolved\theld:captain-held')" "$cursor" \
+  assert_grep "$(printf 'fold-contract=fold:2\tresolve:resolved\theld:captain-held')" "$cursor" \
     "the rewritten cursor must identify the new fold contract"
   pass "a changed resolve/held fold contract invalidates and rewrites the cursor"
 }
