@@ -1,0 +1,88 @@
+---
+name: project-management
+description: >-
+  Agent-only procedure for Consigliere project management.
+  Use before adding, creating, removing, or initializing a project.
+  Cloning or registering a project is add intake and uses the same trigger.
+  Owns project add, create, clone, remove, initialization, registry, delivery-mode, autonomy, and outward-consent decisions.
+user-invocable: false
+---
+
+# project-management
+
+Use this procedure before adding, creating, removing, or initializing a project.
+Cloning or registering a project is add intake and uses the same trigger.
+This skill is the single owner of Consigliere's project-management procedure.
+It does not replace `capo-provisioning`, which owns project clones inside persistent capo homes.
+
+## Preconditions and registry
+
+Projects live flat under `projects/`, and `config/projects.md` is the private fleet registry.
+Use the registry format and parser contract owned by the header of `bin/cs-project-mode.sh`.
+The registry records the boss's standing posture for a project and is advisory: per `AGENTS.md` section 7, each ship task's mode and yolo are decided at intake and passed explicitly, so a registry entry is the default the boss expects rather than an enforced setting.
+Keep each registry description useful for identifying the project, but keep boss-private state and detailed project knowledge in their existing designated homes.
+Do not turn the registry into project documentation.
+
+Before adding, cloning, creating, or registering any project in the main home, read `host/capos.md` and judge the proposed project or domain against every registered natural-language `scope:`.
+Apply `AGENTS.md` section 7's routing rules: when an existing scope owns that domain, route the operation to that capo instead of standing up a duplicate main-home clone.
+Absence from `config/projects.md` is never evidence that no capo owns the domain, because a capo's own clones live in its home and never appear in the main registry.
+If the owning capo cannot accept the route, report that concrete blocker or get an explicit boss redirection rather than silently duplicating the project here.
+
+Resolve the project name, destination, delivery mode, and autonomy posture before changing local or remote state.
+Keep a newly added clone and its registry entry consistent, and roll back only artifacts created by the incomplete operation when a later initialization step fails and that rollback is safe.
+Do not overwrite or repurpose an existing path.
+
+## Standing delivery posture
+
+Choose the project's standing delivery mode when adding or creating it:
+
+- `no-mistakes` runs the full validation pipeline before a PR and is the default when the boss does not specify a mode.
+- `direct-PR` pushes and opens a PR without the no-mistakes pipeline.
+- `local-only` has no required remote or PR and lands only through the approved local fast-forward path.
+
+The optional `+yolo` posture changes routine approval authority but does not change the delivery mode.
+Default it off, and enable it only on the boss's explicit instruction.
+Destructive, irreversible, and security-sensitive decisions still require boss approval when it is on.
+
+This entry is the standing default the boss expects for the project, not a per-task setting.
+Registering a project never removes the per-task decision at dispatch, and a project may stay unregistered, in which case it simply has no standing posture.
+
+## Add or clone an existing project
+
+Confirm the source URL, local project name, delivery mode, and autonomy posture.
+Clone into `projects/<name>` and add the registry entry only after the destination is known to be unused.
+A `no-mistakes` project must have an `origin` remote and must complete the initialization procedure below.
+A `direct-PR` project needs an `origin` remote but skips no-mistakes initialization.
+A `local-only` project may have no remote and skips no-mistakes initialization.
+
+## Create a project
+
+Creating a GitHub repository is outward-facing.
+Before making that remote change, propose the repository name, owner or organization, visibility, and delivery mode, defaulting visibility to private and delivery mode to `no-mistakes`, then obtain the boss's explicit consent for those values.
+Use `gh-axi` for the approved GitHub operation and consult its current help rather than relying on remembered flags.
+After remote creation succeeds, clone it locally, add the registry entry, and initialize it according to its delivery mode.
+
+For a purely `local-only` project, create a local Git repository under its unused `projects/<name>` path, add the registry entry, and make no GitHub call.
+The boss's request to create that local project authorizes this local initialization, but it does not authorize an unmentioned remote repository.
+
+## Initialize
+
+Run no-mistakes initialization only for `no-mistakes` projects:
+
+```sh
+cd projects/<name> && no-mistakes init && no-mistakes doctor
+```
+
+Initialization configures the local gate and does not vendor a no-mistakes skill into the project.
+Do not create a commit merely because initialization ran.
+If doctor reports an environment, authentication, or daemon problem, resolve that blocker before dispatching work and never restart the shared daemon from a project operation.
+
+## Remove
+
+Project removal is destructive and is not one of Consigliere's standing direct-write exceptions under `projects/`.
+Never issue a raw removal command on your own initiative.
+First obtain the boss's explicit removal decision, then inspect the current digest and authoritative repositories for in-flight or queued work, registered capo clones, linked worktrees, dirty files, unpushed commits, and any other unlanded work.
+If any dependency or unlanded work exists, stop and report it before changing the registry.
+Only once that preflight is clean may removal proceed, and only under `AGENTS.md` hard rule 1's boss-approved concrete operation: the boss names the removal and its scope in the moment, and you perform exactly that and nothing adjacent.
+A clean preflight is never itself the authorization, and the approval never extends to forcing or discarding unlanded work.
+When a clone has already been removed through an approved guarded path, or the registry is provably stale because no clone exists, remove its registry line so navigation matches reality.
