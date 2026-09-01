@@ -68,6 +68,39 @@ wake_message() {
   printf 'recover: re-woke message=%s task=%s\n' "$message_id" "$(cs_message_field "$file" to_task_id)"
 }
 
+wake_root_message() {
+  local file=$1 message_id pane root_generation cwd source_task source_home source_meta expected_agent
+  message_id=$(cs_message_field "$file" message_id)
+  pane=$(sed -n '1p' "$STATE/.home-pane" 2>/dev/null || true)
+  root_generation=$(sed -n '1p' "$STATE/.home-endpoint-generation" 2>/dev/null || true)
+  [ -n "$pane" ] && [ -n "$root_generation" ] || {
+    echo "error: message '$message_id' root endpoint identity is unavailable" >&2
+    return 1
+  }
+  cwd=$(cs_herdr_pane_cwd "$pane" 2>/dev/null || true)
+  [ -n "$cwd" ] && [ "$(cd "$cwd" 2>/dev/null && pwd -P)" = "$(cd "$CS_HOME" 2>/dev/null && pwd -P)" ] || {
+    echo "error: message '$message_id' root endpoint '$pane' is unavailable or belongs to another home" >&2
+    return 1
+  }
+  source_task=$(cs_message_field "$file" from_task_id)
+  source_home=$(cs_message_field "$file" from_home)
+  source_meta="$source_home/state/$source_task.meta"
+  expected_agent=$(cs_meta_get "$source_meta" harness 2>/dev/null || true)
+  if [ -n "$expected_agent" ] && ! cs_herdr_agent_kind_matches "$pane" "$expected_agent"; then
+    echo "error: message '$message_id' root endpoint '$pane' does not contain the recorded $expected_agent agent" >&2
+    return 1
+  fi
+  cs_message_route_write "$file" root "$root_generation" || {
+    echo "error: message '$message_id' root route could not be repaired" >&2
+    return 1
+  }
+  cs_herdr_agent_prompt_confirmed "$pane" "CONSIGLIERE_WAKE v1 message=$message_id" || {
+    echo "error: message '$message_id' root wake was not confirmed" >&2
+    return 1
+  }
+  printf 'recover: re-woke message=%s task=root\n' "$message_id"
+}
+
 reconcile_settled_child() {
   local meta=$1 task kind status last generation pane recovery_id marker
   task=$(basename "$meta" .meta)
@@ -162,12 +195,17 @@ for pending in "$STATE"/pending/*.pending; do
     }
   [ -e "${message_file%.msg}.ack" ] && continue
   recipient_meta="$parent_state/$parent_task.meta"
-  if [ ! -f "$recipient_meta" ]; then
+  if [ "$parent_task" = root ] && [ ! -f "$recipient_meta" ]; then
+    if wake_root_message "$message_file"; then
+      rewoken=$((rewoken + 1))
+    else
+      failed=1
+    fi
+  elif [ ! -f "$recipient_meta" ]; then
     echo "error: pending message '$message_id' names missing recipient metadata '$recipient_meta'" >&2
     failed=1
     continue
-  fi
-  if wake_message "$message_file" "$recipient_meta"; then
+  elif wake_message "$message_file" "$recipient_meta"; then
     rewoken=$((rewoken + 1))
   else
     failed=1
@@ -188,6 +226,14 @@ for message_file in "$STATE"/inbox/*.msg; do
   if seen_message "$message_id"; then continue; fi
   task=$(cs_message_field "$message_file" to_task_id)
   recipient_meta="$STATE/$task.meta"
+  if [ "$task" = root ] && [ ! -f "$recipient_meta" ]; then
+    if wake_root_message "$message_file"; then
+      rewoken=$((rewoken + 1))
+    else
+      failed=1
+    fi
+    continue
+  fi
   if [ ! -f "$recipient_meta" ]; then
     echo "error: inbox message '$message_id' names missing recipient metadata '$recipient_meta'" >&2
     failed=1

@@ -37,15 +37,8 @@ esac
 SH
 chmod +x "$FAKEBIN/herdr"
 
-cat > "$STATE/root.meta" <<EOF
-task_id=root
-kind=capo
-home=$HOME_DIR
-worktree=$HOME_DIR
-pane=w-root:p1
-endpoint_generation=root-generation
-harness=codex
-EOF
+printf '%s\n' 'w-root:p1' > "$STATE/.home-pane"
+printf '%s\n' 'root-generation' > "$STATE/.home-endpoint-generation"
 cat > "$STATE/child.meta" <<EOF
 task_id=child
 kind=ship
@@ -85,7 +78,7 @@ grep -F 'endpoint_generation=root-generation' "$STATE/inbox/$message_id.route" >
 pass "recovery re-wakes an existing durable obligation once"
 
 relaunch_id='message-recover-0000000000000002'
-printf '%s\n' 'endpoint_generation=root-generation-2' >> "$STATE/root.meta"
+printf '%s\n' 'root-generation-2' > "$STATE/.home-endpoint-generation"
 cs_message_publish "$STATE/inbox" \
   "schema=cs-message.v1" "message_id=$relaunch_id" "correlation_id=$relaunch_id" \
   "sequence=1" "kind=question" "from_task_id=child" "to_task_id=root" \
@@ -108,7 +101,7 @@ export CS_FAKE_PANE_CWD="$TMP/wrong-worktree"
 if "$ROOT/bin/cs-recover.sh" >"$TMP/wrong.out" 2>"$TMP/wrong.err"; then
   fail "recover accepted a wrong-home endpoint"
 fi
-grep -F 'wrong' "$TMP/wrong.err" >/dev/null || fail "wrong-home recovery refusal lacked its reason"
+grep -F 'another home' "$TMP/wrong.err" >/dev/null || fail "wrong-home recovery refusal lacked its reason"
 [ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$message_id" "$TMP/prompts")" = 2 ] || fail "wrong-home recovery sent a wake"
 pass "recovery refuses a stale or wrong-home endpoint without guessing"
 

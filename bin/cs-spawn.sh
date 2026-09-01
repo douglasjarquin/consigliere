@@ -354,6 +354,9 @@ PARENT_TASK=${PARENT_TASK:-root}
 PARENT_HOME=${PARENT_HOME:-$CS_HOME}
 PARENT_STATE=${PARENT_HOME}/state
 PARENT_PANE=${PARENT_PANE:-${HERDR_PANE_ID:-unknown}}
+if [ -z "$PARENT_GENERATION" ] && [ "$PARENT_TASK" = root ] && [ -f "$PARENT_STATE/.home-endpoint-generation" ]; then
+  PARENT_GENERATION=$(sed -n '1p' "$PARENT_STATE/.home-endpoint-generation")
+fi
 PARENT_GENERATION=${PARENT_GENERATION:-${CS_PARENT_ENDPOINT_GENERATION:-unknown}}
 ENDPOINT_GENERATION=${CS_ENDPOINT_GENERATION:-task-$$-$(date +%s)-$RANDOM}
 if ! cs_meta_validate_parent_values "$PARENT_TASK" "$PARENT_HOME" "$PARENT_STATE" \

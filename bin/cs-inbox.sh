@@ -109,6 +109,12 @@ message_source_valid() {
       echo "error: stale receiver generation in '$file'" >&2
       return 1
     }
+  elif [ -f "$STATE/.home-endpoint-generation" ]; then
+    root_generation=$(sed -n '1p' "$STATE/.home-endpoint-generation")
+    [ -n "$root_generation" ] && [ "$root_generation" = "$(cs_message_route_generation "$file")" ] || {
+      echo "error: stale receiver generation in '$file'" >&2
+      return 1
+    }
   fi
 }
 
