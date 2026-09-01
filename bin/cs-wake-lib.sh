@@ -78,8 +78,8 @@ cs_watcher_healthy() {
   identity=$CS_WATCHER_MATCHED_IDENTITY
   age=$(cs_path_age "$beat")
   [ "$age" -lt "$grace" ] || return 1
-  CS_WATCHER_HEALTHY_PID=$pid
-  CS_WATCHER_HEALTHY_IDENTITY=$identity
+  export CS_WATCHER_HEALTHY_PID=$pid
+  export CS_WATCHER_HEALTHY_IDENTITY=$identity
   return 0
 }
 

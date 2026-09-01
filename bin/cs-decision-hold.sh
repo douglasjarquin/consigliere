@@ -498,7 +498,7 @@ command_resolve() {
     esac
   done
 
-  body=$(resolution_body resolved "$routed_csv" $routed)
+  body=$(resolution_body resolved "$routed_csv" "$routed")
   tasks_axi update "$id" --body "$body" >/dev/null \
     || fail "could not record the boss decision on $id"
   for dep in $routed; do

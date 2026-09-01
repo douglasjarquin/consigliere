@@ -175,7 +175,7 @@ cs_grok_json_escape() {
 
 # cs_grok_exclude_worktree_pointer <worktree> - gitignore the turn-end pointer.
 cs_grok_exclude_worktree_pointer() {
-  local wt=$1 excl
+  local wt=$1
   EXCL=$(git -C "$wt" rev-parse --git-path info/exclude 2>/dev/null || true)
   [ -n "$EXCL" ] || return 0
   grep -Fqx '.cs-grok-turnend' "$EXCL" 2>/dev/null || printf '%s\n' '.cs-grok-turnend' >> "$EXCL"
