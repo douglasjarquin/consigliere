@@ -48,7 +48,7 @@ endpoint_generation=child-generation
 EOF
 
 message() {
-  local id=$1 target=$2 kind=$3 generation=$4 artifact=${5:-reports/result.md}
+  local id=$1 target=$2 kind=$3 generation=$4 artifact=${5:-reports/result.md} commit=${6:-$CHILD_COMMIT}
   cs_message_publish "$STATE/inbox" \
     "schema=cs-message.v1" \
     "message_id=$id" \
@@ -62,7 +62,7 @@ message() {
     "to_endpoint_generation=current-generation" \
     "summary=$kind summary" \
     "artifact=$artifact" \
-    "commit_sha=$CHILD_COMMIT" \
+    "commit_sha=$commit" \
     "pull_request=" \
     "created_at=1700000000"
 }
@@ -97,6 +97,15 @@ fi
 grep -F 'artifact' "$TMP/invalid-result.err" >/dev/null || fail "invalid result refusal must name the artifact"
 [ ! -e "$STATE/inbox/message-invalid-result.ack" ] || fail "invalid result was acknowledged"
 pass "result acknowledgement refuses an unverifiable artifact"
+
+message message-invalid-commit current result child-generation reports/result.md \
+  0000000000000000000000000000000000000000 || fail "invalid commit setup"
+if "$INBOX" --ack message-invalid-commit >/dev/null 2>"$TMP/invalid-commit.err"; then
+  fail "a result with a missing commit must not be acknowledged"
+fi
+grep -F 'commit' "$TMP/invalid-commit.err" >/dev/null || fail "invalid commit refusal must name the commit"
+[ ! -e "$STATE/inbox/message-invalid-commit.ack" ] || fail "invalid commit was acknowledged"
+pass "result acknowledgement refuses an unverifiable commit"
 
 "$INBOX" --ack message-current >/dev/null || fail "message acknowledgement"
 [ -f "$STATE/inbox/message-current.ack" ] || fail "acknowledgement record missing"
