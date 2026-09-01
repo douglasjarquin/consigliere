@@ -36,7 +36,11 @@
 # `config/backlog-backend.conf=manual` governs only consigliere's own hand-editing,
 # never this validated helper. Idempotent: re-running converges. Atomic: on
 # any move failure nothing moves.
-# Usage: cs-backlog-handoff.sh <capo-id> <item-key>...
+# After a successful move, durably wake the capo's recorded receiver when one
+# exists; a failed wake leaves a retryable marker under state/.backlog-handoff-<id>.wake-pending.
+# Usage:
+#   cs-backlog-handoff.sh <capo-id> <item-key>...
+#   cs-backlog-handoff.sh --resume-pending
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,6 +53,139 @@ REG="$HOST_DIR/capos.md"
 MAIN_BACKLOG="$CONFIG/backlog.md"
 # shellcheck source=bin/cs-tasks-lib.sh
 . "$SCRIPT_DIR/cs-tasks-lib.sh"
+# shellcheck source=bin/cs-pending-reply-lib.sh
+. "$SCRIPT_DIR/cs-pending-reply-lib.sh"
+# shellcheck source=bin/cs-meta-lib.sh
+. "$SCRIPT_DIR/cs-meta-lib.sh"
+
+RECEIVER_WAKE_MESSAGE='New routed work is in your backlog. Run bin/cs-session-start.sh now, then act on the routed task.'
+
+receiver_wake_marker() { printf '%s/.backlog-handoff-%s.wake-pending' "$STATE" "$1"; }
+
+receiver_wake_state_write() {
+  local id=$1 value=$2 marker tmp
+  case "$id" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "$value" in
+    pending|confirmed) ;;
+    pending:*) printf '%s' "$value" | grep -Eq '^pending:[a-f0-9]{16}$' || return 1 ;;
+    confirmed:*) printf '%s' "$value" | grep -Eq '^confirmed:[a-f0-9]{16}$' || return 1 ;;
+    *) return 1 ;;
+  esac
+  marker=$(receiver_wake_marker "$id")
+  tmp=$(umask 077; mktemp "$STATE/.backlog-handoff-wake.XXXXXX") || return 1
+  if ! printf '%s\n' "$value" > "$tmp" || ! chmod 600 "$tmp" || ! mv -f -- "$tmp" "$marker"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+}
+
+receiver_wake_mark_pending() {
+  local id=$1 marker value corr rec
+  marker=$(receiver_wake_marker "$id")
+  if [ -e "$marker" ] || [ -L "$marker" ]; then
+    [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+    value=$(cat "$marker" 2>/dev/null || true)
+    case "$value" in
+      pending:*) return 0 ;;
+      pending) ;;
+      confirmed|confirmed:*) return 0 ;;
+      *) return 1 ;;
+    esac
+  fi
+  corr=$(cs_pending_reply_create "$CS_HOME" "$STATE" "$id" "$RECEIVER_WAKE_MESSAGE") || return 1
+  receiver_wake_state_write "$id" "pending:$corr"
+}
+
+wake_capo_receiver() {
+  local id=$1 corr=$2 meta="$STATE/$1.meta" out rc=0
+  if [ ! -f "$meta" ] || [ -L "$meta" ]; then
+    printf 'error: handed off work to capo %s, but no live receiver endpoint is recorded; the destination backlog is durable and the receiver was not woken\n' "$id" >&2
+    return 1
+  fi
+  [ "$(cs_meta_get "$meta" kind 2>/dev/null || true)" = capo ] || {
+    printf 'error: capo %s has non-capo endpoint metadata; backlog is durable but the receiver was not woken\n' "$id" >&2
+    return 1
+  }
+  out=$(CS_HOME="$CS_HOME" CS_STATE_OVERRIDE="$STATE" CS_PENDING_REPLY_EXISTING_CORR="$corr" \
+    "$SCRIPT_DIR/cs-send.sh" "$id" "$RECEIVER_WAKE_MESSAGE" 2>&1) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    [ -z "$out" ] || printf '%s\n' "$out" >&2
+    printf 'error: backlog delivery to capo %s succeeded, but its receiver wake failed; rerun this handoff or cs-backlog-handoff.sh --resume-pending to retry the wake\n' "$id" >&2
+    return 1
+  fi
+  [ -z "$out" ] || printf '%s\n' "$out"
+}
+
+wake_pending_capo_receiver() {
+  local id=$1 marker value corr rec delivered
+  marker=$(receiver_wake_marker "$id")
+  [ -e "$marker" ] || [ -L "$marker" ] || return 0
+  [ -f "$marker" ] && [ ! -L "$marker" ] || {
+    printf 'error: receiver wake state for capo %s is unsafe or invalid\n' "$id" >&2
+    return 1
+  }
+  value=$(cat "$marker" 2>/dev/null || true)
+  case "$value" in
+    confirmed|confirmed:*) return 0 ;;
+    pending) receiver_wake_mark_pending "$id" || return 1; value=$(cat "$marker" 2>/dev/null || true) ;;
+  esac
+  case "$value" in
+    pending:*) corr=${value#pending:} ;;
+    *)
+      printf 'error: receiver wake state for capo %s is unsafe or invalid\n' "$id" >&2
+      return 1
+      ;;
+  esac
+  rec=$(cs_pending_reply_path "$STATE" "$corr")
+  [ -f "$rec" ] && [ ! -L "$rec" ] \
+    && [ "$(cs_pending_reply_get "$rec" task_id)" = "$id" ] || return 1
+  cs_pending_reply_reconcile_delivery "$STATE" "$corr" >/dev/null 2>&1 || true
+  delivered=$(cs_pending_reply_get "$rec" delivered_epoch)
+  if [ -z "$delivered" ]; then
+    cs_pending_reply_corr_reusable "$STATE" "$corr" "$id" || {
+      printf 'error: receiver wake delivery for capo %s is unresolved; refusing to resend correlation %s\n' "$id" "$corr" >&2
+      return 1
+    }
+    wake_capo_receiver "$id" "$corr" || return 1
+    cs_pending_reply_reconcile_delivery "$STATE" "$corr" >/dev/null 2>&1 || true
+    delivered=$(cs_pending_reply_get "$rec" delivered_epoch)
+  fi
+  [ -n "$delivered" ] || return 1
+  receiver_wake_state_write "$id" "confirmed:$corr" || return 1
+  rm -f -- "$marker"
+}
+
+resume_pending_capo_wakes() {
+  local marker id failed=0
+  shopt -s nullglob
+  for marker in "$STATE"/.backlog-handoff-*.wake-pending; do
+    id=${marker##*/}
+    id=${id#.backlog-handoff-}
+    id=${id%.wake-pending}
+    wake_pending_capo_receiver "$id" || failed=1
+  done
+  shopt -u nullglob
+  return "$failed"
+}
+
+finish_handoff_wake() {
+  local id=$1
+  if [ ! -f "$STATE/$id.meta" ] || [ -L "$STATE/$id.meta" ]; then
+    printf 'warning: handed off work to capo %s, but no live receiver endpoint is recorded; the destination backlog is durable\n' "$id" >&2
+    return 0
+  fi
+  receiver_wake_mark_pending "$id" || {
+    echo "error: handed off work to capo $id, but durable receiver wake state could not be recorded" >&2
+    return 1
+  }
+  wake_pending_capo_receiver "$id"
+}
+
+if [ "${1:-}" = --resume-pending ]; then
+  [ "$#" -eq 1 ] || { echo "usage: cs-backlog-handoff.sh --resume-pending" >&2; exit 1; }
+  resume_pending_capo_wakes
+  exit $?
+fi
 
 [ $# -ge 2 ] || { echo "usage: cs-backlog-handoff.sh <capo-id> <item-key>..." >&2; exit 1; }
 ID=$1
@@ -265,6 +402,9 @@ fi
 
 if [ "${#TO_MOVE[@]}" -eq 0 ]; then
   echo "nothing to move: ${ALREADY[*]:-no keys} already present in $CAPO_BACKLOG"
+  if [ -e "$(receiver_wake_marker "$ID")" ]; then
+    wake_pending_capo_receiver "$ID" || exit 1
+  fi
   exit 0
 fi
 
@@ -314,6 +454,7 @@ fi
 
 echo "handed off ${#TO_MOVE[@]} item(s) to $ID: ${TO_MOVE[*]}"
 echo "  into $CAPO_BACKLOG"
+finish_handoff_wake "$ID" || exit 1
 if [ "${#ALREADY[@]}" -gt 0 ]; then
   echo "  already present (skipped): ${ALREADY[*]}"
 fi

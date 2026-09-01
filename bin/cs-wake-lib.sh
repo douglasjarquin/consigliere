@@ -401,6 +401,53 @@ cs_wake_append() {
   return "$status"
 }
 
+cs_wake_queued_keys() {  # <kind>
+  awk -F '\t' -v kind="$1" 'NF >= 5 && $3 == kind && !seen[$4]++ { print $4 }' \
+    "$CS_WAKE_QUEUE" 2>/dev/null || true
+}
+
+cs_wake_capo_stall_marker_write() {  # <capo-id> <row-key>
+  local task=$1 row_key=$2 marker tmp
+  case "$task" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "$row_key" in ''|*[!0-9-]*) return 1 ;; esac
+  marker="$STATE/.capo-wake-stall-$task"
+  if [ -e "$marker" ] || [ -L "$marker" ]; then
+    [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+  fi
+  tmp=$(umask 077; mktemp "$STATE/.capo-wake-stall.XXXXXX") || return 1
+  if ! printf '%s\n' "$row_key" > "$tmp" || ! chmod 0600 "$tmp" || ! mv -f -- "$tmp" "$marker"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+}
+
+cs_wake_capo_stall_receipt_write() {  # <capo-id> <row-key>
+  local task=$1 row_key=$2 root task_dir receipt tmp
+  case "$task" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "$row_key" in ''|*[!0-9-]*) return 1 ;; esac
+  root="$STATE/.capo-wake-stall-receipts"
+  task_dir="$root/$task"
+  if [ -e "$root" ] || [ -L "$root" ]; then
+    [ -d "$root" ] && [ ! -L "$root" ] || return 1
+  else
+    mkdir "$root" || return 1
+    chmod 0700 "$root" || return 1
+  fi
+  if [ -e "$task_dir" ] || [ -L "$task_dir" ]; then
+    [ -d "$task_dir" ] && [ ! -L "$task_dir" ] || return 1
+  else
+    mkdir "$task_dir" || return 1
+    chmod 0700 "$task_dir" || return 1
+  fi
+  receipt="$task_dir/$row_key"
+  [ "$(cat "$receipt" 2>/dev/null || true)" = "$row_key" ] && return 0
+  tmp=$(umask 077; mktemp "$task_dir/.receipt.XXXXXX") || return 1
+  if ! printf '%s\n' "$row_key" > "$tmp" || ! chmod 0600 "$tmp" || ! mv -f -- "$tmp" "$receipt"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+}
+
 # Create an empty rotation batch and print its path. The name is unique rather
 # than pid-derived, so a fresh batch can never land on an orphaned batch that an
 # interrupted drain left behind and clobber records nothing else can reach.
