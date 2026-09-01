@@ -9,7 +9,16 @@ TMP=$(mktemp -d "${TMPDIR:-/tmp}/cs-inbox.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 HOME_DIR="$TMP/home"
 STATE="$HOME_DIR/state"
-mkdir -p "$HOME_DIR/config" "$HOME_DIR/data" "$STATE/inbox"
+WORKTREE="$TMP/child-worktree"
+mkdir -p "$HOME_DIR/config" "$HOME_DIR/data" "$STATE/inbox" "$WORKTREE/reports"
+
+git -C "$WORKTREE" init -q || fail "child worktree setup"
+git -C "$WORKTREE" config user.email test@example.invalid
+git -C "$WORKTREE" config user.name test
+printf '%s\n' 'verified artifact' > "$WORKTREE/reports/result.md"
+git -C "$WORKTREE" add reports/result.md
+git -C "$WORKTREE" commit -q -m 'add result artifact'
+CHILD_COMMIT=$(git -C "$WORKTREE" rev-parse HEAD)
 
 # shellcheck source=bin/cs-message-lib.sh
 . "$ROOT/bin/cs-message-lib.sh"
@@ -29,6 +38,7 @@ cat > "$STATE/child.meta" <<EOF
 task_id=child
 kind=ship
 home=$HOME_DIR
+worktree=$WORKTREE
 parent_task_id=current
 parent_home=$HOME_DIR
 parent_state=$STATE
@@ -38,7 +48,7 @@ endpoint_generation=child-generation
 EOF
 
 message() {
-  local id=$1 target=$2 kind=$3 generation=$4
+  local id=$1 target=$2 kind=$3 generation=$4 artifact=${5:-reports/result.md}
   cs_message_publish "$STATE/inbox" \
     "schema=cs-message.v1" \
     "message_id=$id" \
@@ -51,8 +61,8 @@ message() {
     "from_endpoint_generation=$generation" \
     "to_endpoint_generation=current-generation" \
     "summary=$kind summary" \
-    "artifact=" \
-    "commit_sha=" \
+    "artifact=$artifact" \
+    "commit_sha=$CHILD_COMMIT" \
     "pull_request=" \
     "created_at=1700000000"
 }
@@ -79,6 +89,14 @@ if printf '%s\n' "$output" | grep -F 'message-other' >/dev/null; then
   fail "another task's message leaked into the current inbox drain"
 fi
 pass "inbox drain filters to the current task"
+
+message message-invalid-result current result child-generation reports/missing.md || fail "invalid result setup"
+if "$INBOX" --ack message-invalid-result >/dev/null 2>"$TMP/invalid-result.err"; then
+  fail "a result with a missing artifact must not be acknowledged"
+fi
+grep -F 'artifact' "$TMP/invalid-result.err" >/dev/null || fail "invalid result refusal must name the artifact"
+[ ! -e "$STATE/inbox/message-invalid-result.ack" ] || fail "invalid result was acknowledged"
+pass "result acknowledgement refuses an unverifiable artifact"
 
 "$INBOX" --ack message-current >/dev/null || fail "message acknowledgement"
 [ -f "$STATE/inbox/message-current.ack" ] || fail "acknowledgement record missing"

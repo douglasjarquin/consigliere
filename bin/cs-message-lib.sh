@@ -110,6 +110,51 @@ cs_message_field() {
   awk -F= -v wanted="$key" '$1 == wanted { print substr($0, length(wanted) + 2); found=1 } END { exit !found }' "$file"
 }
 
+cs_message_verify_result() {
+  local file=$1 source_meta=$2 worktree artifact commit pull_request
+  [ "$(cs_message_field "$file" kind)" = result ] || {
+    printf 'result message has the wrong kind\n' >&2
+    return 1
+  }
+  worktree=$(cs_meta_get "$source_meta" worktree 2>/dev/null) || {
+    printf 'result message sender metadata has no worktree\n' >&2
+    return 1
+  }
+  case "$worktree" in /*) ;; *) printf 'result message worktree is not absolute\n' >&2; return 1 ;; esac
+  [ -d "$worktree" ] || {
+    printf 'result message worktree is unavailable\n' >&2
+    return 1
+  }
+  artifact=$(cs_message_field "$file" artifact)
+  commit=$(cs_message_field "$file" commit_sha)
+  pull_request=$(cs_message_field "$file" pull_request)
+  [ -n "$artifact" ] || [ -n "$commit" ] || [ -n "$pull_request" ] || {
+    printf 'result message has no evidence reference\n' >&2
+    return 1
+  }
+  if [ -n "$artifact" ]; then
+    cs_message_path_value "$artifact" || {
+      printf 'result artifact path is invalid: %s\n' "$artifact" >&2
+      return 1
+    }
+    [ -f "$worktree/$artifact" ] && [ ! -L "$worktree/$artifact" ] || {
+      printf 'result artifact is missing or not a regular file: %s\n' "$artifact" >&2
+      return 1
+    }
+  fi
+  if [ -n "$commit" ]; then
+    git -C "$worktree" cat-file -e "${commit}^{commit}" 2>/dev/null || {
+      printf 'result commit does not exist: %s\n' "$commit" >&2
+      return 1
+    }
+    if [ -n "$artifact" ] && ! git -C "$worktree" cat-file -e "${commit}:${artifact}" 2>/dev/null; then
+      printf 'result artifact is not present in commit %s: %s\n' "$commit" "$artifact" >&2
+      return 1
+    fi
+  fi
+  return 0
+}
+
 cs_message_validate_ack() {
   local file=$1
   [ -f "$file" ] || return 1

@@ -96,6 +96,11 @@ ack_message() {
   message_source_valid "$file" || return 1
   kind=$(cs_message_field "$file" kind)
   from_home=$(cs_message_field "$file" from_home)
+  source_task=$(cs_message_field "$file" from_task_id)
+  if [ "$kind" = result ] && ! cs_message_verify_result "$file" "$from_home/state/$source_task.meta"; then
+    echo "error: result message '$ACK_ID' has unverifiable artifact, commit, or pull request evidence; acknowledgement remains absent" >&2
+    return 1
+  fi
   case "$kind" in
     question|decision-required)
       [ -n "$REPLY" ] || {
