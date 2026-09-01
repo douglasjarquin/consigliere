@@ -44,13 +44,20 @@ Recovery may update that route after a verified parent endpoint relaunches, whil
 
 `bin/cs-inbox.sh --ack <message-id> --reply <bounded-answer>` revalidates the sender pane's recorded worktree, delivers a correlated answer, and only then closes the pending obligation and writes the acknowledgement.
 
+An escalated response-required message uses `bin/cs-inbox.sh --escalate <message-id> --summary <bounded-summary>`.
+The command creates one deterministic transfer message to the current parent's parent before closing and acknowledging the child obligation.
+Repeating the escalation returns the existing transfer without another wake.
+
+`bin/cs-status.sh` renders bounded open-message, pending-obligation, and malformed-message counts with exact inbox and recovery next actions.
+`bin/cs-recover.sh` reports whether it re-woke recipients, refused a record, or found no work, and prints the next action for each outcome.
+
 `bin/cs-recover.sh` is the cold backstop: it makes one bounded pass over durable pending and unacknowledged messages, revalidates the current endpoint, and either re-wakes the exact message ID or reports the concrete repair action.
 
 Locked startup runs this recovery pass after draining the wake queue.
 An otherwise quiet supervision checkpoint runs the same bounded pass when its wait expires.
 Teardown runs it before cleanup and refuses to remove a task while its pending or unacknowledged message records remain unresolved.
 
-Event-driven lifecycle routing, recursive inbox draining, and bounded cold reconciliation are implemented in the active slices above.
+Event-driven lifecycle routing, recursive inbox draining, bounded cold reconciliation, recursive escalation, and settled-child stop-hook recovery are implemented in the active slices above.
 Polling reduction, deletion of redundant supervision paths, and the nested real-Herdr canary remain later phases.
 
 No issue checkbox for a later phase is complete until its named real-surface evidence exists.

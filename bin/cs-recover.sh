@@ -134,4 +134,12 @@ for message_file in "$STATE"/inbox/*.msg; do
 done
 
 printf 'recover: checked=%s re-woke=%s\n' "$checked" "$rewoken"
-[ "$failed" -eq 0 ]
+if [ "$failed" -ne 0 ]; then
+  printf 'recover: next=inspect the named endpoint, metadata, or message before retrying\n'
+  exit 1
+fi
+if [ "$rewoken" -gt 0 ]; then
+  printf 'recover: next=drain each re-woken recipient inbox\n'
+else
+  printf 'recover: next=none\n'
+fi

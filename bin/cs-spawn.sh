@@ -781,6 +781,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
       echo "warning: the cold launch of '$ID' started an agent on pane $R_PANE but its brief was never confirmed delivered within ${BRIEF_DELIVER_WAIT}s - steer it manually" >&2
   fi
 
+  previous_generation=$(cs_meta_get "$META" endpoint_generation 2>/dev/null || true)
+  [ -n "$previous_generation" ] || previous_generation=unknown
+  cs_meta_set "$META" previous_endpoint_generation "$previous_generation"
+  cs_meta_set "$META" endpoint_generation "$ENDPOINT_GENERATION"
+
   report_human_gate "$R_PANE" "$R_HARNESS" "$ID"
   report_task_metadata "$R_PANE" "$ID" \
     "$(cs_meta_get "$META" mode 2>/dev/null || printf '%s' "$R_KIND")"

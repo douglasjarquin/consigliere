@@ -22,6 +22,14 @@ cs_message_new_id() {
   printf 'message-%s\n' "${raw:0:32}"
 }
 
+cs_message_recovery_id() {
+  local task=$1 generation=$2 digest
+  cs_message_task "$task" && cs_message_generation "$generation" || return 1
+  digest=$(printf '%s\n' "$task:$generation" | shasum -a 256 2>/dev/null | awk '{print $1}') || return 1
+  [ -n "$digest" ] || return 1
+  printf 'recovery-%s\n' "${digest:0:32}"
+}
+
 cs_message_scalar() {
   local value=$1 max=$2 clean
   case "$value" in *$'\n'*|*$'\r'*|*$'\t'*) return 1 ;; esac

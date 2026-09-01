@@ -63,7 +63,7 @@ cs_event_file_size() {  # <path>
 # place: this runs inside herdr's hook for every status edge of every pane on
 # the machine, and a command substitution per field would fork a subshell each
 # time for work bash does natively. Missing trailing fields are emitted empty,
-# so a record is always exactly five fields.
+# so a record is always exactly five fields before an optional generation field.
 cs_event_record() {  # <kind> <pane_id> <workspace_id> <field3> <field4>
   local out='' n=0 field
   for field in "$@"; do

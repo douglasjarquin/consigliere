@@ -65,6 +65,16 @@ cs_meta_validate_parent_edge() {
     "$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)"
 }
 
+cs_meta_endpoint_generation_known() {
+  local meta=$1 generation=$2 current previous
+  current=$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)
+  [ "$current" = "$generation" ] && return 0
+  while IFS= read -r previous; do
+    [ "$previous" = "$generation" ] && return 0
+  done < <(awk -F= '$1 == "previous_endpoint_generation" { print substr($0, 30) }' "$meta")
+  return 1
+}
+
 cs_meta_event_route() {
   local state=$1 pane=$2 workspace=$3 agent=$4 meta id found=''
   [ -d "$state" ] || return 1

@@ -49,6 +49,8 @@ GRACE=${CS_GUARD_GRACE:-300}
 . "$SCRIPT_DIR/cs-primary-scope-lib.sh"
 # shellcheck source=bin/cs-operational-input.sh
 . "$SCRIPT_DIR/cs-operational-input.sh"
+. "$SCRIPT_DIR/cs-meta-lib.sh"
+. "$SCRIPT_DIR/cs-message-lib.sh"
 # Optional turn telemetry (off unless host/telemetry.conf enables it). The
 # library is pure function definitions with no side effects on source, and every
 # telemetry entry point swallows its own failures, so sourcing it cannot change
@@ -101,6 +103,47 @@ else
 fi
 
 [ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
+
+worker_settled_without_report() {
+  local task=$1 meta kind status last parent_state generation file message_kind
+  local recovery_id marker
+  meta="$STATE/$task.meta"
+  [ -f "$meta" ] || return 0
+  kind=$(cs_meta_get "$meta" kind 2>/dev/null || true)
+  [ "$kind" != capo ] || return 0
+  status="$STATE/$task.status"
+  [ -f "$status" ] || return 0
+  last=$(tail -n 1 "$status" 2>/dev/null || true)
+  case "$last" in
+    done:*|done\ *|failed:*|failed\ *) ;;
+    *) return 0
+  esac
+  parent_state=$(cs_meta_get "$meta" parent_state 2>/dev/null || true)
+  generation=$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)
+  [ -n "$parent_state" ] && [ -n "$generation" ] || return 0
+  for file in "$parent_state/inbox"/*.msg; do
+    [ -f "$file" ] || continue
+    cs_message_validate_file "$file" || continue
+    [ "$(cs_message_field "$file" from_task_id)" = "$task" ] || continue
+    [ "$(cs_message_field "$file" from_endpoint_generation)" = "$generation" ] || continue
+    message_kind=$(cs_message_field "$file" kind)
+    case "$message_kind" in result|failed) return 0 ;; esac
+  done
+  recovery_id=$(cs_message_recovery_id "$task" "$generation") || return 0
+  marker="$STATE/.message-recovery-$recovery_id"
+  [ ! -e "$marker" ] || return 0
+  if CS_HOME="$CS_HOME" CS_ROOT_OVERRIDE="$CS_ROOT" CS_STATE_OVERRIDE="$STATE" \
+    CS_DATA_OVERRIDE="$DATA" CS_TASK_ID="$task" \
+    "$SCRIPT_DIR/cs-report.sh" failed \
+      "settled child has no semantic result; inspect its durable work" \
+      --message-id "$recovery_id" >/dev/null 2>&1; then
+    : > "$marker"
+  fi
+}
+
+if [ -n "${CS_TASK_ID:-}" ]; then
+  worker_settled_without_report "$CS_TASK_ID"
+fi
 
 # Defer when ANOTHER live consigliere session holds this home's lock. The guard
 # scopes to a primary checkout but that says nothing about whether THIS session

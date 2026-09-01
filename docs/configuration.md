@@ -112,7 +112,9 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
   `question` and `decision-required` reports also create `state/pending/<message-id>.pending` before delivery; the parent closes that sender-side obligation before writing the inbox acknowledgement.
   A sender may retry with `bin/cs-report.sh --message-id <message-id>`; matching bytes remain one logical record while the Herdr doorbell may be retried.
   A parent answers a response-required message with `bin/cs-inbox.sh --ack <message-id> --reply <bounded-answer>`; the child pane and worktree are revalidated before delivery.
+  A parent escalates a response-required message with `bin/cs-inbox.sh --escalate <message-id> --summary <bounded-summary>`; the deterministic upward transfer is published before the child obligation is closed.
   `bin/cs-recover.sh` performs one bounded pass over pending and unacknowledged messages, revalidating the recipient generation and worktree before re-waking it.
+  `bin/cs-status.sh` prints bounded message counts and exact inbox or recovery next actions without mutating state.
   A `kind=ship` task also records the posture its spawn stated explicitly: `mode=` (no-mistakes|direct-PR|local-only) and `yolo=` (on|off).
   A `kind=scout` records NEITHER, because a report deliverable has no mode to honour and no approval posture to apply, which is why `cs-promote.sh` is where a promoted scout first states both.
   `kind=capo` records `mode=capo`, `yolo=off`, and `home=`.
