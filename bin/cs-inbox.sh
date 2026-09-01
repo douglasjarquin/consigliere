@@ -108,10 +108,10 @@ message_source_valid() {
   if [ -z "$source_session" ] && [ "$from_home" = "$CS_HOME" ]; then
     source_session=$(cs_herdr_session)
   fi
-  [ -n "$source_session" ] && cs_meta_validate_herdr_session "$source_session" || {
+  if [ -z "$source_session" ] || ! cs_meta_validate_herdr_session "$source_session"; then
     echo "error: message '$file' has no valid sender Herdr session" >&2
     return 1
-  }
+  fi
   cs_meta_endpoint_generation_known "$source_meta" \
     "$(cs_message_field "$file" from_endpoint_generation)" "$(cs_message_field "$file" created_at)" || {
     echo "error: stale sender generation in '$file'" >&2
@@ -156,10 +156,10 @@ deliver_reply() {
   if [ -z "$source_session" ] && [ "$from_home" = "$CS_HOME" ]; then
     source_session=$(cs_herdr_session)
   fi
-  [ -n "$source_session" ] && cs_meta_validate_herdr_session "$source_session" || {
+  if [ -z "$source_session" ] || ! cs_meta_validate_herdr_session "$source_session"; then
     echo "error: sender metadata for message '$ACK_ID' has no valid Herdr session" >&2
     return 1
-  }
+  fi
   source_agent=$(cs_meta_get "$source_meta" harness 2>/dev/null || true)
   if [ -n "$source_agent" ] && ! CS_HERDR_SESSION="$source_session" cs_herdr_agent_kind_matches "$source_pane" "$source_agent"; then
     echo "error: sender pane '$source_pane' does not contain the recorded $source_agent agent; message '$ACK_ID' remains open" >&2

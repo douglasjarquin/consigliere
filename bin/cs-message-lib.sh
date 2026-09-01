@@ -109,7 +109,7 @@ cs_message_filename_id() {
   local file=$1 suffix=$2 filename expected temp
   filename=${file##*/}
   case "$filename" in
-    *"$suffix") expected=${filename%$suffix} ;;
+    *"$suffix") expected=${filename%"$suffix"} ;;
     .*)
       temp=${filename#.}
       case "$temp" in
