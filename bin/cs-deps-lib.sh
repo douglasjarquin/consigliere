@@ -43,6 +43,8 @@
 #   cs_deps_tool_floor <tool>                     # the tool's dependency floor
 #   cs_deps_python_tomllib                        # exit 0 iff Python can import tomllib
 #   cs_deps_tool_gap <tool>                       # "<version><TAB><floor><TAB><reason>" iff below
+#   cs_deps_path_hits <command>                   # every executable copy on PATH, deduped
+#   cs_deps_path_shadow_gap <tool>                # "<resolved_path><TAB><resolved_ver><TAB><best_path><TAB><best_ver>" when a later PATH copy is newer
 #   cs_deps_axi_floor <tool>                      # the tool's axi floor, or nothing
 #   cs_deps_axi_gap <tool>                        # "<version><TAB><floor><TAB><reason>" iff below
 #
@@ -147,7 +149,8 @@ cs_deps_hint() {
     lavish-axi) printf 'npm i -g lavish-axi\n' ;;
     chrome-devtools-axi) printf 'npm i -g chrome-devtools-axi\n' ;;
     quota-axi) printf 'npm i -g quota-axi\n' ;;
-    shellcheck) printf 'brew install shellcheck; on Linux x86_64, bin/cs-install-shellcheck.sh <dir> installs the pinned build\n' ;;
+    shellcheck) printf 'bin/cs-install-shellcheck.sh <dir> installs the pinned build for linux or darwin on amd64/x86_64 or arm64/aarch64\n' ;;
+    actionlint) printf 'bin/cs-install-actionlint.sh <dir> installs the pinned build for linux or darwin on amd64/x86_64 or arm64/aarch64\n' ;;
     python3) printf 'install Python 3.11+ (stdlib tomllib is required), for example: brew install python\n' ;;
     *) printf 'no recorded install suggestion\n'; return 1 ;;
   esac
@@ -268,6 +271,80 @@ CS_DEPS_UNCOMPARABLE_VERSION='unparseable version'
 cs_deps_python_tomllib() {
   command -v python3 >/dev/null 2>&1 || return 1
   python3 -I -c 'import tomllib' >/dev/null 2>&1
+}
+
+cs_deps_path_identity() {
+  perl -MCwd=realpath -e 'defined($p=realpath($ARGV[0])) or exit 1; print "$p\n"' "$1" 2>/dev/null \
+    || printf '%s\n' "$1"
+}
+
+cs_deps_release_at() {
+  local path=$1 have
+  [ -f "$path" ] && [ -x "$path" ] || return 1
+  have=$("$path" --version 2>/dev/null) || return 1
+  [[ "$have" =~ ^([A-Za-z][A-Za-z0-9_-]*[\ /])?([0-9]+(\.[0-9]+)+)$ ]] || return 1
+  printf '%s\n' "${BASH_REMATCH[2]}"
+}
+
+cs_deps_release_newer() {
+  local have=$1 floor=$2
+  awk -v have="$have" -v floor="$floor" 'BEGIN {
+    n = split(have, H, "."); m = split(floor, F, ".")
+    len = (n > m ? n : m)
+    for (i = 1; i <= len; i++) {
+      h = H[i] + 0; f = F[i] + 0
+      if (h > f) exit 0
+      if (h < f) exit 1
+    }
+    exit 0
+  }'
+}
+
+# cs_deps_path_hits <command> - every executable copy on PATH in PATH order,
+# deduplicated by resolved path so one copy reached through two entries is not
+# probed twice.
+cs_deps_path_hits() {
+  local command_name=$1 dir candidate identity seen=''
+  while IFS= read -r dir; do
+    [ -n "$dir" ] || continue
+    candidate="$dir/$command_name"
+    [ -f "$candidate" ] && [ -x "$candidate" ] || continue
+    identity=$(cs_deps_path_identity "$candidate")
+    case " $seen " in
+      *" $identity "*) continue ;;
+    esac
+    seen="$seen $identity"
+    printf '%s\n' "$candidate"
+  done < <(printf '%s\n' "$PATH" | tr ':' '\n')
+}
+
+# cs_deps_path_shadow_gap <tool> - when a newer copy exists later on PATH than
+# the one PATH resolves first, print
+# "<resolved_path><TAB><resolved_ver><TAB><best_path><TAB><best_ver>" and exit 0.
+cs_deps_path_shadow_gap() {
+  local tool=${1:-} hit resolved_path='' resolved_version='' best_path='' best_version='' version hits
+  [ -n "$tool" ] || return 1
+  hits=$(cs_deps_path_hits "$tool")
+  [ -n "$hits" ] || return 1
+  while IFS= read -r hit; do
+    [ -n "$hit" ] || continue
+    version=$(cs_deps_release_at "$hit") || version=
+    if [ -z "$resolved_path" ]; then
+      resolved_path=$hit
+      resolved_version=$version
+    fi
+    [ -n "$version" ] || continue
+    if [ -z "$best_version" ] || cs_deps_release_newer "$version" "$best_version"; then
+      best_version=$version
+      best_path=$hit
+    fi
+  done <<EOF
+$hits
+EOF
+  [ -n "$resolved_path" ] && [ -n "$best_version" ] && [ "$best_path" != "$resolved_path" ] \
+    && cs_deps_release_newer "$best_version" "${resolved_version:-0.0.0}" || return 1
+  [ -n "$resolved_version" ] || return 1
+  printf '%s\t%s\t%s\t%s\n' "$resolved_path" "$resolved_version" "$best_path" "$best_version"
 }
 
 # cs_deps_tool_gap <tool> - the below-floor/capability classification, owned
