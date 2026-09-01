@@ -76,7 +76,7 @@ done
 }
 
 message_source_valid() {
-  local file=$1 source_task source_meta source_parent source_home from_home
+  local file=$1 source_task source_meta source_parent source_home source_recorded_home from_home
   cs_message_validate_file "$file" || {
     echo "error: malformed inbox message '$file'" >&2
     return 1
@@ -87,6 +87,11 @@ message_source_valid() {
   source_meta="$from_home/state/$source_task.meta"
   [ -f "$source_meta" ] || {
     echo "error: message '$file' names missing sender metadata '$source_meta'" >&2
+    return 1
+  }
+  source_recorded_home=$(cs_meta_get "$source_meta" home 2>/dev/null || true)
+  [ "$source_recorded_home" = "$from_home" ] || {
+    echo "error: message '$file' does not match the sender metadata home" >&2
     return 1
   }
   cs_meta_validate_parent_edge "$source_meta" || {

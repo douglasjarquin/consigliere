@@ -37,12 +37,15 @@ done
 
 recovery_id=$(cs_message_recovery_id "$task" "$generation") || exit 0
 marker="$STATE/.message-recovery-$recovery_id"
-[ ! -e "$marker" ] || exit 0
+if [ -e "$marker" ]; then
+  [ -f "$marker" ] || exit 0
+  exit 0
+fi
 CS_HOME="$CS_HOME" CS_ROOT_OVERRIDE="$CS_ROOT" CS_STATE_OVERRIDE="$STATE" \
   CS_DATA_OVERRIDE="$DATA" CS_TASK_ID="$task" \
   "$SCRIPT_DIR/cs-report.sh" failed \
     "settled child has no semantic result; inspect its durable work" \
     --message-id "$recovery_id" >/dev/null 2>&1 || true
 if [ -f "$parent_state/inbox/$recovery_id.msg" ]; then
-  : > "$marker"
+  (set -C; : > "$marker") 2>/dev/null || true
 fi

@@ -117,6 +117,13 @@ if cs_message_publish "$STATE/inbox" "${oversized[@]}" >/dev/null 2>&1; then
 fi
 pass "oversized message is refused"
 
+oversized_pr=("${valid_message[@]}")
+oversized_pr[13]="pull_request=$(printf '9%.0s' $(seq 1 1000))"
+if cs_message_publish "$STATE/inbox" "${oversized_pr[@]}" >/dev/null 2>&1; then
+  fail "an oversized pull request identity must be refused"
+fi
+pass "pull request identities are bounded"
+
 printf '%s\n' 'schema=invalid' > "$STATE/inbox/malformed.msg"
 if cs_message_validate_file "$STATE/inbox/malformed.msg" >/dev/null 2>&1; then
   fail "malformed message must be refused"

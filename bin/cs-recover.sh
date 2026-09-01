@@ -70,24 +70,24 @@ wake_message() {
   printf 'recover: re-woke message=%s task=%s\n' "$message_id" "$(cs_message_field "$file" to_task_id)"
 }
 
-wake_root_message() {
-  local file=$1 message_id pane root_generation cwd source_task source_home source_meta expected_agent
+ wake_root_message() {
+  local file=$1 root_state=$2 root_home=$3 message_id pane root_generation cwd source_task source_home source_meta expected_agent
   message_id=$(cs_message_field "$file" message_id)
-  pane=$(sed -n '1p' "$STATE/.home-pane" 2>/dev/null || true)
-  root_generation=$(sed -n '1p' "$STATE/.home-endpoint-generation" 2>/dev/null || true)
+  pane=$(sed -n '1p' "$root_state/.home-pane" 2>/dev/null || true)
+  root_generation=$(sed -n '1p' "$root_state/.home-endpoint-generation" 2>/dev/null || true)
   [ -n "$pane" ] && [ -n "$root_generation" ] || {
     echo "error: message '$message_id' root endpoint identity is unavailable" >&2
     return 1
   }
   cwd=$(cs_herdr_pane_cwd "$pane" 2>/dev/null || true)
-  [ -n "$cwd" ] && [ "$(cd "$cwd" 2>/dev/null && pwd -P)" = "$(cd "$CS_HOME" 2>/dev/null && pwd -P)" ] || {
+  [ -n "$cwd" ] && [ "$(cd "$cwd" 2>/dev/null && pwd -P)" = "$(cd "$root_home" 2>/dev/null && pwd -P)" ] || {
     echo "error: message '$message_id' root endpoint '$pane' is unavailable or belongs to another home" >&2
     return 1
   }
   source_task=$(cs_message_field "$file" from_task_id)
   source_home=$(cs_message_field "$file" from_home)
   source_meta="$source_home/state/$source_task.meta"
-  expected_agent=$(cs_harness_detect_root)
+  expected_agent=$(CS_HOME="$root_home" cs_harness_detect_root)
   if [ -n "$expected_agent" ] && ! cs_herdr_agent_kind_matches "$pane" "$expected_agent"; then
     echo "error: message '$message_id' root endpoint '$pane' does not contain the recorded $expected_agent agent" >&2
     return 1
@@ -215,7 +215,7 @@ for pending in "$STATE"/pending/*.pending; do
   fi
   recipient_meta="$parent_state/$parent_task.meta"
   if [ "$parent_task" = root ]; then
-    if wake_root_message "$message_file"; then
+    if wake_root_message "$message_file" "$parent_state" "$(cs_meta_get "$child_meta" parent_home)"; then
       rewoken=$((rewoken + 1))
     else
       failed=1
@@ -261,6 +261,7 @@ for message_file in "$STATE"/inbox/*.msg; do
   source_home=$(cs_message_field "$message_file" from_home)
   source_meta="$source_home/state/$source_task.meta"
   if [ ! -f "$source_meta" ] || ! cs_meta_validate_parent_edge "$source_meta" ||
+    [ "$(cs_meta_get "$source_meta" home 2>/dev/null || true)" != "$source_home" ] ||
     [ "$(cs_meta_get "$source_meta" parent_task_id 2>/dev/null || true)" != "$task" ] ||
     [ "$(cs_meta_get "$source_meta" parent_home 2>/dev/null || true)" != "$CS_HOME" ] ||
     ! cs_meta_endpoint_generation_known "$source_meta" \
@@ -272,7 +273,7 @@ for message_file in "$STATE"/inbox/*.msg; do
   fi
   recipient_meta="$STATE/$task.meta"
   if [ "$task" = root ]; then
-    if wake_root_message "$message_file"; then
+    if wake_root_message "$message_file" "$STATE" "$CS_HOME"; then
       rewoken=$((rewoken + 1))
     else
       failed=1

@@ -155,6 +155,22 @@ grep -F 'pull request could not be verified' "$TMP/unavailable-pr.err" >/dev/nul
 [ ! -e "$STATE/inbox/message-unavailable-pr.ack" ] || fail "unavailable PR was acknowledged"
 pass "result acknowledgement refuses an unavailable pull request"
 
+printf '%s\n' 'home='"$TMP/other-home" >> "$STATE/child.meta"
+if "$INBOX" --ack message-current >/dev/null 2>"$TMP/mismatched-home.err"; then
+  fail "a message whose sender metadata home differs must not be acknowledged"
+fi
+grep -F 'metadata home' "$TMP/mismatched-home.err" >/dev/null || fail "sender home mismatch refusal must name the mismatch"
+printf '%s\n' 'home='"$HOME_DIR" >> "$STATE/child.meta"
+pass "inbox acknowledgement refuses a sender home mismatch"
+
+mv "$STATE/inbox/message-current.msg" "$STATE/inbox/alias-current.msg"
+if "$INBOX" >/dev/null 2>"$TMP/filename-mismatch.err"; then
+  fail "a message filename that differs from its embedded identity must be refused"
+fi
+grep -F 'malformed' "$TMP/filename-mismatch.err" >/dev/null || fail "filename mismatch refusal must name the malformed record"
+mv "$STATE/inbox/alias-current.msg" "$STATE/inbox/message-current.msg"
+pass "inbox rejects a filename and embedded message identity mismatch"
+
 message message-mismatched-pending current question child-generation
 cs_message_pending_create "$STATE" message-mismatched-pending different-correlation child current question 1700000000 \
   || fail "mismatched pending setup"
@@ -187,6 +203,11 @@ printf '%s\n' 'current-generation' > "$STATE/.home-endpoint-generation"
   printf '%s\n' 'parent_generation=current-generation'
 } >> "$STATE/child.meta"
 message message-root root result child-generation
+mv "$STATE/.home-endpoint-generation" "$TMP/root-generation.saved"
+if CS_TASK_ID=root "$INBOX" --ack message-root >/dev/null 2>&1; then
+  fail "the root inbox must refuse messages when its endpoint generation is absent"
+fi
+mv "$TMP/root-generation.saved" "$STATE/.home-endpoint-generation"
 if CS_TASK_ID=root "$INBOX" --ack message-root >/dev/null; then
   :
 else

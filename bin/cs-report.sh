@@ -57,15 +57,18 @@ PARENT_PANE=$(cs_meta_get "$META" parent_pane)
 FROM_GENERATION=$(cs_meta_get "$META" endpoint_generation)
 TO_GENERATION=$(cs_meta_get "$META" parent_generation)
 [ -d "$PARENT_STATE/inbox" ] || mkdir -p "$PARENT_STATE/inbox"
+PARENT_META="$PARENT_STATE/$PARENT_TASK.meta"
 PARENT_HOME_REAL=$(cd "$(cs_meta_get "$META" parent_home)" && pwd -P)
+PARENT_WORKTREE=$(cs_meta_get "$PARENT_META" worktree 2>/dev/null || true)
+PARENT_WORKTREE=${PARENT_WORKTREE:-$PARENT_HOME_REAL}
+PARENT_WORKTREE_REAL=$(cd "$PARENT_WORKTREE" 2>/dev/null && pwd -P) || PARENT_WORKTREE_REAL="$PARENT_HOME_REAL"
 PARENT_CWD=$(cs_herdr_pane_cwd "$PARENT_PANE" || true)
-if [ -z "$PARENT_CWD" ] || [ "$(cd "$PARENT_CWD" 2>/dev/null && pwd -P)" != "$PARENT_HOME_REAL" ]; then
+if [ -z "$PARENT_CWD" ] || [ "$(cd "$PARENT_CWD" 2>/dev/null && pwd -P)" != "$PARENT_WORKTREE_REAL" ]; then
   echo "warning: parent pane '$PARENT_PANE' is unavailable or belongs to another home; the durable report remains in $PARENT_STATE/inbox" >&2
   PARENT_ROUTE_OK=0
 else
   PARENT_ROUTE_OK=1
 fi
-PARENT_META="$PARENT_STATE/$PARENT_TASK.meta"
 PARENT_AGENT=$(cs_meta_get "$PARENT_META" harness 2>/dev/null || true)
 if [ -z "$PARENT_AGENT" ] && [ "$PARENT_TASK" = root ]; then
   PARENT_AGENT=$(cs_harness_detect_root)

@@ -170,7 +170,7 @@ cs_message_route_write() {
 }
 
 cs_message_validate_file() {
-  local file=$1 line key value
+  local file=$1 line key value filename expected_id embedded_id
   [ -f "$file" ] || return 1
   [ "$(LC_ALL=C tr -d '\000' < "$file" | LC_ALL=C wc -c)" = "$(LC_ALL=C wc -c < "$file")" ] || return 1
   local -a fields=()
@@ -180,7 +180,16 @@ cs_message_validate_file() {
     value=${line#*=}
     fields+=("$key=$value")
   done < "$file"
-  cs_message_validate_fields "${fields[@]}"
+  cs_message_validate_fields "${fields[@]}" || return 1
+  case "$file" in
+    *.msg)
+      filename=${file##*/}
+      expected_id=${filename%.msg}
+      cs_message_id "$expected_id" || return 1
+      embedded_id=$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$file")
+      [ "$embedded_id" = "$expected_id" ] || return 1
+      ;;
+  esac
 }
 
 cs_message_field() {
@@ -238,8 +247,8 @@ cs_message_verify_result() {
       printf 'result commit does not exist: %s\n' "$commit" >&2
       return 1
     }
-    if [ -n "$artifact" ] && ! git -C "$worktree" cat-file -e "${commit}:${artifact}" 2>/dev/null; then
-      printf 'result artifact is not present in commit %s: %s\n' "$commit" "$artifact" >&2
+    if [ -n "$artifact" ] && [ "$(git -C "$worktree" cat-file -t "${commit}:${artifact}" 2>/dev/null || true)" != blob ]; then
+      printf 'result artifact is not a file in commit %s: %s\n' "$commit" "$artifact" >&2
       return 1
     fi
   fi
