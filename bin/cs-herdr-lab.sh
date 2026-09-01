@@ -56,10 +56,9 @@ cs_herdr_lab_tripwire_path() { # <session>
 
 cs_herdr_lab_raw() { # <session> <herdr arguments...>
   local name=$1
-  local -a argv
   shift
-  cs_herdr_argv_with_session argv "$name" "$@"
-  HERDR_SESSION="$name" herdr "${argv[@]}"
+  cs_herdr_argv_with_session "$name" "$@"
+  HERDR_SESSION="$name" herdr "${CS_HERDR_ARGV[@]}"
 }
 
 cs_herdr_lab_session_list() { # <session>

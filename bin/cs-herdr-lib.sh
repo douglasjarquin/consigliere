@@ -33,8 +33,8 @@ cs_herdr_session() {
   printf '%s' "${CS_HERDR_SESSION:-default}"
 }
 
-# cs_herdr_argv_with_session <out-array-name> <session> <herdr arguments...>
-# Populates <out-array-name> with argv plus --session <session> inserted
+# cs_herdr_argv_with_session <session> <herdr arguments...>
+# Populates CS_HERDR_ARGV with argv plus --session <session> inserted
 # immediately before a trailing "--" separator when one is present (e.g.
 # `agent start ... -- AGENT_ARG...`), else appended at the end. Appending
 # --session after a subcommand's own "--" would make it a literal passthrough
@@ -43,25 +43,23 @@ cs_herdr_session() {
 # caller (cs_herdr below and bin/cs-herdr-lab.sh's cs_herdr_lab_raw), not
 # reintroduced independently per caller.
 cs_herdr_argv_with_session() {
-  local -n _cs_herdr_argv_out=$1
-  local session=$2
-  shift 2
+  local session=$1
+  shift
   local arg saw_sep=0
-  _cs_herdr_argv_out=()
+  CS_HERDR_ARGV=()
   for arg in "$@"; do
     if [ "$saw_sep" -eq 0 ] && [ "$arg" = "--" ]; then
-      _cs_herdr_argv_out+=(--session "$session")
+      CS_HERDR_ARGV+=(--session "$session")
       saw_sep=1
     fi
-    _cs_herdr_argv_out+=("$arg")
+    CS_HERDR_ARGV+=("$arg")
   done
-  [ "$saw_sep" -eq 1 ] || _cs_herdr_argv_out+=(--session "$session")
+  [ "$saw_sep" -eq 1 ] || CS_HERDR_ARGV+=(--session "$session")
 }
 
 cs_herdr() { # <herdr arguments...>
-  local -a _cs_herdr_call_argv
-  cs_herdr_argv_with_session _cs_herdr_call_argv "$(cs_herdr_session)" "$@"
-  herdr "${_cs_herdr_call_argv[@]}"
+  cs_herdr_argv_with_session "$(cs_herdr_session)" "$@"
+  herdr "${CS_HERDR_ARGV[@]}"
 }
 
 cs_herdr_require() {
@@ -394,6 +392,13 @@ cs_herdr_agent_alive() { # <pane_id>  - is a real agent (codex or claude) in the
   local out
   out=$(cs_herdr agent get "$1" 2>/dev/null) || return 1
   printf '%s' "$out" | jq -e '.result.agent.agent // empty | select(. != "")' >/dev/null 2>&1
+}
+
+cs_herdr_agent_kind_matches() { # <pane_id> <expected-kind>
+  local out kind
+  out=$(cs_herdr agent get "$1" 2>/dev/null) || return 1
+  kind=$(printf '%s' "$out" | jq -er '.result.agent.agent // empty' 2>/dev/null) || return 1
+  [ "$kind" = "$2" ]
 }
 
 # cs_herdr_agent_start_timeout_ms <seconds> - seconds converted to milliseconds

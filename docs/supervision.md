@@ -10,7 +10,7 @@ Codex cannot reason during a foreground tool call, so a background watcher that 
    That scan is cursor-backed (`state/.decision-cursor-<task>`), so each drain folds only status bytes appended since the previous drain instead of every task's whole lifetime log.
 2. Run one checkpoint, and only one this turn: `bin/cs-watch-checkpoint.sh --seconds "${CS_WATCH_CHECKPOINT:-180}"`.
    It ensures `bin/cs-monitor.sh` is alive for this home, reviving it on a stale `state/.last-monitor-beat`, then waits for `state/.wake-queue` to carry something.
-3. Actionable wake (`signal:` / `stale:` / `check:` / `capo:` / `heartbeat`): drain, handle, report, end the turn.
+3. Actionable wake (`signal:` / `stale:` / `check:` / `heartbeat`): drain, handle, report, end the turn.
 4. Quiet checkpoint (`checkpoint:` line, exit 124): drain anyway, process any queued boss message, end the turn.
 5. Never `&`, never background tasks, never a second cycle beside a healthy one.
 6. Failure or missing cycle only: drain, inspect, start a fresh checkpoint.
@@ -67,11 +67,6 @@ Restoring an interrupted drain's queue removes the batch it restored from, becau
   A pane that stays *busy* is bounded too: past `CS_BUSY_TURN_MAX_SECS` (default 3600) with no completed turn it enters the same wedge timer, because a busy signal alone cannot distinguish real work from a hung foreground tool call.
   The escalation is for inspection only and never interrupts or restarts the soldier; any completed turn resets the age.
 - `check: <script>: <out>` - authenticated poll output (PR merge poll, registered custom checks); always actionable. Unauthenticated state checks are rejected without execution.
-- `capo: <capo>/<worker>: <line>` - a boss-relevant status a worker inside one of this home's capo homes raised, read directly by this watcher rather than waited on.
-  A capo home is polled only while its own agent sits idle on a checkpoint, so an event there can otherwise wait as long as that agent's turn lasts.
-  The wake reports that the event exists; the capo still owns the lane.
-  Discovery is from this home's own `state/<id>.meta` records with `kind=capo`, and a recorded home is read only when it still carries the `.cs-capo-home` marker.
-  Dedup is per capo, worker task, and decision key against a per-task open-decision manifest (`state/.capo-surfaced-<capo>__<worker>`), not the surfaced line's text, so a standing block wakes the parent once and a resolve-then-reopen under the same key and wording still surfaces again; `bin/cs-watch.sh`'s `scan_capo_worker_events` owns the fold.
 - `heartbeat` - fleet-scan backstop found an unsurfaced boss-relevant status.
 
 `bin/cs-classify-lib.sh` is the single owner of the verb vocabulary and delegates machine-input typing to `bin/cs-operational-input.sh`.

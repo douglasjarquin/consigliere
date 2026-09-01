@@ -26,6 +26,8 @@ set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+export CS_LOCK_HARNESS_RE='bash|zsh|codex|claude'
+
 TMP=$(cs_test_tmproot cs-session-start)
 mkdir -p "$TMP"
 BIN="$ROOT/bin/cs-session-start.sh"
@@ -54,6 +56,8 @@ printf 'The boss prefers plain outcome language.\n' > "$HOME_DIR/config/boss.md"
 out=$(CS_HOME="$HOME_DIR" CS_STARTUP_MEMORY_MAX_BYTES=8192 "$BIN" 2>/dev/null)
 assert_not_contains "$out" 'OVER STARTUP-MEMORY BUDGET' "a small startup-memory file is not flagged"
 assert_contains "$out" 'The boss prefers plain outcome language.' "the digest still prints the file"
+assert_contains "$out" 'MESSAGE RECOVERY' "startup does not expose its durable message recovery stage"
+assert_contains "$out" 'recover: checked=0 re-woke=0' "startup did not run one bounded recovery pass"
 pass "startup memory under budget is printed without a report"
 
 # --- over budget: reported, named, and still printed in full ------------------

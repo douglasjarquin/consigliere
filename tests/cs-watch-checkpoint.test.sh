@@ -84,6 +84,7 @@ out=$(env PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" \
 set -e
 expect_code 124 "$rc" "a quiet checkpoint should exit 124"
 assert_contains "$out" "checkpoint: no actionable wake within 1s" "quiet checkpoint reports the bound"
+assert_contains "$out" "recover: checked=0 re-woke=0" "a quiet checkpoint did not run bounded message recovery"
 pass "cs-watch-checkpoint exits 124 with a quiet-checkpoint message when nothing is actionable"
 
 # --- runtime: actionable wake passthrough ------------------------------------

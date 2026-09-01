@@ -677,6 +677,36 @@ else
   fi
 fi
 
+# Refresh root's endpoint identity before message recovery can use it.
+if [ "$READ_ONLY" -eq 0 ] && [ -n "${HERDR_PANE_ID:-}" ]; then
+  ROOT_ENDPOINT_GENERATION="root-$(date +%s)-$RANDOM"
+  ROOT_ENDPOINT_TMP="$STATE/.home-endpoint-generation.tmp.$$"
+  printf '%s\n' "$ROOT_ENDPOINT_GENERATION" > "$ROOT_ENDPOINT_TMP" 2>/dev/null &&
+    mv -f "$ROOT_ENDPOINT_TMP" "$STATE/.home-endpoint-generation" 2>/dev/null ||
+    rm -f "$ROOT_ENDPOINT_TMP" 2>/dev/null || true
+fi
+
+# Reconcile durable parent/child messages after the queue drain and before the
+# foreground supervision instructions. Recovery is one bounded pass: it may
+# re-wake an exact durable record, but it never starts a retry loop.
+stage message-recovery
+subsection "MESSAGE RECOVERY"
+if [ "$READ_ONLY" -eq 1 ]; then
+  printf 'skipped (read-only session) - the session holding the lock owns message recovery.\n'
+else
+  RECOVERY_OUT=$(CS_HOME="$CS_HOME" CS_STATE_OVERRIDE="$STATE" \
+    "$SCRIPT_DIR/cs-recover.sh" 2>&1) || RECOVERY_RC=$?
+  RECOVERY_RC=${RECOVERY_RC:-0}
+  if [ -n "$RECOVERY_OUT" ]; then
+    printf '%s\n' "$RECOVERY_OUT"
+  else
+    printf 'recover: checked=0 re-woke=0\n'
+  fi
+  if [ "$RECOVERY_RC" -ne 0 ]; then
+    printf 'recovery: unresolved records remain; inspect the errors above before acting on them.\n'
+  fi
+fi
+
 # --- 4. supervision operating instructions ----------------------------------
 stage supervision
 AFK_PRESENT=0
@@ -707,7 +737,7 @@ When this session owns supervision:
 1. Drain first with bin/cs-wake-drain.sh.
 2. Run at most ONE foreground watcher checkpoint per turn:
      bin/cs-watch-checkpoint.sh --seconds "${CS_WATCH_CHECKPOINT:-180}"
-3. Whatever it returns - a wake (signal:, stale:, check:, capo:, heartbeat) or
+3. Whatever it returns - a wake (signal:, stale:, check:, heartbeat) or
    a quiet checkpoint (prints checkpoint: / exits 124) - drain queued wakes,
    handle what they report, say what happened, and END the turn. A second
    checkpoint in the same turn is refused: a turn boundary is the only moment

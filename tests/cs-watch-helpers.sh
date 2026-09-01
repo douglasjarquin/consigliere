@@ -39,6 +39,10 @@ case "${1:-} ${2:-}" in
       cat "$CS_FAKE_HERDR_CAPTURE" 2>/dev/null
     fi
     exit 0 ;;
+  "pane get")
+    [ -n "${CS_FAKE_HERDR_PANE_CWD:-}" ] || exit 1
+    printf '{"result":{"pane":{"cwd":"%s"}}}\n' "$CS_FAKE_HERDR_PANE_CWD"
+    exit 0 ;;
   "agent get")
     status="${CS_FAKE_HERDR_AGENT_STATUS:-idle}"
     agent="${CS_FAKE_HERDR_AGENT-codex}"

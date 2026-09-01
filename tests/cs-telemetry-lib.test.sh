@@ -297,8 +297,8 @@ test_fold_supervision_actions() {
 
 test_fold_wake_kind_provenance() {
   local got home
-  got=$(fold_case single root 'wake capo')
-  [ "${got##* }" = capo ] || fail "one drained kind must be recorded verbatim, got '$got'"
+  got=$(fold_case single root 'wake check')
+  [ "${got##* }" = check ] || fail "one drained kind must be recorded verbatim, got '$got'"
   got=$(fold_case ckpt root checkpoint)
   [ "${got##* }" = checkpoint ] || fail "a checkpoint-only turn records 'checkpoint', got '$got'"
 
@@ -317,8 +317,8 @@ cs_telemetry_turn_end root ""'
     fail "wake_kinds must carry every distinct kind in drain order:"$'\n'"$(records "$home")"
 
   home=$(make_home fold-one-kind 'enabled true')
-  in_home "$home" 'cs_telemetry_crumb wake capo; cs_telemetry_turn_end root ""'
-  [ "$(records "$home" | jq -rc '.wake_kinds')" = '["capo"]' ] ||
+  in_home "$home" 'cs_telemetry_crumb wake check; cs_telemetry_turn_end root ""'
+  [ "$(records "$home" | jq -rc '.wake_kinds')" = '["check"]' ] ||
     fail "a single-wake turn must still carry wake_kinds:"$'\n'"$(records "$home")"
 
   home=$(make_home fold-no-wake 'enabled true')

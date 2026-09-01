@@ -129,7 +129,7 @@ state/               volatile runtime signals; gitignored
   .last-monitor-beat .monitor.log .monitor-stop   persistent monitor liveness, lifecycle log, and stop request; cs-monitor.sh
   .checkpoint-turn   per-turn checkpoint counter; written by cs-watch-checkpoint.sh, cleared at every turn end
   .decision-cursor-*   per-task byte cursor and folded open-decision set bounding the wake drain's open-decision scan to new status appends; written only by cs-classify-lib.sh; safe to delete (forces one full re-fold)
-  .hash-* .count-* .stale-* .paused-* .seen-* .last-* .capo-surfaced-*   watcher internals; never touch
+  .hash-* .count-* .stale-* .paused-* .seen-* .last-*   watcher internals; never touch
   .subsuper-*        away-mode delivery internals (cs-activate.sh, cs-afk-start.sh, cs-afk-return.sh); never touch
 .no-mistakes/        local validation state and evidence (`.no-mistakes/evidence`); gitignored
 ```
@@ -376,7 +376,7 @@ Handle actionable wakes as follows:
 1. For `signal:`, read the listed event lines first, then reconcile current state only where action depends on it.
 2. For `stale:`, inspect the recorded endpoint and load `stuck-soldier-recovery` for a stopped, looping, confused, or unresponsive soldier; a demand-deep-inspection reason also requires current-state and validation-log inspection.
 3. For `check:`, act on the named poll result, including a merge the boss has already authorized.
-4. For `capo:`, treat the named capo's worker event as real now: the capo may be mid-turn and unable to relay it, and the capo still owns the lane.
+4. For a message wake, drain the addressed inbox through the generic parent/child protocol and act only on the current task's records.
 5. For `heartbeat:`, review the whole fleet from `bin/cs-fleet-view.sh`, reconcile suspicious tasks and PR state, update the backlog, and never report an unchanged fleet as progress.
 
 When any wake reports a merged PR for a project cloned in this home, refresh that clone through the guarded fleet-sync path.
