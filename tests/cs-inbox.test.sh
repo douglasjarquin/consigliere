@@ -10,7 +10,8 @@ trap 'rm -rf "$TMP"' EXIT
 HOME_DIR="$TMP/home"
 STATE="$HOME_DIR/state"
 WORKTREE="$TMP/child-worktree"
-mkdir -p "$HOME_DIR/config" "$HOME_DIR/data" "$STATE/inbox" "$WORKTREE/reports"
+FAKEBIN="$TMP/fakebin"
+mkdir -p "$HOME_DIR/config" "$HOME_DIR/data" "$STATE/inbox" "$WORKTREE/reports" "$FAKEBIN"
 
 git -C "$WORKTREE" init -q || fail "child worktree setup"
 git -C "$WORKTREE" config user.email test@example.invalid
@@ -48,7 +49,7 @@ endpoint_generation=child-generation
 EOF
 
 message() {
-  local id=$1 target=$2 kind=$3 generation=$4 artifact=${5:-reports/result.md} commit=${6:-$CHILD_COMMIT}
+  local id=$1 target=$2 kind=$3 generation=$4 artifact=${5:-reports/result.md} commit=${6:-$CHILD_COMMIT} pull_request=${7:-}
   cs_message_publish "$STATE/inbox" \
     "schema=cs-message.v1" \
     "message_id=$id" \
@@ -63,7 +64,7 @@ message() {
     "summary=$kind summary" \
     "artifact=$artifact" \
     "commit_sha=$commit" \
-    "pull_request=" \
+    "pull_request=$pull_request" \
     "created_at=1700000000"
 }
 
@@ -117,6 +118,41 @@ fi
 grep -F 'escapes' "$TMP/invalid-symlink.err" >/dev/null || fail "symlink escape refusal must name the escape"
 [ ! -e "$STATE/inbox/message-invalid-symlink.ack" ] || fail "symlink escape was acknowledged"
 pass "result acknowledgement refuses a symlinked artifact directory"
+
+cat > "$FAKEBIN/gh-axi" <<'SH'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = pr ] && [ "${2:-}" = view ]; then
+  case "${FAKE_PR_MODE:-valid}" in
+    valid) printf 'pr:\n  number: %s\n' "${3:-}"; exit 0 ;;
+    mismatch) printf 'pr:\n  number: 99\n'; exit 0 ;;
+    unavailable) exit 1 ;;
+  esac
+fi
+exit 2
+SH
+chmod +x "$FAKEBIN/gh-axi"
+message message-valid-pr current result child-generation reports/result.md "$CHILD_COMMIT" 42
+if ! PATH="$FAKEBIN:$PATH" FAKE_PR_MODE=valid "$INBOX" --ack message-valid-pr >/dev/null; then
+  fail "a result with a matching PR identity should be acknowledged"
+fi
+pass "result acknowledgement accepts a verifiable pull request"
+
+message message-mismatched-pr current result child-generation reports/result.md "$CHILD_COMMIT" 43
+if PATH="$FAKEBIN:$PATH" FAKE_PR_MODE=mismatch "$INBOX" --ack message-mismatched-pr >/dev/null 2>"$TMP/mismatched-pr.err"; then
+  fail "a result with a mismatched PR identity must not be acknowledged"
+fi
+grep -F 'pull request identity' "$TMP/mismatched-pr.err" >/dev/null || fail "mismatched PR refusal must name the identity"
+[ ! -e "$STATE/inbox/message-mismatched-pr.ack" ] || fail "mismatched PR was acknowledged"
+pass "result acknowledgement refuses a mismatched pull request"
+
+message message-unavailable-pr current result child-generation reports/result.md "$CHILD_COMMIT" 44
+if PATH="$FAKEBIN:$PATH" FAKE_PR_MODE=unavailable "$INBOX" --ack message-unavailable-pr >/dev/null 2>"$TMP/unavailable-pr.err"; then
+  fail "a result whose PR cannot be queried must not be acknowledged"
+fi
+grep -F 'pull request could not be verified' "$TMP/unavailable-pr.err" >/dev/null || fail "unavailable PR refusal must name verification"
+[ ! -e "$STATE/inbox/message-unavailable-pr.ack" ] || fail "unavailable PR was acknowledged"
+pass "result acknowledgement refuses an unavailable pull request"
 
 "$INBOX" --ack message-current >/dev/null || fail "message acknowledgement"
 [ -f "$STATE/inbox/message-current.ack" ] || fail "acknowledgement record missing"
