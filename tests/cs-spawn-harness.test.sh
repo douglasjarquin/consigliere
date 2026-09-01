@@ -96,6 +96,12 @@ case "${1:-} ${2:-}" in
   "pane wait-output")
     # The env-export pre-step's confirmation, always taken for a capo (its
     # CS_HOME/override-clearing prefix is unconditional).
+    if [ "${CS_FAKE_SPAWN_WAIT_FAIL_ONCE:-0}" = 1 ] &&
+      [ ! -f "${CS_FAKE_SPAWN_WAIT_MARKER:-}" ]; then
+      : > "$CS_FAKE_SPAWN_WAIT_MARKER"
+      printf '%s\n' '{"error":{"code":"wait_timeout","message":"shell not ready"}}' >&2
+      exit 1
+    fi
     printf '{"result":{"matched":true}}\n' ;;
   "workspace list") printf '{"result":{"workspaces":[]}}\n' ;;
   "workspace create") printf '{"result":{"workspace":{"workspace_id":"wcapo"}}}\n' ;;
@@ -155,6 +161,8 @@ spawn_one() {
     CS_FAKE_SPAWN_METADATA="$TMP/metadata-$id" \
     CS_FAKE_SPAWN_META="$HOME_DIR/state/$id.meta" \
     CS_FAKE_SPAWN_META_BEFORE="$TMP/meta-before-$id" \
+    CS_FAKE_SPAWN_WAIT_FAIL_ONCE="${CS_FAKE_SPAWN_WAIT_FAIL_ONCE:-0}" \
+    CS_FAKE_SPAWN_WAIT_MARKER="${CS_FAKE_SPAWN_WAIT_MARKER:-$TMP/wait-once-$id}" \
     CS_FAKE_SPAWN_REPORT_METADATA_FAIL="${CS_FAKE_SPAWN_REPORT_METADATA_FAIL:-0}" \
     "$SPAWN" "$id" "$REPO" "$@" >/dev/null || fail "spawn ($harness) failed"
   # An interactive spawn is captured by `agent start`; a headless scout never
@@ -401,6 +409,14 @@ env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude CLAUDE_CONFIG_DIR="$TMP/wor
 assert_contains "$(cat "$TMP/panerun-t-claude-env")" "export CLAUDE_CONFIG_DIR='$TMP/work-claude'" \
   "a soldier under a credential-store split must export the store into the pane before agent start"
 pass "a claude credential-store split is exported into the pane shell before the agent starts"
+
+CS_FAKE_SPAWN_WAIT_FAIL_ONCE=1
+CS_FAKE_SPAWN_WAIT_MARKER="$TMP/wait-once-t-env-retry"
+launch=$(spawn_one codex t-env-retry --mode made --yolo off)
+unset CS_FAKE_SPAWN_WAIT_FAIL_ONCE CS_FAKE_SPAWN_WAIT_MARKER
+retry_runs=$(grep -c '^pane_run=' "$TMP/panerun-t-env-retry" 2>/dev/null || true)
+[ "$retry_runs" -ge 2 ] || fail "a swallowed env export must be retried before agent start"
+pass "fresh-pane env export retries after one swallowed confirmation"
 
 # --- config/permission-mode.conf reaches a real spawn ----------------------------
 # End-to-end, not just the launch-string unit: proves the home's config dir

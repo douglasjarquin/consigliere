@@ -205,9 +205,16 @@ report_task_metadata() {
 # pre-step is how a launch's environment reaches the agent at all. A no-op
 # (success) when the prefix is empty.
 _cs_spawn_env_export_confirmed() {
-  local pane=$1 prefix=$2
+  local pane=$1 prefix=$2 started=$SECONDS elapsed remaining_ms attempt_ms
   [ -n "$prefix" ] || return 0
-  cs_herdr_pane_run_confirmed "$pane" "export $prefix" "$(cs_herdr_agent_start_timeout_ms "$ENV_STEP_WAIT")"
+  while :; do
+    elapsed=$((SECONDS - started))
+    [ "$elapsed" -lt "$ENV_STEP_WAIT" ] || return 1
+    remaining_ms=$(( (ENV_STEP_WAIT - elapsed) * 1000 ))
+    attempt_ms=$remaining_ms
+    [ "$attempt_ms" -gt 1000 ] && attempt_ms=1000
+    cs_herdr_pane_run_confirmed "$pane" "export $prefix" "$attempt_ms" && return 0
+  done
 }
 
 # _cs_spawn_deliver_brief <pane> <encoded-brief>: delivers the brief as the
