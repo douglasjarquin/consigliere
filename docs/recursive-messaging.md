@@ -20,6 +20,21 @@ The agent hierarchy owns judgment, delegation, summarization, and escalation.
 
 The human boss owns merge authority.
 
+## Existing mechanism inventory
+
+| Mechanism | Classification | Reason |
+|---|---|---|
+| `bin/cs-send.sh` | reuse | Retains Herdr delivery, bounded text, and explicit target validation for directed prompts. |
+| `bin/cs-pending-reply-lib.sh` | generalize | Retains parent-owned response obligations and bounded recovery while the removed nested-decision subtype is gone. |
+| `bin/cs-wake-lib.sh` and `bin/cs-wake-drain.sh` | reuse | Retain the durable zero-token wake queue and atomic drain boundary. |
+| `bin/cs-herdr-event-hook.sh` and `bin/cs-herdr-event-lib.sh` | reuse | Retain the tiny event transport and exact pane/workspace identity binding. |
+| `bin/cs-report.sh` and `bin/cs-message-lib.sh` | generalize | Provide the common bounded parent/child message schema, publication, retry, and identity rules. |
+| `bin/cs-inbox.sh` | generalize | Provides parent-scoped message handling, result verification, acknowledgement, and upward transfer. |
+| `bin/cs-recover.sh` | generalize | Provides one bounded reconciliation path for startup, timeout, explicit recovery, and teardown. |
+| Root-side nested Capo status scan | delete later | Removed after the generic recursive message path and replacement tests were proven. |
+| `capo-decision-escalation` pending subtype and relay branch | delete later | Removed after generic recursive upward transfer covered the behavior. |
+| Telemetry transcript reads | temporary fallback | Retained only as bounded measurement input, never as semantic supervision authority. |
+
 The first implementation slice adds exact parent-edge metadata, a generic bounded durable message record, and a parent-scoped inbox drain.
 
 The message is atomically published to the immediate parent's inbox before a bounded Herdr wake reference is sent.
