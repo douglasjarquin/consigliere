@@ -50,6 +50,7 @@ Locked startup runs this recovery pass after draining the wake queue.
 An otherwise quiet supervision checkpoint runs the same bounded pass when its wait expires.
 Teardown runs it before cleanup and refuses to remove a task while its pending or unacknowledged message records remain unresolved.
 
-Event-driven lifecycle routing, recursive inbox draining, bounded cold reconciliation, polling reduction, and the nested Herdr canary remain later phases.
+Event-driven lifecycle routing, recursive inbox draining, and bounded cold reconciliation are implemented in the active slices above.
+Polling reduction, deletion of redundant supervision paths, and the nested real-Herdr canary remain later phases.
 
 No issue checkbox for a later phase is complete until its named real-surface evidence exists.
