@@ -130,7 +130,7 @@ if env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   "$REPORT" blocked "parent unavailable" >/dev/null 2>&1; then
   fail "an unavailable parent must not receive a wake"
 fi
-[ "$(find "$STATE/inbox" -name '*.msg' -type f | wc -l | tr -d ' ')" = 3 ] || fail "unavailable parent report was not retained"
+[ "$(find "$STATE/inbox" -name '*.msg' -type f | wc -l | tr -d ' ')" = 4 ] || fail "unavailable parent report was not retained"
 pass "report remains durable when the parent endpoint is unavailable"
 export CS_FAKE_MESSAGE_PARENT_HOME="$HOME_DIR"
 

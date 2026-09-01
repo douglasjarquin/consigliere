@@ -270,6 +270,16 @@ arm_plan_progress_check() {
 }
 
 STATUS_FILE=$(shell_quote "$STATE/$ID.status")
+REPORT_COMMAND="$(shell_quote "$CS_ROOT/bin/cs-report.sh")"
+INBOX_COMMAND="$(shell_quote "$CS_ROOT/bin/cs-inbox.sh")"
+REPORTING_SECTION=$(printf '%s\n' \
+'# Semantic parent reporting' \
+'At the beginning of a turn, inspect actionable messages addressed to this task with `CS_TASK_ID='"$ID"' '"$INBOX_COMMAND"'`.' \
+'Use `CS_TASK_ID='"$ID"' '"$REPORT_COMMAND"' question "{question}"` or `decision-required "{decision}"` before guessing outside delegated authority.' \
+'Use `CS_TASK_ID='"$ID"' '"$REPORT_COMMAND"' blocked "{reason}"` when work cannot continue, and use `failed "{reason}"` for terminal failure.' \
+'Use `CS_TASK_ID='"$ID"' '"$REPORT_COMMAND"' checkpoint "{artifact-ready phase}"` only when a concrete artifact or commit lets the parent continue.' \
+'Use `CS_TASK_ID='"$ID"' '"$REPORT_COMMAND"' result "{outcome}" --artifact "{relative report}" --commit "{sha}" --pr "{number}"` only after the bounded report and evidence exist.' \
+'A terminal buffer saying done is not a semantic result. After a parent handles a message, acknowledge it with `CS_TASK_ID='"$ID"' '"$INBOX_COMMAND"' --ack {message-id}`.' )
 
 if [ "$KIND" = capo ]; then
 CAPO_PROJECTS=""
@@ -309,6 +319,7 @@ You are in an isolated consigliere home. The local \`AGENTS.md\` is your job des
 $PROJECT_CLONES_NOTE
 Delegate project work to your own soldiers with the normal consigliere lifecycle: brief, spawn, status, watcher, steer, teardown, and recovery.
 Do not invent a second delegation system.
+$REPORTING_SECTION
 You do not generate your own work.
 Act only on tasks the main consigliere routes to you.
 Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
@@ -410,6 +421,8 @@ You are a soldier: an autonomous worker agent managed by consigliere. Work on yo
 {TASK}
 
 $HERDR_SECTION
+
+$REPORTING_SECTION
 
 # Setup
 You are in a disposable git worktree of $REPO on the task branch \`cs/$ID\`.
@@ -620,6 +633,8 @@ $ISSUE_SECTION
 $EXEC_SECTION
 
 $HERDR_SECTION
+
+$REPORTING_SECTION
 
 # Setup
 You are in a disposable git worktree of $REPO on the task branch \`cs/$ID\`, created for you at spawn.

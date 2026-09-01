@@ -691,7 +691,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # CLAUDE_CONFIG_DIR under a work/personal account split, exported once here
   # (this pane's shell keeps it for both the resume attempt and any cold-launch
   # fallback below) rather than per-attempt - see _cs_spawn_env_export_confirmed.
-  R_ENV_PREFIX=$(cs_harness_launch_env "$R_HARNESS")
+  R_ENV_PREFIX="$(cs_harness_launch_env "$R_HARNESS")CS_ROOT_OVERRIDE=$(shell_quote "$CS_ROOT") CS_HOME=$(shell_quote "$CS_HOME") CS_DATA_OVERRIDE=$(shell_quote "$DATA") CS_STATE_OVERRIDE=$(shell_quote "$STATE") CS_TASK_ID=$(shell_quote "$ID")"
   if ! _cs_spawn_env_export_confirmed "$R_PANE" "$R_ENV_PREFIX"; then
     echo "error: could not confirm $ID's launch environment landed on pane $R_PANE before relaunching; the export line was typed at the pane's shell but never confirmed executed, and no replacement agent was started" >&2
     exit 1
@@ -836,7 +836,7 @@ if [ "$KIND" = capo ]; then
   # home. `agent start`'s trailing argv has no shell prefix-assignment support
   # and neither it nor `worktree create` has an --env flag, so this must land
   # via its own confirmed pane-shell export before the agent starts.
-  ENV_PREFIX="$(cs_harness_launch_env "$HARNESS")CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME=$(shell_quote "$HOME_ABS")"
+  ENV_PREFIX="$(cs_harness_launch_env "$HARNESS")CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME=$(shell_quote "$HOME_ABS") CS_TASK_ID=$(shell_quote "$ID")"
   if ! _cs_spawn_env_export_confirmed "$PANE" "$ENV_PREFIX"; then
     echo "error: could not confirm capo $ID's launch environment landed on pane $PANE before starting the agent; the home and its workspace are left intact - retry the spawn" >&2
     exit 1
@@ -1070,7 +1070,7 @@ else
   # prefix-assignment support and neither it nor `worktree create` has an
   # --env flag, so this must land via its own confirmed pane-shell export
   # before the agent starts - skipped entirely when there is nothing to export.
-  ENV_PREFIX=$(cs_harness_launch_env "$HARNESS")
+  ENV_PREFIX="$(cs_harness_launch_env "$HARNESS")CS_ROOT_OVERRIDE=$(shell_quote "$CS_ROOT") CS_HOME=$(shell_quote "$CS_HOME") CS_DATA_OVERRIDE=$(shell_quote "$DATA") CS_STATE_OVERRIDE=$(shell_quote "$STATE") CS_TASK_ID=$(shell_quote "$ID")"
   if ! _cs_spawn_env_export_confirmed "$PANE" "$ENV_PREFIX"; then
     abort_task "could not confirm $ID's launch environment landed on pane $PANE before starting the agent"
   fi

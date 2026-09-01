@@ -187,6 +187,9 @@ assert_contains "$launch" "kind=codex" "codex root launches codex"
 assert_contains "$launch" 'notify=' "codex root wires notify turn-end"
 assert_not_contains "$launch" '--settings' "codex root does not use --settings"
 assert_absent "$HOME_DIR/state/t-codex.claude-settings.json" "codex root writes no claude settings file"
+assert_contains "$(cat "$TMP/panerun-t-codex")" \
+  "export CS_ROOT_OVERRIDE='$ROOT' CS_HOME='$HOME_DIR' CS_DATA_OVERRIDE='$HOME_DIR/data' CS_STATE_OVERRIDE='$HOME_DIR/state' CS_TASK_ID='t-codex'" \
+  "a regular soldier receives its explicit home and task identity before agent start"
 pass "codex root: harness=codex, codex notify launch, no settings file"
 
 launch=$(spawn_one codex t-nested --mode made --yolo off --parent parent --parent-home "$HOME_DIR" --parent-pane w1:p1 --parent-generation parent-generation-2)
@@ -309,7 +312,7 @@ assert_not_contains "$launch" 'CONSIGLIERE_OP' "the charter never rides agent st
 # store first, then the override clears, then the capo's own home.
 CAPO_ABS=$(cd "$CAPO_HOME" && pwd -P)
 assert_contains "$(cat "$TMP/panerun-foo")" \
-  "export CLAUDE_CONFIG_DIR='$TMP/work-claude' CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME='$CAPO_ABS'" \
+  "export CLAUDE_CONFIG_DIR='$TMP/work-claude' CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME='$CAPO_ABS' CS_TASK_ID='foo'" \
   "the capo env pre-step must export the credential store, the override clears, and its own home, in that order"
 prompt=$(cat "$TMP/prompt-foo")
 [ "$(printf '%s' "$prompt" | "$ROOT/bin/cs-operational-input.sh" kind)" = launch-brief ] \
@@ -371,7 +374,9 @@ assert_grep 't-claude.turn-ended' "$SETTINGS" "claude settings touches the turn-
 assert_no_grep 'cs-turnend-guard' "$SETTINGS" "soldier settings must not run the root guard"
 # The launch references the settings file by path.
 assert_contains "$launch" "$SETTINGS" "claude launch references the settings file"
-assert_absent "$TMP/panerun-t-claude" "no credential-store split means no env pre-step is typed into the pane"
+assert_contains "$(cat "$TMP/panerun-t-claude")" \
+  "export CS_ROOT_OVERRIDE='$ROOT' CS_HOME='$HOME_DIR' CS_DATA_OVERRIDE='$HOME_DIR/data' CS_STATE_OVERRIDE='$HOME_DIR/state' CS_TASK_ID='t-claude'" \
+  "a claude soldier receives its explicit home and task identity before agent start"
 pass "claude root: harness=claude, --settings launch, settings file written"
 
 # --- a credential-store split reaches the pane before the agent starts -------

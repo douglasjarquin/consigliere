@@ -20,13 +20,15 @@ The agent hierarchy owns judgment, delegation, summarization, and escalation.
 
 The human boss owns merge authority.
 
-The first implementation slice adds exact parent-edge metadata and a generic bounded durable message record.
+The first implementation slice adds exact parent-edge metadata, a generic bounded durable message record, and a parent-scoped inbox drain.
 
 The message is atomically published to the immediate parent's inbox before a bounded Herdr wake reference is sent.
 
 Duplicate message IDs are idempotent when the bytes match and fail closed when they conflict.
 
 The message primitive uses a versioned flat key/value record because the repository already validates flat metadata this way and no new parser or runtime is required.
+
+`bin/cs-inbox.sh` is the parent-side operation: it emits only unacknowledged messages addressed to the current task, rejects malformed or stale sender and receiver generations, and acknowledges a message only through an explicit `--ack` operation after handling.
 
 Event-driven lifecycle routing, recursive inbox draining, bounded cold reconciliation, polling reduction, and the nested Herdr canary remain later phases.
 
