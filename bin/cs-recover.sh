@@ -187,9 +187,6 @@ for pending in "$STATE"/pending/*.pending; do
   message_id=$(cs_message_pending_field "$pending" message_id 2>/dev/null || true)
   if seen_message "$message_id"; then continue; fi
   task=$(cs_message_pending_field "$pending" task_id)
-  pending_parent=$(cs_message_pending_field "$pending" parent_task_id)
-  pending_correlation=$(cs_message_pending_field "$pending" correlation_id)
-  pending_kind=$(cs_message_pending_field "$pending" kind)
   child_meta="$STATE/$task.meta"
   if [ ! -f "$child_meta" ]; then
     echo "error: pending message '$message_id' names missing sender metadata '$child_meta'" >&2
@@ -209,16 +206,11 @@ for pending in "$STATE"/pending/*.pending; do
     failed=1
     continue
   fi
-  child_home=$(cs_meta_get "$child_meta" home 2>/dev/null || true)
-  [ "$(cs_message_field "$message_file" from_task_id)" = "$task" ] &&
-    [ "$(cs_message_field "$message_file" from_home)" = "$child_home" ] &&
-    [ "$(cs_message_field "$message_file" to_task_id)" = "$pending_parent" ] &&
-    [ "$(cs_message_field "$message_file" correlation_id)" = "$pending_correlation" ] &&
-    [ "$(cs_message_field "$message_file" kind)" = "$pending_kind" ] || {
-      echo "error: pending message '$message_id' does not match its inbox identity" >&2
-      failed=1
-      continue
-    }
+  if ! cs_message_pending_matches_message "$pending" "$message_file"; then
+    echo "error: pending message '$message_id' does not match its inbox identity" >&2
+    failed=1
+    continue
+  fi
   ack_file="${message_file%.msg}.ack"
   if [ -e "$ack_file" ]; then
     cs_message_validate_ack "$ack_file" "$message_id" || {

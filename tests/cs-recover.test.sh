@@ -129,6 +129,23 @@ grep -F 'malformed acknowledgement' "$TMP/bad-ack.err" >/dev/null \
 pass "recovery refuses a mismatched acknowledgement instead of suppressing work"
 rm -f "$STATE/inbox/$bad_ack_id.msg" "$STATE/inbox/$bad_ack_id.ack" "$STATE/pending/$bad_ack_id.pending"
 
+mismatch_id='message-recover-generation-mismatch-000000000001'
+cs_message_publish "$STATE/inbox" \
+  "schema=cs-message.v1" "message_id=$mismatch_id" "correlation_id=$mismatch_id" \
+  "sequence=1" "kind=question" "from_task_id=child" "to_task_id=root" \
+  "from_home=$HOME_DIR" "from_endpoint_generation=child-generation" \
+  "to_endpoint_generation=root-generation-2" "summary=generation mismatch" "artifact=" \
+  "commit_sha=" "pull_request=" "created_at=1700000000" || fail "generation mismatch message setup"
+cs_message_pending_create "$STATE" "$mismatch_id" "$mismatch_id" child root question 1700000000 \
+  "$HOME_DIR" stale-child-generation root-generation-2 || fail "generation mismatch pending setup"
+if "$ROOT/bin/cs-recover.sh" >"$TMP/generation-mismatch.out" 2>"$TMP/generation-mismatch.err"; then
+  fail "recovery accepted a pending obligation with mismatched endpoint generation"
+fi
+grep -F 'does not match its inbox identity' "$TMP/generation-mismatch.err" >/dev/null \
+  || fail "generation mismatch refusal lacked its identity reason"
+rm -f "$STATE/inbox/$mismatch_id.msg" "$STATE/pending/$mismatch_id.pending"
+pass "recovery refuses a pending obligation with mismatched endpoint generation"
+
 printf '%s\n' 'done: child stopped before semantic report' > "$STATE/child.status"
 export CS_FAKE_PANE_CWD="$HOME_DIR" CS_FAKE_AGENT_LIVE=1
 output=$("$ROOT"/bin/cs-recover.sh) || fail "recover should request a report from a live settled child"
