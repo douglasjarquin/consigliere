@@ -298,4 +298,26 @@ pass "local-only brief is untouched by the bossless-evidence attachment step"
 ) || fail "the brief's own render-and-commit recipe, extracted and run verbatim, did not produce a valid staged evidence file"
 pass "the render-and-commit recipe embedded in a real generated brief works end to end against a fixture ledger"
 
+# Regression (port of firstmate 86dd2f6): the documented fill replaces EVERY
+# {TASK} occurrence, so each generated ship/scout scaffold must contain exactly
+# one - a second occurrence in guard prose (the unguarded herdr gate used to
+# quote it) would splice the whole task body into a safety sentence.
+for spec in \
+  "z1 --mode made" \
+  "z2 --mode direct-PR" \
+  "z3 --mode local-only" \
+  "z4 --mode made --herdr-lab" \
+  "z5 --mode direct-PR --herdr-lab" \
+  "z6 --mode local-only --herdr-lab" \
+  "z7 --scout" \
+  "z8 --scout --herdr-lab"; do
+  # shellcheck disable=SC2086  # spec is a deliberate space-separated flag list
+  set -- $spec
+  id=$1; shift
+  "$BIN" "$id" alpha "$@" >/dev/null 2>&1 || fail "scaffold '$spec' failed"
+  n=$(grep -c '{TASK}' "$TMP/data/$id/brief.md" || true)
+  [ "$n" -eq 1 ] || fail "brief '$spec' must contain exactly one {TASK}, got $n"
+done
+pass "every ship and scout scaffold variant contains exactly one {TASK} fill site"
+
 pass "cs-brief behaviors"

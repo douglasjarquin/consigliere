@@ -136,3 +136,74 @@ assert_contains "$out" "held by live harness pid $LIVE" \
 kill "$LIVE" 2>/dev/null || true
 wait "$LIVE" 2>/dev/null || true
 pass "a live version-named session holds its lock instead of losing it as stale"
+
+# --- portable mtime owner (cs_lock_path_mtime) --------------------------------
+
+# Regression for the GNU stat trap: `stat -f` on GNU coreutils is FILESYSTEM
+# stat - it consumes the format string as a path, prints a partial dump on
+# stdout, and can still exit 0, so a `stat -f %m ... || stat -c %Y ...` fallback
+# never runs and downstream arithmetic evaluates garbage. The owner must probe
+# the flavor and return only a pure integer.
+STUBS="$TMP/stat-stubs"
+mkdir -p "$STUBS"
+: > "$TMP/mtime-target"
+
+cat > "$STUBS/stat" <<'SH'
+#!/usr/bin/env bash
+if [ "${1-}" = -f ]; then
+  printf '  File: "%s"\n    ID: 100 Namelen: 255    Type: apfs\n' "${3-}"
+  exit 0
+fi
+if [ "${1-}" = -c ] && [ "${2-}" = %Y ]; then
+  printf '1234567890\n'
+  exit 0
+fi
+exit 1
+SH
+chmod 0700 "$STUBS/stat"
+
+out=$(
+  # shellcheck disable=SC2030,SC2031 # subshell-local by design: each scenario pins its own stat stub
+  PATH="$STUBS:$PATH"
+  unset _CS_LOCK_STAT_FLAVOR CS_LOCK_LIB_SOURCED
+  # shellcheck source=bin/cs-lock-lib.sh
+  . "$ROOT/bin/cs-lock-lib.sh"
+  cs_lock_path_mtime "$TMP/mtime-target"
+) || fail "a GNU-style stat must fall through to the -c form, not fail"
+[ "$out" = 1234567890 ] || fail "GNU-style stat corrupted the mtime value: '$out'"
+pass "a GNU-style stat (filesystem-dump -f that exits 0) never corrupts the mtime"
+
+# A stat that prints garbage in BOTH forms must fail with NO output, never pass
+# the garbage through into a caller's arithmetic.
+cat > "$STUBS/stat" <<'SH'
+#!/usr/bin/env bash
+printf '  File: nonsense\n'
+exit 0
+SH
+chmod 0700 "$STUBS/stat"
+set +e
+out=$(
+  # shellcheck disable=SC2030,SC2031 # subshell-local by design: each scenario pins its own stat stub
+  PATH="$STUBS:$PATH"
+  unset _CS_LOCK_STAT_FLAVOR CS_LOCK_LIB_SOURCED
+  # shellcheck source=bin/cs-lock-lib.sh
+  . "$ROOT/bin/cs-lock-lib.sh"
+  cs_lock_path_mtime "$TMP/mtime-target"
+)
+code=$?
+set -e
+[ "$code" -ne 0 ] || fail "an all-garbage stat must be a failure, not a success"
+[ -z "$out" ] || fail "a failed mtime read leaked output: '$out'"
+pass "a non-numeric stat result is a clean failure, never passed downstream"
+
+# And the real system stat still yields a pure-integer epoch mtime.
+out=$(
+  unset _CS_LOCK_STAT_FLAVOR CS_LOCK_LIB_SOURCED
+  # shellcheck source=bin/cs-lock-lib.sh
+  . "$ROOT/bin/cs-lock-lib.sh"
+  cs_lock_path_mtime "$TMP/mtime-target"
+) || fail "the real stat must read the fixture's mtime"
+case "$out" in
+  ''|*[!0-9]*) fail "the real stat did not yield a pure integer: '$out'" ;;
+esac
+pass "the real platform stat yields a pure-integer epoch mtime"

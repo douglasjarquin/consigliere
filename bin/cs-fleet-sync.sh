@@ -13,6 +13,12 @@
 # stashed, or discarded.
 # Still skips (benignly) local-only/no-origin projects, missing remotes/branches,
 # and fetch failures.
+# Every candidate must be a genuine clone ROOT: git repository discovery walks
+# upward, so `git -C <plain dir under projects/>` would resolve to the enclosing
+# repository (in a consigliere home, the consigliere checkout itself) and sync IT
+# under the project's label. A candidate whose `git rev-parse --show-toplevel` is
+# not the candidate directory itself is skipped with a diagnostic naming both
+# paths, before any state-changing git call.
 # Pruning never deletes the checked-out branch or a branch that still has a
 # worktree, so it cannot discard unlanded work; set CS_FLEET_PRUNE=0 to disable it.
 # When the fetch fails on an orphaned .git/packed-refs.lock (left by a ref rewrite
@@ -304,8 +310,24 @@ sync_project() {
     echo "$label: skipped: not a directory"
     return 0
   fi
-  if ! git -C "$PROJ" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  # Clone-root guard: git discovery walks upward, so a plain directory nested
+  # under projects/ is "inside a work tree" - the ENCLOSING repository's. Every
+  # later `git -C "$PROJ"` would then read and fast-forward that enclosing repo
+  # (in a consigliere home, the consigliere checkout itself) under this label.
+  # Require the candidate to be a genuine clone root: its toplevel must be the
+  # candidate directory itself.
+  local toplevel proj_abs
+  toplevel=$(git -C "$PROJ" rev-parse --show-toplevel 2>/dev/null) || toplevel=""
+  if [ -z "$toplevel" ]; then
     echo "$label: skipped: not a git repo"
+    return 0
+  fi
+  proj_abs=$(cd "$PROJ" && pwd -P) || {
+    echo "$label: skipped: cannot resolve $PROJ"
+    return 0
+  }
+  if [ "$toplevel" != "$proj_abs" ]; then
+    echo "$label: skipped: not a clone root ($proj_abs is a plain directory inside enclosing repository $toplevel); left untouched"
     return 0
   fi
   mode_line=$("$CS_ROOT/bin/cs-project-mode.sh" "$label" 2>/dev/null || echo "made off")

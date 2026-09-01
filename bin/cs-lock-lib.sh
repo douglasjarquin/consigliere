@@ -16,18 +16,52 @@
 # Diagnostics print to stderr prefixed by ${CS_LOCK_LOG_PREFIX:-cs-lock} so each
 # caller's output stays recognizable.
 
+# Idempotent guard: several libraries source this leaf for cs_lock_path_mtime,
+# and a caller may reach it through more than one of them.
+if [ -n "${CS_LOCK_LIB_SOURCED:-}" ]; then
+  return 0
+fi
+CS_LOCK_LIB_SOURCED=1
+
 cs_lock_log() {
   echo "${CS_LOCK_LOG_PREFIX:-cs-lock}: $*" >&2
 }
 
-# Portable mtime in epoch seconds. Kept self-contained so this leaf lib drags in
-# no wake-queue machinery when a caller only needs the staleness proof.
-cs_lock_path_mtime() {
-  if [ "$(uname)" = Darwin ]; then
-    stat -f %m "$1" 2>/dev/null
-  else
-    stat -c %Y "$1" 2>/dev/null
+# Portable mtime in epoch seconds - THE one owner of the stat mtime read, which
+# every other mtime helper in bin/ delegates to. macOS (BSD) stat spells it
+# `stat -f %m`; GNU coreutils spells it `stat -c %Y`. NEVER collapse the two
+# into `stat -f %m ... || stat -c %Y ...`: on GNU coreutils `-f` is *filesystem*
+# stat, so it consumes the format string as a path, complains on stderr, prints
+# a partial filesystem dump ("  File: ...") on stdout, and can still exit 0 -
+# the fallback never runs and the caller's arithmetic evaluates garbage,
+# aborting under `set -u`. The flavor is probed ONCE per process against this
+# library file itself: the BSD form is trusted only when it produces a pure
+# integer, and anything else selects the GNU form.
+_cs_lock_stat_flavor_probe() {
+  local probe
+  if [ -z "${_CS_LOCK_STAT_FLAVOR:-}" ]; then
+    probe=$(LC_ALL=C stat -f %m "${BASH_SOURCE[0]}" 2>/dev/null) || probe=
+    case "$probe" in
+      ''|*[!0-9]*) _CS_LOCK_STAT_FLAVOR=gnu ;;
+      *) _CS_LOCK_STAT_FLAVOR=bsd ;;
+    esac
   fi
+}
+
+# cs_lock_path_mtime <path>: pure-integer epoch mtime on stdout, or non-zero
+# with NO output. A non-numeric stat result is a failure, never passed through,
+# so a portability surprise degrades to the caller's own failure handling
+# instead of corrupting downstream arithmetic.
+cs_lock_path_mtime() {
+  local m
+  _cs_lock_stat_flavor_probe
+  if [ "$_CS_LOCK_STAT_FLAVOR" = bsd ]; then
+    m=$(LC_ALL=C stat -f %m "$1" 2>/dev/null) || return 1
+  else
+    m=$(LC_ALL=C stat -c %Y "$1" 2>/dev/null) || return 1
+  fi
+  case "$m" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$m"
 }
 
 # cs_lock_lsof_holder <target>: 0 a process holds it, 1 provably none, 2 lsof

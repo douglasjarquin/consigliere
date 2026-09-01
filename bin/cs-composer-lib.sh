@@ -296,5 +296,21 @@ EOF
     && ! cs_herdr_pane_agent_process "$pane" >/dev/null 2>&1; then
     verdict=unknown
   fi
+  # BLOCKED-AGENT GATE (ported upstream fix, firstmate #2811): an agent parked
+  # on an interactive dialog - a permission prompt, a trust dialog, a question
+  # menu - reports native agent_status=blocked (docs/codex.md "Directory trust
+  # blocks an unattended launch") while the dialog is drawn OUTSIDE the composer
+  # region, so structure alone can still look like a free composer. Typing there
+  # would answer the dialog - selecting its highlighted default and discarding
+  # the text - which is exactly the pane where typing is unsafe. Structure
+  # cannot disprove that, so a blocked agent forces the empty verdict down to
+  # 'unknown' (defer) here, in the ONE owner of the empty verdict, covering
+  # every consumer. Only native `blocked` demotes: an unreadable status is
+  # 'unknown', not blocked, so the existing structural proof still governs and
+  # availability is unchanged when `agent get` cannot answer.
+  if [ "$verdict" = empty ] \
+    && [ "$(cs_herdr_agent_status_raw "$pane")" = blocked ]; then
+    verdict=unknown
+  fi
   printf '%s' "$verdict"
 }

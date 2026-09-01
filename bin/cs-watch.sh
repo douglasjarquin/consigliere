@@ -109,19 +109,16 @@ WATCHER_STALE_GRACE=${CS_WATCHER_STALE_GRACE:-${CS_GUARD_GRACE:-300}}
 # including the event-wait splice below - and returns before acquiring the lock
 # or starting the loop. Running it as a script executes the runtime.
 
-# Portable stat. macOS (BSD) stat uses `-f <fmt>`; Linux (GNU) stat uses `-c <fmt>`.
-# Do NOT use the `stat -f <fmt> ... || stat -c <fmt> ...` fallback form: on Linux
-# `stat -f` is *filesystem* stat and writes a partial filesystem dump ("File: ...",
-# "Blocks: ...") to stdout before failing, so the fallback's correct output gets
-# appended to that garbage. Arithmetic under `set -u` then aborts on the stray
-# token (e.g. the word "File" read as an unset variable), which silently kills the
-# watcher mid-cycle. Detect the platform once and pick the right form.
+# Portable stat. stat_mtime delegates to cs_lock_path_mtime (bin/cs-lock-lib.sh,
+# sourced through cs-wake-lib.sh above), the one owner of the portable mtime
+# read and of the warning against the broken `stat -f ... || stat -c ...`
+# fallback form. stat_sig stays platform-branched here: its composite
+# size:mtime signature is a watcher-local format the mtime owner does not cover.
+stat_mtime() { cs_lock_path_mtime "$1"; }              # epoch seconds of mtime
 if [ "$(uname)" = Darwin ]; then
-  stat_mtime() { stat -f %m "$1" 2>/dev/null; }        # epoch seconds of mtime
-  stat_sig()   { stat -f '%z:%Fm' "$1" 2>/dev/null; }   # size:mtime signature
+  stat_sig() { stat -f '%z:%Fm' "$1" 2>/dev/null; }    # size:mtime signature
 else
-  stat_mtime() { stat -c %Y "$1" 2>/dev/null; }
-  stat_sig()   { stat -c '%s:%Y' "$1" 2>/dev/null; }
+  stat_sig() { stat -c '%s:%Y' "$1" 2>/dev/null; }
 fi
 
 POLL=${CS_POLL:-15}                   # seconds between cycles

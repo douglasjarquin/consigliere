@@ -4,6 +4,7 @@
 # trust record written here is what lets bin/cs-watch.sh execute it (from a
 # hash-validated private snapshot, via bin/cs-check-lib.sh).
 # Usage: cs-check-register.sh <id>
+# Retirement is owned by the sibling cs-check-unregister.sh, never a raw rm.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

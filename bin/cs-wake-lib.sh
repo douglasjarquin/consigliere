@@ -8,6 +8,9 @@
 CS_WAKE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/cs-session-pid-lib.sh
 . "$CS_WAKE_LIB_DIR/cs-session-pid-lib.sh"
+# cs_lock_path_mtime, the one owner of the portable stat mtime read.
+# shellcheck source=bin/cs-lock-lib.sh
+. "$CS_WAKE_LIB_DIR/cs-lock-lib.sh"
 CS_WAKE_DEFAULT_ROOT="$(cd "$CS_WAKE_LIB_DIR/.." && pwd)"
 CS_ROOT="${CS_ROOT_OVERRIDE:-${CS_ROOT:-$CS_WAKE_DEFAULT_ROOT}}"
 CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
@@ -36,11 +39,7 @@ cs_pid_alive() {
 }
 
 cs_path_mtime() {
-  if [ "$(uname)" = Darwin ]; then
-    stat -f %m "$1" 2>/dev/null
-  else
-    stat -c %Y "$1" 2>/dev/null
-  fi
+  cs_lock_path_mtime "$1"
 }
 
 cs_path_age() {

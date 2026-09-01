@@ -335,6 +335,7 @@ Run `bin/cs-pr-check.sh <id> <PR url>` - it records the PR identity in the task'
 Tell the boss the PR's full URL, always the complete `https://...` link rather than a bare `#number`, a concise outcome summary, and the no-mistakes risk level when applicable.
 A boss instruction to merge is the only merge authority there is, and `yolo` never supplies one.
 For any custom `state/<id>.check.sh` you write yourself, keep it an ordinary single-link mode-`0700` file, print one line only when consigliere should wake, print nothing otherwise, finish before `CS_CHECK_TIMEOUT`, then bind its current bytes with `bin/cs-check-register.sh <id>` before the watcher may execute it.
+Retire a custom check only through `bin/cs-check-unregister.sh <id>`, which validates the id and state directory before removing the check, its trust binding, and its watcher sidecars - never with a hand-typed `rm`.
 
 Tear down a ship task only after landing is confirmed.
 A teardown refusal for uncommitted or unlanded work is a stop-and-investigate result, never an obstacle to bypass.
@@ -351,7 +352,8 @@ Read the report, relay its findings rather than merely saying it finished, recor
 A report may recommend implementation but does not authorize it.
 Before treating the investigation or any visual review as complete, load `decision-hold-lifecycle`; teardown enforces that shared completion gate.
 When implementation is separately authorized, promote the existing scout through `bin/cs-promote.sh` rather than creating a duplicate task.
-`cs-promote.sh` does not regenerate brief text, so state execution mode in the manually-composed follow-up ship instructions the same way `bin/cs-brief.sh` would have.
+`cs-promote.sh` writes the promotion's ship instructions to `data/<id>/ship-instructions.md`, carrying the same mode-specific definition of done a briefed ship worker gets - `bin/cs-dod-lib.sh` is the single owner both scripts render it from.
+Those instructions default to ultrawork execution; edit their execution-mode line to plan-first before delivering them when the task warrants it.
 The promoted soldier must inventory scratch state, return to a clean default-branch base, carry over only intended fix changes, create the ship branch, and follow the delivery path the promotion stated.
 Scratch commits and debug edits never ride along, and a reproduced bug becomes the regression test.
 

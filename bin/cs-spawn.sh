@@ -149,6 +149,10 @@ esac
 
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
+# cs_lock_path_mtime, the one owner of the portable stat mtime read, for the
+# spawn-lock staleness check.
+# shellcheck source=bin/cs-lock-lib.sh
+. "$SCRIPT_DIR/cs-lock-lib.sh"
 cs_resolve_root
 # Optional turn telemetry (off unless host/telemetry.conf enables it). Sourced
 # after cs_resolve_root so it sees this home's resolved DATA/STATE/HOST_DIR.
@@ -457,12 +461,7 @@ _cs_spawn_pid_alive() { # <pid>: 0 iff a live process currently holds this PID
 
 _cs_spawn_path_age() { # <path>: whole-second mtime age on stdout; non-zero on failure
   local m now
-  if [ "$(uname)" = Darwin ]; then
-    m=$(stat -f %m "$1" 2>/dev/null) || m=
-  else
-    m=$(stat -c %Y "$1" 2>/dev/null) || m=
-  fi
-  case "$m" in ''|*[!0-9]*) return 1 ;; esac
+  m=$(cs_lock_path_mtime "$1") || return 1
   now=$(date +%s)
   printf '%s\n' "$(( now - m ))"
 }
