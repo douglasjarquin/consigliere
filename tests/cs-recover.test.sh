@@ -112,13 +112,13 @@ pass "recovery refuses a stale or wrong-home endpoint without guessing"
 
 printf '%s\n' 'done: child stopped before semantic report' > "$STATE/child.status"
 export CS_FAKE_PANE_CWD="$HOME_DIR" CS_FAKE_AGENT_LIVE=1
-output=$($ROOT/bin/cs-recover.sh) || fail "recover should request a report from a live settled child"
+output=$("$ROOT"/bin/cs-recover.sh) || fail "recover should request a report from a live settled child"
 printf '%s\n' "$output" | grep -F 'requested-report task=child' >/dev/null \
   || fail "recover did not report the one-time child report request"
 grep -F 'CONSIGLIERE_REPORT_REQUIRED v1 task=child' "$TMP/prompts" >/dev/null \
   || fail "recover did not prompt the live child for a semantic report"
 prompt_count=$(grep -Fc 'CONSIGLIERE_REPORT_REQUIRED v1 task=child' "$TMP/prompts")
-output=$($ROOT/bin/cs-recover.sh) || fail "repeated recovery should remain bounded"
+output=$("$ROOT"/bin/cs-recover.sh) || fail "repeated recovery should remain bounded"
 [ "$(grep -Fc 'CONSIGLIERE_REPORT_REQUIRED v1 task=child' "$TMP/prompts")" = "$prompt_count" ] \
   || fail "repeated recovery prompted the settled child twice"
 pass "recovery requests one missing report from a live settled child"

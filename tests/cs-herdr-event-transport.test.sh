@@ -117,6 +117,7 @@ test_append_never_recreates_a_retired_home() {
   # An existing state directory whose spool was deleted still self-heals on the
   # next edge, which is what docs/configuration.md promises.
   mkdir -p "$state"
+  printf '%s\n' 'pane=w1:p1' 'endpoint_generation=generation-1' > "$state/worker.meta"
   HERDR_PLUGIN_EVENT=pane.agent_status_changed \
   HERDR_PLUGIN_EVENT_JSON="$(status_json w1:p1 w1 blocked claude)" \
     "$HOOK" "$state" || fail "the hook failed on a live home with no spool yet"
@@ -138,11 +139,12 @@ test_record_fields_never_break_the_line_shape() {
 test_hook_projects_a_status_event_into_the_spool() {
   local dir out
   dir=$(mktemp -d "$TMP_ROOT/hook.XXXXXX")
+  printf '%s\n' 'pane=w7Z:p1' 'endpoint_generation=generation-7' > "$dir/worker.meta"
   HERDR_PLUGIN_EVENT=pane.agent_status_changed \
   HERDR_PLUGIN_EVENT_JSON="$(status_json w7Z:p1 w7Z blocked claude)" \
     "$HOOK" "$dir" || fail "the hook exited non-zero on a well-formed event"
   out=$(cat "$dir/.herdr-events")
-  [ "$out" = "$(printf 'status\tw7Z:p1\tw7Z\tblocked\tclaude')" ] \
+  [ "$out" = "$(printf 'status\tw7Z:p1\tw7Z\tblocked\tclaude\tgeneration-7')" ] \
     || fail "hook wrote the wrong record: $out"
   pass "the hook projects a live pane.agent_status_changed payload into the spool"
 }

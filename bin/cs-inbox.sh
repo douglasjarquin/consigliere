@@ -73,7 +73,7 @@ done
 }
 
 message_source_valid() {
-  local file=$1 source_task source_meta source_parent source_home source_generation from_home
+  local file=$1 source_task source_meta source_parent source_home from_home
   cs_message_validate_file "$file" || {
     echo "error: malformed inbox message '$file'" >&2
     return 1
@@ -96,8 +96,8 @@ message_source_valid() {
     echo "error: message '$file' is not owned by task '$TASK_ID'" >&2
     return 1
   }
-  source_generation=$(cs_meta_get "$source_meta" endpoint_generation)
-  cs_meta_endpoint_generation_known "$source_meta" "$(cs_message_field "$file" from_endpoint_generation)" || {
+  cs_meta_endpoint_generation_known "$source_meta" \
+    "$(cs_message_field "$file" from_endpoint_generation)" "$(cs_message_field "$file" created_at)" || {
     echo "error: stale sender generation in '$file'" >&2
     return 1
   }
@@ -108,7 +108,7 @@ message_source_valid() {
 }
 
 deliver_reply() {
-  local file=$1 kind from_home source_task source_meta source_pane source_worktree source_cwd corr
+  local file=$1 kind from_home source_task source_meta source_pane source_worktree source_cwd corr state
   kind=$(cs_message_field "$file" kind)
   case "$kind" in
     question|decision-required) ;;
@@ -129,14 +129,26 @@ deliver_reply() {
     echo "error: reply for message '$ACK_ID' exceeds the bounded message field or contains control characters" >&2
     return 1
   }
+  state="$from_home/state"
+  corr=$(cs_message_field "$file" correlation_id)
+  cs_message_reply_publish "$state" "$ACK_ID" "$corr" "$REPLY" "$(cs_message_now)" || {
+    echo "error: reply for message '$ACK_ID' could not be durably recorded" >&2
+    return 1
+  }
+  if cs_message_reply_delivery_exists "$state" "$ACK_ID"; then
+    return 0
+  fi
   source_cwd=$(cs_herdr_pane_cwd "$source_pane" || true)
   [ -n "$source_cwd" ] && [ "$(cd "$source_cwd" 2>/dev/null && pwd -P)" = "$(cd "$source_worktree" 2>/dev/null && pwd -P)" ] || {
     echo "error: sender pane '$source_pane' is unavailable or belongs to another worktree; message '$ACK_ID' remains open" >&2
     return 1
   }
-  corr=$(cs_message_field "$file" correlation_id)
   cs_herdr_agent_prompt_confirmed "$source_pane" "CONSIGLIERE_REPLY v1 message=$ACK_ID correlation=$corr summary=$REPLY" || {
     echo "error: reply for message '$ACK_ID' was not confirmed; obligation remains open" >&2
+    return 1
+  }
+  cs_message_reply_delivery_mark "$state" "$ACK_ID" "$(cs_message_now)" || {
+    echo "error: reply for message '$ACK_ID' was accepted but delivery state could not be recorded" >&2
     return 1
   }
 }
@@ -148,7 +160,7 @@ ack_message() {
   [ -f "$file" ] || { echo "error: message '$ACK_ID' is missing" >&2; return 1; }
   ack="$INBOX/$ACK_ID.ack"
   if [ -e "$ack" ]; then
-    cs_message_validate_ack "$ack" || { echo "error: malformed acknowledgement '$ack'" >&2; return 1; }
+    cs_message_validate_ack "$ack" "$ACK_ID" || { echo "error: malformed acknowledgement '$ack'" >&2; return 1; }
     if [ -n "$REPLY" ]; then
       message_source_valid "$file" || return 1
       deliver_reply "$file" || return 1
@@ -190,7 +202,7 @@ ack_message() {
 
 escalate_message() {
   local file="$INBOX/$ESCALATE_ID.msg" kind from_home source_task source_meta corr
-  local parent_task escalation_id report_output pending_file closed_file transfer_file
+  local parent_task parent_state escalation_id pending_file closed_file transfer_file data_dir
   cs_message_id "$ESCALATE_ID" || { echo "error: invalid message id '$ESCALATE_ID'" >&2; return 1; }
   [ -f "$file" ] || { echo "error: message '$ESCALATE_ID' is missing" >&2; return 1; }
   message_source_valid "$file" || return 1
@@ -215,13 +227,14 @@ escalate_message() {
     return 1
   }
   parent_task=$(cs_meta_get "$TASK_META" parent_task_id)
+  parent_state=$(cs_meta_get "$TASK_META" parent_state)
   corr=$(cs_message_field "$file" correlation_id)
   escalation_id=$(cs_message_recovery_id "$TASK_ID" "$ESCALATE_ID") || {
     echo "error: could not derive the idempotent escalation identity" >&2
     return 1
   }
   closed_file=$(cs_message_pending_close_path "$from_home/state" "$ESCALATE_ID")
-  transfer_file="$INBOX/$escalation_id.msg"
+  transfer_file="$parent_state/inbox/$escalation_id.msg"
   if [ -e "$INBOX/$ESCALATE_ID.ack" ] && [ -e "$closed_file" ]; then
     cs_message_validate_file "$transfer_file" || {
       echo "error: acknowledged escalation '$ESCALATE_ID' has no valid durable transfer" >&2
@@ -230,13 +243,14 @@ escalate_message() {
     printf 'already escalated message=%s transfer=%s parent=%s\n' "$ESCALATE_ID" "$escalation_id" "$parent_task"
     return 0
   fi
-  report_output=$(CS_HOME="$CS_HOME" CS_STATE_OVERRIDE="$STATE" \
-    CS_DATA_OVERRIDE="${CS_DATA_OVERRIDE:-$CS_HOME/data}" CS_TASK_ID="$TASK_ID" \
+  data_dir=${CS_DATA_OVERRIDE:-$CS_HOME/data}
+  if ! CS_HOME="$CS_HOME" CS_STATE_OVERRIDE="$STATE" \
+    CS_DATA_OVERRIDE="$data_dir" CS_TASK_ID="$TASK_ID" \
     "$SCRIPT_DIR/cs-report.sh" decision-required "$ESCALATE_SUMMARY" \
-      --message-id "$escalation_id" --correlation "$corr") || {
+      --message-id "$escalation_id" --correlation "$corr" >/dev/null; then
     echo "error: escalation '$ESCALATE_ID' was not durably transferred to parent '$parent_task'" >&2
     return 1
-  }
+  fi
   cs_message_pending_close "$from_home/state" "$ESCALATE_ID" "transferred-to-$TASK_ID" || {
     echo "error: escalation transferred but child obligation '$ESCALATE_ID' could not be closed" >&2
     return 1
@@ -271,7 +285,7 @@ for file in "$INBOX"/*.msg; do
   [ "$(cs_message_field "$file" to_task_id)" = "$TASK_ID" ] || continue
   ack="$INBOX/$(basename "$file" .msg).ack"
   if [ -e "$ack" ]; then
-    cs_message_validate_ack "$ack" || {
+      cs_message_validate_ack "$ack" "$(cs_message_field "$file" message_id)" || {
       echo "error: malformed acknowledgement '$ack'" >&2
       failed=1
     }

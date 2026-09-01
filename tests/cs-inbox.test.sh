@@ -107,11 +107,27 @@ grep -F 'commit' "$TMP/invalid-commit.err" >/dev/null || fail "invalid commit re
 [ ! -e "$STATE/inbox/message-invalid-commit.ack" ] || fail "invalid commit was acknowledged"
 pass "result acknowledgement refuses an unverifiable commit"
 
+mkdir -p "$TMP/outside"
+printf '%s\n' 'outside artifact' > "$TMP/outside/result.md"
+ln -s "$TMP/outside" "$WORKTREE/escape"
+message message-invalid-symlink current result child-generation escape/result.md || fail "symlink artifact setup"
+if "$INBOX" --ack message-invalid-symlink >/dev/null 2>"$TMP/invalid-symlink.err"; then
+  fail "an artifact through a symlinked directory must not be acknowledged"
+fi
+grep -F 'escapes' "$TMP/invalid-symlink.err" >/dev/null || fail "symlink escape refusal must name the escape"
+[ ! -e "$STATE/inbox/message-invalid-symlink.ack" ] || fail "symlink escape was acknowledged"
+pass "result acknowledgement refuses a symlinked artifact directory"
+
 "$INBOX" --ack message-current >/dev/null || fail "message acknowledgement"
 [ -f "$STATE/inbox/message-current.ack" ] || fail "acknowledgement record missing"
 "$INBOX" --ack message-current >/dev/null || fail "duplicate acknowledgement"
 if "$INBOX" --ack message-other >/dev/null 2>&1; then
   fail "a message addressed to another task must not be acknowledged"
+fi
+printf '%s\n' 'schema=cs-message.v1' 'message_id=message-other' 'acked_at=1700000000' \
+  > "$STATE/inbox/message-current.ack"
+if "$INBOX" --ack message-current >/dev/null 2>&1; then
+  fail "an acknowledgement naming another message must not suppress the requested message"
 fi
 pass "acknowledgement is explicit, scoped, and idempotent"
 

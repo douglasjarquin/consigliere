@@ -60,6 +60,7 @@ for meta in "$STATE"/*.meta; do
   generation=$(awk -F= '$1 == "endpoint_generation" { value=substr($0, 21) } END { print value }' "$meta")
   break
 done
+[ -n "$generation" ] || exit 0
 
 cs_event_append "$(cs_event_spool_path "$STATE")" \
   "$(cs_event_record_with_generation status "$pane" "$(field workspace_id || true)" \

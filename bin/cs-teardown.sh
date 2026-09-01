@@ -150,7 +150,7 @@ message_state_has_open_records() {
     [ "$(cs_message_field "$file" to_task_id)" = "$target" ] || continue
     ack="${file%.msg}.ack"
     if [ -e "$ack" ]; then
-      cs_message_validate_ack "$ack" || return 1
+      cs_message_validate_ack "$ack" "$(cs_message_field "$file" message_id)" || return 1
     else
       return 1
     fi

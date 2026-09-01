@@ -103,16 +103,21 @@ printf '%s\n' "$repeat_escalation" | grep -F "already escalated message=$worker_
 [ "$(wc -l < "$TMP/prompts" | tr -d ' ')" = "$prompt_count" ] || fail "duplicate escalation re-woke the root"
 pass "the immediate parent transfers one compressed decision without forwarding the worker transcript"
 
-root_reply=$(env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
+env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   CS_TASK_ID=root CS_FAKE_PARENT_HOME="$HOME_DIR" CS_FAKE_PROMPTS="$TMP/prompts" \
-  "$ROOT/bin/cs-inbox.sh" --ack "$transfer_id" --reply "root approves the local option") \
+  "$ROOT/bin/cs-inbox.sh" --ack "$transfer_id" --reply "root approves the local option" >/dev/null \
   || fail "root answer"
 [ -f "$STATE/inbox/$transfer_id.ack" ] || fail "root answer acknowledgement missing"
 [ -f "$STATE/pending/$transfer_id.closed" ] || fail "root answer did not close mate obligation"
+[ -f "$STATE/pending/$transfer_id.reply" ] || fail "root answer must have a durable reply record"
+[ -f "$STATE/pending/$transfer_id.reply-delivered" ] || fail "root answer must have confirmed delivery state"
 grep -F "CONSIGLIERE_REPLY v1 message=$transfer_id" "$TMP/prompts" >/dev/null || fail "root answer was not delivered to mate"
 
-printf '%s\n' 'previous_endpoint_generation=worker-generation' >> "$STATE/worker.meta"
-printf '%s\n' 'endpoint_generation=worker-generation-2' >> "$STATE/worker.meta"
+{
+  printf '%s\n' 'previous_endpoint_generation=worker-generation'
+  printf '%s\n' 'previous_endpoint_generation_at='"$(date +%s)"
+  printf '%s\n' 'endpoint_generation=worker-generation-2'
+} >> "$STATE/worker.meta"
 env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   CS_TASK_ID=mate CS_FAKE_PARENT_HOME="$HOME_DIR" CS_FAKE_PROMPTS="$TMP/prompts" \
   "$ROOT/bin/cs-inbox.sh" --ack "$worker_id" --reply "root approves the local option" >/dev/null \
@@ -120,6 +125,14 @@ env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
 [ -f "$STATE/inbox/$worker_id.ack" ] || fail "mate answer acknowledgement missing"
 [ -f "$STATE/pending/$worker_id.closed" ] || fail "mate answer did not close worker obligation"
 grep -F "CONSIGLIERE_REPLY v1 message=$worker_id" "$TMP/prompts" >/dev/null || fail "mate answer was not delivered to worker"
+worker_reply_count=$(grep -Fc "CONSIGLIERE_REPLY v1 message=$worker_id" "$TMP/prompts")
+rm -f "$STATE/inbox/$worker_id.ack"
+env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
+  CS_TASK_ID=mate CS_FAKE_PARENT_HOME="$HOME_DIR" CS_FAKE_PROMPTS="$TMP/prompts" \
+  "$ROOT/bin/cs-inbox.sh" --ack "$worker_id" --reply "root approves the local option" >/dev/null \
+  || fail "retry after a lost acknowledgement"
+[ "$(grep -Fc "CONSIGLIERE_REPLY v1 message=$worker_id" "$TMP/prompts")" = "$worker_reply_count" ] \
+  || fail "retry after a lost acknowledgement duplicated the logical answer"
 pass "the three-level answer returns through each independent edge"
 
 mate_report=$(run_report mate result "mate resolved the worker choice" --artifact reports/mate.txt --correlation "$worker_id") || fail "mate result report"

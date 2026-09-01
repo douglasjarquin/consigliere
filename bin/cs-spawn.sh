@@ -786,6 +786,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   previous_generation=$(cs_meta_get "$META" endpoint_generation 2>/dev/null || true)
   [ -n "$previous_generation" ] || previous_generation=unknown
   cs_meta_set "$META" previous_endpoint_generation "$previous_generation"
+  cs_meta_set "$META" previous_endpoint_generation_at "$(date +%s)"
   cs_meta_set "$META" endpoint_generation "$ENDPOINT_GENERATION"
 
   report_human_gate "$R_PANE" "$R_HARNESS" "$ID"

@@ -66,12 +66,20 @@ cs_meta_validate_parent_edge() {
 }
 
 cs_meta_endpoint_generation_known() {
-  local meta=$1 generation=$2 current previous
+  local meta=$1 generation=$2 created_at=${3:-} current previous previous_at
   current=$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)
   [ "$current" = "$generation" ] && return 0
-  while IFS= read -r previous; do
-    [ "$previous" = "$generation" ] && return 0
-  done < <(awk -F= '$1 == "previous_endpoint_generation" { print substr($0, 30) }' "$meta")
+  case "$created_at" in ''|*[!0-9]*) return 1 ;; esac
+  while IFS=$'\t' read -r previous previous_at; do
+    [ "$previous" = "$generation" ] || continue
+    case "$previous_at" in ''|*[!0-9]*) continue ;; esac
+    [ "$created_at" -le "$previous_at" ] && return 0
+  done < <(awk -F= '
+    $1 == "previous_endpoint_generation" { previous=substr($0, 30); next }
+    $1 == "previous_endpoint_generation_at" && previous != "" {
+      print previous "\t" substr($0, 33); previous=""
+    }
+  ' "$meta")
   return 1
 }
 

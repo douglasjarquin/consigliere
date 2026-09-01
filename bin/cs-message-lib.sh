@@ -6,6 +6,7 @@
 
 CS_MESSAGE_SCHEMA='cs-message.v1'
 CS_MESSAGE_PENDING_SCHEMA='cs-message-obligation.v1'
+CS_MESSAGE_REPLY_SCHEMA='cs-message-reply.v1'
 CS_MESSAGE_ROUTE_SCHEMA='cs-message-route.v1'
 CS_MESSAGE_MAX_SUMMARY=512
 CS_MESSAGE_MAX_PATH=512
@@ -213,6 +214,17 @@ cs_message_verify_result() {
       printf 'result artifact path is invalid: %s\n' "$artifact" >&2
       return 1
     }
+    worktree=$(cd "$worktree" && pwd -P) || return 1
+    artifact_dir=${artifact%/*}
+    [ "$artifact_dir" = "$artifact" ] && artifact_dir=.
+    resolved_dir=$(CDPATH='' cd -P "$worktree/$artifact_dir" 2>/dev/null && pwd -P) || {
+      printf 'result artifact directory is unavailable: %s\n' "$artifact_dir" >&2
+      return 1
+    }
+    case "$resolved_dir/" in
+      "$worktree"/*) ;;
+      *) printf 'result artifact directory escapes the worktree: %s\n' "$artifact_dir" >&2; return 1 ;;
+    esac
     [ -f "$worktree/$artifact" ] && [ ! -L "$worktree/$artifact" ] || {
       printf 'result artifact is missing or not a regular file: %s\n' "$artifact" >&2
       return 1
@@ -242,12 +254,14 @@ cs_message_verify_result() {
 }
 
 cs_message_validate_ack() {
-  local file=$1
+  local file=$1 expected=${2:-} embedded
   [ -f "$file" ] || return 1
   [ "$(wc -l < "$file" | tr -d ' ')" = 3 ] || return 1
   grep -Eq '^schema=cs-message\.v1$' "$file" || return 1
   grep -Eq '^message_id=[A-Za-z0-9._-]{1,96}$' "$file" || return 1
-  grep -Eq '^acked_at=[0-9]{1,20}$' "$file"
+  grep -Eq '^acked_at=[0-9]{1,20}$' "$file" || return 1
+  embedded=$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$file")
+  [ -z "$expected" ] || [ "$embedded" = "$expected" ]
 }
 
 cs_message_publish() {
@@ -287,12 +301,12 @@ cs_message_ack() {
   printf 'schema=%s\nmessage_id=%s\nacked_at=%s\n' "$CS_MESSAGE_SCHEMA" "$message_id" "$(cs_message_now)" > "$tmp"
   if [ -e "$ack" ]; then
     rm -f "$tmp"
-    cs_message_validate_ack "$ack"
+    cs_message_validate_ack "$ack" "$message_id"
     return
   fi
   if ln "$tmp" "$ack" 2>/dev/null; then rm -f "$tmp"; return 0; fi
   rm -f "$tmp"
-  [ -e "$ack" ] && cs_message_validate_ack "$ack"
+  [ -e "$ack" ] && cs_message_validate_ack "$ack" "$message_id"
 }
 
 cs_message_pending_path() { printf '%s/pending/%s.pending\n' "$1" "$2"; }
@@ -364,6 +378,10 @@ cs_message_pending_close() {
   [ -f "$pending" ] || return 1
   cs_message_pending_validate_file "$pending" || return 1
   closed=$(cs_message_pending_close_path "$state" "$message_id")
+  if [ -e "$closed" ]; then
+    cs_message_pending_close_validate_file "$closed" "$message_id" || return 1
+    return 0
+  fi
   tmp="${closed}.tmp.$$.$RANDOM"
   printf 'schema=%s\nmessage_id=%s\nclosed_at=%s\nreason=%s\n' \
     "$CS_MESSAGE_PENDING_SCHEMA" "$message_id" "$(cs_message_now)" "$reason" > "$tmp" || {
@@ -380,4 +398,119 @@ cs_message_pending_close() {
   if [ -e "$closed" ] && cmp -s "$tmp" "$closed"; then rm -f "$tmp"; return 0; fi
   rm -f "$tmp"
   return 1
+}
+
+cs_message_reply_path() { printf '%s/pending/%s.reply\n' "$1" "$2"; }
+cs_message_reply_delivery_path() { printf '%s/pending/%s.reply-delivered\n' "$1" "$2"; }
+
+cs_message_reply_validate_file() {
+  local file=$1 expected=${2:-} line key value seen='' required embedded
+  local -a required_keys=(schema message_id correlation_id summary replied_at)
+  [ -f "$file" ] || return 1
+  [ "$(wc -l < "$file" | tr -d ' ')" = 5 ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    key=${line%%=*}
+    value=${line#*=}
+    case "$key" in
+      schema) [ "$value" = "$CS_MESSAGE_REPLY_SCHEMA" ] || return 1 ;;
+      message_id|correlation_id) cs_message_id "$value" || return 1 ;;
+      summary) cs_message_scalar "$value" "$CS_MESSAGE_MAX_SUMMARY" || return 1 ;;
+      replied_at)
+        case "$value" in ''|*[!0-9]*) return 1 ;; esac
+        [ "${#value}" -le 20 ] || return 1
+        ;;
+      *) return 1 ;;
+    esac
+    case " $seen " in *" $key "*) return 1 ;; esac
+    seen="$seen $key"
+  done < "$file"
+  for required in "${required_keys[@]}"; do
+    case " $seen " in *" $required "*) ;; *) return 1 ;; esac
+  done
+  embedded=$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$file")
+  [ -z "$expected" ] || [ "$embedded" = "$expected" ]
+}
+
+cs_message_reply_publish() {
+  local state=$1 message_id=$2 correlation_id=$3 summary=$4 replied_at=$5
+  local dir file tmp same
+  cs_message_id "$message_id" && cs_message_id "$correlation_id" || return 1
+  cs_message_scalar "$summary" "$CS_MESSAGE_MAX_SUMMARY" || return 1
+  case "$replied_at" in ''|*[!0-9]*) return 1 ;; esac
+  dir="$state/pending"
+  [ -d "$dir" ] || return 1
+  file=$(cs_message_reply_path "$state" "$message_id")
+  tmp="$dir/.$message_id.reply.tmp.$$.$RANDOM"
+  printf 'schema=%s\nmessage_id=%s\ncorrelation_id=%s\nsummary=%s\nreplied_at=%s\n' \
+    "$CS_MESSAGE_REPLY_SCHEMA" "$message_id" "$correlation_id" "$summary" "$replied_at" > "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  cs_message_reply_validate_file "$tmp" || { rm -f "$tmp"; return 1; }
+  if [ -e "$file" ]; then
+    cs_message_reply_validate_file "$file" "$message_id" || { rm -f "$tmp"; return 1; }
+    [ "$(awk -F= '$1 == "correlation_id" { print substr($0, 16) }' "$file")" = "$correlation_id" ] || {
+      rm -f "$tmp"
+      return 1
+    }
+    [ "$(awk -F= '$1 == "summary" { print substr($0, 9) }' "$file")" = "$summary" ] || {
+      rm -f "$tmp"
+      return 1
+    }
+    rm -f "$tmp"
+    return 0
+  fi
+  if ln "$tmp" "$file" 2>/dev/null; then rm -f "$tmp"; return 0; fi
+  if [ -e "$file" ] && cmp -s "$tmp" "$file"; then rm -f "$tmp"; return 0; fi
+  rm -f "$tmp"
+  return 1
+}
+
+cs_message_reply_delivery_mark() {
+  local state=$1 message_id=$2 delivered_at=$3 file tmp
+  cs_message_id "$message_id" || return 1
+  case "$delivered_at" in ''|*[!0-9]*) return 1 ;; esac
+  file=$(cs_message_reply_delivery_path "$state" "$message_id")
+  if [ -e "$file" ]; then
+    cs_message_reply_delivery_validate_file "$file" "$message_id"
+    return $?
+  fi
+  tmp="$file.tmp.$$.$RANDOM"
+  printf 'schema=%s\nmessage_id=%s\ndelivered_at=%s\n' "$CS_MESSAGE_REPLY_SCHEMA" "$message_id" "$delivered_at" > "$tmp" || {
+    rm -f "$tmp"
+    return 1
+  }
+  if ln "$tmp" "$file" 2>/dev/null; then rm -f "$tmp"; return 0; fi
+  rm -f "$tmp"
+  [ -e "$file" ] && cs_message_reply_delivery_mark "$state" "$message_id" "$delivered_at"
+}
+
+cs_message_reply_delivery_exists() {
+  local file
+  file=$(cs_message_reply_delivery_path "$1" "$2")
+  cs_message_reply_delivery_validate_file "$file" "$2"
+}
+
+cs_message_reply_delivery_validate_file() {
+  local file=$1 expected=${2:-} embedded
+  [ -f "$file" ] || return 1
+  [ "$(wc -l < "$file" | tr -d ' ')" = 3 ] || return 1
+  grep -Eq "^schema=$CS_MESSAGE_REPLY_SCHEMA$" "$file" || return 1
+  grep -Eq '^message_id=[A-Za-z0-9._-]{1,96}$' "$file" || return 1
+  grep -Eq '^delivered_at=[0-9]{1,20}$' "$file" || return 1
+  embedded=$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$file")
+  [ -z "$expected" ] || [ "$embedded" = "$expected" ]
+}
+
+cs_message_pending_close_validate_file() {
+  local file=$1 expected=${2:-} reason embedded
+  [ -f "$file" ] || return 1
+  [ "$(wc -l < "$file" | tr -d ' ')" = 4 ] || return 1
+  grep -Eq "^schema=$CS_MESSAGE_PENDING_SCHEMA$" "$file" || return 1
+  grep -Eq '^message_id=[A-Za-z0-9._-]{1,96}$' "$file" || return 1
+  grep -Eq '^closed_at=[0-9]{1,20}$' "$file" || return 1
+  embedded=$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$file")
+  [ -z "$expected" ] || [ "$embedded" = "$expected" ] || return 1
+  reason=$(awk -F= '$1 == "reason" { print substr($0, 8) }' "$file")
+  cs_message_scalar "$reason" "$CS_MESSAGE_MAX_SUMMARY"
 }

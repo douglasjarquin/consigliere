@@ -61,6 +61,23 @@ if (
   fail "the watcher accepted a stale endpoint generation from the event spool"
 fi
 pass "the watcher refuses stale native event generations"
+missing_generation_record=$(printf 'w1:p1\tworkspace-1\t\tblocked\tcodex')
+if (
+  cd "$ROOT" || exit 2
+  CS_STATE_OVERRIDE="$STATE" . "$ROOT/bin/cs-watch.sh"
+  cs_transition_validate_event_generation "$STATE" "$missing_generation_record"
+); then
+  fail "a native event without endpoint generation was accepted"
+fi
+missing_identity_record=$(printf 'w1:p1\t\t\tblocked\tcodex\tworker-generation')
+if (
+  cd "$ROOT" || exit 2
+  CS_STATE_OVERRIDE="$STATE" . "$ROOT/bin/cs-watch.sh"
+  cs_transition_validate_event_generation "$STATE" "$missing_identity_record"
+); then
+  fail "a native event without workspace identity was accepted"
+fi
+pass "native events require workspace, agent, and endpoint generation"
 bad_record=$(printf 'w1:p1\twrong-workspace\t\tblocked\tcodex')
 if (
   cd "$ROOT" || exit 2

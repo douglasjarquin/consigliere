@@ -945,10 +945,10 @@ cs_transition_validate_route() { # <state_dir> <record>
 cs_transition_validate_event_generation() { # <state_dir> <record>
   local state=$1 record=$2 pane workspace agent event_generation route expected_generation
   event_generation=$(printf '%s' "$record" | cut -f6)
-  [ -n "$event_generation" ] || return 0
   pane=$(cs_transition_pane_id "$record")
   workspace=$(cs_transition_workspace "$record")
   agent=$(cs_transition_agent "$record")
+  [ -n "$workspace" ] && [ -n "$agent" ] && [ -n "$event_generation" ] || return 1
   route=$(cs_meta_event_route "$state" "$pane" "$workspace" "$agent" 2>/dev/null || true)
   expected_generation=$(printf '%s' "$route" | cut -f7)
   [ -n "$expected_generation" ] && [ "$event_generation" = "$expected_generation" ]
