@@ -179,6 +179,7 @@ cs_message_field() {
 
 cs_message_verify_result() {
   local file=$1 source_meta=$2 worktree artifact commit pull_request
+  local pull_request_view
   [ "$(cs_message_field "$file" kind)" = result ] || {
     printf 'result message has the wrong kind\n' >&2
     return 1
@@ -218,6 +219,16 @@ cs_message_verify_result() {
       printf 'result artifact is not present in commit %s: %s\n' "$commit" "$artifact" >&2
       return 1
     fi
+  fi
+  if [ -n "$pull_request" ]; then
+    pull_request_view=$(cd "$worktree" && gh-axi pr view "$pull_request" 2>/dev/null) || {
+      printf 'result pull request could not be verified: %s\n' "$pull_request" >&2
+      return 1
+    }
+    printf '%s\n' "$pull_request_view" | grep -Eq "^[[:space:]]+number: $pull_request$" || {
+      printf 'result pull request identity did not match: %s\n' "$pull_request" >&2
+      return 1
+    }
   fi
   return 0
 }
