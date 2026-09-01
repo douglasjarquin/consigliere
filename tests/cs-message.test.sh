@@ -188,6 +188,23 @@ fi
 grep -F 'summary=retryable result' "$STATE/inbox/$retry_id.msg" >/dev/null || fail "conflicting retry mutated the durable message"
 pass "same-id report retry preserves one logical message and repeats only the doorbell"
 
+wrong_worktree="$TMP/wrong-parent-worktree"
+mkdir -p "$wrong_worktree"
+wrong_route_id='message-wrong-parent-worktree-000000000001'
+prompt_count=$(wc -l < "$CS_FAKE_MESSAGE_PROMPTS" | tr -d ' ')
+export CS_FAKE_MESSAGE_PARENT_HOME="$wrong_worktree"
+if env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
+  CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
+  CS_FAKE_MESSAGE_PROMPTS="$CS_FAKE_MESSAGE_PROMPTS" \
+  "$REPORT" blocked "parent worktree changed" --message-id "$wrong_route_id" >/dev/null 2>"$TMP/wrong-worktree.err"; then
+  fail "a wrong-parent-worktree report must not claim delivery"
+fi
+[ -f "$STATE/inbox/$wrong_route_id.msg" ] || fail "a wrong-parent-worktree report was not retained durably"
+[ "$(wc -l < "$CS_FAKE_MESSAGE_PROMPTS" | tr -d ' ')" = "$prompt_count" ] \
+  || fail "a wrong-parent-worktree report sent a parent wake"
+rm -f "$STATE/inbox/$wrong_route_id.msg" "$STATE/inbox/$wrong_route_id.route"
+pass "report remains durable and sends no wake for a wrong-parent-worktree endpoint"
+
 export CS_FAKE_MESSAGE_PARENT_HOME="$TMP/missing-parent"
 if env PATH="$FAKEBIN:$PATH" CS_HOME="$HOME_DIR" CS_STATE_OVERRIDE="$STATE" \
   CS_DATA_OVERRIDE="$HOME_DIR/data" CS_TASK_ID=child CS_HERDR_SESSION=test \
