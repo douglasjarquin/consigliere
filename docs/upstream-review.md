@@ -1,4 +1,33 @@
-last-reviewed: 76355e2
+last-reviewed: 355f46f
+
+## 2026-09-01 - reviewed 76355e2..355f46f (123 commits)
+Boss accepted the triage as presented: 17 port-now and 27 backlog, then pulled the Cursor and Grok adapter commits back from skip into the backlog.
+Per the boss's instruction, the whole backlog batch is one checklist issue (#147) and the port-now batch is tracked as one checklist issue (#148); dispatch was deferred because this review session held no fleet lock.
+- 7ee0c19, 662a8c7, 801c083, 86dd2f6, c7fdef9, 614fae6, b91016f, 9ce69ac, 4eb587d, b0ad61e, db0280f, a56a78a, 8714c9a, 87681a4, 266fdb9, 1260adc, 0866a77 port-now: merge-outcome verification and durable merge records, fleet-sync clone-root guard, brief {TASK}/herdr-gate and promoted-scout definition-of-done safety, decision-fold key/tag parsing, status-span classification and duplicate-wake collapse, blocked-pane composer and steer-submit confirmation, lock stat portability, atomic record+backlog transitions, and guarded custom-check retirement; each item's problem statement lives in issue #148. -> issue #148
+- e46df1a, 7f5255a, 362c508, 99b21d8, 5521323, d3342dc, b57c4d6, 5953e9b, 99c1a0d, 3d125ad, 2d550fe, ed66b85, 3f03533, c42cfe0, bca584a, 52f62ab, 81ce6dc, 1fbc7bb, ac55d39, 0ae14af, 738460d, 8d8362c, 4207214, a0cec26, 3e5577b, e518906, f170ced, 59e7393, 505c819, debe4bf, 6c1d2db, 07bf0c8, d71f4b9 backlog: decision-hold close/decline/divergence, away-mode pause and wedge cadence, inactive-crew reconciliation and recovery-announcement bounds, run attribution, capo handoff stall alerts, inbox steer comparison, pending-reply retention, condition-to-action and trusted process-event adapters, cross-platform pinned lint and attestation CI, fast lint and changed-test selection, vault open-record sweep and decay horizon, inert-tooling detection, lavish adapter robustness, routine-noise suppression, and contained metadata rewrites; one checklist issue. -> issue #147
+- 4930d2c, 81f7020 backlog (boss pulled back from skip): Cursor Agent CLI as crew and primary harness. -> issue #147
+- 862c532, 9d2ad81, f758e51 backlog (boss pulled back from skip): Grok adapter informed by GROK_BOT.md. -> issue #147
+- e8c7645, 85cefa9, ef35d79, 9823ff8, 88d0f2e, 52ff62e, d55e00a, 8fa0505, 6a2cd6c, 9a01dea, f7a387f, 5aed873, d63b0e2, 4f89f5b, c651b59, 52b59a1, f66be0f, 7b88520 skip: Pi/Calm supervision-branch and presentation subsystem consigliere dropped.
+- b0ca8f5 skip: Cursor-park behavior specific to a Pi host.
+- b5d430d, dc0172c, 1231b6a, 7a3259e, 196fb65 skip: Relay/X-mode subsystem consigliere dropped.
+- d843712, ddf74ef, 038d0f7, 22fa6ed, 1fd7ea2, 197afbb skip: remote-secondmate transport; every capo here runs local on one machine.
+- fb2ce5b skip, already handled: consigliere's startup network stage already runs detached off the session-open path.
+- 85d6c72 skip: the per-actor wake split is driven by the remote/Pi actors consigliere dropped; revisit the silent-success half if startup-network wakes get noisy.
+- 96876db, d9ee8ea, 4ad8cba skip: quota dispatch; the harness selects model and effort here.
+- 4d2cb0c, 10b93b2 skip: arm/continuity layer; consigliere's only wait shape is the foreground checkpoint.
+- 07450b9, f1a4af4 skip: upstream CI runtime tuning.
+- 1238402, 6789876, 312871d, 64d61ae, d023c45 skip: upstream-repo chores and doc notes.
+- 4913723, bdae21e skip: the CLAUDE.md symlink is deliberate in consigliere.
+- c731c36 skip: harness-adapter doc split for the adapter matrix consigliere dropped.
+- 9e3df47 skip: retires PR-check migration machinery consigliere never had.
+- 5b6d0fb skip: GitLab merge support; no GitLab projects registered.
+- a5f3cbe skip: bash 3.2 support; consigliere's floor is 4.3 and the boss keeps no 3.2 requirement.
+- fbe37e9 skip: spoken interface, out of scope.
+- 524994c skip: pooled-slot machinery consigliere does not have.
+- a390659, 5f31097 skip: per-home summary ledgers exist for the Bearings consumer consigliere dropped.
+- 1cb900c, b96dba1, 60bedde skip: Bearings fleet board subsystem.
+- c54c448, 2f250c7, 8b21c99, 822a990, 0ace60a skip: upstream test-infrastructure specifics with no consigliere counterpart.
+- 63362d2, 03bb1d8, 7b38a2f, f242264 skip: firstmate-voice AGENTS.md contract-language edits; consigliere's contract diverged deliberately.
 
 ## 2026-08-11 - reviewed 345de4e..76355e2 (30 commits)
 Boss took every relevant commit as work now - eleven items across nine tasks, nothing deferred to the backlog; four commits were already handled here and ten skipped as triaged.
