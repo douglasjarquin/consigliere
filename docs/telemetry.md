@@ -202,7 +202,7 @@ Outcome, recorded only when purpose is `supervision`, first match wins:
 So in this dataset `wait` means precisely "a checkpoint ran, no wake was drained, and no action was taken", and `no_action` means precisely "at least one wake was drained and no action was taken".
 Neither is an opinion about whether the turn was useful; both are statements about what ran.
 
-Purpose rule 5 is the one inference in the table, and it rests on the operating contract rather than on a guess about content: `AGENTS.md` section 8 requires every wake-handling turn to drain the queue first, and permits one bounded checkpoint per turn as the only supervision wait shape, so a root turn that ran neither, and dispatched, steered, merged, tore down, or promoted nothing, supervised nothing.
+Purpose rule 5 is the one inference in the table, and it rests on the operating contract rather than on a guess about content: `AGENTS.md` section 7 requires every wake-handling turn to drain the queue first, and permits one bounded checkpoint per turn as the only supervision wait shape, so a root turn that ran neither, and dispatched, steered, merged, tore down, or promoted nothing, supervised nothing.
 A capo turn with the same emptiness stays `unknown`, because a capo is idle by default and its turns arrive as work routed from the main home.
 
 `escalate_up` and `technical_intervention` stay in the vocabulary but have no deterministic mechanical source, so schema 1 never emits them.

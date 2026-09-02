@@ -536,7 +536,7 @@ cs_telemetry_emit() {
 # guessing: bad telemetry is worse than missing telemetry.
 #
 # The one inference in the table is purpose rule 5, and it is a property of the
-# operating contract rather than a guess about content: AGENTS.md section 8
+# operating contract rather than a guess about content: AGENTS.md section 7
 # requires every wake-handling turn to drain the queue first and to hold exactly
 # one live checkpoint while work is under way, so a ROOT turn that ran neither,
 # and dispatched, steered, merged, tore down, or promoted nothing, supervised

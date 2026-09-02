@@ -16,7 +16,7 @@ Produce a scannable catch-up brief from durable fleet state, then surface a conc
    - **In flight**: one line per task in the boss's nouns (the fix, the investigation, the PR) - never internal labels.
    - **Recently done** and **queued next** from the backlog.
    - **Capos**: one line each - domain, healthy/idle, anything routed and outstanding.
-4. Surface the concise version in chat following AGENTS.md section 9 (outcomes, not mechanics; full PR URLs; no internal vocabulary).
+4. Surface the concise version in chat following AGENTS.md section 8 (outcomes, not mechanics; full PR URLs; no internal vocabulary).
 5. Mutate nothing: no teardown, no merge, no backlog rewrites beyond optionally filing a boss-decision hold the report itself surfaced (via `bin/cs-decision-hold.sh`, only when the boss asks).
 
 ## Clearing the open decisions
@@ -25,7 +25,7 @@ A flat list of open decisions tends to stay open, so work them one at a time ins
 
 After the brief, when the report surfaced at least one open decision, pick the single one you judge most consequential and put only that one to the boss.
 Say plainly that the order is your judgment about what matters most right now, not a computed ranking.
-Give it escalation-quality context per `AGENTS.md` section 9: the decision, why it matters, the options, and your recommendation.
+Give it escalation-quality context per `AGENTS.md` section 8: the decision, why it matters, the options, and your recommendation.
 When the boss answers, present the next most consequential decision the same way, and keep going one at a time until none are left.
 
 Use only the fleet view already read for the brief; never gather fresh state to feed this flow.

@@ -7,7 +7,7 @@ user-invocable: false
 # ask-user-authority
 
 This skill is the single owner of the decision procedure for ask-user findings.
-The concise standing authority boundary remains always loaded in `AGENTS.md` section 7.
+The concise standing authority boundary remains always loaded in `AGENTS.md` section 6.
 
 ## Decide who has authority
 
@@ -39,7 +39,7 @@ State all five of these elements in one concise, evidence-first escalation:
 4. The concrete consequences of accepting and declining the expansion.
 5. A recommendation with the reason it best serves the accepted intent.
 
-Do not relay reviewer labels or gate output as if they settled the decision, and translate the finding into outcome language under section 9 before sending it.
+Do not relay reviewer labels or gate output as if they settled the decision, and translate the finding into outcome language under section 8 before sending it.
 
 ## Classification examples
 

@@ -124,7 +124,7 @@ Do not read a capo's chat to check on a request; the correlated status channel i
 
 ## Backlog handoff
 
-Apply `AGENTS.md` section 10's work-items-only backlog contract before creation or handoff.
+Apply `AGENTS.md` section 9's work-items-only backlog contract before creation or handoff.
 When a capo is created for a domain, existing main-backlog items that fall under its scope should become its work instead of staying stranded in the main backlog.
 Scope-matching is consigliere's judgment against the capo's natural-language scope, not a keyword rule.
 For an existing or inherited domain, reconcile each selected item against shipped reality per the record-intake step above before moving it; a row for already-shipped work must not be handed off.

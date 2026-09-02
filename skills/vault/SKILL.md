@@ -23,7 +23,7 @@ This skill is the single owner of the memory-lifecycle contract: what a memory e
    - Undone next steps: anything left open that has not yet been filed as backlog work.
 
 2. **Route each finding using AGENTS.md's knowledge-routing table.**
-   AGENTS.md (section 6, "Project and knowledge management") is the single source of truth for where each kind of knowledge belongs.
+   AGENTS.md (section 5, "Project and knowledge management") is the single source of truth for where each kind of knowledge belongs.
    Read that table and route each finding there instead of re-deriving the mapping here.
 
 3. **Write within consigliere's existing write boundaries.**
@@ -32,14 +32,14 @@ This skill is the single owner of the memory-lifecycle contract: what a memory e
      Before writing, inspect the destination, find the existing bullet or section the finding duplicates or supersedes, and rewrite it in place rather than adding a new trailing entry.
      `config/learnings.md` may not exist yet; create it on first local learning, in the same dated, evidence-backed, curated style as `config/boss.md`.
    - Project-intrinsic knowledge: never hand-write a project's `AGENTS.md`.
-     Route it through a normal ship task so a soldier records it via `bin/cs-ensure-agents-md.sh` and commits it through that project's delivery pipeline, exactly as section 6 describes.
+     Route it through a normal ship task so a soldier records it via `bin/cs-ensure-agents-md.sh` and commits it through that project's delivery pipeline, exactly as section 5 describes.
      If the fleet is live, delegate this to a soldier rather than doing it inline.
    - Knowledge about consigliere itself: this repo's own `AGENTS.md` (or other shared, tracked material), shipped through the normal branch -> no-mistakes -> PR -> boss-merge pipeline for this repo (section 1), never hand-committed straight to `main`.
    - Task-scoped notes: inspect the relevant backlog item with `tasks-axi show <id> --full`, judge whether the new note is new, duplicate, superseding, or obsolete, then write a considered replacement body with `tasks-axi update <id> --body-file <path>`.
      When the replacement intentionally supersedes prior state that should remain recoverable, add `--archive-body` to that update command so the prior body stays recoverable without copying it into the replacement.
      Never append.
      If hand-editing `config/backlog.md` per the active backend, make the same inspect-then-update edit in place.
-   - Undone next steps: file each as a queued backlog item (section 10), with `blocked-by` recorded if it genuinely depends on something else.
+   - Undone next steps: file each as a queued backlog item (section 9), with `blocked-by` recorded if it genuinely depends on something else.
 
 4. **Curate with inspect-then-update.**
    Every write starts by reading the current destination and deciding how the finding changes what is already there.
@@ -66,7 +66,7 @@ This skill is the single owner of the memory-lifecycle contract: what a memory e
 7. **Cascade to the capo homes**, per "Cascade" below, when this sweep is running in the primary home.
 
 8. **Report to the boss.**
-   Summarize, in plain outcome language (section 9): what went into the vault and where, what was retired to the archive and why, what was filed to the backlog, what each capo home's sweep did, and whether the session is now safe to reset or destroy - i.e. whether every durable finding from this sweep now lives on disk rather than only in this conversation.
+   Summarize, in plain outcome language (section 8): what went into the vault and where, what was retired to the archive and why, what was filed to the backlog, what each capo home's sweep did, and whether the session is now safe to reset or destroy - i.e. whether every durable finding from this sweep now lives on disk rather than only in this conversation.
    If something could not be captured yet (for example, project-intrinsic knowledge waiting on a soldier to land it, or a capo home that could not be reached), say so explicitly rather than reporting the session fully safe.
 
 ## Tiers and decay
@@ -159,7 +159,7 @@ Work in this order and stop as soon as the file is under budget:
 
 1. **Decay.** Run the decay pass above.
    A file that is over budget because it is carrying six months of unreinforced facts is fixed here, and no eviction decision is needed.
-2. **Consolidate.** Merge duplicate entries, rewrite a multi-line note down to the durable fact it is really asserting, and retire entries now owned by a more specific destination under `AGENTS.md` section 6.
+2. **Consolidate.** Merge duplicate entries, rewrite a multi-line note down to the durable fact it is really asserting, and retire entries now owned by a more specific destination under `AGENTS.md` section 5.
 3. **Propose eviction.** Only if the file is STILL over budget.
    Consigliere does not decide which of the boss's own preferences leave: it proposes.
    Name the candidate entries and the bytes each would free in the report, file ONE durable boss-held backlog item for the decision (`tasks-axi hold <id> --reason "<reason>" --kind captain`), and leave the file over budget until the boss answers.

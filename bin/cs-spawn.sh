@@ -25,7 +25,7 @@
 #   promoted scout first states one.
 #
 #   Model and reasoning level are NOT selectable here: the harness resolves its own
-#   profile per task (AGENTS.md section 4), so no launch built here names either.
+#   profile per task (AGENTS.md's intro; bin/cs-harness-lib.sh owns the facts), so no launch built here names either.
 #   A claude home whose account policy forbids --dangerously-skip-permissions
 #   selects a narrower launch mode in config/permission-mode.conf (auto|acceptEdits|
 #   bypassPermissions); an unusable or malformed record blocks the dispatch.

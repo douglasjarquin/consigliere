@@ -8,7 +8,7 @@
 # it only runs for mode=local-only tasks, only after the boss approves, and
 # only as a clean fast-forward - it refuses a diverged branch and tells you to
 # have the soldier rebase. `yolo` does not approve a landing and never has any
-# bearing on this script: landing is the boss's alone (AGENTS.md section 7).
+# bearing on this script: landing is the boss's alone (AGENTS.md section 6).
 # Usage: cs-merge-local.sh <task-id>
 set -eu
 

@@ -11,6 +11,77 @@ The main home is the repo checkout itself; each capo has a persistent isolated `
 
 Test and script overrides: `CS_ROOT_OVERRIDE`, `CS_STATE_OVERRIDE` narrow a single script's resolution; production flows never set them.
 
+## Complete home layout
+
+This section is the single owner of the complete tree; the sections below it add field-level reference detail, and each producing script's header owns exact mutation mechanics.
+
+```text
+AGENTS.md            always-loaded kernel
+README.md            public overview
+.codex/              codex SessionStart digest run and Stop-hook turn-end guard, committed
+.claude/              claude SessionStart digest run and Stop-hook turn-end guard (settings.json), committed
+CLAUDE.md            symlink to AGENTS.md (claude loads CLAUDE.md; codex loads AGENTS.md)
+.tasks.toml          tracked tasks-axi backlog backend config
+.no-mistakes.yaml    tracked per-repo no-mistakes overrides; gate-agent scope, canonical lint, and local evidence placement
+skills/              consigliere-loaded skills, committed (source of truth)
+.claude/skills       symlink to ../skills, so claude discovers project skills
+.agents/skills       symlink to ../skills, so codex discovers project skills
+bin/                 helper scripts, committed; read each script's header before first use
+docs/                architecture, configuration schema, herdr and codex verified facts, supervision protocol, upstream-review ledger
+config/              THE USER-OWNED TREE; LOCAL, gitignored; back it up wholesale; per-file inventory and symlink policy below
+  boss.md            boss preferences and working style; canonical even if harness memory mirrors it; inspect-then-update
+  boss-shared.md     main-authoritative shared boss preferences propagated read-only to capo homes
+  learnings.md       fleet-local operational facts; dated, evidence-backed, curated; created lazily
+  projects.md        thin fleet navigation registry
+  boards.md          per-project GitHub Projects board mapping for the contracts and casino skills; parsed by bin/cs-board.sh
+  backlog.md         task queue, dependencies, history; done-archive.md and note-archive.md are its tasks-axi siblings
+  charter.md         capo homes only; the capo's filled charter brief
+  backlog-backend.conf  backlog backend override; absent or "tasks-axi" = default, "manual" = hand-edit
+  permission-mode.conf  optional narrower claude launch permission mode; a Claude ACCOUNT policy, portable across that account's machines; absent = full autonomy
+  wedge-alarm.conf   optional away-mode wedge-alarm directives; absent = auto, which adapts per OS; a command: directive naming a machine-local path is the one non-portable use
+host/                MACHINE-LOCAL; LOCAL, gitignored; not backed up, re-created per machine, never propagated
+  capos.md           capo routing table; maintained by cs-home-seed.sh; parsed by bin/cs-capo-registry-lib.sh
+  harness.conf       pins the root harness (codex or claude); absent = auto-detect
+  herdr-plugin/      generated manifest for this home's herdr push-event plugin; bin/cs-herdr-event-plugin.sh
+  upstream.conf      path of the firstmate checkout used by /upstream-review; absent = ../firstmate
+  activation.conf    per-home activation scope; absent = afk-only
+  telemetry.conf     optional per-home turn telemetry switch; absent = off; docs/telemetry.md
+data/                generated and task-scoped output; LOCAL, gitignored, DISPOSABLE as a tree
+  sweeps.md          standing board sweeps that outlive the session that started one; armed, converged, and retired only by bin/cs-board-watch.sh
+  telemetry/turns.jsonl  append-only turn telemetry, written only while enabled; docs/telemetry.md
+  <id>/brief.md      per-task soldier brief, or per-capo charter brief when kind=capo
+  <id>/report.md     scout task deliverable, written by the soldier; survives teardown
+projects/            cloned repos; gitignored; READ-ONLY for you
+state/               volatile runtime signals; gitignored
+  <id>.status        appended by soldiers: "<state>: <note>" wake-event lines, not current-state truth
+  <id>.turn-ended    touched every turn end by the harness turn-end hook (codex notify / claude Stop-hook)
+  <id>.meta          written by cs-spawn; kind-specific posture fields and the complete schema, including cs-pr-check's PR-ready fields, live below
+  <id>.check.sh      authenticated slow poll; watcher runs registered checks from hash-validated snapshots only
+  .home-pane         this home's own agent pane, recorded at session start; revalidated before any activation
+  .session-start-complete  completion proof gating the session-open re-emit; bin/cs-sessionstart-run.sh
+  .startup-network.*  the deferred network stage's status, current result, pending unread results, claim, delivery proof, elapsed-time timeline, and lock; bin/cs-startup-network.sh
+  .activation-stalled  present when this home cannot self-activate (pane gone or agent dead); needs recovery
+  <id>.check-trust   content binding created by cs-check-register.sh
+  <id>.pr-poll       validated data sidecar for the byte-static PR merge poll
+  pending-replies/   parent-owned capo pending-reply records; cs-pending-reply-lib.sh
+  procevent/         armed blocking sources supervised outside a turn; bin/cs-procevent.sh
+  procevent-inbox/   their captured results, adapter records, and handled acknowledgements
+  .herdr-events .herdr-events-cursor  push-event spool fed by herdr's plugin hook, and the watcher's cursor into it; bin/cs-herdr-event-lib.sh
+  .wake-queue        durable queued wakes: epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload
+  .afk               durable away-mode flag; present = cs-activate.sh may afk-only-inject and cs-auto-decision-lib.sh may decide bosslessly
+  .watch.lock .wake-queue.lock .monitor.lock   watcher, queue, and monitor singleton locks
+  .last-watcher-beat watcher liveness beacon; guard scripts read it
+  .last-monitor-beat .monitor.log .monitor-stop   persistent monitor liveness, lifecycle log, and stop request; cs-monitor.sh
+  .checkpoint-turn   per-turn checkpoint counter; written by cs-watch-checkpoint.sh, cleared at every turn end
+  .decision-cursor-*   per-task byte cursor and folded open-decision set bounding the wake drain's open-decision scan to new status appends; written only by cs-classify-lib.sh; safe to delete (forces one full re-fold)
+  .hash-* .count-* .stale-* .paused-* .seen-* .last-*   watcher internals; never touch
+  .subsuper-*        away-mode delivery internals (cs-activate.sh, cs-afk-start.sh, cs-afk-return.sh); never touch
+.no-mistakes/        local validation state and evidence (`.no-mistakes/evidence`); gitignored
+```
+
+A `state/<id>.status` line is a wake event, not current-state truth; `bin/cs-crew-state.sh` owns current-state reconciliation.
+Treat `config/boss.md` as the record of boss preferences and `config/learnings.md` as curated home-local knowledge, regardless of harness memory.
+
 ## Herdr layout
 
 - One herdr session: `default` (labs excepted; see `bin/cs-herdr-lab.sh`).
@@ -98,7 +169,7 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
 
 ## data/ and state/
 
-`AGENTS.md` section 2 owns the every-session file tree; this section owns field-level reference detail; producing scripts own mutation:
+The "Complete home layout" section above owns the every-session file tree; this section owns field-level reference detail; producing scripts own mutation:
 
 - `config/boards.md` - per-project GitHub Projects (v2) board mapping for the `contracts` and `casino` skills, kept beside `config/projects.md` and keyed by the same project name. Blank lines and `#` comments ignored; every other line is `<project> <owner> <number> [ready-label] [in-progress-label] [status-field] [inbox-label] [backlog-label]`. Labels/field default to `Ready` / `In Progress` / `Status` / `Inbox` / `Backlog`; use `_` for spaces in a label token. `<owner>` is a user/org login or `@me`. `bin/cs-board.sh` reads it; the board mapping is optional (only projects worked via the board need a line), and the Inbox/Backlog columns matter only to `casino`.
 - `data/sweeps.md` - the boss's standing intent to work a project's board, so a sweep outlives the session that started it.

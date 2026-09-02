@@ -27,7 +27,7 @@
 #   the boss. It never authorizes landing: a PR merge and a local-only merge are
 #   the boss's alone, yolo or not. Anything destructive, irreversible, or
 #   security-sensitive still escalates, and so does a fix that would materially
-#   expand the product or engineering contract. AGENTS.md section 7 is the owner.
+#   expand the product or engineering contract. AGENTS.md section 6 is the owner.
 #
 # An unknown/missing project or unknown mode falls back to "made off" and
 # warns to stderr, so a typo never silently drops the gate.
