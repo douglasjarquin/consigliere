@@ -120,6 +120,13 @@ CAPO_WAKE_STALL_SECS=${CS_CAPO_WAKE_STALL_SECS:-60}
 stat_mtime() { cs_lock_path_mtime "$1"; }              # epoch seconds of mtime
 stat_sig() { cs_wake_signal_sig "$1"; }                # size:mtime signature
 
+# Initialized here (not only where the USR1 trap is installed, in the
+# executed-only runtime section below) so cs_watch_wait_transition stays
+# callable under `set -u` when this file is merely sourced for unit testing,
+# which never reaches that section. Only the runtime section's trap ever
+# advances it - the same default here just means "no wake seen yet".
+CS_WATCH_WAKE_GENERATION=${CS_WATCH_WAKE_GENERATION:-0}
+
 POLL=${CS_POLL:-15}                   # seconds between cycles
 HEARTBEAT=${CS_HEARTBEAT:-600}        # base seconds between heartbeat scans
 HEARTBEAT_MAX=${CS_HEARTBEAT_MAX:-7200}  # heartbeat backoff cap
@@ -982,14 +989,55 @@ cs_watch_events_capable() {
   [ -e "$(cs_event_spool_path "$STATE")" ]
 }
 
-# How often the bounded wait re-checks the spool. An idle tick costs two
-# short-lived processes - one `stat` of the spool and the `sleep` itself; the
-# cursor is read with bash's own `read`, and the drain's `tail` runs only when
-# the spool actually grew. That is the trade between escalation latency and the
-# idle cost of a watcher with panes but no events; half a second keeps a blocked
-# soldier's wake sub-second in practice (the hook itself runs the moment herdr
-# sees the edge).
-EVENT_SPOOL_TICK=${CS_EVENT_SPOOL_TICK:-0.5}
+# issue #152: replaced the 500ms poll tick. CS_EVENT_SPOOL_TICK no longer
+# does anything - it is not read anywhere in this file - because the bounded
+# wait below blocks a single interruptible sleep for the whole remaining
+# budget instead of re-checking the spool every half second:
+# bin/cs-herdr-event-hook.sh signals this watcher's own pid (SIGUSR1) the
+# instant it appends an event this home owns, and cs_watch_block_for_wake
+# returns immediately when that arrives instead of waiting out the tick. The
+# idle cost drops from two processes twice a second (~240/min) to one
+# `sleep` per full wait (~4/min at the default 15s POLL). The durable spool
+# and its cursor remain the sole transport authority; a lost, coalesced, or
+# entirely absent signal only costs latency up to the remaining budget,
+# never a missed event - the next loop iteration drains unconditionally
+# regardless of why the wait ended.
+
+# cs_watch_block_for_wake <seconds> - blocks up to <seconds>, one background
+# `sleep` plus a `wait` on it. Interrupted immediately when
+# CS_WATCH_WAKE_GENERATION changes (bumped only by the USR1 trap installed at
+# watcher startup): empirically verified on bash 5.3.15/macOS-Darwin
+# (tests/cs-watch-signal-wait.test.sh) that a trapped signal delivered WHILE
+# blocked in `wait` on a background child returns `wait` immediately, with
+# the child still alive and needing an explicit reap - which this always
+# does when `wait` returned early. A signal delivered BEFORE this function is
+# even called still runs its trap, but the `wait` that follows blocks its
+# full duration regardless (an accepted, self-healing race: the caller
+# always re-drains at the top of its next loop iteration either way, so this
+# only ever costs one iteration's worth of latency on that one occurrence,
+# never a lost or duplicated event) - callers close the realistic instance of
+# that race (a signal arriving during the drain that precedes this call, not
+# the sub-millisecond gap between checking and forking) by comparing
+# CS_WATCH_WAKE_GENERATION before and after their own drain, and skipping
+# straight back to draining instead of calling this at all when it changed.
+# MUST be called as a plain statement, never via `$(...)` or a pipeline: bash
+# forks a real subshell for command substitution (verified: BASHPID differs
+# inside one even though `$$` misleadingly does not), and a signal sent to
+# the pid recorded in state/.watch.lock - the top-level script's original
+# pid - would then arrive at a process that is not the one actually blocked
+# in `wait`, and never interrupt it at all.
+cs_watch_block_for_wake() {
+  local seconds=$1 sp
+  case "$seconds" in ''|*[!0-9.]*) return 0 ;; esac
+  awk -v s="$seconds" 'BEGIN { exit !(s > 0) }' || return 0
+  sleep "$seconds" &
+  sp=$!
+  wait "$sp" 2>/dev/null
+  if kill -0 "$sp" 2>/dev/null; then
+    kill "$sp" 2>/dev/null
+    wait "$sp" 2>/dev/null
+  fi
+}
 
 # cs_watch_wait_transition: the bounded event wait. Blocks up to <timeout_secs>
 # for one of <pane...> to reach a fresh `blocked` edge, then prints the
@@ -1055,9 +1103,15 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
   # absent workspace_id) and shift the remaining columns. `cut` preserves them.
   # $SECONDS is a bash builtin, so the tick loop costs no extra process to
   # know the time.
-  local started=$SECONDS i n idx
+  local started=$SECONDS i n idx wake_gen
   local -a pending_panes pending_recs
   while :; do
+    # Recorded before this iteration's drain, not after: a signal that lands
+    # anywhere during the drain below still shows up as a generation change
+    # once the drain returns, so it is caught below and re-drained
+    # immediately instead of paying for a full wait that would only
+    # rediscover the same event.
+    wake_gen=$CS_WATCH_WAKE_GENERATION
     # A drained batch is consumed whether or not it holds an actionable edge,
     # so EVERY line in it is applied before returning: stopping at the first hit
     # would silently discard the rest of that batch, including the `working`
@@ -1123,7 +1177,10 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
       return 0
     done
     [ "$((SECONDS - started))" -lt "$timeout" ] || return 1
-    sleep "$EVENT_SPOOL_TICK"
+    if [ "$CS_WATCH_WAKE_GENERATION" != "$wake_gen" ]; then
+      continue
+    fi
+    cs_watch_block_for_wake $((timeout - (SECONDS - started)))
   done
 }
 
@@ -1159,8 +1216,19 @@ event_wait_or_sleep() {
     return
   fi
 
-  rec=$(cs_watch_wait_transition "$POLL" "$STATE" "${panes[@]}")
+  # NOT `rec=$(cs_watch_wait_transition ...)`: command substitution forks a
+  # real subshell (verified - see cs_watch_block_for_wake's header), and the
+  # interruptible wait deep inside this call needs to run in THIS process,
+  # the one whose pid is recorded in state/.watch.lock and actually signaled.
+  # A plain temp-file redirect keeps it here; only the harmless post-hoc
+  # `cat` below forks, after the wait it might have interrupted already
+  # returned.
+  local wait_tmp
+  wait_tmp=$(mktemp "${TMPDIR:-/tmp}/cs-watch-wait.XXXXXX") || { sleep "$POLL"; return; }
+  cs_watch_wait_transition "$POLL" "$STATE" "${panes[@]}" > "$wait_tmp"
   rc=$?
+  rec=$(cat "$wait_tmp" 2>/dev/null)
+  rm -f "$wait_tmp"
   case "$rc" in
     0) handle_push_transition "$rec" ;;
     2)
@@ -1237,6 +1305,20 @@ watcher_cleanup() {
 }
 trap watcher_cleanup EXIT
 trap 'exit 1' HUP INT TERM
+# The doorbell (issue #152): a coalescing wake generation counter, bumped by
+# the trap handler alone - nothing else may write it. Bash delivers a trapped
+# signal at the next safe point; while blocked in `wait` on a background
+# child that point is immediate (empirically verified against bash 5.3.15 on
+# macOS/Darwin - see tests/cs-watch-signal-wait.test.sh; the Linux CI lane
+# running the same suite is this fact's Linux proof, not a separate claim
+# recorded here), so cs_watch_wait
+# below can tell "a signal arrived since I last checked" from a plain integer
+# comparison with no lock of its own. Multiple coalesced signals still only
+# bump this once per delivery, which is fine: the counter's job is "did
+# anything happen", never "how many", and a coalesced doorbell can never lose
+# the durable spool record a real event already appended before ringing it.
+CS_WATCH_WAKE_GENERATION=0
+trap 'CS_WATCH_WAKE_GENERATION=$((CS_WATCH_WAKE_GENERATION + 1))' USR1
 # This watcher's own pid, as recorded in the lock by the wake-lib claim (which
 # writes ${BASHPID:-$$} from this same main shell). Read directly, never via a
 # command substitution, so it matches the stored holder pid for the
