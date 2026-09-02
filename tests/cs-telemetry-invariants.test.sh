@@ -196,21 +196,24 @@ drain() { # <home>
     CS_TELEMETRY_DISABLE='' "$ROOT/bin/cs-wake-drain.sh" 2>&1
 }
 
-seed_queue() { # <home>
-  local now
-  now=$(date +%s)
+seed_queue() { # <home> <timestamp>
   {
-    printf '%s\t1\tsignal\ttask.status\tsignal: task.status\n' "$now"
-    printf '%s\t2\tstale\tw1:p1\tstale: w1:p1\n' "$now"
+    printf '%s\t1\tsignal\ttask.status\tsignal: task.status\n' "$2"
+    printf '%s\t2\tstale\tw1:p1\tstale: w1:p1\n' "$2"
   } > "$1/state/.wake-queue"
 }
 
 test_wake_drain_output_is_unchanged_by_telemetry() {
-  local off on out_off out_on rc_off rc_on
+  local off on out_off out_on rc_off rc_on now
   off=$(make_home drain-off off)
   on=$(make_home drain-on on)
-  seed_queue "$off"
-  seed_queue "$on"
+  # Both queues MUST carry the identical timestamp: the drain's output embeds
+  # it verbatim, so seeding each home from its own separate `date +%s` call
+  # spuriously fails this byte-for-byte comparison whenever the wall clock
+  # ticks over a second between the two calls (live-caught in CI, PR #159).
+  now=$(date +%s)
+  seed_queue "$off" "$now"
+  seed_queue "$on" "$now"
   out_off=$(drain "$off"); rc_off=$?
   out_on=$(drain "$on"); rc_on=$?
   [ "$rc_off" = "$rc_on" ] || fail "telemetry changed the drain's exit status ($rc_off -> $rc_on)"
@@ -238,11 +241,12 @@ checkpoint() { # <home>
 }
 
 test_checkpoint_behavior_is_unchanged_by_telemetry() {
-  local off on out_off out_on rc_off rc_on
+  local off on out_off out_on rc_off rc_on now
   off=$(make_home checkpoint-off off)
   on=$(make_home checkpoint-on on)
-  seed_queue "$off"
-  seed_queue "$on"
+  now=$(date +%s)
+  seed_queue "$off" "$now"
+  seed_queue "$on" "$now"
   out_off=$(checkpoint "$off"); rc_off=$?
   out_on=$(checkpoint "$on"); rc_on=$?
   [ "$rc_off" = "$rc_on" ] || fail "telemetry changed the checkpoint's exit status ($rc_off -> $rc_on)"
