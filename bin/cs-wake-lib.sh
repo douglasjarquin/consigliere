@@ -83,6 +83,39 @@ cs_watcher_healthy() {
   return 0
 }
 
+# cs_watcher_lock_current_pid <state> -> the live watcher pid recorded in
+# <state>/.watch.lock on stdout, or rc 1 with nothing printed. Unlike
+# cs_watcher_lock_matches_pid, this needs no externally-known expected
+# home/watcher-path: it is the self-consistency check a caller that only has
+# a state directory (issue #152's Herdr event hook, invoked by herdr's own
+# server process with nothing but the state path baked into its plugin
+# manifest) can run before signaling that pid. Rejects a missing lock, a
+# symlinked lock directory or record file (no symlink following - a directory,
+# FIFO, or oversized record fails the same way), a non-numeric or
+# non-positive pid, a dead pid, and a pid whose live cs_pid_identity no
+# longer matches what was recorded - the exact PID-reuse case a stale lock
+# after a crash must never let through.
+cs_watcher_lock_current_pid() {
+  local state=$1 lockdir f size pid identity current
+  lockdir=$state/.watch.lock
+  [ -e "$lockdir" ] && [ ! -L "$lockdir" ] && [ -d "$lockdir" ] || return 1
+  for f in pid pid-identity; do
+    [ -e "$lockdir/$f" ] && [ ! -L "$lockdir/$f" ] && [ -f "$lockdir/$f" ] || return 1
+    size=$(wc -c < "$lockdir/$f" 2>/dev/null | tr -d '[:space:]') || return 1
+    case "$size" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$size" -le 256 ] || return 1
+  done
+  pid=$(cat "$lockdir/pid" 2>/dev/null | tr -d '[:space:]')
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$pid" -gt 1 ] || return 1
+  identity=$(cat "$lockdir/pid-identity" 2>/dev/null | tr -d '\n')
+  [ -n "$identity" ] || return 1
+  cs_pid_alive "$pid" || return 1
+  current=$(cs_pid_identity "$pid") || return 1
+  [ "$current" = "$identity" ] || return 1
+  printf '%s\n' "$pid"
+}
+
 cs_lock_clean_known_files() {
   local lockdir=$1
   rm -f \
