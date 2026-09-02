@@ -151,6 +151,74 @@ cs_herdr_task_create() { # <project-path> <branch> <task-label> [base-ref]
     '.result | [.workspace.workspace_id, .root_pane.pane_id, .worktree.path, .worktree.branch] | @tsv'
 }
 
+# --- task nesting (tab-in-existing-workspace, no dedicated container) ------
+# herdr's own worktree-aware create (`worktree create`) unconditionally binds
+# a BRAND NEW workspace to the worktree - `--workspace` there only names the
+# SOURCE workspace whose repo is used, never a target to join (docs/herdr.md
+# "Container shape: workspace-per-task"). There is no flag that opens a new
+# git worktree as a tab inside an EXISTING workspace, so nesting a task under
+# its capo without a dangling workspace means never routing the worktree
+# itself through herdr: the checkout is plain git, and only the pane is
+# herdr's (`tab create --workspace <target>`), live-verified (cs-lab,
+# 2026-09-02, herdr 0.8.2) to add a tab to the target workspace with its
+# other tabs and the workspace itself untouched, and to have `pane close` on
+# that tab's root pane remove exactly that one tab and nothing else in the
+# workspace. cs_herdr_worktree_remove (herdr's OWN worktree-bound teardown)
+# must never be called for a task created this way - see
+# cs_herdr_nested_task_remove below.
+
+# Mirrors the layout herdr's own worktree create uses (cs-spawn.sh's
+# worktree-create failure message points at ~/.herdr/worktrees/<project>/),
+# kept under its own "nested" subtree so a nested and a herdr-owned worktree
+# for the same project can never collide on one path.
+cs_herdr_nested_worktree_path() { # <project-root> <task-label> -> path
+  local root=$1 label=$2
+  printf '%s/%s/nested/%s\n' "${CS_HERDR_WORKTREES_ROOT:-$HOME/.herdr/worktrees}" "$(basename "$root")" "$label"
+}
+
+cs_herdr_task_create_nested() { # <project-path> <branch> <task-label> <target-workspace> [base-ref]
+  # Same TAB-separated shape as cs_herdr_task_create (workspace_id pane_id
+  # worktree_path branch): workspace_id here is always the caller's own
+  # <target-workspace> echoed back, never a new one.
+  local src=$1 branch=$2 label=$3 target_ws=$4 base=${5:-} root wt out pane
+  cs_herdr_workspace_exists "$target_ws" || return 1
+  root=$(git -C "$src" rev-parse --show-toplevel 2>/dev/null) || return 1
+  wt=$(cs_herdr_nested_worktree_path "$root" "$label") || return 1
+  [ -e "$wt" ] && return 1
+  mkdir -p "$(dirname "$wt")" >/dev/null 2>&1 || return 1
+  if [ -n "$base" ]; then
+    git -C "$src" worktree add -b "$branch" "$wt" "$base" >/dev/null 2>&1 || return 1
+  else
+    git -C "$src" worktree add -b "$branch" "$wt" >/dev/null 2>&1 || return 1
+  fi
+  out=$(cs_herdr tab create --workspace "$target_ws" --cwd "$wt" --label "$label" --no-focus 2>/dev/null) || {
+    git -C "$src" worktree remove --force "$wt" >/dev/null 2>&1 || true
+    return 1
+  }
+  pane=$(printf '%s' "$out" | jq -re '.result.root_pane.pane_id // empty' 2>/dev/null)
+  if [ -z "$pane" ]; then
+    git -C "$src" worktree remove --force "$wt" >/dev/null 2>&1 || true
+    return 1
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$target_ws" "$pane" "$wt" "$branch"
+}
+
+cs_herdr_nested_task_remove() { # <project-path> <worktree-path> <pane-id> [--force]
+  # Dirty worktrees fail closed on plain `git worktree remove`, same contract
+  # as cs_herdr_worktree_remove's herdr-side dirty_worktree_requires_force;
+  # --force is passed only on an explicit boss-authorized discard. The pane
+  # close happens ONLY after the worktree is confirmed gone, so a refused
+  # (dirty) removal leaves the task's pane in place to inspect rather than
+  # closing the tab out from under surviving work.
+  local src=$1 wt=$2 pane=$3 force=${4:-}
+  if [ "$force" = --force ]; then
+    git -C "$src" worktree remove --force "$wt" >/dev/null 2>&1 || return 1
+  else
+    git -C "$src" worktree remove "$wt" >/dev/null 2>&1 || return 1
+  fi
+  cs_herdr_pane_close "$pane" >/dev/null 2>&1 || true
+}
+
 cs_herdr_worktree_open() { # <path> <label> -> same TAB-separated tuple
   # Recovery path for a surviving worktree whose workspace is gone.
   local path=$1 label=$2 out

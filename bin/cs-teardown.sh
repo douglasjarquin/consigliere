@@ -130,6 +130,7 @@ PROJ=$(cs_meta_get "$META" project || true)
 PANE=$(cs_meta_get "$META" pane || true)
 WS=$(cs_meta_get "$META" workspace || true)
 KIND=$(cs_meta_get "$META" kind || echo ship)
+CONTAINER=$(cs_meta_get "$META" container 2>/dev/null || echo workspace)
 MODE=$(cs_meta_get "$META" mode || echo made)
 PR_URL=$(cs_meta_get "$META" pr || true)
 HOME_PATH=$(cs_meta_get "$META" home || true)
@@ -964,7 +965,16 @@ if [ -n "$WT" ] && [ -d "$WT" ]; then
   if [ "$FORCE" = "--force" ] || [ "$KIND" = scout ]; then
     REMOVE_FORCE="--force"
   fi
-  if [ -n "$WS" ] && cs_herdr_workspace_exists "$WS"; then
+  if [ "$CONTAINER" = tab ]; then
+    # WS here is the capo's own persistent home workspace, not a worktree-bound
+    # one: cs_herdr_worktree_remove would tear down that whole home. Only the
+    # task's own tab (its root pane) and its plain-git worktree are this
+    # task's to remove.
+    cs_herdr_nested_task_remove "$PROJ" "$WT" "$PANE" $REMOVE_FORCE >/dev/null || {
+      echo "error: nested task removal refused for $WT after the safety proofs passed; stop and investigate (do not delete by hand)." >&2
+      exit 1
+    }
+  elif [ -n "$WS" ] && cs_herdr_workspace_exists "$WS"; then
     cs_herdr_worktree_remove "$WS" $REMOVE_FORCE >/dev/null || {
       echo "error: herdr worktree remove refused for $WT after the safety proofs passed; stop and investigate (do not delete by hand)." >&2
       exit 1
