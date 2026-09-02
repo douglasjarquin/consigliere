@@ -79,6 +79,13 @@
 # The LOCK/BOOTSTRAP/WAKE-QUEUE safety preamble keeps its order: it establishes
 # mutation authority and this turn's work queue before anything else is read.
 #
+# This ordering is defense in depth, not the only defense: the live-task
+# inventory is now itself count-bounded (CS_SESSION_START_TASK_LIMIT) with an
+# exact remainder and a bin/cs-fleet-view.sh pointer, and a locked run
+# publishes the unbounded equivalent to data/session-start/ so a truncated
+# tail has a named, hashed artifact to recover from rather than only a
+# favorable read order to rely on.
+#
 # COMPOSITION, NOT DUPLICATION: this script calls cs-lock.sh, cs-bootstrap.sh,
 # cs-wake-drain.sh, and cs-startup-network.sh as real subprocesses and prints
 # their real output; all sequencing/formatting logic added here stays local to
@@ -152,10 +159,12 @@
 # (CS_TIMEOUT_UNAVAILABLE), because a digest that never started must not be
 # announced as a digest that stalled.
 #
-# Usage: cs-session-start.sh [--reemit]
+# Usage: cs-session-start.sh [--reemit] [--recover | --full]
 #   Prints the full ordered digest to stdout and always exits 0: this is a
 #   reporting command, not a gate. A lock refusal is reported as a loud banner
 #   inline, never a silent failure that would make an agent skip the digest.
+#   --reemit is orthogonal to --recover/--full: it controls which MUTATING
+#   sweeps run, not how bounded the printed content is.
 #
 #   --reemit  This session ALREADY completed a full startup and has only lost
 #             its context (a /clear or a compaction). Skip the mutating sweeps
@@ -173,25 +182,58 @@
 #             already treats a lock this session's own harness holds as its
 #             own, so the re-emit proceeds, while a lock another live session
 #             took meanwhile still produces the ordinary read-only path.
+#
+#   (default) NORMAL - bounded actionable orientation. The live-task
+#             inventory, the backlog groups, per-task status tails, and the
+#             curated memory files are all capped (CS_SESSION_START_TASK_LIMIT,
+#             CS_SESSION_START_ACTIVE_LIMIT, CS_SESSION_START_QUEUED_LIMIT,
+#             CS_SESSION_START_STATUS_TAIL, CS_STARTUP_MEMORY_MAX_BYTES); every
+#             cap that hits its limit prints an exact remainder count and a
+#             targeted retrieval command, never a silent drop. A locked
+#             (non-read-only) run also publishes the unbounded equivalent to
+#             data/session-start/<timestamp>-<home-id>.md (pruned to the most
+#             recent CS_SESSION_START_SNAPSHOT_KEEP, default 20) and prints its
+#             path and sha256 in the FLEET STATE section, so the bounded view
+#             always names where the rest already lives - no reliance on the
+#             calling harness truncating the output tail to survive an
+#             oversized digest.
+#   --recover EXPANDED RECOVERY CONTEXT. Same digest shape, but the live-task
+#             inventory and every backlog group print in full (no actionable
+#             identity capped) while per-task status tails and the curated
+#             memory files keep their line/byte caps, since those two remain
+#             recoverable with one targeted read regardless. No snapshot is
+#             published - this run already IS the expanded view.
+#   --full    COMPLETE DIAGNOSTIC SNAPSHOT. Everything --recover shows, plus
+#             uncapped status tails and uncapped memory files: nothing in the
+#             digest is bounded. No snapshot is published, for the same reason
+#             as --recover.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 REEMIT=0
+RECOVER=0
+FULL=0
 for arg in "$@"; do
   case "$arg" in
     --reemit) REEMIT=1 ;;
+    --recover) RECOVER=1 ;;
+    --full) FULL=1 ;;
     -h|--help)
       sed -n '2,/^set -u$/p' "$SCRIPT_DIR/cs-session-start.sh" | sed 's/^# \{0,1\}//; $d'
       exit 0
       ;;
     *)
       printf 'cs-session-start: unknown argument: %s\n' "$arg" >&2
-      printf 'usage: cs-session-start.sh [--reemit]\n' >&2
+      printf 'usage: cs-session-start.sh [--reemit] [--recover] [--full]\n' >&2
       exit 2
       ;;
   esac
 done
+if [ "$RECOVER" -eq 1 ] && [ "$FULL" -eq 1 ]; then
+  printf 'cs-session-start: --recover and --full are mutually exclusive\n' >&2
+  exit 2
+fi
 
 # --- 0. runtime bound --------------------------------------------------------
 # The ordered stage list is the contract behind the truncation banner: the
@@ -333,6 +375,33 @@ print_file_or_absent() {
 # decide which of the boss's own preferences to drop. /vault owns consolidation.
 STARTUP_MEMORY_MAX_BYTES=${CS_STARTUP_MEMORY_MAX_BYTES:-8192}
 case "$STARTUP_MEMORY_MAX_BYTES" in ''|*[!0-9]*|0) STARTUP_MEMORY_MAX_BYTES=8192 ;; esac
+
+# The live-task inventory (state/*.meta) is the one section a pathological
+# fleet can grow without limit: unlike the backlog listing above, nothing
+# bounded its ENTRY COUNT before this. bin/cs-fleet-view.sh already renders
+# the complete fleet review, so a capped entry here points there for the rest
+# instead of reimplementing a second listing.
+TASK_LIMIT=${CS_SESSION_START_TASK_LIMIT:-15}
+case "$TASK_LIMIT" in ''|*[!0-9]*|0) TASK_LIMIT=15 ;; esac
+
+SNAPSHOT_KEEP=${CS_SESSION_START_SNAPSHOT_KEEP:-20}
+case "$SNAPSHOT_KEEP" in ''|*[!0-9]*|0) SNAPSHOT_KEEP=20 ;; esac
+
+# --recover/--full raise the record-count and (for --full only) the
+# per-record line/byte caps to a value no real fleet reaches, rather than
+# special-casing "unbounded" through every print function below. Every
+# print function already treats its bound as "how many", so a value this
+# large is behaviorally unbounded without a second code path.
+UNBOUNDED=999999999
+if [ "$RECOVER" -eq 1 ] || [ "$FULL" -eq 1 ]; then
+  TASK_LIMIT=$UNBOUNDED
+  ACTIVE_LIMIT=$UNBOUNDED
+  QUEUED_LIMIT=$UNBOUNDED
+fi
+if [ "$FULL" -eq 1 ]; then
+  STATUS_TAIL=$UNBOUNDED
+  STARTUP_MEMORY_MAX_BYTES=$UNBOUNDED
+fi
 
 print_startup_memory() {  # <path> <label> - print, then report if over budget
   local path=$1 label=$2 size
@@ -814,52 +883,113 @@ section "FLEET STATE"
 # alive is the record recovery depends on, and every bound below it is a bound
 # on something the fleet can grow without limit. Nothing that scales with fleet
 # size may sit between the top of the digest's payload and this block.
-subsection "Work under way (state/*.meta)"
-META_FOUND=0
-for meta in "$STATE"/*.meta; do
-  [ -f "$meta" ] || continue
-  META_FOUND=1
-  id=$(basename "$meta" .meta)
-  printf '\n--- %s ---\n' "$id"
-  cat "$meta"
+render_task_inventory() {
+  local meta id pane status shown=0 total=0
+  for meta in "$STATE"/*.meta; do
+    [ -f "$meta" ] || continue
+    total=$((total + 1))
+    [ "$shown" -lt "$TASK_LIMIT" ] || continue
+    shown=$((shown + 1))
+    id=$(basename "$meta" .meta)
+    printf '\n--- %s ---\n' "$id"
+    cat "$meta"
 
-  pane=$(cs_meta_get "$meta" pane 2>/dev/null || true)
-  if [ -n "$pane" ]; then
-    if cs_herdr_pane_exists "$pane"; then
-      if cs_herdr_agent_alive "$pane"; then
-        printf 'endpoint: alive (pane=%s, agent detected)\n' "$pane"
+    pane=$(cs_meta_get "$meta" pane 2>/dev/null || true)
+    if [ -n "$pane" ]; then
+      if cs_herdr_pane_exists "$pane"; then
+        if cs_herdr_agent_alive "$pane"; then
+          printf 'endpoint: alive (pane=%s, agent detected)\n' "$pane"
+        else
+          printf 'endpoint: pane present, no agent detected (pane=%s)\n' "$pane"
+        fi
       else
-        printf 'endpoint: pane present, no agent detected (pane=%s)\n' "$pane"
+        printf 'endpoint: dead (pane=%s)\n' "$pane"
       fi
     else
-      printf 'endpoint: dead (pane=%s)\n' "$pane"
+      printf 'endpoint: unknown (no pane recorded)\n'
     fi
-  else
-    printf 'endpoint: unknown (no pane recorded)\n'
-  fi
 
-  status="$STATE/$id.status"
-  if [ -f "$status" ]; then
-    print_status_tail "$status"
-  else
-    printf 'status tail: (no status file yet: %s)\n' "$status"
+    status="$STATE/$id.status"
+    if [ -f "$status" ]; then
+      print_status_tail "$status"
+    else
+      printf 'status tail: (no status file yet: %s)\n' "$status"
+    fi
+  done
+  if [ "$total" -eq 0 ]; then
+    printf '(none)\n'
+  elif [ "$total" -gt "$shown" ]; then
+    printf '\n(shown %d of %d task(s); %d more - raise CS_SESSION_START_TASK_LIMIT, pass --recover/--full, or read %s/bin/cs-fleet-view.sh for the complete fleet)\n' \
+      "$shown" "$total" "$((total - shown))" "$CS_ROOT"
   fi
-done
-[ "$META_FOUND" -eq 1 ] || printf '(none)\n'
+}
+
+subsection "Work under way (state/*.meta)"
+render_task_inventory
+
+render_orphan_status_logs() {
+  local status id found=0
+  for status in "$STATE"/*.status; do
+    [ -f "$status" ] || continue
+    id=$(basename "$status" .status)
+    [ -f "$STATE/$id.meta" ] && continue
+    found=1
+    printf '\n--- %s ---\n' "$id"
+    print_status_tail "$status"
+  done
+  [ "$found" -eq 1 ] || printf '(none)\n'
+}
 
 subsection "Orphan status logs (state/*.status without matching .meta)"
-ORPHAN_STATUS_FOUND=0
-for status in "$STATE"/*.status; do
-  [ -f "$status" ] || continue
-  id=$(basename "$status" .status)
-  [ -f "$STATE/$id.meta" ] && continue
-  ORPHAN_STATUS_FOUND=1
-  printf '\n--- %s ---\n' "$id"
-  print_status_tail "$status"
-done
-[ "$ORPHAN_STATUS_FOUND" -eq 1 ] || printf '(none)\n'
+render_orphan_status_logs
 
 print_backlog_compact "$CONFIG/backlog.md" "config/backlog.md"
+
+# Expanded recovery snapshot: the unbounded equivalent of the three sections
+# above (the ones a pathological fleet can grow past any fixed bound),
+# published atomically so a bounded digest never has to rely on the calling
+# harness's own tail truncation to preserve the rest. Read-only sessions skip
+# this, consistent with every other write this file gates on locked status;
+# --recover/--full skip it too, because that run already IS the unbounded
+# view and a second copy would be pure duplication. Pure reads only (the same
+# functions the bounded printing above just called), so the second pass here
+# costs one more read of each source, never a second mutation.
+subsection "Expanded recovery snapshot (data/session-start/)"
+if [ "$READ_ONLY" -eq 1 ]; then
+  printf 'skipped (read-only session) - the session holding the lock publishes it.\n'
+elif [ "$RECOVER" -eq 1 ] || [ "$FULL" -eq 1 ]; then
+  printf 'skipped - this run already shows the unbounded view inline.\n'
+else
+  SNAPSHOT_DIR="$DATA/session-start"
+  mkdir -p "$SNAPSHOT_DIR" 2>/dev/null
+  HOME_ID=$(basename "$CS_HOME")
+  SNAPSHOT_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+  SNAPSHOT_FILE="$SNAPSHOT_DIR/$SNAPSHOT_STAMP-$HOME_ID.md"
+  SNAPSHOT_TMP="$SNAPSHOT_FILE.tmp.$$"
+  if (
+      TASK_LIMIT=$UNBOUNDED
+      ACTIVE_LIMIT=$UNBOUNDED
+      QUEUED_LIMIT=$UNBOUNDED
+      { render_task_inventory
+        render_orphan_status_logs
+        print_backlog_compact "$CONFIG/backlog.md" "config/backlog.md"
+      } > "$SNAPSHOT_TMP" 2>&1
+    ) && mv "$SNAPSHOT_TMP" "$SNAPSHOT_FILE" 2>/dev/null; then
+    SNAPSHOT_HASH=$( (shasum -a 256 "$SNAPSHOT_FILE" 2>/dev/null || sha256sum "$SNAPSHOT_FILE" 2>/dev/null) | awk '{print $1}')
+    printf 'published: %s (sha256 %s)\n' "$SNAPSHOT_FILE" "${SNAPSHOT_HASH:-unavailable}"
+    # shellcheck disable=SC2012  # filenames are our own timestamp-prefixed stamps, never adversarial or containing newlines
+    # `head -n -N` (all but the last N) is GNU-only, so the prune list is
+    # built with awk instead for portability to macOS's BSD head.
+    ls -1 "$SNAPSHOT_DIR" 2>/dev/null | sort | awk -v keep="$SNAPSHOT_KEEP" \
+      '{lines[NR] = $0} END { for (i = 1; i <= NR - keep; i++) print lines[i] }' |
+      while IFS= read -r stale; do
+        [ -n "$stale" ] && rm -f "$SNAPSHOT_DIR/$stale" 2>/dev/null
+      done
+  else
+    rm -f "$SNAPSHOT_TMP" 2>/dev/null
+    printf 'FAILED to publish - the bounded digest above remains the source of truth; retry with --full if the rest is needed now.\n'
+  fi
+fi
 
 subsection "Board sweeps (data/sweeps.md)"
 if [ "$READ_ONLY" -eq 1 ]; then
@@ -905,14 +1035,18 @@ fi
 # session, already reported against CS_STARTUP_MEMORY_MAX_BYTES, and
 # recoverable with one targeted read, so it is the cheapest thing for a
 # truncated tail to take (see this file's ORDERING note).
+render_context_memory() {
+  print_file_or_absent "$CONFIG/projects.md" "config/projects.md"
+  print_file_or_absent "$CONFIG/boards.md" "config/boards.md (GitHub board mapping for the contracts and casino skills)"
+  print_file_or_absent "$HOST_DIR/capos.md" "host/capos.md (host-local; ABSENT = no capos provisioned here)"
+  print_startup_memory "$CONFIG/boss.md" "config/boss.md"
+  print_startup_memory "$CONFIG/boss-shared.md" "config/boss-shared.md (shared, main-authoritative, read-only in capo homes)"
+  print_startup_memory "$CONFIG/learnings.md" "config/learnings.md"
+}
+
 stage context
 section "CONTEXT"
-print_file_or_absent "$CONFIG/projects.md" "config/projects.md"
-print_file_or_absent "$CONFIG/boards.md" "config/boards.md (GitHub board mapping for the contracts and casino skills)"
-print_file_or_absent "$HOST_DIR/capos.md" "host/capos.md (host-local; ABSENT = no capos provisioned here)"
-print_startup_memory "$CONFIG/boss.md" "config/boss.md"
-print_startup_memory "$CONFIG/boss-shared.md" "config/boss-shared.md (shared, main-authoritative, read-only in capo homes)"
-print_startup_memory "$CONFIG/learnings.md" "config/learnings.md"
+render_context_memory
 
 # --- 9. closing reminder -----------------------------------------------
 stage next-step
