@@ -26,21 +26,21 @@ For consigliere-specific install and upgrade instructions, see [`docs/grokbot.md
 ## What it is
 
 Grok Ship is an agent distro for Grok Bot.
-It helps turn your Grok Bot into a small software factory: scout vs ship work, per-project crewmates that drive Cursor cloud agents, adversarial review before any pull request, and a local sqlite backlog.
+It helps turn your Grok Bot into a small software factory: scout vs ship work, per-project soldiers that drive Cursor cloud agents, adversarial review before any pull request, and a local sqlite backlog.
 
 Bots never execute on your machine.
 They run on the shared Grok Bot computer; project work runs on ephemeral Cursor cloud agents.
 
-After install, talk only to Firstmate - the one agent you chat with in the factory. If you ask, Firstmate can sign on a repo triage crewmate; that is not part of the factory install.
+After install, talk only to Consigliere - the one agent you chat with in the factory. If you ask, Consigliere can sign on a repo triage soldier; that is not part of the factory install.
 
 ## Features
 
 - **A software factory on Grok Bot** - you bring work; the factory files it, delegates it, and brings back reports or pull requests.
 - **Scout vs ship** - scout is investigation, diagnosis, planning, or audit, and the deliverable is a report, never a PR. Ship is authorized change. Promoting a scout flips the same task row rather than opening a duplicate.
-- **Per-project crewmates** - each project or project area gets a persistent crewmate that drives Cursor cloud agents.
+- **Per-project soldiers** - each project or project area gets a persistent soldier that drives Cursor cloud agents.
 - **Review before any PR** - after a ship cloud agent pushes a branch, a fresh adversarial review reads it through the project's forge CLI. No pull request until that pass is clean.
 - **Local sqlite backlog** - chat is not the source of truth. Projects and tasks live in a sqlite database on the shared computer.
-- **You merge** - factory ships never merge without your word, and never while checks are red. A wired triage crewmate may auto-merge corrective or opt-in work only when CI is green, VISION is aligned with no cannot-tell, and the change is not default-behavior and not security.
+- **You merge** - factory ships never merge without your word, and never while checks are red. A wired triage soldier may auto-merge corrective or opt-in work only when CI is green, VISION is aligned with no cannot-tell, and the change is not default-behavior and not security.
 - **Forge-agnostic** - detect GitHub, GitLab, Bitbucket, or Cursor Origin. Do not assume GitHub.
 
 ## Quick Start
@@ -51,13 +51,13 @@ Tell any Grok Bot:
 follow https://github.com/kunchenguid/grok-ship/blob/main/GROK_SHIP.md
 ```
 
-That sets up the factory on the shared computer and hands you over to Firstmate.
-Talk only to Firstmate from then on.
+That sets up the factory on the shared computer and hands you over to Consigliere.
+Talk only to Consigliere from then on.
 
 ```
 > look at my project xyz, then fix the flaky login test
 
-# The factory files a ship task. A project crewmate drives a
+# The factory files a ship task. A project soldier drives a
 # Cursor cloud agent; adversarial review runs before any pull request.
 
   PR ready: https://github.com/you/xyz/pull/42
@@ -78,7 +78,7 @@ Talk only to Firstmate from then on.
     │                              │
     ▼              ▼               ▼
  ┌────────┐   ┌────────┐      ┌────────┐
- │crewmate│   │crewmate│      │crewmate│   one per project
+ │soldier│   │soldier│      │soldier│   one per project
  └───┬────┘   └───┬────┘      └───┬────┘
      ▼            ▼               ▼
   Cursor cloud agents
@@ -88,8 +88,8 @@ Talk only to Firstmate from then on.
      └─ scout: report, never a PR
 ```
 
-Work is filed as scout or ship in the local sqlite backlog, then handed to the crewmate whose project charter fits.
-Software goes through a project crewmate and a Cursor cloud agent.
+Work is filed as scout or ship in the local sqlite backlog, then handed to the soldier whose project charter fits.
+Software goes through a project soldier and a Cursor cloud agent.
 Scout reports land on the shared computer.
 Ship work is reviewed on the pushed branch before a pull request is opened.
 

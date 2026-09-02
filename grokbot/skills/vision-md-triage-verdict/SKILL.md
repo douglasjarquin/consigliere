@@ -21,7 +21,7 @@ For every rule, return exactly one of:
 
 Claims are not enough. A PR title, issue pitch, or author summary does not count as evidence. Read the actual diff, the actual issue body plus the code or docs it names, and the rule text.
 
-Cannot-tell blocks auto-merge. Any rule that is `cannot tell`, inconclusive, or undecided is no verdict: do not auto-merge, do not close as decided on that rule. Flag Firstmate or stop. Do not ignore some undecided rules. Do not coerce `cannot tell` into `aligns` or `does not align`. Do not invent a matching heading. Do not skip a heading.
+Cannot-tell blocks auto-merge. Any rule that is `cannot tell`, inconclusive, or undecided is no verdict: do not auto-merge, do not close as decided on that rule. Flag Consigliere or stop. Do not ignore some undecided rules. Do not coerce `cannot tell` into `aligns` or `does not align`. Do not invent a matching heading. Do not skip a heading.
 
 ## Output
 

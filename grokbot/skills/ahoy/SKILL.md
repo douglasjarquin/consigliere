@@ -1,17 +1,17 @@
 ---
 name: Ahoy
-description: Use when the captain explicitly says ahoy or /ahoy, or asks for a session recap of what happened since they last spoke, plus any visibly unanswered decisions. A standalone captain message whose main ask is "ahoy" is an invocation. History-only. Do not gather live fleet state.
+description: Use when the boss explicitly says ahoy or /ahoy, or asks for a session recap of what happened since they last spoke, plus any visibly unanswered decisions. A standalone boss message whose main ask is "ahoy" is an invocation. History-only. Do not gather live fleet state.
 ---
 
 # Ahoy
 
 Give a concise session-only recap. Do not gather fresh state.
 
-Treat an explicit captain "ahoy" the same as `/ahoy`. Slash is optional. Do not wait for a slash-command invocation.
+Treat an explicit boss "ahoy" the same as `/ahoy`. Slash is optional. Do not wait for a slash-command invocation.
 
-## What counts as a captain message
+## What counts as a boss message
 
-A captain boundary is an ordinary user message they typed.
+A boss boundary is an ordinary user message they typed.
 
 Exclude:
 
@@ -20,22 +20,22 @@ Exclude:
 - System, tool, and other injected operational messages
 - The current ahoy invocation itself, with or without a slash
 
-A previous ahoy is a real captain message and may be the next interval boundary.
+A previous ahoy is a real boss message and may be the next interval boundary.
 
 ## Recap
 
-1. Find the most recent real captain-authored message before this invocation.
-2. If none exists, say this session has no prior captain message and stop. Do not invent a fleet snapshot. Do not call GitHub or read live queues.
+1. Find the most recent real boss-authored message before this invocation.
+2. If none exists, say this session has no prior boss message and stop. Do not invent a fleet snapshot. Do not call GitHub or read live queues.
 3. Recap only what is already visible after that message and before this invocation.
    Include concrete outcomes, landed work, failures, decisions made, new decisions needed, and work still running only when those events appear in that interval.
    Use outcome language. Keep every full PR URL that appears in the interval.
-4. Also inspect the entire visible session before this invocation for every explicit captain decision that is still unanswered.
-   A later unrelated captain message is a recap boundary. It does not close an earlier decision.
+4. Also inspect the entire visible session before this invocation for every explicit boss decision that is still unanswered.
+   A later unrelated boss message is a recap boundary. It does not close an earlier decision.
    A decision is closed only when a later visible response substantively resolves it: they chose an option, declined it, granted or denied the approval, skipped a card (treat skip as decline and record the assumption you made), or otherwise directly addressed it.
    Deduplicate by substance.
 5. Do not call GitHub, browsers, fleet snapshots, or file writes. Create no report. Do not guess live state beyond the last visible event.
-6. If nothing happened after the previous captain message but an older open decision is still visible, report that decision instead of claiming nothing happened.
-7. If neither events nor open decisions exist, say in one sentence that nothing happened after the previous captain message.
+6. If nothing happened after the previous boss message but an older open decision is still visible, report that decision instead of claiming nothing happened.
+7. If neither events nor open decisions exist, say in one sentence that nothing happened after the previous boss message.
 
 ## Decisions
 

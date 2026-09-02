@@ -29,6 +29,19 @@ test_project_management_schema() {
   pass "Grok Bot project-management schema"
 }
 
+test_consigliere_naming() {
+  local stale
+  assert_present "$ROOT/grokbot/GROK_BOT_CONSIGLIERE.md" "Consigliere charter is missing"
+  assert_present "$ROOT/grokbot/GROK_BOT_SOLDIER.md" "soldier charter is missing"
+  assert_absent "$ROOT/grokbot/GROK_BOT_FIRSTMATE.md" "old Firstmate charter name remains"
+  assert_absent "$ROOT/grokbot/GROK_BOT_CREWMATE.md" "old Crewmate charter name remains"
+  stale=$(find "$ROOT/grokbot" -type f ! -path '*/__pycache__/*' \
+    -exec grep -Ein '(^|[^[:alnum:]_])(firstmate|crewmate|captain)([^[:alnum:]_]|$)' {} + || true)
+  [ -z "$stale" ] || fail "upstream role vocabulary remains in the Grok Bot pack"$'\n'"$stale"
+  pass "Consigliere role vocabulary"
+}
+
 test_vendored_python_suite
 test_project_management_schema
+test_consigliere_naming
 pass "grokbot content checks"

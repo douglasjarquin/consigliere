@@ -1,6 +1,6 @@
 ---
 name: Project management
-description: Use at Grok Ship intake and whenever work is handed to a crewmate.
+description: Use at Grok Ship intake and whenever work is handed to a soldier.
 ---
 
 # Project management
@@ -25,33 +25,33 @@ Canonical schema: see `schema.sql` in this directory.
 `tasks.kind` is `scout`, `ship`, or `decision`. Do not add `triage`.
 `tasks.status` is `queued`, `underway`, `blocked`, `done`, or `cancelled`.
 `tasks.result` is the outcome pointer: scout report path, or ship PR URL.
-`gate_kind` is optional: `after-task`, `at-time`, or `captain`.
+`gate_kind` is optional: `after-task`, `at-time`, or `boss`.
 
 The schema is deliberately minimal: enough to route work and find its results. Do not add tables speculatively.
 
 ## Setup
 
-If `factory.db` does not exist, create it and run the schema. If it exists, do not migrate inventively. Report the path to Firstmate.
+If `factory.db` does not exist, create it and run the schema. If it exists, do not migrate inventively. Report the path to Consigliere.
 
 ## Intake
 
-Firstmate writes a task row before handing factory work off. Reuse the task id in the crewmate message. A good `prompt` states the goal, acceptance criteria, and constraints - enough to act on without coming back for basics.
+Consigliere writes a task row before handing factory work off. Reuse the task id in the soldier message. A good `prompt` states the goal, acceptance criteria, and constraints - enough to act on without coming back for basics.
 
 Triage wakes stay in chat or cron, not factory.db. Do not write a factory.db row for a standing wake or on-demand "triage now". Do not add kind=triage. Do not file those as scout or ship.
 
-If a project row already maps that repo to a crewmate, reuse that crewmate. Do not overwrite crewmate_id. Do not insert a second row for the same repo.
+If a project row already maps that repo to a soldier, reuse that soldier. Do not overwrite crewmate_id. Do not insert a second row for the same repo.
 
-If the work belongs to a repo that has no project row, insert one row: sign on from `/home/box/agent-data/grok-ship/pack/GROK_BOT_TRIAGE.md` when the captain asked for triage (factory addendum included), otherwise from the crewmate template (`/home/box/agent-data/grok-ship/pack/GROK_BOT_CREWMATE.md`). Record crewmate_id plus repos plus source_control. Do not route factory scout/ship to a second bot.
+If the work belongs to a repo that has no project row, insert one row: sign on from `/home/box/agent-data/grok-ship/pack/GROK_BOT_TRIAGE.md` when the boss asked for triage (factory addendum included), otherwise from the soldier template (`/home/box/agent-data/grok-ship/pack/GROK_BOT_SOLDIER.md`). Record crewmate_id plus repos plus source_control. Do not route factory scout/ship to a second bot.
 
 Non-software work files under the reserved `default` project row (repos `[]`, no source_control); create that row on first use.
 
 ## Promotion
 
-When the captain authorizes implementation after a scout, do not open a duplicate task: flip the same row's kind to ship and hand it back to the crewmate with the scout report as context. The ship flow then applies unchanged.
+When the boss authorizes implementation after a scout, do not open a duplicate task: flip the same row's kind to ship and hand it back to the soldier with the scout report as context. The ship flow then applies unchanged.
 
 ## Updates
 
-The crewmate updates `status`, `branch`, `result`, and `updated_at` as it goes. Done means `result` holds the pointer: scout report path, or ship PR URL.
+The soldier updates `status`, `branch`, `result`, and `updated_at` as it goes. Done means `result` holds the pointer: scout report path, or ship PR URL.
 
 ## Do not
 
@@ -59,7 +59,7 @@ The crewmate updates `status`, `branch`, `result`, and `updated_at` as it goes. 
 - Do not write a factory.db row for a triage wake
 - Do not add kind=triage
 - Do not file on-demand "triage now" as scout or ship
-- Do not create one Firstmate per project
+- Do not create one Consigliere per project
 - Do not assume GitHub when recording `source_control`
 - Do not add a role column
 - Do not invent a second mapping table

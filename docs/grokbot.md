@@ -139,13 +139,13 @@ The canonical schema source in this repository is `grokbot/skills/project-manage
      "$CONSIGLIERE_SHA" > "$PACK_REAL/.grokbot-version"
    ```
 
-8. Reuse or create the Firstmate Grok Bot agent.
+8. Reuse or create the Consigliere Grok Bot agent.
 
    Inspect the existing Grok Bot roster first.
-   If a Firstmate already runs this pack, reuse it and refresh its description from `$ROOT/pack/GROK_BOT_FIRSTMATE.md`.
-   Do not create a second Firstmate.
-   If none exists, create an agent named `Firstmate` from `$ROOT/pack/GROK_BOT_FIRSTMATE.md`.
-   If you are already Firstmate, update your own description instead of cloning yourself.
+   If a Consigliere already runs this pack, reuse it and refresh its description from `$ROOT/pack/GROK_BOT_CONSIGLIERE.md`.
+   Do not create a second Consigliere.
+   If none exists, create an agent named `Consigliere` from `$ROOT/pack/GROK_BOT_CONSIGLIERE.md`.
+   If you are already Consigliere, update your own description instead of cloning yourself.
 
 9. Register or refresh the four global workflows.
 
@@ -159,25 +159,25 @@ The canonical schema source in this repository is `grokbot/skills/project-manage
 
    Do not install extra plugins without the human's approval.
 
-10. Complete the Firstmate handshake and first-install handoff.
+10. Complete the Consigliere handshake and first-install handoff.
 
-    Message Firstmate with a task id such as `GS-READY`.
-    Tell Firstmate that the skills are installed, give it the database path, and require a ready or blocked reply against that same task id.
-    Ask Firstmate to leave the human a greeting message.
+    Message Consigliere with a task id such as `CS-READY`.
+    Tell Consigliere that the skills are installed, give it the database path, and require a ready or blocked reply against that same task id.
+    Ask Consigliere to leave the human a greeting message.
     On a first install only, tell the human that this starter bot is leftover and that they can delete it from the Grok Bot sidebar.
     Do not attempt to delete the starter bot yourself.
-    On a refresh, keep the existing Firstmate and skip the starter-bot handoff.
+    On a refresh, keep the existing Consigliere and skip the starter-bot handoff.
 
 ## Verification on the shared computer
 
 Before reporting success, verify all of the following from the live Grok Bot session:
 
 - `$ROOT/pack/LICENSE` exists.
-- `$ROOT/pack/GROK_BOT_FIRSTMATE.md` and all four registered workflow sources exist.
+- `$ROOT/pack/GROK_BOT_CONSIGLIERE.md` and all four registered workflow sources exist.
 - `sqlite3 "$ROOT/factory.db" ".tables"` lists both `projects` and `tasks`.
 - `$ROOT/reports/` still exists.
 - `$ROOT/pack/.grokbot-version` contains exactly the pinned upstream line and fetched consigliere line.
-- Firstmate replies ready or reports a concrete blocker against the handshake task id.
+- Consigliere replies ready or reports a concrete blocker against the handshake task id.
 - The human confirms that the shared computer's Lavish URL is reachable.
 
 ## License and provenance

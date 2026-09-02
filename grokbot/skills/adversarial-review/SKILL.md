@@ -9,7 +9,7 @@ Review draft ship work on a pushed branch. Do not open a pull request until this
 
 ## Who runs it
 
-A project crewmate starts a **fresh** subagent. Do not resume an old review subagent. The parent model is whatever the crewmate is running unless the captain asked for a specific one.
+A project soldier starts a **fresh** subagent. Do not resume an old review subagent. The parent model is whatever the soldier is running unless the boss asked for a specific one.
 
 The subagent starts blank. The dispatch must include the repo, source control CLI, branch, base, and this entire prompt.
 
@@ -78,9 +78,9 @@ Return JSON:
 ## Loop
 
 - `auto-fix`: reply to the same cloud agent. Then a new fresh review subagent.
-- `ask-user`: Firstmate takes one decision card to the captain. Do not raise.
+- `ask-user`: Consigliere takes one decision card to the boss. Do not raise.
 - `error`: do not raise.
-- Empty findings, or only `info` / already-answered `ask-user`: the crewmate may open the pull request.
+- Empty findings, or only `info` / already-answered `ask-user`: the soldier may open the pull request.
 
 Fix-forward. Do not revert the author's intentional first commit to silence a finding.
 

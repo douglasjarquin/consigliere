@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Eligible-fetch for a triage crewmate. Flags only; no config file.
+"""Eligible-fetch for a triage soldier. Flags only; no config file.
 
 Lists open issues and PRs that are due for triage. Items authored by
-`--owner` (the captain's personal GitHub login) are skipped except
-last-resort ports. Firstmate-mark comments and automation comments/reviews
+`--owner` (the boss's personal GitHub login) are skipped except
+last-resort ports. Consigliere-mark comments and automation comments/reviews
 do not reset the stamp clock. Author comments and new commits still do.
 Existing `<!-- triage:`, `<!-- gh-axi-triage:`, and
 `<!-- treehouse-triage:` stamps still count.
@@ -326,19 +326,19 @@ def closing_issue_numbers(*texts: str | None, repo: str | None = None) -> list[i
     return numbers
 
 
-def is_firstmate_text(text: str | None, firstmate_mark: str) -> bool:
-    if not text or not firstmate_mark:
+def is_consigliere_text(text: str | None, consigliere_mark: str) -> bool:
+    if not text or not consigliere_mark:
         return False
-    return text.lstrip().lower().startswith(firstmate_mark.lower())
+    return text.lstrip().lower().startswith(consigliere_mark.lower())
 
 
-def is_clock_noise(activity: Activity, firstmate_mark: str) -> bool:
-    """Firstmate-mark and automation comments/reviews do not reset the clock."""
+def is_clock_noise(activity: Activity, consigliere_mark: str) -> bool:
+    """Consigliere-mark and automation comments/reviews do not reset the clock."""
     if activity.kind not in {"comment", "review"}:
         return False
     if is_automation(activity.login, activity.typename):
         return True
-    return is_firstmate_text(activity.body, firstmate_mark)
+    return is_consigliere_text(activity.body, consigliere_mark)
 
 
 def ready_for_pr_closers(
@@ -439,7 +439,7 @@ def classify_item(
     item: Item,
     *,
     owner: str,
-    firstmate_mark: str,
+    consigliere_mark: str,
     stale_days: int,
     now: datetime,
     repo: str,
@@ -458,7 +458,7 @@ def classify_item(
         for activity in item.activities:
             if activity.when <= stamp[0]:
                 continue
-            if is_clock_noise(activity, firstmate_mark):
+            if is_clock_noise(activity, consigliere_mark):
                 continue
             later_real = True
             break
@@ -1043,12 +1043,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--owner",
         required=True,
-        help="Captain's personal GitHub login to skip (not the org or repo-owner slug); last-resort ports are kept",
+        help="Boss's personal GitHub login to skip (not the org or repo-owner slug); last-resort ports are kept",
     )
     parser.add_argument(
-        "--firstmate-mark",
+        "--consigliere-mark",
         required=True,
-        help="Text that must start a firstmate comment so those comments do not reset the clock",
+        help="Text that must start a consigliere comment so those comments do not reset the clock",
     )
     parser.add_argument("--stale-days", type=int, default=14)
     parser.add_argument("--issues", type=int, default=5, help="Issue cap (default 5)")
@@ -1090,7 +1090,7 @@ def main(argv: list[str] | None = None) -> int:
             classify_item(
                 item,
                 owner=args.owner,
-                firstmate_mark=args.firstmate_mark,
+                consigliere_mark=args.consigliere_mark,
                 stale_days=args.stale_days,
                 now=now,
                 repo=args.repo,
@@ -1105,7 +1105,7 @@ def main(argv: list[str] | None = None) -> int:
             classify_item(
                 item,
                 owner=args.owner,
-                firstmate_mark=args.firstmate_mark,
+                consigliere_mark=args.consigliere_mark,
                 stale_days=args.stale_days,
                 now=now,
                 repo=args.repo,

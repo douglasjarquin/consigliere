@@ -19,7 +19,7 @@ SPEC.loader.exec_module(fetch)
 NOW = datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc)
 OWNER = "repo-owner"
 REPO = "acme/tools"
-MARK = "Speaking as Firstmate"
+MARK = "Speaking as Consigliere"
 
 
 def activity(when: datetime, kind: str, body: str | None = None, login: str | None = "other", typename: str | None = None) -> fetch.Activity:
@@ -85,7 +85,7 @@ def pr_graphql(**kwargs) -> dict:
 
 
 def classify(item: fetch.Item, **kwargs) -> fetch.Classified | None:
-    params = dict(owner=OWNER, firstmate_mark=MARK, stale_days=14, now=NOW, repo=REPO)
+    params = dict(owner=OWNER, consigliere_mark=MARK, stale_days=14, now=NOW, repo=REPO)
     params.update(kwargs)
     return fetch.classify_item(item, **params)
 
@@ -171,8 +171,8 @@ class SkipTests(unittest.TestCase):
     def test_no_hardcoded_kun_strings(self) -> None:
         source = Path(__file__).with_name("fetch.py").read_text()
         self.assertNotIn("kunchenguid", source.lower())
-        self.assertNotIn("kun's firstmate", source.lower())
-        self.assertNotIn("kun’s firstmate", source.lower())
+        self.assertNotIn("kun's consigliere", source.lower())
+        self.assertNotIn("kun’s consigliere", source.lower())
         pack_root = Path(__file__).resolve().parents[2]
         pack_files = [
             pack_root / "GROK_BOT_TRIAGE.md",
@@ -184,7 +184,7 @@ class SkipTests(unittest.TestCase):
         for path in pack_files:
             text = path.read_text().lower()
             self.assertNotIn("kunchenguid", text, path)
-            self.assertNotIn("kun's firstmate", text, path)
+            self.assertNotIn("kun's consigliere", text, path)
         close_skill = pack_root / "skills/14-day-stale-pr-close/SKILL.md"
         self.assertIn("gh pr close <n> --repo <OWNER/NAME> --comment", close_skill.read_text())
 
@@ -196,7 +196,7 @@ class ClockTests(unittest.TestCase):
         assert row is not None
         self.assertEqual(row.bucket, "unstamped")
 
-    def test_firstmate_comment_does_not_reset_clock(self) -> None:
+    def test_consigliere_comment_does_not_reset_clock(self) -> None:
         stamp_at = NOW - timedelta(days=3)
         body = f"thanks\n<!-- triage: {stamp_at.strftime('%Y-%m-%dT%H:%M:%SZ')} outcome=waiting-author -->"
         row = classify(
@@ -214,10 +214,10 @@ class ClockTests(unittest.TestCase):
         )
         self.assertIsNone(row)
 
-    def test_quoted_disclosure_is_not_firstmate_chatter(self) -> None:
-        self.assertTrue(fetch.is_firstmate_text(f"{MARK}: still waiting.", MARK))
+    def test_quoted_disclosure_is_not_consigliere_chatter(self) -> None:
+        self.assertTrue(fetch.is_consigliere_text(f"{MARK}: still waiting.", MARK))
         self.assertFalse(
-            fetch.is_firstmate_text(
+            fetch.is_consigliere_text(
                 f"Got it.\n\n> {MARK}: please push a fix\n\nPushed.",
                 MARK,
             )
@@ -256,7 +256,7 @@ class ClockTests(unittest.TestCase):
         assert row is not None
         self.assertEqual(row.bucket, "stale-restamp")
 
-    def test_later_non_firstmate_comment_makes_live(self) -> None:
+    def test_later_non_consigliere_comment_makes_live(self) -> None:
         stamp_at = NOW - timedelta(days=1)
         body = f"<!-- triage: {stamp_at.strftime('%Y-%m-%dT%H:%M:%SZ')} outcome=waiting-author -->"
         row = classify(
@@ -1441,7 +1441,7 @@ class CliTests(unittest.TestCase):
             with redirect_stderr(StringIO()):
                 parser.parse_args([])
         args = parser.parse_args(
-            ["--repo", "acme/tools", "--owner", "acme", "--firstmate-mark", MARK]
+            ["--repo", "acme/tools", "--owner", "acme", "--consigliere-mark", MARK]
         )
         self.assertEqual(args.stale_days, 14)
         self.assertEqual(args.issues, 5)
@@ -1451,21 +1451,21 @@ class CliTests(unittest.TestCase):
         self.assertIn("personal GitHub login", folded)
         self.assertIn("not the org or repo-owner slug", folded)
         self.assertIn("OWNER/NAME", folded)
-        firstmate = Path(__file__).resolve().parents[2] / "GROK_BOT_FIRSTMATE.md"
-        charter = firstmate.read_text()
-        self.assertIn("captain's personal GitHub login for `--owner`", charter)
+        consigliere = Path(__file__).resolve().parents[2] / "GROK_BOT_CONSIGLIERE.md"
+        charter = consigliere.read_text()
+        self.assertIn("boss's personal GitHub login for `--owner`", charter)
         self.assertIn("`--repo` stays OWNER/NAME", charter)
         self.assertIn("Triage wakes stay in chat or cron, not factory.db", charter)
         self.assertIn("do not add kind=triage", charter)
         self.assertIn("do not file it as scout or ship", charter)
-        self.assertIn("FM-", charter)
+        self.assertIn("CS-", charter)
         schema = (Path(__file__).resolve().parents[2] / "skills/project-management/SKILL.md").read_text()
         self.assertIn("`tasks.kind` is `scout`, `ship`, or `decision`. Do not add `triage`.", schema)
         self.assertIn("Do not write a factory.db row for a standing wake or on-demand", schema)
         addendum = (Path(__file__).resolve().parents[2] / "GROK_BOT_TRIAGE.md").read_text()
-        self.assertIn("ONLY when Firstmate sends a real factory scout or ship", addendum)
+        self.assertIn("ONLY when Consigliere sends a real factory scout or ship", addendum)
         self.assertIn("NEVER launch a cloud agent for issue fixes", addendum)
-        self.assertIn("FM-", addendum)
+        self.assertIn("CS-", addendum)
         self.assertIn("Cannot-tell / inconclusive / undecided blocks auto-merge", addendum)
         self.assertIn("Do not ignore some undecided rules", addendum)
         triage = Path(__file__).resolve().parents[2] / "TRIAGE.md"
@@ -1483,21 +1483,21 @@ class CliTests(unittest.TestCase):
         readme = Path(__file__).resolve().parents[2] / "README.md"
         readme_text = readme.read_text()
         self.assertIn("factory ships never merge without your word", readme_text)
-        self.assertIn("wired triage crewmate may auto-merge", readme_text)
+        self.assertIn("wired triage soldier may auto-merge", readme_text)
         self.assertIn("corrective or opt-in", readme_text)
         self.assertIn("no cannot-tell", readme_text)
         self.assertIn("not default-behavior", readme_text)
         self.assertIn("not security", readme_text)
         self.assertIn("May auto-merge only when all of these hold", triage_text)
         self.assertIn(
-            "Factory ships never merge without the captain's explicit word",
+            "Factory ships never merge without the boss's explicit word",
             charter,
         )
-        self.assertIn("wired triage crewmate may auto-merge", charter)
+        self.assertIn("wired triage soldier may auto-merge", charter)
         self.assertIn("no cannot-tell", charter)
         ship = (Path(__file__).resolve().parents[2] / "GROK_SHIP.md").read_text()
-        self.assertIn("Factory ships never merge without the captain's word", ship)
-        self.assertIn("wired triage crewmate may auto-merge", ship)
+        self.assertIn("Factory ships never merge without the boss's word", ship)
+        self.assertIn("wired triage soldier may auto-merge", ship)
         self.assertIn("no cannot-tell", ship)
 
     def test_parse_repo(self) -> None:
@@ -1828,7 +1828,7 @@ class CliTests(unittest.TestCase):
 
         owner_issue = {
             "number": 1,
-            "title": "captain work",
+            "title": "boss work",
             "url": "https://example.com/i/1",
             "createdAt": "2026-08-20T00:00:00Z",
             "body": "mine",
@@ -1943,7 +1943,7 @@ class CliTests(unittest.TestCase):
                     "acme/tools",
                     "--owner",
                     OWNER,
-                    "--firstmate-mark",
+                    "--consigliere-mark",
                     MARK,
                 ]
             )

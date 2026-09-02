@@ -7,10 +7,10 @@ This file is an installer. Do not summarize.
 
 ## What you are installing
 
-- A Firstmate the captain talks to from then on
+- A Consigliere the boss talks to from then on
 - Global skills: lavish-session, adversarial-review, project-management, ahoy
 - A local sqlite database for projects and tasks
-- A crewmate template for later, per project. Repo triage is not part of this install; if asked later, Firstmate can sign on a triage crewmate. Factory ships never merge without the captain's word; a wired triage crewmate may auto-merge corrective or opt-in work only (green CI, VISION aligned with no cannot-tell, not default-behavior, not security).
+- A soldier template for later, per project. Repo triage is not part of this install; if asked later, Consigliere can sign on a triage soldier. Factory ships never merge without the boss's word; a wired triage soldier may auto-merge corrective or opt-in work only (green CI, VISION aligned with no cannot-tell, not default-behavior, not security).
 
 ## The three computers
 
@@ -22,9 +22,9 @@ This file is an installer. Do not summarize.
 
 Same directory as this file:
 
-- `GROK_BOT_FIRSTMATE.md` — Firstmate charter
-- `GROK_BOT_CREWMATE.md` — per-project crewmate charter
-- `GROK_BOT_TRIAGE.md` — per-repo triage crewmate charter, signed on only when asked
+- `GROK_BOT_CONSIGLIERE.md` — Consigliere charter
+- `GROK_BOT_SOLDIER.md` — per-project soldier charter
+- `GROK_BOT_TRIAGE.md` — per-repo triage soldier charter, signed on only when asked
 - `TRIAGE.md` — triage judgment, not an installer
 - `skills/lavish-session/SKILL.md`
 - `skills/adversarial-review/SKILL.md`
@@ -39,9 +39,9 @@ Same directory as this file:
 
 1. Copy this whole pack to `/home/box/agent-data/grok-ship/pack/` on the shared computer (clone or download it first if you only have this file's text). Every later reference to a pack file means that path. If a copy is already there, refresh it.
 
-2. Look at the existing roster (agent profile folders). If a Firstmate already exists, reuse it. Do not create a second.
+2. Look at the existing roster (agent profile folders). If a Consigliere already exists, reuse it. Do not create a second.
 
-3. Read `GROK_BOT_FIRSTMATE.md`. CreateAgent name `Firstmate` with that description. If you are already Firstmate, keep your name and update your description instead of cloning yourself.
+3. Read `GROK_BOT_CONSIGLIERE.md`. CreateAgent name `Consigliere` with that description. If you are already Consigliere, keep your name and update your description instead of cloning yourself.
 
 4. Write four global workflows from the skill files. Names:
    - Lavish session
@@ -56,6 +56,6 @@ Same directory as this file:
 
 7. Detect source control CLIs on the shared computer: `gh`, `glab`, Bitbucket, or Cursor Origin, and verify the CLI is authenticated (for example `gh auth status`) - the adversarial review reads branches through it. Do not assume GitHub. Cloud agents separately need the user's Cursor account connected to whichever source control they use. Ask the user to connect whatever is missing. Do not ask them to paste a token in chat.
 
-8. Message Firstmate with a task id (for example GS-READY). Tell it the skills are installed, the DB path, and to reply ready against that id. Empty or blocked still gets a reply. Tell Firstmate to leave a greeting message to the user.
+8. Message Consigliere with a task id (for example GS-READY). Tell it the skills are installed, the DB path, and to reply ready against that id. Empty or blocked still gets a reply. Tell Consigliere to leave a greeting message to the user.
 
-9. Tell the user: talk only to Firstmate from here. This starter bot is leftover. They can delete it from the sidebar (right-click the row, Delete). You cannot delete it yourself.
+9. Tell the user: talk only to Consigliere from here. This starter bot is leftover. They can delete it from the sidebar (right-click the row, Delete). You cannot delete it yourself.
