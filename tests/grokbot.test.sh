@@ -35,8 +35,13 @@ test_consigliere_naming() {
   assert_present "$ROOT/grokbot/GROK_BOT_SOLDIER.md" "soldier charter is missing"
   assert_absent "$ROOT/grokbot/GROK_BOT_FIRSTMATE.md" "old Firstmate charter name remains"
   assert_absent "$ROOT/grokbot/GROK_BOT_CREWMATE.md" "old Crewmate charter name remains"
-  stale=$(find "$ROOT/grokbot" -type f ! -path '*/__pycache__/*' \
-    -exec grep -Ein '(^|[^[:alnum:]_])(firstmate|crewmate|captain)([^[:alnum:]_]|$)' {} + || true)
+  stale=$(
+    {
+      find "$ROOT/grokbot" -type f ! -path '*/__pycache__/*' \
+        -exec grep -Ein '(^|[^[:alnum:]_])(firstmate|crewmate|captain)([^[:alnum:]_]|$)' {} +
+      grep -Ein '(^|[^[:alnum:]_])(firstmate|crewmate|captain)([^[:alnum:]_]|$)' "$ROOT/docs/grokbot.md"
+    } || true
+  )
   [ -z "$stale" ] || fail "upstream role vocabulary remains in the Grok Bot pack"$'\n'"$stale"
   pass "Consigliere role vocabulary"
 }
