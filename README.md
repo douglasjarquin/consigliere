@@ -81,6 +81,12 @@ Then talk to it in plain language: describe the work, name the project when it i
 - `host/` - machine-local sibling (capo roster, harness pin, activation); never backed up, re-created per machine
 - `data/ state/ projects/` - generated output, volatile runtime state, and clones; boss-private, gitignored, disposable or re-creatable
 
+### Grok Bot pack
+
+The `grokbot/` subtree is a vendored, pinned port of [grok-ship](https://github.com/kunchenguid/grok-ship/) for the Grok Bot platform, not consigliere's terminal harnesses.
+It retains grok-ship's third-party MIT license.
+Install and upgrade both mean telling a Grok Bot session to follow [`docs/grokbot.md`](docs/grokbot.md).
+
 Backup and restore need no tool:
 
 ```

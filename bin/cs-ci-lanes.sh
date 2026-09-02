@@ -139,6 +139,9 @@ while IFS= read -r path; do
     skills/* | docs/* | README.md | .tasks.toml)
       portable=true
       ;;
+    grokbot/*)
+      portable=true
+      ;;
   esac
 done <<EOF
 $changed
