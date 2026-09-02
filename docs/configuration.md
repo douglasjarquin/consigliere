@@ -51,6 +51,7 @@ data/                generated and task-scoped output; LOCAL, gitignored, DISPOS
   telemetry/turns.jsonl  append-only turn telemetry, written only while enabled; docs/telemetry.md
   <id>/brief.md      per-task soldier brief, or per-capo charter brief when kind=capo
   <id>/report.md     scout task deliverable, written by the soldier; survives teardown
+  session-start/<timestamp>-<home-id>.md  expanded-recovery snapshot published by a locked, non-`--recover`/`--full` session-start run; pruned to CS_SESSION_START_SNAPSHOT_KEEP, diagnostic only, never a second source of operational truth
 projects/            cloned repos; gitignored; READ-ONLY for you
 state/               volatile runtime signals; gitignored
   <id>.status        appended by soldiers: "<state>: <note>" wake-event lines, not current-state truth
@@ -296,6 +297,8 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_SESSION_START_STATUS_TAIL` | cs-session-start | `state/*.status` lines printed per task in the session-start digest; default 5; each line is capped by `bin/cs-line-cap-lib.sh` |
 | `CS_SESSION_START_QUEUED_LIMIT` | cs-session-start | plain queued backlog rows in the session-start digest; default 20; done rows are never listed |
 | `CS_SESSION_START_ACTIVE_LIMIT` | cs-session-start | in-flight, held, and blocked backlog rows per group in the session-start digest; default 40; each row is shown in full and any remainder is disclosed with the targeted follow-up that prints the rest; queued public-followup rows are outside this bound and always print in full |
+| `CS_SESSION_START_TASK_LIMIT` | cs-session-start | `state/*.meta` task blocks shown in full in the session-start digest's live-task inventory; default 15; a remainder is disclosed with an exact count and a pointer to `bin/cs-fleet-view.sh`. `--recover`/`--full` raise this (and `CS_SESSION_START_ACTIVE_LIMIT`/`CS_SESSION_START_QUEUED_LIMIT`) to unbounded |
+| `CS_SESSION_START_SNAPSHOT_KEEP` | cs-session-start | how many `data/session-start/<timestamp>-<home-id>.md` expanded-recovery snapshots a locked, non-`--recover`/`--full` run retains after publishing a new one; default 20 |
 | `CS_CAPO_WAKE_STALL_SECS` | cs-watch | minimum age of the oldest valid wake-queue row in a registered capo home before the main watcher publishes one durable parent capo wake-loop stall notification; zero or invalid values use 60 |
 | `CS_PAUSE_RESURFACE_SECS` | cs-watch | declared external-wait recheck cadence |
 | `CS_EVENT_SPOOL_TICK` | cs-watch | how often the bounded event wait re-reads the spool, in seconds; default 0.5. The direct trade between blocked-escalation latency and the idle cost of a watcher with panes but no events - each tick is one `stat` plus the `sleep` |
