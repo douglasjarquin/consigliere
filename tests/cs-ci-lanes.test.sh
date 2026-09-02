@@ -60,6 +60,15 @@ for path in docs/herdr.md skills/rundown/SKILL.md README.md .tasks.toml; do
 done
 pass 'documentation and skill changes run only the hermetic suite'
 
+# --- vendored Grok Bot content is a portable-suite dependency ---------------
+
+out=$(lanes_for grokbot/README.md)
+assert_lane "$out" portable true "grokbot content is a portable-suite dependency"
+assert_lane "$out" lint false "grokbot content cannot change the lint verdict"
+assert_lane "$out" herdr false "grokbot content cannot change the real-herdr verdict"
+assert_lane "$out" coverage false "grokbot content cannot change the lane partition"
+pass 'grokbot changes run only the hermetic suite'
+
 # --- a change no lane reads ---------------------------------------------------
 
 out=$(lanes_for AGENTS.md .gitignore)
