@@ -68,6 +68,8 @@ A capo's routed reply returns through status or a document pointer, not by consi
 For the parent-owned correlation, recovery, and escalation contract on marked capo requests, see `bin/cs-pending-reply-lib.sh`.
 Supervise all live work under `AGENTS.md` section 7.
 
+Every spawn also records a `pack_sha256`/`pack_schema` pair in `state/<id>.meta`: the deterministic role/workflow/harness scaffold hash the brief was rendered from (`bin/cs-context-pack.sh`, issue #151's context-pack composer). It is audit/measurement metadata, never something to inspect or act on during ordinary dispatch or supervision.
+
 ## Selected delivery path and approval authority
 
 Decide each ship task's delivery mode and `yolo` posture at intake, and pass both explicitly at scaffold, spawn, and promotion; nothing derives them for you, and a mismatch between the brief and the spawn is refused rather than launched.

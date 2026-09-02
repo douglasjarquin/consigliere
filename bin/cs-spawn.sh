@@ -1092,6 +1092,31 @@ META_LINES+=("harness=$HARNESS" "herdr_session=$(cs_herdr_session)")
 [ "$HEADLESS" -eq 1 ] && META_LINES+=("headless=1")
 [ -n "$ISSUE" ] && META_LINES+=("issue=$ISSUE")
 [ -n "$BACKLOG_ITEM" ] && META_LINES+=("backlog_item=$BACKLOG_ITEM")
+
+# Record the phase-2 context-pack audit trail: the deterministic
+# role/workflow/harness scaffold hash this task's brief was rendered from
+# (bin/cs-context-pack.sh, issue #151). Measurement/reproducibility only -
+# never a dispatch gate, so a failure here (missing sha256 tool, unexpected
+# state) warns and proceeds exactly like the base-freshness check above,
+# rather than aborting a real dispatch over audit metadata.
+PACK_ROLE=$KIND
+case "$KIND" in
+  ship) PACK_WORKFLOW=$MODE ;;
+  scout) PACK_WORKFLOW=report-only ;;
+  capo) PACK_WORKFLOW=none ;;
+esac
+if PACK_JSON=$("$CS_ROOT/bin/cs-context-pack.sh" "$PACK_ROLE" "$PACK_WORKFLOW" "$HARNESS" 2>/dev/null); then
+  PACK_HASH=$(printf '%s\n' "$PACK_JSON" | sed -n 's/.*"pack_sha256": "\([^"]*\)".*/\1/p')
+  PACK_SCHEMA=$(printf '%s\n' "$PACK_JSON" | sed -n 's/.*"schema": "\([^"]*\)".*/\1/p')
+  if [ -n "$PACK_HASH" ] && [ -n "$PACK_SCHEMA" ]; then
+    META_LINES+=("pack_sha256=$PACK_HASH" "pack_schema=$PACK_SCHEMA")
+  else
+    echo "warn: cs-context-pack.sh produced no parseable pack_sha256/schema for $PACK_ROLE/$PACK_WORKFLOW/$HARNESS; dispatch proceeds without the pack audit fields" >&2
+  fi
+else
+  echo "warn: cs-context-pack.sh failed composing the $PACK_ROLE/$PACK_WORKFLOW/$HARNESS audit pack; dispatch proceeds without the pack audit fields" >&2
+fi
+
 cs_meta_write "$STATE/$ID.meta" "${META_LINES[@]}"
 
 # The dispatch backlog transition, folded into the same physical change under
