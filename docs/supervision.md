@@ -60,6 +60,27 @@ Keying it to the print is the one boundary the drain can observe by itself.
 Nothing is ever re-promoted into a new pending batch, which is what keeps repeated adoption from feeding itself: a drain that commits ends the chain outright, and consecutive dying drains accumulate batches whose contents dedupe away the moment one of them commits.
 Restoring an interrupted drain's queue removes the batch it restored from, because those records are back in the queue and a leftover copy would be adopted as a loss that never happened.
 
+## Turn handling by wake type
+
+`AGENTS.md` section 7 requires draining the wake queue before acting on any wake-handling turn.
+Once drained, handle each actionable wake as follows:
+
+1. `signal:` - read the listed event lines first, then reconcile current state only where action depends on it.
+2. `stale:` - inspect the recorded endpoint and load `stuck-soldier-recovery` for a stopped, looping, confused, or unresponsive soldier; a demand-deep-inspection reason also requires current-state and validation-log inspection.
+3. `check:` - act on the named poll result, including a merge the boss has already authorized.
+4. A message wake - drain the addressed inbox through the generic parent/child protocol and act only on the current task's records.
+5. `heartbeat:` - review the whole fleet from `bin/cs-fleet-view.sh`, reconcile suspicious tasks and PR state, update the backlog, and never report an unchanged fleet as progress.
+
+When any wake reports a merged PR for a project cloned in this home, refresh that clone through the guarded fleet-sync path.
+A capo's idle endpoint is healthy, and parent supervision relies on its routed status rather than treating a quiet pane as stale.
+Waiting on a healthy supervision cycle is silent; empty polls, elapsed time, and no-change updates are not boss-facing progress (`escalation-style`).
+
+## Self-activation
+
+Every home activates itself: when its wake queue has sat unattended, its own monitor prompts its own agent through `bin/cs-activate.sh`, so a queue is picked up without anyone injecting into that pane.
+Scope is `host/activation.conf`, which defaults to `always` everywhere because an ended turn now depends on it.
+A `state/.activation-stalled` marker means that home cannot start its own turns and needs recovery; treat it as a blocker, not a warning.
+
 ## Wake vocabulary
 
 - `signal: <files>` - status/turn-end signals; surfaced when a listed status carries a boss-relevant verb anywhere in its unread appended span OR a no-verb signal's soldier is not provably working.

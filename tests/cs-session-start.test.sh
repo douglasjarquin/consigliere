@@ -634,7 +634,7 @@ pass "manual actionable groups are bounded while public-followup obligations sta
 # The backlog section tells the agent how to recover a withheld row; the
 # contract two sections earlier forbids bulk-reading the same file. They have to
 # agree, or an agent obeying the contract literally cannot recover the rows
-# AGENTS.md sections 7 and 10 make most actionable.
+# AGENTS.md sections 6 and 9 make most actionable.
 assert_contains "$out" 'the backlog listing disclosed omitted rows in any of its groups - in-flight,' \
   "the read-once contract still sanctions only omitted queued items"
 assert_contains "$out" 'targeted follow-up that disclosure names' \

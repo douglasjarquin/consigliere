@@ -39,7 +39,7 @@
 #   CS_CREW_STATE_BIN        current-state reader override (tests stub it)
 #   CS_FLEET_NOW             fixed generated timestamp override
 #
-# Consumers: AGENTS.md section 8 heartbeat review ("review the whole fleet
+# Consumers: AGENTS.md section 7 heartbeat review ("review the whole fleet
 # from bin/cs-fleet-view.sh") and any point-in-time boss status brief.
 set -u
 

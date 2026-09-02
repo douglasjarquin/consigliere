@@ -67,4 +67,4 @@ Escalate in order:
    Unsent composer text is never a refusal: the verb submits it with one Enter, cancels whatever turn that starts, and types the exit command regardless of what the composer classifier still says, so only the verified postcondition decides the outcome.
    If the verb still reports the agent running after that, read the pane with `bin/cs-peek.sh <id>` and settle what is actually sitting there before trying again.
    A pane whose agent cannot be stopped at all is recovered by closing the pane and reopening the surviving worktree with `herdr worktree open --path`, which is endpoint replacement, not work discard.
-6. If a second relaunch fails too, write `failed` to the backlog and tell the boss the plain failure, preserved work, and consequence using `AGENTS.md` section 9; do not mention metadata, pane, or worktree unless the path itself is needed for action.
+6. If a second relaunch fails too, write `failed` to the backlog and tell the boss the plain failure, preserved work, and consequence using `AGENTS.md` section 8; do not mention metadata, pane, or worktree unless the path itself is needed for action.

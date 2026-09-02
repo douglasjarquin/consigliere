@@ -19,12 +19,12 @@ It does not replace `capo-provisioning`, which owns project clones inside persis
 
 Projects live flat under `projects/`, and `config/projects.md` is the private fleet registry.
 Use the registry format and parser contract owned by the header of `bin/cs-project-mode.sh`.
-The registry records the boss's standing posture for a project and is advisory: per `AGENTS.md` section 7, each ship task's mode and yolo are decided at intake and passed explicitly, so a registry entry is the default the boss expects rather than an enforced setting.
+The registry records the boss's standing posture for a project and is advisory: per `AGENTS.md` section 6, each ship task's mode and yolo are decided at intake and passed explicitly, so a registry entry is the default the boss expects rather than an enforced setting.
 Keep each registry description useful for identifying the project, but keep boss-private state and detailed project knowledge in their existing designated homes.
 Do not turn the registry into project documentation.
 
 Before adding, cloning, creating, or registering any project in the main home, read `host/capos.md` and judge the proposed project or domain against every registered natural-language `scope:`.
-Apply `AGENTS.md` section 7's routing rules: when an existing scope owns that domain, route the operation to that capo instead of standing up a duplicate main-home clone.
+Apply `AGENTS.md` section 6's routing rules: when an existing scope owns that domain, route the operation to that capo instead of standing up a duplicate main-home clone.
 Absence from `config/projects.md` is never evidence that no capo owns the domain, because a capo's own clones live in its home and never appear in the main registry.
 If the owning capo cannot accept the route, report that concrete blocker or get an explicit boss redirection rather than silently duplicating the project here.
 
@@ -76,6 +76,22 @@ cd projects/<name> && no-mistakes init && no-mistakes doctor
 Initialization configures the local gate and does not vendor a no-mistakes skill into the project.
 Do not create a commit merely because initialization ran.
 If doctor reports an environment, authentication, or daemon problem, resolve that blocker before dispatching work and never restart the shared daemon from a project operation.
+
+## Knowledge routing
+
+Route durable knowledge to its most specific owner:
+
+- Boss preferences and working style belong in `config/boss.md` after inspect-then-update.
+- Preferences shared across capo domains belong in the primary home's `config/boss-shared.md` under the `capo-provisioning` contract.
+- Fleet-local operational facts belong in curated, home-local `config/learnings.md`.
+- Task-scoped notes belong with the backlog item, and investigation findings belong in the scout report.
+- Knowledge useful to almost every contributor to one project belongs in that project's committed `AGENTS.md`.
+- Knowledge about consigliere itself belongs in this repo's tracked surface.
+
+Consigliere never writes a project's `AGENTS.md` directly.
+A soldier creates or updates it lazily through the task's selected delivery path, using `bin/cs-ensure-agents-md.sh` and preferring pointers to authoritative sources over copied detail.
+Keep fleet delivery posture and boss-private strategy out of project memory.
+When the boss invokes `/vault`, load the `vault` skill for the complete knowledge-routing and unfinished-work sweep.
 
 ## Remove
 

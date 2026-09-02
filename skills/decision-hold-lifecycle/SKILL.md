@@ -29,7 +29,7 @@ The fleet review (`bin/cs-fleet-view.sh`) and any status brief read the resultin
 2. Inventory only genuine unresolved choices that require the boss.
 3. For each choice, choose a stable key and use the script's `hold` command with a concise title, reason, and repository.
 4. Run the script's `complete` command with the full unresolved-key inventory for that review pass.
-5. Relay the choices to the boss as decisions under `AGENTS.md` section 9; do not use the word hold in boss chat.
+5. Relay the choices to the boss as decisions under `AGENTS.md` section 8; do not use the word hold in boss chat.
 6. After the boss decides, record dependent work with normal tasks-axi commands and block it by the hold identity.
 7. Put the boss's exact durable decision in a file and use the script's `resolve` command with every routed task.
 8. Confirm the fleet review no longer shows the closed hold and that routed work remains in structured backlog state.

@@ -123,7 +123,7 @@
 # STATUS TAILS: CS_SESSION_START_STATUS_TAIL bounds how many lines each task's
 # tail prints, and bin/cs-line-cap-lib.sh bounds how long each of those lines
 # may be. Both bounds are safe because the section prints every task's full
-# status log path, and AGENTS.md section 8 treats a status line as a wake EVENT
+# status log path, and AGENTS.md section 7 treats a status line as a wake EVENT
 # rather than current state - bin/cs-crew-state.sh owns current state.
 #
 # RUNTIME BOUND: the digest is executed by the session-open hooks (see
