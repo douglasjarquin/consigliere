@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Behavior (portable): cross-home messages use the recorded parent and sender Herdr sessions.
 set -u
-fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
-pass() { printf 'ok - %s\n' "$1"; }
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/cs-cross-home-message.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 CHILD_HOME="$TMP/child"
