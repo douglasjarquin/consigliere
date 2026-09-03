@@ -70,6 +70,7 @@ WORKDIR /workspace
 COPY mise.toml /workspace/mise.toml
 COPY bin/cs-install-shellcheck.sh /tmp/cs-dev-tools/bin/cs-install-shellcheck.sh
 COPY bin/cs-lint.sh /tmp/cs-dev-tools/bin/cs-lint.sh
+RUN chown cs:cs /workspace
 
 # Pinned ShellCheck via this repo's own installer (bin/cs-lint.sh
 # --required-version owns the exact pin; this never floats to latest).
@@ -107,13 +108,13 @@ USER cs
 RUN printf '%s\n' 'export PATH="/usr/local/share/mise/shims:$PATH"' >> /home/cs/.bashrc
 # Installs node/aube per mise.toml, baked into the image rather than lazily
 # fetched at container-run time. Runs as the non-root "cs" user, not root,
-# since mise installs into the invoking user's home directory
-# (~/.local/share/mise) - installing as root here would leave the tools
-# invisible to the "cs" user this image actually runs as.
+# since mise installs into the configured system-wide directories owned by
+# the invoking user - installing as root here would leave the tools invisible
+# to the "cs" user this image actually runs as.
 RUN mise install
 
-# Also installed via mise's GLOBAL config (~/.config/mise/config.toml), not
-# just the project mise.toml: a project-scoped tool's shim only activates in
+# Also installed via mise's GLOBAL config (/usr/local/etc/mise/config.toml),
+# not just the project mise.toml: a project-scoped tool's shim only activates in
 # a directory mise.toml governs, but bin/cs-test-run.sh's fixtures invoke
 # tasks-axi (and its own shim needs node) from scratch directories under
 # /tmp with no mise.toml of their own - tasks-axi needs to behave like the

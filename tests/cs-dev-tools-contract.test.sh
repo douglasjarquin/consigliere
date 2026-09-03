@@ -37,6 +37,9 @@ if build.get("context") != "..":
 if "snapshot" in config:
     print("snapshot must be absent", file=sys.stderr)
     raise SystemExit(1)
+if "start" in config:
+    print("start must be absent when no Cloud Agent service needs it", file=sys.stderr)
+    raise SystemExit(1)
 if config.get("install") != "mise install":
     print("install must be the idempotent project-root refresh: mise install", file=sys.stderr)
     raise SystemExit(1)
@@ -62,6 +65,7 @@ required = {
     "passwordless sudo": "NOPASSWD:ALL" in source,
     "default UID": "ARG UID=1000" in source,
     "default GID": "ARG GID=1000" in source,
+    "writable workspace": "chown cs:cs /workspace" in source,
     "system mise data": "MISE_DATA_DIR=/usr/local/share/mise" in source,
     "system mise config": "MISE_CONFIG_DIR=/usr/local/etc/mise" in source,
     "mise manifest": "COPY mise.toml" in source,

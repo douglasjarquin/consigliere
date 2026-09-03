@@ -69,6 +69,14 @@ assert_lane "$out" herdr false "grokbot content cannot change the real-herdr ver
 assert_lane "$out" coverage false "grokbot content cannot change the lane partition"
 pass 'grokbot changes run only the hermetic suite'
 
+out=$(lanes_for .cursor/environment.json)
+assert_lane "$out" portable true '.cursor/environment.json is a portable-suite dependency'
+assert_lane "$out" lint false '.cursor/environment.json cannot change the lint verdict'
+assert_lane "$out" herdr false '.cursor/environment.json cannot change the real-herdr verdict'
+assert_lane "$out" coverage false '.cursor/environment.json cannot change the lane partition'
+assert_lane "$out" docker false '.cursor/environment.json does not change the Compose image'
+pass '.cursor/environment.json runs the portable suite'
+
 # --- dev-tools suite changes need lint, portable, and the real-docker lane ---
 
 out=$(lanes_for mise-tasks/dev/test)

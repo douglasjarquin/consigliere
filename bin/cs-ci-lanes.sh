@@ -146,6 +146,9 @@ while IFS= read -r path; do
     grokbot/*)
       portable=true
       ;;
+    .cursor/environment.json)
+      portable=true
+      ;;
     mise.toml | mise-tasks/* | docker/* | docker-compose.yml | scripts/ci/*)
       lint=true
       portable=true
