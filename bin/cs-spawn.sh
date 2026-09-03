@@ -143,6 +143,8 @@ esac
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
 # shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# shellcheck source=bin/cs-herdr-nest-lib.sh
+. "$SCRIPT_DIR/cs-herdr-nest-lib.sh"
 # shellcheck source=bin/cs-operational-input.sh
 . "$SCRIPT_DIR/cs-operational-input.sh"
 # shellcheck source=bin/cs-harness-lib.sh
@@ -1047,9 +1049,24 @@ refresh_base() {
 # implicit current-HEAD base to keep fresh: skip the check entirely.
 [ -n "$BASE" ] || refresh_base
 
-if ! TUPLE=$(cs_herdr_task_create "$PROJ_ABS" "$BRANCH" "$ID" "$BASE"); then
-  echo "error: herdr worktree create failed for '$ID' (a pre-existing worktree directory may hold unlanded work; inspect ~/.herdr/worktrees/$PROJECT_NAME/ - never pre-delete it to force the spawn)" >&2
-  exit 1
+# A soldier spawned by a capo joins the capo's OWN live workspace as a new
+# tab instead of getting a dedicated workspace-per-task container - the
+# nesting the boss asked for (cs-herdr-nest-lib.sh). Empty when this spawn
+# has no capo to nest under, or that capo's recorded workspace is stale, in
+# which case the ordinary dedicated container below is unchanged.
+NEST_WS=$(cs_herdr_nest_target_workspace "$CS_HOME" "${CS_TASK_ID:-}" 2>/dev/null || true)
+if [ -n "$NEST_WS" ]; then
+  CONTAINER=tab
+  if ! TUPLE=$(cs_herdr_task_create_nested "$PROJ_ABS" "$BRANCH" "$ID" "$NEST_WS" "$BASE"); then
+    echo "error: nested herdr tab create failed for '$ID' under capo workspace $NEST_WS (a pre-existing worktree directory may hold unlanded work; inspect ${CS_HERDR_WORKTREES_ROOT:-$HOME/.herdr/worktrees}/$PROJECT_NAME/nested/ - never pre-delete it to force the spawn)" >&2
+    exit 1
+  fi
+else
+  CONTAINER=workspace
+  if ! TUPLE=$(cs_herdr_task_create "$PROJ_ABS" "$BRANCH" "$ID" "$BASE"); then
+    echo "error: herdr worktree create failed for '$ID' (a pre-existing worktree directory may hold unlanded work; inspect ~/.herdr/worktrees/$PROJECT_NAME/ - never pre-delete it to force the spawn)" >&2
+    exit 1
+  fi
 fi
 WS=$(printf '%s' "$TUPLE" | cut -f1)
 PANE=$(printf '%s' "$TUPLE" | cut -f2)
@@ -1057,7 +1074,11 @@ WT=$(printf '%s' "$TUPLE" | cut -f3)
 
 abort_task() { # <message>
   echo "error: $1" >&2
-  cs_herdr_worktree_remove "$WS" >/dev/null 2>&1 || true
+  if [ "$CONTAINER" = tab ]; then
+    cs_herdr_nested_task_remove "$PROJ_ABS" "$WT" "$PANE" >/dev/null 2>&1 || true
+  else
+    cs_herdr_worktree_remove "$WS" >/dev/null 2>&1 || true
+  fi
   exit 1
 }
 
@@ -1076,6 +1097,7 @@ META_LINES=(
   "worktree=$WT_REAL"
   "project=$PROJ_ABS"
   "kind=$KIND"
+  "container=$CONTAINER"
   "parent_task_id=$PARENT_TASK"
   "parent_home=$PARENT_HOME"
   "parent_state=$PARENT_STATE"

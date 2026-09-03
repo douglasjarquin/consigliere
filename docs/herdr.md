@@ -37,6 +37,21 @@ Returning the first match there would silently bind the capo to whichever duplic
 The boss resolves it by closing or relabelling the duplicate.
 This is the same rule already applied to tab labels below: scope to this home's workspace ids from metadata, never adopt by label sweep.
 
+### Nested tab shape: joining a capo's own workspace (no dedicated container)
+
+A ship/scout task spawned by a capo instead joins the CAPO's own live workspace as a new tab, when that capo's own recorded workspace is still live (`bin/cs-herdr-nest-lib.sh`'s `cs_herdr_nest_target_workspace`, called from `bin/cs-spawn.sh`).
+This is the "no dangling space" placement the boss asked for after reading firstmate's herdr-backend doc, which joins its own launcher's live workspace by default for the same reason.
+
+`herdr worktree create` has no flag to target an existing workspace (its own `--workspace` only names the SOURCE, verified above), so a nested task never routes its worktree through herdr's own git integration: the checkout is plain `git worktree add`/`git worktree remove` (`bin/cs-herdr-lib.sh`'s `cs_herdr_task_create_nested` / `cs_herdr_nested_task_remove`), and only the pane is herdr's.
+
+Verified live 2026-09-02 (herdr 0.8.2, protocol 20, isolated `cs-lab-*` session):
+
+- `tab create --workspace <target> --cwd <path> --label <label> --no-focus` adds ONE new tab to `<target>`; the target's `tab_count`/`pane_count` increase by exactly one, its OTHER tabs are untouched, and no new workspace is created. Response carries `result.tab.tab_id` and `result.root_pane.pane_id`, the same shape as `worktree create`'s.
+- `pane close <that tab's root pane>` removes exactly that one tab; the target workspace and its remaining tabs survive unchanged.
+
+So a nested task's `workspace=` in `state/<id>.meta` is the CAPO's own home workspace, not a dedicated one - `container=tab` in that same file is the signal `cs-teardown.sh` needs to route its removal through `cs_herdr_nested_task_remove` instead of `cs_herdr_worktree_remove`, which would otherwise try to tear down the capo's entire home.
+A stale or missing recorded capo workspace fails OPEN to the ordinary dedicated-workspace path above, never closed: nesting is a placement preference, not a correctness requirement.
+
 ## Worktree lifecycle safety (D1 verification)
 
 - `worktree remove --workspace <id>` on a dirty worktree fails closed: `dirty_worktree_requires_force`. `--force` is the only override.
