@@ -1,4 +1,3 @@
 [tools]
 node = "24"
 aube = "2.1"
-"npm:tasks-axi" = "0.2.4"

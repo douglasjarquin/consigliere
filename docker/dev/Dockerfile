@@ -92,12 +92,20 @@ RUN set -eu; \
 ENV MISE_YES=1
 ENV PATH="/home/cs/.local/share/mise/shims:${PATH}"
 USER cs
-# Installs node/aube/npm:tasks-axi per mise.toml, baked into the image rather
-# than lazily fetched at container-run time. Runs as the non-root "cs" user,
-# not root, since mise installs into the invoking user's home directory
+# Installs node/aube per mise.toml, baked into the image rather than lazily
+# fetched at container-run time. Runs as the non-root "cs" user, not root,
+# since mise installs into the invoking user's home directory
 # (~/.local/share/mise) - installing as root here would leave the tools
 # invisible to the "cs" user this image actually runs as.
 RUN mise install
+
+# Also installed via mise's GLOBAL config (~/.config/mise/config.toml), not
+# just the project mise.toml: a project-scoped tool's shim only activates in
+# a directory mise.toml governs, but bin/cs-test-run.sh's fixtures invoke
+# tasks-axi (and its own shim needs node) from scratch directories under
+# /tmp with no mise.toml of their own - tasks-axi needs to behave like the
+# "npm install -g" it replaced, reachable from any cwd.
+RUN mise use --global node@24 npm:tasks-axi@0.2.4
 
 # The actual work happens via `docker compose run`/`exec` (see
 # mise-tasks/dev/* and scripts/ci/run-in-container.sh), not this image's own

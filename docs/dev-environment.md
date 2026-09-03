@@ -6,12 +6,13 @@ It exists to give consigliere its own reproducible, container-based dev environm
 
 ## Layout
 
-- `mise.toml` (root) - pins `node`, `aube` (`2.1`), and `"npm:tasks-axi"` (`0.2.4`, matching `bin/cs-deps-lib.sh`'s `CS_TASKS_AXI_MIN` floor) for this suite's own tooling.
+- `mise.toml` (root) - pins `node` and `aube` (`2.1`) for this suite's own project-scoped tooling.
+  `tasks-axi` (`0.2.4`, matching `bin/cs-deps-lib.sh`'s `CS_TASKS_AXI_MIN` floor) is pinned separately, via mise's GLOBAL config inside the image (see below) - a project-scoped tool's shim only activates in a directory `mise.toml` governs, but tests invoke `tasks-axi` from scratch fixture directories with no `mise.toml` of their own.
   It does not replace `bin/cs-deps-lib.sh`, which stays the single owner of consigliere's own required/optional tool floors for the human/doctor-check path.
   The two are independent, compatible mechanisms: `mise.toml` governs what's baked into the container image; `cs-deps-lib.sh` governs what a human running consigliere directly needs on their own machine.
 - `mise-tasks/dev/{install,up,down,shell,test}` - file-based mise tasks (namespaced `dev:*`), each a thin composition of already-built pieces (a mise task invoking a `docker compose` command), never a duplicate of logic that already lives in `bin/cs-test-run.sh` or `docker-compose.yml`.
 - `docker/dev/Dockerfile` - a single image (deliberately not split into a toolchain image and a dev image the way niceuptime's own setup is - that split was flagged there as needing manual sync, a rough edge this image avoids).
-  Installs the toolchain `bin/cs-test-run.sh --portable` needs (bash, git, jq, sqlite3, python3, gh), a pinned ShellCheck via `bin/cs-install-shellcheck.sh` (reused as-is, not modified), and a SHA-pinned `mise` bootstrap that then installs `node`/`aube`/`npm:tasks-axi` per `mise.toml`.
+  Installs the toolchain `bin/cs-test-run.sh --portable` needs (bash, git, jq, sqlite3, python3, gh, lsof), a pinned ShellCheck via `bin/cs-install-shellcheck.sh` (reused as-is, not modified), and a SHA-pinned `mise` bootstrap that then installs `node`/`aube` per `mise.toml` and `node`/`tasks-axi` again via mise's global config, so `tasks-axi` is reachable from any directory.
   Never runs as root at container runtime.
 - `docker-compose.yml` (root) - `dev` service (the toolchain/test container) and `web` service (see "The web placeholder" below).
 - `.dockerignore` - excludes `config/`, `host/`, `data/`, `state/`, `projects/`, `.no-mistakes/` from the build context, so none of that gitignored, boss-private content is ever baked into an image layer, regardless of what happens to exist on disk when the image is built.
