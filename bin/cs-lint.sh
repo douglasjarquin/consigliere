@@ -78,7 +78,7 @@ cd "$ROOT" || exit 1
 # The globs are kept as patterns because the set has to answer two questions: what
 # is on disk now (their expansion) and whether a path a branch deleted was one of
 # ours (no expansion can match a file that is gone).
-canonical_globs=('bin/*.sh' 'tests/*.sh')
+canonical_globs=('bin/*.sh' 'tests/*.sh' 'scripts/ci/*.sh' 'mise-tasks/dev/*')
 canonical=()
 for glob in "${canonical_globs[@]}"; do
   # shellcheck disable=SC2086  # unquoted on purpose: $glob is a pattern to expand

@@ -13,6 +13,8 @@
 #                 omitted from CI.
 #   real-herdr  - needs a real isolated Herdr lab (CS_TEST_HERDR_LIVE=1). Runs in
 #                 the dedicated required Herdr CI lane, never in portable.
+#   real-docker - needs a live Docker daemon (CS_TEST_DOCKER_LIVE=1). Runs in the
+#                 dedicated real-docker CI lane, never in portable.
 #   live-codex  - needs a real Codex agent and credentials (CS_TEST_CODEX_LIVE=1).
 #                 OPT-IN ONLY: never run in hosted CI. The coverage guard reports
 #                 it as explicitly excluded so it is visibly skipped, not silently
@@ -23,7 +25,8 @@
 # Selection modes (exactly one):
 #   cs-test-run.sh --portable                 run every portable (hermetic) test, serial
 #   cs-test-run.sh --herdr                    run the real-herdr lane, serial
-#   cs-test-run.sh --lane <name>              run a named lane (portable|real-herdr|live-codex|live-claude)
+#   cs-test-run.sh --docker                   run the real-docker lane, serial
+#   cs-test-run.sh --lane <name>              run a named lane (portable|real-herdr|real-docker|live-codex|live-claude)
 #   cs-test-run.sh tests/<name>.test.sh ...   run the given scripts, serial
 #
 # Inspection (no execution):
@@ -81,6 +84,9 @@ lane_for_basename() {
     cs-herdr-lib-live.test.sh)
       printf '%s\n' real-herdr
       ;;
+    cs-dev-tools.test.sh)
+      printf '%s\n' real-docker
+      ;;
     cs-lifecycle-live.test.sh)
       printf '%s\n' live-codex
       ;;
@@ -97,6 +103,7 @@ list_known_lanes() {
   cat <<'EOF'
 portable
 real-herdr
+real-docker
 live-codex
 live-claude
 EOF
@@ -139,7 +146,7 @@ add_script() {
 select_lane() {
   local want=$1 s found=0
   case "$want" in
-    portable|real-herdr|live-codex|live-claude) ;;
+    portable|real-herdr|real-docker|live-codex|live-claude) ;;
     *) die "unknown lane '$want' (see --list-lanes)" ;;
   esac
   while IFS= read -r s; do
@@ -161,7 +168,7 @@ run_coverage_guard() {
   all_repo_tests | LC_ALL=C sort -u >"$tmp/all"
 
   : >"$tmp/union"
-  for lane in portable real-herdr live-codex live-claude; do
+  for lane in portable real-herdr real-docker live-codex live-claude; do
     : >"$tmp/lane.$lane"
     while IFS= read -r s; do
       [ -n "$s" ] || continue
@@ -186,15 +193,16 @@ run_coverage_guard() {
   missing=$(comm -23 "$tmp/all" "$tmp/union_sorted" || true)
   extra=$(comm -13 "$tmp/all" "$tmp/union_sorted" || true)
   if [ -n "$missing" ] || [ -n "$extra" ] || [ "$dup_overlap" -ne 0 ]; then
-    log "coverage guard: the portable + real-herdr + live-codex + live-claude lanes must equal tests/*.test.sh exactly, with no script in two lanes"
+    log "coverage guard: the portable + real-herdr + real-docker + live-codex + live-claude lanes must equal tests/*.test.sh exactly, with no script in two lanes"
     [ -z "$missing" ] || { log "missing from every lane:"; printf '%s\n' "$missing" >&2; }
     [ -z "$extra" ] || { log "categorized but not in the inventory:"; printf '%s\n' "$extra" >&2; }
     return 1
   fi
 
   # The live-only scripts must exist and be excluded from the hosted lanes.
-  local herdr_count codex_count claude_count portable_count total
+  local herdr_count docker_count codex_count claude_count portable_count total
   herdr_count=$(wc -l <"$tmp/lane.real-herdr" | tr -d ' ')
+  docker_count=$(wc -l <"$tmp/lane.real-docker" | tr -d ' ')
   codex_count=$(wc -l <"$tmp/lane.live-codex" | tr -d ' ')
   claude_count=$(wc -l <"$tmp/lane.live-claude" | tr -d ' ')
   portable_count=$(wc -l <"$tmp/lane.portable" | tr -d ' ')
@@ -215,8 +223,8 @@ run_coverage_guard() {
     done <"$tmp/lane.live-claude"
   fi
 
-  printf 'CS_TEST_COVERAGE ok total=%s portable=%s real-herdr=%s live-codex=%s live-claude=%s\n' \
-    "$total" "$portable_count" "$herdr_count" "$codex_count" "$claude_count"
+  printf 'CS_TEST_COVERAGE ok total=%s portable=%s real-herdr=%s real-docker=%s live-codex=%s live-claude=%s\n' \
+    "$total" "$portable_count" "$herdr_count" "$docker_count" "$codex_count" "$claude_count"
   return 0
 }
 
@@ -287,6 +295,12 @@ while [ "$#" -gt 0 ]; do
       [ -z "$MODE" ] || die "only one selection mode is allowed"
       MODE=lane
       LANE=real-herdr
+      shift
+      ;;
+    --docker)
+      [ -z "$MODE" ] || die "only one selection mode is allowed"
+      MODE=lane
+      LANE=real-docker
       shift
       ;;
     --lane)

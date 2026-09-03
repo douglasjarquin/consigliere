@@ -33,6 +33,7 @@ jobs:
       coverage: ${{ steps.lanes.outputs.coverage }}
       portable: ${{ steps.lanes.outputs.portable }}
       herdr: ${{ steps.lanes.outputs.herdr }}
+      docker: ${{ steps.lanes.outputs.docker }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -90,7 +91,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: bin/cs-test-run.sh --check-coverage
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - env:
+          CI: "true"
+        run: scripts/ci/run-in-container.sh bin/cs-test-run.sh --check-coverage
 
   portable:
     name: Portable behavior
@@ -100,29 +105,25 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-      - name: Require test tools
-        run: |
-          set -eu
-          command -v jq >/dev/null || { echo "::error::jq is required"; exit 1; }
-          command -v python3 >/dev/null || { echo "::error::python3 is required"; exit 1; }
-          command -v sqlite3 >/dev/null || { echo "::error::sqlite3 is required"; exit 1; }
-          jq --version
-          python3 --version
-          sqlite3 --version
-      - name: Install tasks-axi
-        # cs-decision-hold.sh's completion gate (exercised by cs-teardown and
-        # cs-decision-hold) probes a compatible tasks-axi; install it so those
-        # tests run for real instead of skipping or failing on its absence.
-        run: |
-          set -eu
-          npm install -g tasks-axi
-          tasks-axi --version
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       - name: Run every portable (hermetic) test, serial
-        run: bin/cs-test-run.sh --portable
+        # Runs inside the dev-tools suite's container image (docker/dev/Dockerfile),
+        # which already has jq/python3/sqlite3/tasks-axi baked in via mise - see
+        # docs/dev-environment.md. scripts/ci/run-in-container.sh builds that image
+        # with GHA layer caching (CI=true) and runs the given command inside it.
+        env:
+          CI: "true"
+        run: scripts/ci/run-in-container.sh bin/cs-test-run.sh --portable
 
   # Required real-Herdr lane: pinned install, protocol-floor assert, an isolated
   # cs-lab-* session only, hard-fail if the env-gate causes a skip instead of a
   # real run, and always clean up job-owned lab sessions.
+  #
+  # NOT containerized, on purpose: this lane runs a real herdr server on the bare
+  # runner and drives it as a client; wrapping only the client command through the
+  # dev-tools container would split it from a host-only server socket. See
+  # docs/dev-environment.md.
   herdr:
     name: Real Herdr behavior
     needs: changes
@@ -208,6 +209,43 @@ jobs:
             herdr session list --json || true
             exit 1
           }
+
+  # Real-docker lane: exercises the dev-tools suite itself (mise.toml,
+  # mise-tasks/dev/*, docker/*, docker-compose.yml). Runs bare, not through
+  # scripts/ci/run-in-container.sh - its whole job is building and running the
+  # dev-tools container, so wrapping it in another container would be
+  # Docker-in-Docker for no reason. See docs/dev-environment.md.
+  real-docker:
+    name: Dev-tools container
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+      - name: Bring up the dev stack
+        run: |
+          set -eu
+          mise run dev:install
+          mise run dev:up
+      - name: Verify the placeholder web service
+        run: |
+          set -eu
+          sleep 2
+          curl -fsS http://localhost:8080/ | grep -qF "consigliere dev environment placeholder"
+      - name: Run the dev-tools test suite
+        env:
+          CS_TEST_DOCKER_LIVE: "1"
+        run: |
+          set -eu
+          bin/cs-test-run.sh --docker \
+            --fail-on-gate-skip 'CS_TEST_DOCKER_LIVE=1 to run'
+      - name: Tear down the dev stack
+        if: always()
+        run: mise run dev:down
 
   # UNCONDITIONAL ON PURPOSE: no `needs: changes`, no `if:`. Any commit at all can
   # track a boss-private path or land a tracked symlink as a resolved regular file,
