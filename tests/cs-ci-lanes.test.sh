@@ -69,6 +69,16 @@ assert_lane "$out" herdr false "grokbot content cannot change the real-herdr ver
 assert_lane "$out" coverage false "grokbot content cannot change the lane partition"
 pass 'grokbot changes run only the hermetic suite'
 
+# --- dev-tools suite changes need lint, portable, and the real-docker lane ---
+
+out=$(lanes_for mise-tasks/dev/test)
+assert_lane "$out" lint true "a mise-tasks/dev change needs shellcheck coverage"
+assert_lane "$out" portable true "a mise-tasks/dev change is a portable-suite dependency"
+assert_lane "$out" docker true "a mise-tasks/dev change needs the real-docker lane"
+assert_lane "$out" herdr false "a mise-tasks/dev change cannot change the real-herdr verdict"
+assert_lane "$out" coverage false "a mise-tasks/dev change cannot change the lane partition"
+pass 'dev-tools suite changes run lint, portable, and real-docker only'
+
 # --- a change no lane reads ---------------------------------------------------
 
 out=$(lanes_for AGENTS.md .gitignore)

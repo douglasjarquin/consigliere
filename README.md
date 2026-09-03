@@ -81,6 +81,11 @@ Then talk to it in plain language: describe the work, name the project when it i
 - `host/` - machine-local sibling (capo roster, harness pin, activation); never backed up, re-created per machine
 - `data/ state/ projects/` - generated output, volatile runtime state, and clones; boss-private, gitignored, disposable or re-creatable
 
+### Dev-tools suite
+
+`mise.toml`, `mise-tasks/dev/`, `docker/dev/Dockerfile`, `docker-compose.yml`, and `scripts/ci/` are a purely additive dev-tools suite (mise for tooling/tasks, `aube` where JS package-manager work needs it, a single container for local dev and CI) - see [`docs/dev-environment.md`](docs/dev-environment.md).
+No existing `bin/*.sh` script's content changed to add it.
+
 ### Grok Bot pack
 
 The `grokbot/` subtree is a vendored, pinned port of [grok-ship](https://github.com/kunchenguid/grok-ship/) for the Grok Bot platform, not consigliere's terminal harnesses.
@@ -109,6 +114,7 @@ checks cannot drift from what you run before pushing:
 | Real Herdr behavior | `CS_TEST_HERDR_LIVE=1 bin/cs-test-run.sh --herdr` (needs a real herdr + a running default session for the lab tripwire) |
 | Repo invariants | `git ls-files -- .env data state config host projects .no-mistakes` prints nothing; tracked symlinks stay symlinks |
 | Coverage guard | `bin/cs-test-run.sh --check-coverage` (proves every `tests/*.test.sh` is in exactly one lane) |
+| Dev-tools container | `CS_TEST_DOCKER_LIVE=1 bin/cs-test-run.sh --docker` (needs a live Docker daemon; see [`docs/dev-environment.md`](docs/dev-environment.md)) |
 
 Each lane except repo invariants runs only when the change can affect it.
 `bin/cs-ci-lanes.sh` owns the path-to-lane map and prints the decision for a diff
