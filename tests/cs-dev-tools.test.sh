@@ -15,6 +15,8 @@ if [ "${CS_TEST_DOCKER_LIVE:-0}" != "1" ]; then
   exit 0
 fi
 
+export DEV_UID="${DEV_UID:-$(id -u)}"
+export DEV_GID="${DEV_GID:-$(id -g)}"
 COMPOSE=(docker compose -f "$ROOT/docker-compose.yml")
 
 cleanup() {

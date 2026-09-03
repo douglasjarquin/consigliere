@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       gnupg \
       xz-utils \
+      lsof \
     && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI (gh), via its official apt repository - no pinned-binary
@@ -43,12 +44,20 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# ubuntu:24.04 pre-creates a "ubuntu" user/group at 1000:1000; remove it first
-# so this stays correct at the default UID/GID and any override.
-RUN (userdel -r ubuntu 2>/dev/null || true) \
-    && (groupdel ubuntu 2>/dev/null || true) \
-    && groupadd -g "${GID}" cs \
-    && useradd -m -u "${UID}" -g "${GID}" -s /bin/bash cs
+# UID/GID are passed in as whatever actually owns the bind-mounted checkout
+# (the invoking host user, or the CI runner's checkout user) - see
+# scripts/ci/run-in-container.sh. That number can collide with a base-image
+# system account at any GID/UID (ubuntu:24.04 itself pre-creates a "ubuntu"
+# user/group at 1000:1000, and low GIDs like 20 are already system groups),
+# so whatever currently owns the target UID/GID is removed first, by name,
+# rather than assuming it's always "ubuntu".
+RUN set -eu; \
+    existing_user="$(getent passwd "${UID}" | cut -d: -f1 || true)"; \
+    [ -z "$existing_user" ] || userdel -r "$existing_user" 2>/dev/null || true; \
+    existing_group="$(getent group "${GID}" | cut -d: -f1 || true)"; \
+    [ -z "$existing_group" ] || groupdel "$existing_group"; \
+    groupadd -g "${GID}" cs; \
+    useradd -m -u "${UID}" -g "${GID}" -s /bin/bash cs
 
 WORKDIR /workspace
 COPY . /workspace

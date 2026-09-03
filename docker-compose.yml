@@ -4,8 +4,8 @@ services:
       context: .
       dockerfile: docker/dev/Dockerfile
       args:
-        UID: ${UID:-1000}
-        GID: ${GID:-1000}
+        UID: ${DEV_UID:-1000}
+        GID: ${DEV_GID:-1000}
     working_dir: /workspace
     command: ["sleep", "infinity"]
     volumes:
@@ -25,8 +25,8 @@ services:
       context: .
       dockerfile: docker/dev/Dockerfile
       args:
-        UID: ${UID:-1000}
-        GID: ${GID:-1000}
+        UID: ${DEV_UID:-1000}
+        GID: ${DEV_GID:-1000}
     command: ["python3", "-m", "http.server", "8080", "--directory", "/srv/web"]
     volumes:
       - ./web:/srv/web:ro

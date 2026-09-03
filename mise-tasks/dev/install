@@ -11,5 +11,7 @@ docker compose version >/dev/null 2>&1 || {
   exit 1
 }
 
+export DEV_UID="${DEV_UID:-$(id -u)}"
+export DEV_GID="${DEV_GID:-$(id -g)}"
 docker compose build dev
 docker compose build web

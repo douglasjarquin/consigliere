@@ -21,5 +21,12 @@ die() {
 command -v docker >/dev/null 2>&1 || die "docker is required but not found on PATH"
 docker compose version >/dev/null 2>&1 || die "docker compose is required but not found (docker present, compose plugin missing)"
 
+# The dev image's non-root user must match whoever owns the bind-mounted
+# checkout, or writing a new file anywhere under /workspace fails with
+# "Permission denied" - the invoking user here IS that owner, whether that's
+# a local dev machine's own account or the CI runner's checkout user.
+export DEV_UID="${DEV_UID:-$(id -u)}"
+export DEV_GID="${DEV_GID:-$(id -g)}"
+
 docker compose build dev
 exec docker compose run --rm dev "$@"
