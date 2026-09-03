@@ -1,7 +1,7 @@
 # Dev-tools suite: mise + aube + container dev/CI/Cloud Agents
 
-This is a purely additive dev-tools suite on top of consigliere's own bash-script tooling.
-No existing `bin/*.sh` script's content changed to add it.
+This is a mostly additive dev-tools suite on top of consigliere's own bash-script tooling.
+The existing CI lane map routes `.cursor/environment.json` into the portable contract suite.
 It gives Mac Compose, CI, and Cursor Cloud Agents one reproducible container-based environment - `mise` for tooling/tasks, `aube` for the JS package-manager work that needs it, and Docker for one shared image - inspired by (not copied from) the boss's `niceuptime` project's own mid-implementation container setup.
 
 ## Layout
