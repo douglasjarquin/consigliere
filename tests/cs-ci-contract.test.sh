@@ -48,14 +48,15 @@ inventory=( "$ROOT"/tests/*.test.sh )
 all_count=${#inventory[@]}
 p=$("$RUN" --list --portable | grep -c .)
 h=$("$RUN" --list --herdr | grep -c .)
+d=$("$RUN" --list --docker | grep -c .)
 c=$("$RUN" --list --lane live-codex | grep -c .)
 cl=$("$RUN" --list --lane live-claude | grep -c .)
-[ "$((p + h + c + cl))" -eq "$all_count" ] \
-  || fail "lanes ($p+$h+$c+$cl) must sum to the inventory ($all_count)"
-pass "portable + real-herdr + live-codex + live-claude partition the whole inventory"
+[ "$((p + h + d + c + cl))" -eq "$all_count" ] \
+  || fail "lanes ($p+$h+$d+$c+$cl) must sum to the inventory ($all_count)"
+pass "portable + real-herdr + real-docker + live-codex + live-claude partition the whole inventory"
 
 # No script may appear in two lanes.
-dups=$({ "$RUN" --list --portable; "$RUN" --list --herdr; "$RUN" --list --lane live-codex; "$RUN" --list --lane live-claude; } \
+dups=$({ "$RUN" --list --portable; "$RUN" --list --herdr; "$RUN" --list --docker; "$RUN" --list --lane live-codex; "$RUN" --list --lane live-claude; } \
   | LC_ALL=C sort | uniq -d)
 [ -z "$dups" ] || fail "a test is categorized into more than one lane: $dups"
 pass "no test appears in two lanes"
@@ -72,6 +73,10 @@ assert_contains "$out" "excluded (CS_TEST_CODEX_LIVE)" \
 assert_contains "$out" "excluded (CS_TEST_CLAUDE_LIVE)" \
   "coverage guard reports live-claude as visibly excluded, not silently dropped"
 pass "live-only lanes are pinned and live-codex is visibly excluded"
+
+[ "$("$RUN" --lane-of cs-dev-tools.test.sh)" = "real-docker" ] \
+  || fail "cs-dev-tools must be the real-docker lane"
+pass "the real-docker lane is pinned to cs-dev-tools.test.sh"
 
 # --- single-owner pins ------------------------------------------------------
 
@@ -127,7 +132,8 @@ for entry in \
   'bin/cs-ci-lanes.sh' \
   'bin/cs-test-run.sh --check-coverage' \
   'bin/cs-test-run.sh --portable' \
-  'bin/cs-test-run.sh --herdr'; do
+  'bin/cs-test-run.sh --herdr' \
+  'bin/cs-test-run.sh --docker'; do
   assert_grep "$entry" "$WF" "workflow must call $entry"
 done
 pass "workflow calls the repository-owned lint, test, install, and cleanup entrypoints"

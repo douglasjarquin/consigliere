@@ -27,6 +27,9 @@
 #             of those are therefore triggers.
 #   herdr     the real-herdr suite drives bin/ through tests/, and the install and
 #             cleanup steps live in the workflow.
+#   docker    the real-docker lane exercises the dev-tools suite itself; nothing
+#             outside mise.toml, mise-tasks/dev/*, docker/*, docker-compose.yml,
+#             and scripts/ci/* can change its verdict.
 #
 # Repo invariants are deliberately NOT a lane here: any commit at all can track a
 # boss-private path or flatten a tracked symlink, so that job stays unconditional
@@ -41,7 +44,7 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-LANES='lint coverage portable herdr'
+LANES='lint coverage portable herdr docker'
 
 usage() {
   awk 'NR > 1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
@@ -124,6 +127,7 @@ lint=false
 coverage=false
 portable=false
 herdr=false
+docker=false
 
 while IFS= read -r path; do
   [ -n "$path" ] || continue
@@ -141,6 +145,11 @@ while IFS= read -r path; do
       ;;
     grokbot/*)
       portable=true
+      ;;
+    mise.toml | mise-tasks/* | docker/* | docker-compose.yml | scripts/ci/*)
+      lint=true
+      portable=true
+      docker=true
       ;;
   esac
 done <<EOF
@@ -161,3 +170,4 @@ emit_lane lint "$lint"
 emit_lane coverage "$coverage"
 emit_lane portable "$portable"
 emit_lane herdr "$herdr"
+emit_lane docker "$docker"

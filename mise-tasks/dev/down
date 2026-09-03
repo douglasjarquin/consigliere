@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Tear down the local dev stack"
+set -eu
+
+docker compose down
