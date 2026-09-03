@@ -7,8 +7,8 @@
 # for the new dev-tooling tasks under mise-tasks/dev/. Never runs as root at
 # container runtime - see the UID/GID build args below.
 #
-# docs/dev-environment.md is the source of truth for how this image is used
-# locally (mise run dev:*) and in CI (scripts/ci/run-in-container.sh).
+# docs/dev-environment.md is the source of truth for how this image is used by
+# Mac Compose, CI, and Cursor Cloud Agents.
 
 FROM ubuntu:24.04
 
@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gnupg \
       xz-utils \
       lsof \
+      sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI (gh), via its official apt repository - no pinned-binary
@@ -59,12 +60,18 @@ RUN set -eu; \
     groupadd -g "${GID}" cs; \
     useradd -m -u "${UID}" -g "${GID}" -s /bin/bash cs
 
+RUN printf 'cs ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/cs \
+    && chmod 0440 /etc/sudoers.d/cs
+
 WORKDIR /workspace
-COPY . /workspace
+COPY mise.toml /workspace/mise.toml
+COPY bin/cs-install-shellcheck.sh /tmp/cs-dev-tools/bin/cs-install-shellcheck.sh
+COPY bin/cs-lint.sh /tmp/cs-dev-tools/bin/cs-lint.sh
 
 # Pinned ShellCheck via this repo's own installer (bin/cs-lint.sh
 # --required-version owns the exact pin; this never floats to latest).
-RUN bin/cs-install-shellcheck.sh /usr/local/bin
+RUN bash /tmp/cs-dev-tools/bin/cs-install-shellcheck.sh /usr/local/bin \
+    && rm -rf /tmp/cs-dev-tools
 
 # Pinned mise bootstrap: exact version, per-archive SHA-256 verified before
 # install - the same posture bin/cs-install-herdr.sh already uses for herdr.
@@ -92,6 +99,7 @@ RUN set -eu; \
 ENV MISE_YES=1
 ENV PATH="/home/cs/.local/share/mise/shims:${PATH}"
 USER cs
+RUN printf '%s\n' 'export PATH="/home/cs/.local/share/mise/shims:$PATH"' >> /home/cs/.bashrc
 # Installs node/aube per mise.toml, baked into the image rather than lazily
 # fetched at container-run time. Runs as the non-root "cs" user, not root,
 # since mise installs into the invoking user's home directory
@@ -106,6 +114,13 @@ RUN mise install
 # /tmp with no mise.toml of their own - tasks-axi needs to behave like the
 # "npm install -g" it replaced, reachable from any cwd.
 RUN mise use --global node@24 npm:tasks-axi@0.2.4
+
+RUN mise reshim
+USER root
+RUN for tool in node npm npx aube tasks-axi; do \
+      ln -sf "/home/cs/.local/share/mise/shims/${tool}" "/usr/local/bin/${tool}"; \
+    done
+USER cs
 
 # The actual work happens via `docker compose run`/`exec` (see
 # mise-tasks/dev/* and scripts/ci/run-in-container.sh), not this image's own
