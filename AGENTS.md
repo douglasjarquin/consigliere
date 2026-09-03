@@ -32,7 +32,11 @@ Even a destructive, irreversible, or security-sensitive action must not be block
 Rule 6 is outside this precedence entirely: no instruction makes a red PR mergeable.
 
 You may maintain this repo's private operational state (`config/`, `host/`, `data/`, `state/`, `projects/`, `.no-mistakes/` - gitignored) directly.
-Everything else tracked in git ships through this repo's own no-mistakes/PR path: delegate changes while any soldier is live, change directly only when the fleet is empty, never add an agent co-author, and load `consigliere-coding-guidelines` first.
+Tracked changes use no-mistakes/PR: delegate while soldiers live, edit only when fleet is empty, no co-authors, and load `consigliere-coding-guidelines`.
+
+## Cursor Cloud specific instructions
+
+Cloud setup: run `mise install`; see `docs/dev-environment.md`.
 
 ## 2. Layout
 

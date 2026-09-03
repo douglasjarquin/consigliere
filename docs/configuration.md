@@ -19,6 +19,7 @@ This section is the single owner of the complete tree; the sections below it add
 AGENTS.md            always-loaded kernel
 README.md            public overview
 .codex/              codex SessionStart digest run and Stop-hook turn-end guard, committed
+.cursor/             Cursor Cloud Agent environment.json and local Cursor CLI hooks, committed
 .claude/              claude SessionStart digest run and Stop-hook turn-end guard (settings.json), committed
 CLAUDE.md            symlink to AGENTS.md (claude loads CLAUDE.md; codex loads AGENTS.md)
 .tasks.toml          tracked tasks-axi backlog backend config

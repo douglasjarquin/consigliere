@@ -83,7 +83,7 @@ Then talk to it in plain language: describe the work, name the project when it i
 
 ### Dev-tools suite
 
-`mise.toml`, `mise-tasks/dev/`, `docker/dev/Dockerfile`, `docker-compose.yml`, and `scripts/ci/` are a purely additive dev-tools suite (mise for tooling/tasks, `aube` where JS package-manager work needs it, a single container for local dev and CI) - see [`docs/dev-environment.md`](docs/dev-environment.md).
+`mise.toml`, `mise-tasks/dev/`, `docker/dev/Dockerfile`, `docker-compose.yml`, and `scripts/ci/` are a purely additive dev-tools suite (mise for tooling/tasks, `aube` where JS package-manager work needs it, and one container for Mac Compose, CI, and Cursor Cloud Agents) - see [`docs/dev-environment.md`](docs/dev-environment.md).
 No existing `bin/*.sh` script's content changed to add it.
 
 ### Grok Bot pack
