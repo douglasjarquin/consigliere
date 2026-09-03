@@ -83,6 +83,9 @@ canonical=()
 for glob in "${canonical_globs[@]}"; do
   # shellcheck disable=SC2086  # unquoted on purpose: $glob is a pattern to expand
   for path in $glob; do
+    # A glob that matches nothing (no nullglob set) leaves $path as the literal,
+    # non-existent pattern string; skip it rather than adding a bogus "file".
+    [ -e "$path" ] || continue
     canonical+=("$path")
   done
 done
