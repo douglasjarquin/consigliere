@@ -4,8 +4,9 @@
 #
 # Every reader of the capo routing table goes through this library:
 # cs-home-seed.sh (seed validation and the bootstrap sweep), cs-fleet-view.sh
-# (the fleet review), cs-backlog-handoff.sh (home resolution), and
-# cs-teardown.sh (capo retirement). Nothing else may re-spell the format.
+# (the fleet review), cs-backlog-handoff.sh (home resolution),
+# cs-teardown.sh (capo retirement), and cs-spawn.sh (the capo-ownership
+# routing gate). Nothing else may re-spell the format.
 #
 # RECORD SHAPE
 #   - <id> - <summary> (home: <path>; scope: <text>; projects: <csv>; added YYYY-MM-DD)
@@ -293,4 +294,69 @@ cs_capo_registry_field() {
       return 1
       ;;
   esac
+}
+
+# cs_capo_registry_owner_of_project <reg> <project-name> - print "<id>\t<home>"
+# for the ONE capo whose `projects:` list names <project-name> literally, or
+# rc=1 with CS_CAPO_REGISTRY_ERROR. This is the routing test cs-spawn.sh runs
+# before creating a ship/scout task: a project a registered capo owns is that
+# capo's work, and a spawn from any other home is a routing error, not a
+# preference. Matching is literal on the comma-separated names (whitespace
+# around each name is ignored), never a substring or a pattern, for the same
+# reason id lookup is literal. A malformed row cannot be trusted to name its
+# projects, so it is refused rather than skipped: a skipped row is exactly how
+# a routing rule stops firing without anyone noticing. Two rows claiming the
+# same project are a registry defect and are refused the same way. An
+# UNAVAILABLE registry (none written yet, unreadable, symlinked) is rc=2: the
+# caller decides whether "no registry" means "no routing" (a home with no
+# capos) or a blocker. The owner is ALSO left in CS_CAPO_REGISTRY_OWNER_ID and
+# CS_CAPO_REGISTRY_OWNER_HOME so a caller can run this in its own shell (stdout
+# to /dev/null) and still read CS_CAPO_REGISTRY_ERROR on refusal; see the
+# subshell note above cs_capo_registry_records.
+CS_CAPO_REGISTRY_OWNER_ID=
+CS_CAPO_REGISTRY_OWNER_HOME=
+cs_capo_registry_owner_of_project() {
+  local reg=$1 name=$2 line rest item owners=0 owner_id owner_home
+  owner_id=
+  owner_home=
+  CS_CAPO_REGISTRY_ERROR=
+  CS_CAPO_REGISTRY_OWNER_ID=
+  CS_CAPO_REGISTRY_OWNER_HOME=
+  if [ -z "$name" ]; then
+    CS_CAPO_REGISTRY_ERROR="project name is empty"
+    return 1
+  fi
+  cs_capo_registry_available "$reg" || return 2
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "- "*) ;;
+      *) continue ;;
+    esac
+    if ! cs_capo_registry_parse_line "$line"; then
+      CS_CAPO_REGISTRY_ERROR="malformed capo registry entry: $line"
+      return 1
+    fi
+    rest=$CS_CAPO_REGISTRY_PROJECTS
+    while [ -n "$rest" ]; do
+      item=${rest%%,*}
+      if [ "$item" = "$rest" ]; then rest=; else rest=${rest#*,}; fi
+      item=${item#"${item%%[![:space:]]*}"}
+      item=${item%"${item##*[![:space:]]}"}
+      [ "$item" = "$name" ] || continue
+      owners=$((owners + 1))
+      owner_id=$CS_CAPO_REGISTRY_ID
+      owner_home=$CS_CAPO_REGISTRY_HOME
+    done
+  done < "$reg"
+  if [ "$owners" -eq 0 ]; then
+    CS_CAPO_REGISTRY_ERROR="no registered capo owns project $name"
+    return 1
+  fi
+  if [ "$owners" -gt 1 ]; then
+    CS_CAPO_REGISTRY_ERROR="project $name is claimed by $owners capo entries in $reg; resolve the duplicate before routing it"
+    return 1
+  fi
+  CS_CAPO_REGISTRY_OWNER_ID=$owner_id
+  CS_CAPO_REGISTRY_OWNER_HOME=$owner_home
+  printf '%s\t%s\n' "$owner_id" "$owner_home"
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a soldier in a herdr-native task worktree, or a capo
 # in its isolated consigliere home.
-# Usage: cs-spawn.sh <task-id> <project-dir> --mode <made|direct-PR|local-only> --yolo <on|off> [--base <ref>] [--issue <n>]
+# Usage: cs-spawn.sh <task-id> <project-dir> --mode <made|direct-PR|local-only> --yolo <on|off> [--base <ref>] [--issue <n>] [--here]
 #        cs-spawn.sh <task-id> <project-dir> [--parent <task-id>] [--parent-home <path>] [--parent-pane <pane>] [--parent-generation <generation>] [--parent-herdr-session <name>]
 #        cs-spawn.sh <task-id> <project-dir> --scout [--headless] [--base <ref>]
 #        cs-spawn.sh <task-id> <capo-home> --capo
@@ -52,6 +52,18 @@
 #     --backlog-item the spawn prints a reminder to move the item yourself.
 #     Refused on --capo (a capo is never a backlog item) and --relaunch (the
 #     dispatch transition already happened).
+#   Capo routing gate (ship/scout): when host/capos.md registers a capo whose
+#     `projects:` list names this project, the project is that capo's work, and
+#     a spawn from any OTHER home is refused before anything is created, naming
+#     the owning capo and its home. That gate is what turns task-lifecycle's
+#     "route in-scope work to the fitting capo" from agent memory into a
+#     runtime rule; it is how a root-spawned dotfiles task once landed in its
+#     own dangling workspace instead of nesting under the private capo
+#     (bin/cs-herdr-nest-lib.sh nests only a capo's OWN spawns).
+#     --here is the explicit boss redirect: it records route_override=here in
+#     meta and spawns in this home anyway. A home with no registry has no capos
+#     and no routing; a malformed registry or a project two capos claim is a
+#     registry defect and refuses (cs-capo-registry-lib.sh owns the reasons).
 #
 # Ship/scout mechanics:
 #   - Requires the brief at data/<id>/brief.md (scaffold with cs-brief.sh first).
@@ -145,6 +157,8 @@ esac
 . "$SCRIPT_DIR/cs-meta-lib.sh"
 # shellcheck source=bin/cs-herdr-nest-lib.sh
 . "$SCRIPT_DIR/cs-herdr-nest-lib.sh"
+# shellcheck source=bin/cs-capo-registry-lib.sh
+. "$SCRIPT_DIR/cs-capo-registry-lib.sh"
 # shellcheck source=bin/cs-operational-input.sh
 . "$SCRIPT_DIR/cs-operational-input.sh"
 # shellcheck source=bin/cs-harness-lib.sh
@@ -306,6 +320,7 @@ BRIEF_DELIVER_RETRY_SECS=${CS_SPAWN_BRIEF_DELIVER_RETRY_SECS:-5}
 case "$BRIEF_DELIVER_RETRY_SECS" in ''|*[!0-9]*|0) BRIEF_DELIVER_RETRY_SECS=5 ;; esac
 ISSUE=
 BACKLOG_ITEM=
+ROUTE_HERE=0
 RELAUNCH=0
 POS=()
 while [ "$#" -gt 0 ]; do
@@ -319,6 +334,7 @@ while [ "$#" -gt 0 ]; do
     --base) BASE=${2:?--base requires a value}; shift ;;
     --issue) ISSUE=${2:?--issue requires a value}; shift ;;
     --backlog-item) BACKLOG_ITEM=${2:?--backlog-item requires a value}; shift ;;
+    --here) ROUTE_HERE=1 ;;
     --parent) PARENT_TASK=${2:?--parent requires a task id}; shift ;;
     --parent-home) PARENT_HOME=${2:?--parent-home requires a path}; shift ;;
     --parent-pane) PARENT_PANE=${2:?--parent-pane requires a pane}; shift ;;
@@ -349,6 +365,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   relaunch_refuse_flag --base "$BASE"
   relaunch_refuse_flag --issue "$ISSUE"
   relaunch_refuse_flag --backlog-item "$BACKLOG_ITEM"
+  [ "$ROUTE_HERE" -eq 0 ] || relaunch_refuse_flag --here 1
   relaunch_refuse_flag --parent "$PARENT_TASK"
   relaunch_refuse_flag --parent-home "$PARENT_HOME"
   relaunch_refuse_flag --parent-pane "$PARENT_PANE"
@@ -965,6 +982,36 @@ git -C "$PROJ_ABS" rev-parse --show-toplevel >/dev/null 2>&1 || {
 
 PROJECT_NAME=$(basename "$PROJ_ABS")
 
+# Capo routing gate: a project a registered capo owns spawns from that capo's
+# home, or not at all. Runs ahead of every create step, so a refusal leaves no
+# worktree, workspace, branch, or metadata behind. See the header.
+CAPO_REG="$HOST_DIR/capos.md"
+ROUTE_RC=0
+cs_capo_registry_owner_of_project "$CAPO_REG" "$PROJECT_NAME" >/dev/null || ROUTE_RC=$?
+case "$ROUTE_RC" in
+  0)
+    ROUTE_CAPO=$CS_CAPO_REGISTRY_OWNER_ID
+    ROUTE_HOME=$CS_CAPO_REGISTRY_OWNER_HOME
+    ROUTE_HOME_ABS=$(cd "$ROUTE_HOME" 2>/dev/null && pwd -P) || ROUTE_HOME_ABS=$ROUTE_HOME
+    if [ "$ROUTE_HOME_ABS" != "$(cd "$CS_HOME" && pwd -P)" ]; then
+      if [ "$ROUTE_HERE" -eq 1 ]; then
+        echo "warn: project $PROJECT_NAME is capo $ROUTE_CAPO's ($ROUTE_HOME); spawning here on --here (boss redirect)" >&2
+      else
+        echo "error: project $PROJECT_NAME belongs to capo $ROUTE_CAPO (home: $ROUTE_HOME); route this work to that capo instead of spawning it from $CS_HOME" >&2
+        echo "A capo-spawned task nests as a tab in the capo's own workspace; a spawn from here would leave a dangling dedicated workspace. Pass --here only on an explicit boss redirect." >&2
+        exit 2
+      fi
+    fi
+    ;;
+  1)
+    case "$CS_CAPO_REGISTRY_ERROR" in
+      "no registered capo owns project "*) ;;
+      *) echo "error: capo routing table refused: $CS_CAPO_REGISTRY_ERROR" >&2; exit 2 ;;
+    esac
+    ;;
+  *) ;; # no registry in this home: no capos, nothing to route.
+esac
+
 # Cross-check the brief against --mode, and note an advisory deviation from the
 # project's standing registry posture. Both run here, ahead of
 # cs_herdr_task_create, so a refusal leaves no worktree, workspace, or branch.
@@ -1114,6 +1161,7 @@ META_LINES+=("harness=$HARNESS" "herdr_session=$(cs_herdr_session)")
 [ "$HEADLESS" -eq 1 ] && META_LINES+=("headless=1")
 [ -n "$ISSUE" ] && META_LINES+=("issue=$ISSUE")
 [ -n "$BACKLOG_ITEM" ] && META_LINES+=("backlog_item=$BACKLOG_ITEM")
+[ "$ROUTE_HERE" -eq 1 ] && META_LINES+=("route_override=here")
 
 # Record the phase-2 context-pack audit trail: the deterministic
 # role/workflow/harness scaffold hash this task's brief was rendered from
