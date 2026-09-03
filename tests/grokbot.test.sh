@@ -46,7 +46,24 @@ test_consigliere_naming() {
   pass "Consigliere role vocabulary"
 }
 
+test_cleaner_and_casino_naming() {
+  local stale
+  assert_present "$ROOT/grokbot/GROK_BOT_CLEANER.md" "Cleaner charter is missing"
+  assert_present "$ROOT/grokbot/skills/sitdown/SKILL.md" "sitdown skill is missing"
+  assert_absent "$ROOT/grokbot/skills/ahoy" "old ahoy skill dir remains"
+  assert_present "$ROOT/grokbot/GROK_CASINO.md" "Grok Casino installer is missing"
+  assert_absent "$ROOT/grokbot/GROK_SHIP.md" "old Grok Ship installer name remains"
+  stale=$(
+    find "$ROOT/grokbot" -type f ! -path '*/__pycache__/*' -exec grep -Ein 'ahoy' {} + || true
+  )
+  [ -z "$stale" ] || fail "stale 'ahoy' vocabulary remains in the Grok Bot pack"$'\n'"$stale"
+  stale=$(grep -Ein 'ahoy' "$ROOT/docs/grokbot.md" || true)
+  [ -z "$stale" ] || fail "stale 'ahoy' vocabulary remains in docs/grokbot.md"$'\n'"$stale"
+  pass "Cleaner and Grok Casino naming"
+}
+
 test_vendored_python_suite
 test_project_management_schema
 test_consigliere_naming
+test_cleaner_and_casino_naming
 pass "grokbot content checks"

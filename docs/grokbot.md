@@ -21,7 +21,7 @@ The refresh is idempotent because it replaces only the pack subtree, reapplies a
 
 ## Deployment layout
 
-Ask the human for the existing Grok Ship root when it is not already known.
+Ask the human for the existing Grok Casino root when it is not already known.
 The usual root is `/home/box/agent-data/grok-ship`, but use it only when it is the confirmed deployment path.
 
 | Path | Ownership |
@@ -37,13 +37,13 @@ The canonical schema source in this repository is `grokbot/skills/project-manage
 
 1. Resolve the deployment root and back up an existing database.
 
-   Ask the human for the existing Grok Ship deployment path if it is unknown.
+   Ask the human for the existing Grok Casino deployment path if it is unknown.
    Set `ROOT` to that confirmed absolute path before continuing.
    If the database already exists, create a timestamped sibling backup before any schema operation.
 
    ```sh
    set -eu
-   ROOT='<confirmed Grok Ship root>'
+   ROOT='<confirmed Grok Casino root>'
    export ROOT
    case "$ROOT" in
      /*) ;;
@@ -155,7 +155,7 @@ The canonical schema source in this repository is `grokbot/skills/project-manage
    - Lavish session from `$ROOT/pack/skills/lavish-session/SKILL.md`.
    - Adversarial review from `$ROOT/pack/skills/adversarial-review/SKILL.md`.
    - Project management from `$ROOT/pack/skills/project-management/SKILL.md`.
-   - Ahoy from `$ROOT/pack/skills/ahoy/SKILL.md`.
+   - Sitdown from `$ROOT/pack/skills/sitdown/SKILL.md`.
 
    Do not install extra plugins without the human's approval.
 

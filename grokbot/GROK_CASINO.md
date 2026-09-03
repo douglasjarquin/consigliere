@@ -1,4 +1,4 @@
-# Grok Ship
+# Grok Casino
 
 Instructions for setting up a software factory on top of Grok Bot. 
 The user just needs to tell any bot in their Grok Bot: follow this file.
@@ -8,7 +8,7 @@ This file is an installer. Do not summarize.
 ## What you are installing
 
 - A Consigliere the boss talks to from then on
-- Global skills: lavish-session, adversarial-review, project-management, ahoy
+- Global skills: lavish-session, adversarial-review, project-management, sitdown
 - A local sqlite database for projects and tasks
 - A soldier template for later, per project. Repo triage is not part of this install; if asked later, Consigliere can sign on a triage soldier. Factory ships never merge without the boss's word; a wired triage soldier may auto-merge corrective or opt-in work only (green CI, VISION aligned with no cannot-tell, not default-behavior, not security).
 
@@ -25,11 +25,12 @@ Same directory as this file:
 - `GROK_BOT_CONSIGLIERE.md` — Consigliere charter
 - `GROK_BOT_SOLDIER.md` — per-project soldier charter
 - `GROK_BOT_TRIAGE.md` — per-repo triage soldier charter, signed on only when asked
+- `GROK_BOT_CLEANER.md` — shared-computer housekeeping bot charter, signed on only when asked
 - `TRIAGE.md` — triage judgment, not an installer
 - `skills/lavish-session/SKILL.md`
 - `skills/adversarial-review/SKILL.md`
 - `skills/project-management/SKILL.md`
-- `skills/ahoy/SKILL.md`
+- `skills/sitdown/SKILL.md`
 - `skills/triage-eligible-fetch/SKILL.md`
 - `skills/triage-eligible-fetch/fetch.py`
 - `skills/vision-md-triage-verdict/SKILL.md`
@@ -47,7 +48,7 @@ Same directory as this file:
    - Lavish session
    - Adversarial review
    - Project management
-   - Ahoy
+   - Sitdown
    Use each skill's description line as the workflow description. Do not install extra plugins without a yes from the user.
 
 5. Run the project-management setup: create the sqlite DB if it does not exist. Path is in that skill. Same path every time.

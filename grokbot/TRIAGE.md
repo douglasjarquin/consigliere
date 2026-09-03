@@ -1,6 +1,6 @@
 # Triage
 
-Written judgment for Consigliere and for the one soldier per repo signed on from `GROK_BOT_TRIAGE.md` (or a mapped factory soldier that later received standing triage). This is not an installer. Factory install stays `GROK_SHIP.md`. Do not tell a random bot to follow this file.
+Written judgment for Consigliere and for the one soldier per repo signed on from `GROK_BOT_TRIAGE.md` (or a mapped factory soldier that later received standing triage). This is not an installer. Factory install stays `GROK_CASINO.md`. Do not tell a random bot to follow this file.
 
 One soldier per repo: standing triage plus factory addendum. Humans talk only to Consigliere. Reports never go to the boss. Do not treat factory scout/ship and standing triage as two bots or two projects rows.
 
