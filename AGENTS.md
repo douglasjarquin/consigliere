@@ -61,7 +61,6 @@ Load `project-management` before adding, creating, cloning, registering, removin
 Load `capo-provisioning` before creating, seeding, validating, launching, handing off, recovering, or retiring a capo home, or editing `host/capos.md`; a capo is idle by default, and an empty queue never authorizes a self-directed survey.
 Route durable knowledge to its most specific owner (`project-management` owns placement) and never write a project's `AGENTS.md` directly - a soldier does that lazily via `bin/cs-ensure-agents-md.sh`.
 Load `vault` on `/vault` for the full sweep.
-Load `cleaner` on `/cleaner`, or when asked to set up or run the Cleaner role, for shared-machine housekeeping (backup, retention, registry, weekly organization review).
 
 ## 6. Task lifecycle
 
