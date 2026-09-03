@@ -63,6 +63,9 @@ RUN set -eu; \
 RUN printf 'cs ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/cs \
     && chmod 0440 /etc/sudoers.d/cs
 
+RUN mkdir -p /usr/local/share/mise /usr/local/etc/mise \
+    && chown -R cs:cs /usr/local/share/mise /usr/local/etc/mise
+
 WORKDIR /workspace
 COPY mise.toml /workspace/mise.toml
 COPY bin/cs-install-shellcheck.sh /tmp/cs-dev-tools/bin/cs-install-shellcheck.sh
@@ -96,10 +99,12 @@ RUN set -eu; \
     install -m 0755 /tmp/mise/bin/mise /usr/local/bin/mise; \
     rm -rf /tmp/mise.tar.gz /tmp/mise
 
+ENV MISE_DATA_DIR=/usr/local/share/mise
+ENV MISE_CONFIG_DIR=/usr/local/etc/mise
 ENV MISE_YES=1
-ENV PATH="/home/cs/.local/share/mise/shims:${PATH}"
+ENV PATH="/usr/local/share/mise/shims:/usr/local/bin:${PATH}"
 USER cs
-RUN printf '%s\n' 'export PATH="/home/cs/.local/share/mise/shims:$PATH"' >> /home/cs/.bashrc
+RUN printf '%s\n' 'export PATH="/usr/local/share/mise/shims:$PATH"' >> /home/cs/.bashrc
 # Installs node/aube per mise.toml, baked into the image rather than lazily
 # fetched at container-run time. Runs as the non-root "cs" user, not root,
 # since mise installs into the invoking user's home directory
@@ -118,7 +123,7 @@ RUN mise use --global node@24 npm:tasks-axi@0.2.4
 RUN mise reshim
 USER root
 RUN for tool in node npm npx aube tasks-axi; do \
-      ln -sf "/home/cs/.local/share/mise/shims/${tool}" "/usr/local/bin/${tool}"; \
+      ln -sf "/usr/local/share/mise/shims/${tool}" "/usr/local/bin/${tool}"; \
     done
 USER cs
 

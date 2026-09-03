@@ -62,6 +62,8 @@ required = {
     "passwordless sudo": "NOPASSWD:ALL" in source,
     "default UID": "ARG UID=1000" in source,
     "default GID": "ARG GID=1000" in source,
+    "system mise data": "MISE_DATA_DIR=/usr/local/share/mise" in source,
+    "system mise config": "MISE_CONFIG_DIR=/usr/local/etc/mise" in source,
     "mise manifest": "COPY mise.toml" in source,
     "ShellCheck installer": "COPY bin/cs-install-shellcheck.sh" in source,
     "ShellCheck pin reader": "COPY bin/cs-lint.sh" in source,
@@ -73,7 +75,7 @@ if missing:
 if re.search(r"^\s*COPY\s+(?:--[^ ]+\s+)*\.\s+", source, re.MULTILINE):
     print("Dockerfile must not COPY the full project", file=sys.stderr)
     raise SystemExit(1)
-if not re.search(r"/home/cs/.local/share/mise/shims.*(?:bashrc|/usr/local/bin)|(?:bashrc|/usr/local/bin).* /home/cs/.local/share/mise/shims", source, re.IGNORECASE):
+if not re.search(r"/usr/local/share/mise/shims.*(?:bashrc|/usr/local/bin)|(?:bashrc|/usr/local/bin).* /usr/local/share/mise/shims", source, re.IGNORECASE):
     print("mise tools need PATH persistence beyond ENV PATH", file=sys.stderr)
     raise SystemExit(1)
 print("Dockerfile: git, sudo, passwordless sudo, UID/GID defaults, narrow tool copies, no full-project COPY, persistent tool visibility")
