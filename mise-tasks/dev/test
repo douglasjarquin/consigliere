@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Run consigliere's existing portable test suite inside the dev container"
+set -eu
+
+exec docker compose run --rm dev bin/cs-test-run.sh --portable

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Open an interactive shell inside the dev container"
+set -eu
+
+exec docker compose run --rm dev bash

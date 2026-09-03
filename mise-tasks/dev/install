@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#MISE description="Build the dev-tools suite's Docker images"
+set -eu
+
+command -v docker >/dev/null 2>&1 || {
+  echo "mise-tasks/dev/install: docker is required but not found on PATH" >&2
+  exit 1
+}
+docker compose version >/dev/null 2>&1 || {
+  echo "mise-tasks/dev/install: docker compose is required but not found" >&2
+  exit 1
+}
+
+docker compose build dev
+docker compose build web

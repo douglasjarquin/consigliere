@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Bring up the local dev stack (dev + web services)"
+set -eu
+
+docker compose up -d dev web
