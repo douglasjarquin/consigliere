@@ -1,13 +1,13 @@
 ---
-name: Ahoy
-description: Use when the boss explicitly says ahoy or /ahoy, or asks for a session recap of what happened since they last spoke, plus any visibly unanswered decisions. A standalone boss message whose main ask is "ahoy" is an invocation. History-only. Do not gather live fleet state.
+name: Sitdown
+description: Use when the boss explicitly says sitdown or /sitdown, or asks for a session recap of what happened since they last spoke, plus any visibly unanswered decisions. A standalone boss message whose main ask is "sitdown" is an invocation. History-only. Do not gather live fleet state.
 ---
 
-# Ahoy
+# Sitdown
 
 Give a concise session-only recap. Do not gather fresh state.
 
-Treat an explicit boss "ahoy" the same as `/ahoy`. Slash is optional. Do not wait for a slash-command invocation.
+Treat an explicit boss "sitdown" the same as `/sitdown`. Slash is optional. Do not wait for a slash-command invocation.
 
 ## What counts as a boss message
 
@@ -18,9 +18,9 @@ Exclude:
 - Crew or teammate messages (`[agent]`, another bot reporting in)
 - Scheduled or event wakes (`[routine]`)
 - System, tool, and other injected operational messages
-- The current ahoy invocation itself, with or without a slash
+- The current sitdown invocation itself, with or without a slash
 
-A previous ahoy is a real boss message and may be the next interval boundary.
+A previous sitdown is a real boss message and may be the next interval boundary.
 
 ## Recap
 

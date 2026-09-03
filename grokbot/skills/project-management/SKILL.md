@@ -1,6 +1,6 @@
 ---
 name: Project management
-description: Use at Grok Ship intake and whenever work is handed to a soldier.
+description: Use at Grok Casino intake and whenever work is handed to a soldier.
 ---
 
 # Project management

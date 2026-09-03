@@ -1495,7 +1495,7 @@ class CliTests(unittest.TestCase):
         )
         self.assertIn("wired triage soldier may auto-merge", charter)
         self.assertIn("no cannot-tell", charter)
-        ship = (Path(__file__).resolve().parents[2] / "GROK_SHIP.md").read_text()
+        ship = (Path(__file__).resolve().parents[2] / "GROK_CASINO.md").read_text()
         self.assertIn("Factory ships never merge without the boss's word", ship)
         self.assertIn("wired triage soldier may auto-merge", ship)
         self.assertIn("no cannot-tell", ship)
