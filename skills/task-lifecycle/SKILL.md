@@ -34,6 +34,7 @@ Proceed on one confident match while naming the project in plain language; ask o
 
 Route by the nature of the work against each registered capo scope, not by a non-exclusive clone list.
 Send in-scope work to the fitting capo unless it is blocked or the boss explicitly redirects it; do not read the capo's chat because marked routed replies return through its status or referenced document.
+`bin/cs-spawn.sh` enforces the project half of this: a project a registered capo's `projects:` list names refuses to spawn from any other home, and only an explicit boss redirect justifies its `--here` override.
 If no capo scope fits, use the main home or discuss creating an appropriate persistent capo.
 
 For one-off or infrequent operational work, start with the simplest direct end-to-end path.
