@@ -29,7 +29,7 @@
 #             cleanup steps live in the workflow.
 #   docker    the real-docker lane exercises the dev-tools suite itself; nothing
 #             outside mise.toml, mise-tasks/dev/*, docker/*, docker-compose.yml,
-#             and scripts/ci/* can change its verdict.
+#             scripts/ci/*, and .cursor/environment.json can change its verdict.
 #
 # Repo invariants are deliberately NOT a lane here: any commit at all can track a
 # boss-private path or flatten a tracked symlink, so that job stays unconditional
@@ -148,6 +148,10 @@ while IFS= read -r path; do
       ;;
     mise.toml | mise-tasks/* | docker/* | docker-compose.yml | scripts/ci/*)
       lint=true
+      portable=true
+      docker=true
+      ;;
+    .cursor/environment.json)
       portable=true
       docker=true
       ;;

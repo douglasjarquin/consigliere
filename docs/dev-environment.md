@@ -1,8 +1,9 @@
-# Dev-tools suite: mise + aube + container dev/CI
+# Dev-tools suite: mise + aube + container for Mac, CI, and Cursor Cloud Agents
 
 This is a purely additive dev-tools suite on top of consigliere's own bash-script tooling.
 No existing `bin/*.sh` script's content changed to add it.
-It exists to give consigliere its own reproducible, container-based dev environment and CI path - `mise` for tooling/tasks, `aube` for the JS package-manager work that needs it, and Docker for a single dev/CI image - inspired by (not copied from) the boss's `niceuptime` project's own mid-implementation container setup.
+It exists to give consigliere its own reproducible, container-based environment - `mise` for tooling/tasks, `aube` for the JS package-manager work that needs it, and one Docker image consumed in three places: this Mac (`mise run dev:*` / `docker-compose.yml`), CI (`scripts/ci/run-in-container.sh`), and Cursor Cloud Agents (`.cursor/environment.json`).
+Inspired by (not copied from) the boss's `niceuptime` project's own mid-implementation container setup.
 
 ## Layout
 
@@ -11,9 +12,14 @@ It exists to give consigliere its own reproducible, container-based dev environm
   It does not replace `bin/cs-deps-lib.sh`, which stays the single owner of consigliere's own required/optional tool floors for the human/doctor-check path.
   The two are independent, compatible mechanisms: `mise.toml` governs what's baked into the container image; `cs-deps-lib.sh` governs what a human running consigliere directly needs on their own machine.
 - `mise-tasks/dev/{install,up,down,shell,test}` - file-based mise tasks (namespaced `dev:*`), each a thin composition of already-built pieces (a mise task invoking a `docker compose` command), never a duplicate of logic that already lives in `bin/cs-test-run.sh` or `docker-compose.yml`.
-- `docker/dev/Dockerfile` - a single image (deliberately not split into a toolchain image and a dev image the way niceuptime's own setup is - that split was flagged there as needing manual sync, a rough edge this image avoids).
-  Installs the toolchain `bin/cs-test-run.sh --portable` needs (bash, git, jq, sqlite3, python3, gh, lsof), a pinned ShellCheck via `bin/cs-install-shellcheck.sh` (reused as-is, not modified), and a SHA-pinned `mise` bootstrap that then installs `node`/`aube` per `mise.toml` and `node`/`tasks-axi` again via mise's global config, so `tasks-axi` is reachable from any directory.
+- `docker/dev/Dockerfile` - a single image (deliberately not split into a toolchain image and a Cloud Agent or CI image the way niceuptime's own setup is - that split was flagged there as needing manual sync, a rough edge this image avoids).
+  Installs the toolchain `bin/cs-test-run.sh --portable` needs (bash, git, jq, sqlite3, python3, gh, lsof, sudo), a pinned ShellCheck via `bin/cs-install-shellcheck.sh` (reused as-is, not modified), and a SHA-pinned `mise` bootstrap that then installs `node`/`aube` per `mise.toml` and `node`/`tasks-axi` again via mise's global config, so `tasks-axi` is reachable from any directory.
+  Copies only those bake inputs (`mise.toml`, the ShellCheck installer, and `bin/cs-lint.sh` which owns the version pin).
+  Cursor Cloud Agents check out the commit themselves, so the image must not `COPY` the full project.
   Never runs as root at container runtime.
+  Default UID/GID 1000 (the Cloud Agent build) and compose-passed `DEV_UID`/`DEV_GID` (Mac/CI bind mounts) both keep working.
+- `.cursor/environment.json` - Dockerfile-based Cloud Agent pointer at that same image, with repo-root build context and an idempotent `mise install` after clone.
+  No `snapshot` field.
 - `docker-compose.yml` (root) - `dev` service (the toolchain/test container) and `web` service (see "The web placeholder" below).
 - `.dockerignore` - excludes `config/`, `host/`, `data/`, `state/`, `projects/`, `.no-mistakes/` from the build context, so none of that gitignored, boss-private content is ever baked into an image layer, regardless of what happens to exist on disk when the image is built.
 - `scripts/ci/run-in-container.sh` - builds the `dev` image and runs a given command inside it.
@@ -32,7 +38,7 @@ It exists to give consigliere its own reproducible, container-based dev environm
 `config/`, `host/`, `data/`, `state/`, `projects/`, and `.no-mistakes/` are this repo's gitignored, boss-private operational state (`docs/configuration.md` owns the complete layout).
 Two independent protections keep them out of the dev-tools suite entirely:
 
-1. `.dockerignore` excludes all six from the Docker build context, so `docker/dev/Dockerfile`'s `COPY . /workspace` step can never bake their real content into any image layer, no matter what exists in the directory the image is built from.
+1. The Dockerfile copies only bake inputs, never the full tree, and `.dockerignore` still excludes all six from the Docker build context, so a later `COPY` cannot bake their real content into any image layer, no matter what exists in the directory the image is built from.
 2. `docker-compose.yml`'s `dev` service mounts the repo root read-write, then mounts an anonymous (empty, ephemeral) volume over each of the six paths inside the container - a standard Compose masking technique.
    Even if a bind-mounted host directory has real content, the container's view of those six paths stays empty.
 
@@ -60,6 +66,22 @@ A new **`real-docker`** job proves the dev-tools suite's own pieces work: it ins
 It runs bare, not through `scripts/ci/run-in-container.sh` - its whole purpose is building and running the dev-tools containers, so wrapping it in another container would be Docker-in-Docker for no reason.
 
 None of this shares an image build across jobs, and none of it pushes to a registry: each containerized job builds its own image as a step (`docker compose build dev`, Docker's ordinary layer cache), with no shared build job and no `packages: write` permission.
+
+## Cursor Cloud Agents
+
+`.cursor/environment.json` tells Cursor to build `docker/dev/Dockerfile` with repo-root context (`build.dockerfile` and `build.context` are relative to `.cursor/`) and to run `mise install` from the project root after clone.
+That `install` script is idempotent checkout-dependent refresh, not a place for Docker, databases, or other long-running processes.
+The runtime user is `cs`, with passwordless sudo.
+When the default UID/GID 1000 build displaces the base image's `ubuntu` account, `ubuntu` is recreated as a same-UID alias so Cursor examples that assume that name still work; Mac and CI bind mounts keep keying off UID/GID.
+
+Cloud Agents reset `PATH` at session start.
+The image therefore links mise shims into `/usr/local/bin` and prepends the shims directory from `/etc/profile.d/cs-mise.sh` and `/home/cs/.bashrc`, rather than relying on `ENV PATH`.
+
+Do not add a second Dockerfile or a `snapshot` field.
+Private operational dirs stay out of the image: they are not bake inputs, `.dockerignore` excludes them from the build context, and compose still mount-masks them for local runs.
+
+Portable coverage of this contract lives in `tests/cs-cursor-cloud-env.test.sh`.
+The live Docker lane (`CS_TEST_DOCKER_LIVE=1`) still covers compose behavior and also builds the default UID/GID 1000 image, then checks git, sudo, mise, node, and tasks-axi on a distro-default PATH.
 
 ## Provenance
 

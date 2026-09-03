@@ -114,6 +114,12 @@ Not boss-invocable; load only at their precise triggers.
 Consigliere is a personal editorial rewrite of Firstmate - never `git merge` or `cherry-pick` from it.
 On `/upstream-review`, load `upstream-review`; it lists new firstmate commits since the ledger's `last-reviewed:` SHA, triages and proposes port-now/backlog/skip, and advances the ledger through the ordinary PR path once the boss disposes of the batch.
 
+## Cursor Cloud specific instructions
+
+Cloud Agents boot the same `docker/dev/Dockerfile` image local compose and CI use, via `.cursor/environment.json`.
+Do not add a second Dockerfile or a `snapshot` field.
+`docs/dev-environment.md` owns the environment contract, including what is already installed and how to run tests.
+
 ## Maintaining this file
 
 Keep this file to knowledge needed on nearly every turn; everything conditional or reference-shaped belongs in a skill, doc, or script header - see `consigliere-coding-guidelines`'s decision tree.

@@ -1,14 +1,23 @@
-# docker/dev/Dockerfile - consigliere's dev-tools container image.
+# docker/dev/Dockerfile - consigliere's single dev-tools container image.
 #
-# Single image (deliberately not split into a toolchain image + a dev image -
-# niceuptime's own dual-Dockerfile setup flagged that split as needing manual
-# sync, a rough edge this image avoids). Installs the toolchain
-# bin/cs-test-run.sh --portable needs, plus mise-managed node/aube/tasks-axi
-# for the new dev-tooling tasks under mise-tasks/dev/. Never runs as root at
-# container runtime - see the UID/GID build args below.
+# One image, three consumers: local Mac compose (`mise run dev:*` /
+# `docker-compose.yml`), CI (`scripts/ci/run-in-container.sh`), and Cursor
+# Cloud Agents (`.cursor/environment.json`). Deliberately not split into a
+# toolchain image + a Cloud Agent image - niceuptime's own dual-Dockerfile
+# setup flagged that split as needing manual sync, a rough edge this image
+# avoids. Installs the toolchain bin/cs-test-run.sh --portable needs, plus
+# mise-managed node/aube/tasks-axi for the new dev-tooling tasks under
+# mise-tasks/dev/. Never runs as root at container runtime - see the UID/GID
+# build args below.
 #
-# docs/dev-environment.md is the source of truth for how this image is used
-# locally (mise run dev:*) and in CI (scripts/ci/run-in-container.sh).
+# Cursor Cloud Agents clone the repo themselves after the image builds, so
+# this file copies only the bake inputs (mise.toml plus the ShellCheck
+# installer and the lint script that owns its version pin). Do not COPY the
+# full project. Cloud Agents also reset PATH at session start, so mise shims
+# are linked into /usr/local/bin and prepended from the runtime user's
+# bashrc / /etc/profile.d rather than relying on ENV PATH.
+#
+# docs/dev-environment.md is the source of truth for all three consumers.
 
 FROM ubuntu:24.04
 
@@ -20,7 +29,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Baseline toolchain bin/cs-test-run.sh --portable needs (matches
 # .github/workflows/ci.yml's portable-lane "Require test tools" step: jq,
 # python3, sqlite3), plus git/curl/ca-certificates/gnupg for the install
-# steps below.
+# steps below. sudo is required for Cloud Agents (passwordless, below).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash \
       git \
@@ -32,6 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gnupg \
       xz-utils \
       lsof \
+      sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI (gh), via its official apt repository - no pinned-binary
@@ -51,16 +61,35 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # user/group at 1000:1000, and low GIDs like 20 are already system groups),
 # so whatever currently owns the target UID/GID is removed first, by name,
 # rather than assuming it's always "ubuntu".
+#
+# The runtime user is always "cs". Cursor Cloud Agent examples often assume
+# an "ubuntu" user, so when creating cs displaced that account (the default
+# UID/GID 1000 build), recreate ubuntu as a same-UID alias sharing cs's home.
+# Mac/CI bind mounts key off UID/GID, not the name.
 RUN set -eu; \
     existing_user="$(getent passwd "${UID}" | cut -d: -f1 || true)"; \
     [ -z "$existing_user" ] || userdel -r "$existing_user" 2>/dev/null || true; \
     existing_group="$(getent group "${GID}" | cut -d: -f1 || true)"; \
     [ -z "$existing_group" ] || groupdel "$existing_group"; \
     groupadd -g "${GID}" cs; \
-    useradd -m -u "${UID}" -g "${GID}" -s /bin/bash cs
+    useradd -m -u "${UID}" -g "${GID}" -s /bin/bash cs; \
+    usermod -aG sudo cs; \
+    echo 'cs ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/cs; \
+    chmod 0440 /etc/sudoers.d/cs; \
+    if ! getent passwd ubuntu >/dev/null; then \
+      useradd -o -u "${UID}" -g "${GID}" -d /home/cs -M -s /bin/bash ubuntu; \
+      echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu; \
+      chmod 0440 /etc/sudoers.d/ubuntu; \
+    fi
 
 WORKDIR /workspace
-COPY . /workspace
+
+# Bake inputs only. Cursor checks out the commit itself; compose/CI bind-mount
+# the tree at /workspace. Copying the full project would bake whatever happened
+# to be on disk, including a missed .dockerignore hole.
+COPY mise.toml /workspace/mise.toml
+COPY bin/cs-install-shellcheck.sh /workspace/bin/cs-install-shellcheck.sh
+COPY bin/cs-lint.sh /workspace/bin/cs-lint.sh
 
 # Pinned ShellCheck via this repo's own installer (bin/cs-lint.sh
 # --required-version owns the exact pin; this never floats to latest).
@@ -90,7 +119,6 @@ RUN set -eu; \
     rm -rf /tmp/mise.tar.gz /tmp/mise
 
 ENV MISE_YES=1
-ENV PATH="/home/cs/.local/share/mise/shims:${PATH}"
 USER cs
 # Installs node/aube per mise.toml, baked into the image rather than lazily
 # fetched at container-run time. Runs as the non-root "cs" user, not root,
@@ -107,7 +135,26 @@ RUN mise install
 # "npm install -g" it replaced, reachable from any cwd.
 RUN mise use --global node@24 npm:tasks-axi@0.2.4
 
+# Cloud Agents reset PATH at session start, so ENV PATH is not enough.
+# Link shims into /usr/local/bin (on the distro default PATH) and persist the
+# shims directory on login/interactive shells.
+USER root
+RUN set -eu; \
+    printf '%s\n' 'export PATH="/home/cs/.local/share/mise/shims:$PATH"' \
+      > /etc/profile.d/cs-mise.sh; \
+    chmod 0644 /etc/profile.d/cs-mise.sh; \
+    printf '%s\n' 'export PATH="/home/cs/.local/share/mise/shims:$PATH"' \
+      >> /home/cs/.bashrc; \
+    if [ -d /home/cs/.local/share/mise/shims ]; then \
+      for shim in /home/cs/.local/share/mise/shims/*; do \
+        [ -e "$shim" ] || continue; \
+        ln -sfn "$shim" "/usr/local/bin/$(basename "$shim")"; \
+      done; \
+    fi
+USER cs
+
 # The actual work happens via `docker compose run`/`exec` (see
 # mise-tasks/dev/* and scripts/ci/run-in-container.sh), not this image's own
 # entrypoint - it just needs to stay alive for `docker compose up -d dev`.
+# Cursor Cloud Agents ignore this CMD and start the agent process themselves.
 CMD ["sleep", "infinity"]

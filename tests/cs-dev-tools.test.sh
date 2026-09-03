@@ -18,9 +18,11 @@ fi
 export DEV_UID="${DEV_UID:-$(id -u)}"
 export DEV_GID="${DEV_GID:-$(id -g)}"
 COMPOSE=(docker compose -f "$ROOT/docker-compose.yml")
+UID1000_IMAGE=cs-dev-uid1000-test
 
 cleanup() {
   "${COMPOSE[@]}" down >/dev/null 2>&1 || true
+  docker rmi "$UID1000_IMAGE" >/dev/null 2>&1 || true
   cs_test_cleanup
 }
 trap cleanup EXIT
@@ -51,5 +53,28 @@ container_out=$("${COMPOSE[@]}" run --rm dev bin/cs-test-run.sh --portable 2>&1)
 container_rc=$?
 [ "$container_rc" -eq 0 ] || fail "containerized portable run must pass: $container_out"
 pass "bin/cs-test-run.sh --portable passes inside the dev container"
+
+# Cursor Cloud Agents build this image with no DEV_UID/DEV_GID, so the
+# Dockerfile defaults (1000:1000) are the Cloud Agent path. Local compose
+# above used this machine's uid and does not cover that.
+docker build --build-arg UID=1000 --build-arg GID=1000 \
+  -t "$UID1000_IMAGE" -f "$ROOT/docker/dev/Dockerfile" "$ROOT" >/dev/null \
+  || fail "default UID/GID 1000 image must build"
+pass "default UID/GID 1000 image builds"
+
+# Override PATH to the distro default (no mise shims dir, no image ENV PATH)
+# so this matches a Cloud Agent PATH reset. bash -c does not source bashrc.
+uid1000_out=$(docker run --rm --user cs \
+  -e PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  "$UID1000_IMAGE" \
+  bash -c 'id -un; command -v git; command -v sudo; command -v mise; command -v node; command -v tasks-axi; sudo -n true' 2>&1) \
+  || fail "UID 1000 image must keep git/sudo/mise/node/tasks-axi on a reset PATH with passwordless sudo: $uid1000_out"
+assert_contains "$uid1000_out" "cs" "UID 1000 image must run as cs"
+assert_contains "$uid1000_out" "/usr/bin/git" "git must remain on the reset PATH"
+assert_contains "$uid1000_out" "/usr/bin/sudo" "sudo must remain on the reset PATH"
+assert_contains "$uid1000_out" "mise" "mise must remain on the reset PATH"
+assert_contains "$uid1000_out" "node" "node must remain on the reset PATH after a Cloud Agent PATH reset"
+assert_contains "$uid1000_out" "tasks-axi" "tasks-axi must remain on the reset PATH after a Cloud Agent PATH reset"
+pass "UID 1000 image keeps tools on a reset PATH with passwordless sudo"
 
 pass 'cs-dev-tools behaviors'

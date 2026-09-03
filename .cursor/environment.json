@@ -1,0 +1,8 @@
+{
+  "build": {
+    "dockerfile": "../docker/dev/Dockerfile",
+    "context": ".."
+  },
+  "install": "mise install",
+  "user": "cs"
+}

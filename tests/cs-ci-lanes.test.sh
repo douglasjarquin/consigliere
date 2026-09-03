@@ -79,6 +79,14 @@ assert_lane "$out" herdr false "a mise-tasks/dev change cannot change the real-h
 assert_lane "$out" coverage false "a mise-tasks/dev change cannot change the lane partition"
 pass 'dev-tools suite changes run lint, portable, and real-docker only'
 
+out=$(lanes_for .cursor/environment.json)
+assert_lane "$out" portable true "environment.json is a portable-suite dependency"
+assert_lane "$out" docker true "environment.json is the Cloud Agent pointer at the shared image"
+assert_lane "$out" lint false "environment.json cannot change the lint verdict"
+assert_lane "$out" herdr false "environment.json cannot change the real-herdr verdict"
+assert_lane "$out" coverage false "environment.json cannot change the lane partition"
+pass 'Cursor Cloud environment.json runs portable and real-docker only'
+
 # --- a change no lane reads ---------------------------------------------------
 
 out=$(lanes_for AGENTS.md .gitignore)
