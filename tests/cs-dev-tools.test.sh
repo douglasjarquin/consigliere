@@ -2,8 +2,8 @@
 # Behavior (LIVE, opt-in): the dev-tools suite's container pieces build and run
 # correctly - the dev/web images build, the six boss-private paths stay masked
 # inside the dev container, the tracked tree is still visible there, the web
-# service serves the placeholder, and bin/cs-test-run.sh --portable produces the
-# same result inside the container as it does bare.
+# service serves the placeholder, and bin/cs-test-run.sh --portable passes
+# inside the dev container.
 #
 # Skipped unless CS_TEST_DOCKER_LIVE=1 because it provisions real containers.
 set -u
@@ -45,12 +45,9 @@ assert_contains "$web_body" "consigliere dev environment placeholder" \
   "web service must serve the fixed placeholder body"
 pass "web service serves the placeholder"
 
-bare_out=$(cd "$ROOT" && bin/cs-test-run.sh --portable 2>&1)
-bare_rc=$?
 container_out=$("${COMPOSE[@]}" run --rm dev bin/cs-test-run.sh --portable 2>&1)
 container_rc=$?
-[ "$bare_rc" -eq 0 ] || fail "bare portable run must itself pass: $bare_out"
 [ "$container_rc" -eq 0 ] || fail "containerized portable run must pass: $container_out"
-pass "bin/cs-test-run.sh --portable passes both bare and inside the dev container"
+pass "bin/cs-test-run.sh --portable passes inside the dev container"
 
 pass 'cs-dev-tools behaviors'

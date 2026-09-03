@@ -15,7 +15,7 @@ It exists to give consigliere its own reproducible, container-based dev environm
   Never runs as root at container runtime.
 - `docker-compose.yml` (root) - `dev` service (the toolchain/test container) and `web` service (see "The web placeholder" below).
 - `.dockerignore` - excludes `config/`, `host/`, `data/`, `state/`, `projects/`, `.no-mistakes/` from the build context, so none of that gitignored, boss-private content is ever baked into an image layer, regardless of what happens to exist on disk when the image is built.
-- `scripts/ci/run-in-container.sh` - builds the `dev` image (with GitHub Actions layer caching when `CI=true`) and runs a given command inside it.
+- `scripts/ci/run-in-container.sh` - builds the `dev` image and runs a given command inside it.
   Adapted from niceuptime's own `scripts/ci/run-in-dev-container.sh` wrapper pattern.
 
 ## Local usage
@@ -58,7 +58,7 @@ Two jobs are deliberately **not** containerized:
 A new **`real-docker`** job proves the dev-tools suite's own pieces work: it installs `mise`, runs `dev:install`/`dev:up`, curls the placeholder web service, runs `bin/cs-test-run.sh --docker` (which runs `tests/cs-dev-tools.test.sh`), then tears the stack down.
 It runs bare, not through `scripts/ci/run-in-container.sh` - its whole purpose is building and running the dev-tools containers, so wrapping it in another container would be Docker-in-Docker for no reason.
 
-None of this shares an image build across jobs, and none of it pushes to a registry: each containerized job builds its own image as a step, using Docker Buildx's GitHub Actions cache backend (`type=gha`) so repeat builds stay fast without needing a shared build job or `packages: write` permission.
+None of this shares an image build across jobs, and none of it pushes to a registry: each containerized job builds its own image as a step (`docker compose build dev`, Docker's ordinary layer cache), with no shared build job and no `packages: write` permission.
 
 ## Provenance
 
