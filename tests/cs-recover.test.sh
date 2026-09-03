@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Behavior (portable): bounded recovery re-wakes durable messages once and refuses stale endpoints.
 set -u
-fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
-pass() { printf 'ok - %s\n' "$1"; }
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/cs-recover.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 HOME_DIR="$TMP/home"
