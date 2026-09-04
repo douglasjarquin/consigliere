@@ -57,10 +57,6 @@ CS_LAYOUT_GATE_SKIP=
 # shellcheck source=bin/cs-hook-host-lib.sh
 . "$SCRIPT_DIR/cs-hook-host-lib.sh"
 cs_primary_scope_matches "$CS_ROOT" "$STATE" || exit 0
-if [ -n "${CS_TASK_ID:-}" ] && ! cs_root_is_capo_home "$CS_ROOT"; then
-  exit 0
-fi
-cs_primary_worktree_matches "$CS_ROOT" || exit 0
 
 COMPLETION_FILE="$STATE/.session-start-complete"
 

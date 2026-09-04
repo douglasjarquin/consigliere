@@ -5,7 +5,7 @@
 set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-unset CS_TASK_ID
+unset CS_TASK_ID CS_ROOT_OVERRIDE CS_HOME CS_STATE_OVERRIDE CS_DATA_OVERRIDE
 
 TMP=$(cs_test_tmproot cs-lock)
 export CS_STATE_OVERRIDE="$TMP/state"
@@ -30,6 +30,37 @@ assert_contains "$out" "soldier context" "soldier lock refusal names its context
 [ "$(cat "$SOLDIER_STATE/.lock")" = 'soldier-lock-sentinel' ] || \
   fail "soldier lock acquisition overwrote the existing lock"
 pass "CS_TASK_ID prevents a soldier from acquiring the session lock"
+
+LOCK_PRIMARY="$TMP/lock-primary"
+LOCK_WORKTREE="$TMP/lock-worktree"
+cs_git_worktree "$LOCK_PRIMARY" "$LOCK_WORKTREE" cs/lock-soldier
+mkdir -p "$LOCK_PRIMARY/bin" "$TMP/lock-home/data" "$TMP/lock-home/config"
+: > "$LOCK_PRIMARY/AGENTS.md"
+LOCK_HOME="$TMP/lock-home"
+mkdir -p "$LOCK_HOME/state"
+printf 'cwd-lock-sentinel\n' > "$LOCK_HOME/state/.lock"
+set +e
+out=$(cd "$LOCK_WORKTREE" && CS_ROOT_OVERRIDE="$LOCK_PRIMARY" CS_HOME="$LOCK_HOME" \
+  CS_STATE_OVERRIDE="$LOCK_HOME/state" CS_DATA_OVERRIDE="$LOCK_HOME/data" \
+  CS_TASK_ID='' "$ROOT/bin/cs-lock.sh" 2>&1)
+code=$?
+expect_code 1 "$code" "a mismatched soldier cwd refuses lock acquisition"
+assert_contains "$out" "cannot acquire" "cwd lock refusal names the refusal"
+[ "$(cat "$LOCK_HOME/state/.lock")" = 'cwd-lock-sentinel' ] || \
+  fail "a mismatched soldier cwd overwrote the existing lock"
+pass "a mismatched soldier cwd cannot acquire the session lock"
+
+LOCK_MISSING_HOME="$TMP/lock-missing-home"
+mkdir -p "$LOCK_MISSING_HOME/data" "$LOCK_MISSING_HOME/config"
+set +e
+out=$(cd "$LOCK_WORKTREE" && CS_ROOT_OVERRIDE="$LOCK_PRIMARY" CS_HOME="$LOCK_MISSING_HOME" \
+  CS_STATE_OVERRIDE="$LOCK_MISSING_HOME/state" CS_DATA_OVERRIDE="$LOCK_MISSING_HOME/data" \
+  CS_TASK_ID='' "$ROOT/bin/cs-lock.sh" 2>&1)
+code=$?
+expect_code 1 "$code" "a mismatched soldier cwd refuses before creating state"
+[ ! -e "$LOCK_MISSING_HOME/state" ] || \
+  fail "a mismatched soldier cwd created the primary state directory"
+pass "a mismatched soldier cwd has no lock-refusal side effects"
 
 # re-acquire by the same session is idempotent
 out=$("$ROOT/bin/cs-lock.sh") || fail "re-acquire by same session failed"

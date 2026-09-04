@@ -32,7 +32,9 @@ cs_primary_scope_matches() {
     git_dir=$(git -C "$root" rev-parse --git-dir 2>/dev/null) || return 1
     git_common_dir=$(git -C "$root" rev-parse --git-common-dir 2>/dev/null) || return 1
     [ "$git_dir" = "$git_common_dir" ] || return 1
+    [ -z "${CS_TASK_ID:-}" ] || return 1
   fi
+  cs_primary_worktree_matches "$root" || return 1
   [ -f "$root/AGENTS.md" ] || return 1
   [ -d "$root/bin" ] || return 1
   [ -d "$state" ] || return 1
@@ -41,7 +43,11 @@ cs_primary_scope_matches() {
 cs_primary_worktree_matches() {
   local root=$1 cwd root_top
   cwd=$(pwd -P) || return 1
-  root_top=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null) || return 1
+  if cs_root_is_capo_home "$root"; then
+    root_top=$root
+  else
+    root_top=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null) || return 1
+  fi
   root_top=$(CDPATH='' cd -- "$root_top" && pwd -P) || return 1
   [ "$cwd" = "$root_top" ]
 }

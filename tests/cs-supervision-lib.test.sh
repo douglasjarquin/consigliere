@@ -27,6 +27,7 @@
 set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+unset CS_TASK_ID
 
 # shellcheck source=bin/cs-supervision-lib.sh
 . "$ROOT/bin/cs-supervision-lib.sh"
@@ -189,7 +190,9 @@ for r in "$PROJ" "$WT"; do
 done
 
 # 14. a plain checkout with AGENTS.md, bin/, and a state dir -> matches.
-cs_primary_scope_matches "$PROJ" "$STATE_DIR" && rc=0 || rc=1
+(
+  cd "$PROJ" && cs_primary_scope_matches "$PROJ" "$STATE_DIR"
+) && rc=0 || rc=1
 [ "$rc" = 0 ] || fail "a plain primary checkout should match"
 pass "cs_primary_scope_matches is true for a plain checkout with the primary shape"
 
@@ -208,7 +211,9 @@ pass "cs_primary_scope_matches requires AGENTS.md on a plain checkout"
 
 # 17. a valid capo marker force-includes a linked worktree that otherwise fails.
 printf 'capo-1\n' > "$WT/.cs-capo-home"
-cs_primary_scope_matches "$WT" "$STATE_DIR" && rc=0 || rc=1
+(
+  cd "$WT" && cs_primary_scope_matches "$WT" "$STATE_DIR"
+) && rc=0 || rc=1
 [ "$rc" = 0 ] || fail "a capo-home worktree with the primary shape should match"
 pass "cs_primary_scope_matches force-includes a valid capo home even in a linked worktree"
 
