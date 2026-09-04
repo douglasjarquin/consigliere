@@ -14,13 +14,18 @@
 # CLI-surface note, verified against made's own source
 # (~/github/douglasjarquin/made/cmd/made/main.go) on 2026-08-13: only
 # `made daemon start|stop|status`, `made status [--json] [run-id]`,
-# `made review`, `made pr`, and `made doctor` exist in made's CLI dispatch
-# switch today. Two wrappers below are forward references to commands made's
-# CLI does not implement yet:
+# `made review`, `made pr`, and `made doctor` existed in made's CLI dispatch
+# switch then. Verified live on 2026-09-03: `made gate init
+# <target-repo-path> <real-remote-url>` is a real, working subcommand today -
+# ran it successfully against 18 separate project clones and confirmed
+# `made doctor --json` reports `"gate":"initialized"` for each afterward
+# (`gate init` prints `gate initialized at <path>/gate.git` on success).
+# cs_made_gate_init below shells this command and is no longer a forward
+# reference.
 #
-#   - cs_made_gate_init shells `made gate init`. `gate init` is documented as
-#     planned (made's internal/skill/skill.go and plans/made-rewrite.md's
-#     Task 19/24) but cmd/made has no `gate` case wired in yet.
+# One wrapper below is still a forward reference to a command made's CLI
+# does not implement yet:
+#
 #   - cs_made_abort shells `made axi abort`. This is NOT a real made
 #     subcommand and no task in plans/made-rewrite.md defines an `axi`
 #     namespace for made at all - the name is carried over verbatim from the
@@ -30,10 +35,9 @@
 #     differently once it is actually built; if so, only this one function
 #     needs to change and every caller stays correct.
 #
-# Both forward-referencing wrappers exist now purely so Tasks 25-35 have a
-# stable function name to call against; each starts working the moment
-# made's CLI grows the matching subcommand, with no consigliere-side change
-# needed.
+# This forward-referencing wrapper exists now purely so Tasks 25-35 have a
+# stable function name to call against; it starts working the moment made's
+# CLI grows the matching subcommand, with no consigliere-side change needed.
 #
 # Requires: made, jq.
 
@@ -62,7 +66,7 @@ cs_made_status() { # [run-id] -> raw `made status --json` output
   fi
 }
 
-cs_made_gate_init() { # [made gate init args...] - forward reference, see header
+cs_made_gate_init() { # [made gate init args...]
   cs_made gate init "$@"
 }
 
