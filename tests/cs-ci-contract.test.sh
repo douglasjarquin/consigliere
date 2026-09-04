@@ -173,6 +173,23 @@ assert_not_contains "$invariants_block" 'if:' \
   "the repo-invariants job must stay unconditional"
 pass "repo invariants run for every change, including docs-only ones"
 
+# Live Made config is the review contract; leftover .no-mistakes/ stays
+# gitignored private state, but .no-mistakes.yaml is no longer the live file.
+# Tracked .made/features/ must remain visible to review and to the dev container.
+assert_contains "$invariants_block" '.made/evidence' \
+  "the repo-invariants job must refuse a tracked .made/evidence path"
+[ -f "$ROOT/.made.yaml" ] || fail "live Made config .made.yaml must exist"
+[ ! -e "$ROOT/.no-mistakes.yaml" ] || fail "predecessor .no-mistakes.yaml must not remain"
+[ -f "$ROOT/.made/features/README.md" ] || fail "Made features index README must exist"
+assert_grep '.made/evidence/' "$ROOT/.gitignore" "gitignore must exclude Made evidence"
+grep -F '.made/features' "$ROOT/.gitignore" >/dev/null \
+  && fail "gitignore must not hide tracked .made/features/"
+assert_grep '/workspace/.made/evidence' "$ROOT/docker-compose.yml" \
+  "dev-tools must mask .made/evidence/"
+grep -E -- '- /workspace/\.made$' "$ROOT/docker-compose.yml" >/dev/null \
+  && fail "dev-tools must not mask tracked .made/features/ by overlaying .made/"
+pass "Made config, features index, and evidence masking stay aligned"
+
 # --- every source site in the canonical set declares its target --------------
 #
 # `# shellcheck source=` is a declarative contract with two machine consumers:

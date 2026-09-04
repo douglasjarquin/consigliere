@@ -21,7 +21,7 @@ cs_capo_fixture_repo() {
   mkdir -p "$dir/bin"
   printf '# fixture consigliere\n' > "$dir/AGENTS.md"
   printf 'tool\n' > "$dir/bin/tool.sh"
-  printf 'data/\nstate/\nconfig/\nhost/\nprojects/\n.env\n.no-mistakes/\n' > "$dir/.gitignore"
+  printf 'data/\nstate/\nconfig/\nhost/\nprojects/\n.env\n.no-mistakes/\n.made/evidence/\n' > "$dir/.gitignore"
   git -C "$dir" init -q -b main
   git -C "$dir" add -A
   git -C "$dir" -c user.name='Consigliere Tests' -c user.email='tests@example.invalid' commit -qm initial

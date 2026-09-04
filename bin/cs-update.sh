@@ -7,8 +7,8 @@
 # homes, not two). FAST-FORWARD ONLY: never force, never create a merge
 # commit, never stash; advance only when it is a clean fast-forward, otherwise
 # skip and report. A tracked-files fast-forward never touches the gitignored
-# operational dirs (data/, state/, config/, projects/, .made/), so
-# in-flight work is never disrupted.
+# operational dirs (data/, state/, config/, projects/, .made/evidence/,
+# leftover .no-mistakes/), so in-flight work is never disrupted.
 #
 # It does NOT re-read AGENTS.md or nudge capos itself - those are LLM actions
 # the skill performs. The script's job is the safe git mechanics plus a

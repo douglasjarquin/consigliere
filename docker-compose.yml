@@ -10,15 +10,18 @@ services:
     command: ["sleep", "infinity"]
     volumes:
       - .:/workspace
-      # Anonymous volumes shadow these six gitignored, boss-private paths so
+      # Anonymous volumes shadow these gitignored, boss-private paths so
       # the container can never see their real host content, regardless of
       # what this machine actually has on disk in them.
+      # .made/features/ is tracked review material and must stay visible;
+      # only .made/evidence/ is masked.
       - /workspace/config
       - /workspace/host
       - /workspace/data
       - /workspace/state
       - /workspace/projects
       - /workspace/.no-mistakes
+      - /workspace/.made/evidence
 
   web:
     build:

@@ -22,7 +22,8 @@ README.md            public overview
 .claude/              claude SessionStart digest run and Stop-hook turn-end guard (settings.json), committed
 CLAUDE.md            symlink to AGENTS.md (claude loads CLAUDE.md; codex loads AGENTS.md)
 .tasks.toml          tracked tasks-axi backlog backend config
-.no-mistakes.yaml    tracked per-repo no-mistakes overrides; gate-agent scope, canonical lint, and local evidence placement
+.made.yaml           tracked per-repo Made config; gate-agent scope, canonical lint, review guides, and local evidence placement
+.made/features/      tracked Made review index (README plus per-area files); do not gitignore
 skills/              consigliere-loaded skills, committed (source of truth)
 .claude/skills       symlink to ../skills, so claude discovers project skills
 .agents/skills       symlink to ../skills, so codex discovers project skills
@@ -31,7 +32,7 @@ docs/                architecture, configuration schema, herdr and codex verifie
 mise.toml            dev-tools suite: pinned tool versions (node, aube, npm:tasks-axi); docs/dev-environment.md
 mise-tasks/dev/      file-based mise tasks (install, up, down, shell, test) for the dev-tools suite; docs/dev-environment.md
 docker/dev/Dockerfile  dev-tools suite's single dev/CI container image; docs/dev-environment.md
-docker-compose.yml   dev-tools suite: dev + web services, with mount-masking over the six LOCAL/gitignored paths below; docs/dev-environment.md
+docker-compose.yml   dev-tools suite: dev + web services, with mount-masking over the LOCAL/gitignored paths below; docs/dev-environment.md
 scripts/ci/          CI-only helper scripts, committed; run-in-container.sh wraps a command inside the dev-tools image
 config/              THE USER-OWNED TREE; LOCAL, gitignored; back it up wholesale; per-file inventory and symlink policy below
   boss.md            boss preferences and working style; canonical even if harness memory mirrors it; inspect-then-update
@@ -82,7 +83,8 @@ state/               volatile runtime signals; gitignored
   .decision-cursor-*   per-task byte cursor and folded open-decision set bounding the wake drain's open-decision scan to new status appends; written only by cs-classify-lib.sh; safe to delete (forces one full re-fold)
   .hash-* .count-* .stale-* .paused-* .seen-* .last-*   watcher internals; never touch
   .subsuper-*        away-mode delivery internals (cs-activate.sh, cs-afk-start.sh, cs-afk-return.sh); never touch
-.no-mistakes/        local validation state and evidence (`.no-mistakes/evidence`); gitignored
+.made/evidence/      local Made test evidence; gitignored
+.no-mistakes/        leftover local validation state from the predecessor tool; gitignored; not the live evidence dir
 ```
 
 A `state/<id>.status` line is a wake event, not current-state truth; `bin/cs-crew-state.sh` owns current-state reconciliation.
