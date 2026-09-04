@@ -133,10 +133,12 @@ assert_grep "Verified live on 2026-09-03" "$HDR" \
   "header must record the 2026-09-03 live verification of made gate init"
 assert_grep "18 separate project clones" "$HDR" \
   "header must record the verification method (18 project clones)"
+# shellcheck disable=SC2016  # needle matches literal backticks in the header
 assert_no_grep 'cmd/made has no `gate` case wired in yet' "$HDR" \
   "header must drop the stale not-implemented-yet framing for gate init"
 assert_no_grep 'forward reference, see header' "$HDR" \
   "cs_made_gate_init's own inline tag must not still call it a forward reference"
+# shellcheck disable=SC2016  # needle matches literal backticks in the header
 assert_grep 'cs_made_abort shells `made axi abort`. This is NOT a real made' "$HDR" \
   "the unrelated cs_made_abort forward-reference note must stay untouched"
 pass "cs-made-lib header records made gate init as verified-working"
