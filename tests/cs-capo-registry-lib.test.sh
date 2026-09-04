@@ -214,4 +214,41 @@ got=$(records_of "$REG" "$bytes")
 assert_contains "$got" 'ok|two|/homes/two|work two' "a bound at or past EOF must keep every row"
 pass "a byte-bounded read drops only the tail the bound cut"
 
+# --- 16. project ownership lookup is literal, unique, and fail-closed ---------
+# cs-spawn.sh routes a ship/scout spawn on this: the project name must match one
+# `projects:` entry exactly, a malformed row or a double claim refuses, and a
+# registry that does not exist is rc=2 so the caller can treat "no capos" as
+# "no routing" without mistaking it for a defect.
+
+cs_capo_registry_write "$REG" \
+  "$(cs_capo_registry_line private 'Private.' /homes/private 'household; and dotfiles' 'rosie, dotfiles')" \
+  "$(cs_capo_registry_line public 'Public.' /homes/public 'web (all of it)' 'oigo,dotfiles-web')"
+got=$(cs_capo_registry_owner_of_project "$REG" dotfiles) || fail "an owned project must resolve: $CS_CAPO_REGISTRY_ERROR"
+[ "$got" = "$(printf 'private\t/homes/private')" ] || fail "owner must be the claiming capo id and home, got: $got"
+got=$(cs_capo_registry_owner_of_project "$REG" rosie) || fail "the first csv entry must resolve"
+[ "${got%%	*}" = private ] || fail "rosie owner must be private, got: $got"
+got=$(cs_capo_registry_owner_of_project "$REG" dotfiles-web) || fail "a name sharing a prefix must resolve to its own owner"
+[ "${got%%	*}" = public ] || fail "dotfiles-web owner must be public, got: $got"
+cs_capo_registry_owner_of_project "$REG" dot >/dev/null && fail "a substring of a project name must not match"
+cs_capo_registry_owner_of_project "$REG" '' >/dev/null && fail "an empty project name must refuse"
+cs_capo_registry_owner_of_project "$REG" unowned >/dev/null
+[ "$?" -eq 1 ] || fail "an unowned project must be rc=1"
+assert_contains "$CS_CAPO_REGISTRY_ERROR" 'no registered capo owns project unowned' "an unowned project names itself in the reason"
+pass "project ownership resolves literally on the csv and refuses substrings"
+
+cs_capo_registry_write "$REG" \
+  "$(cs_capo_registry_line one 'One.' /homes/one 'work one' shared)" \
+  "$(cs_capo_registry_line two 'Two.' /homes/two 'work two' shared)"
+cs_capo_registry_owner_of_project "$REG" shared >/dev/null && fail "a project two capos claim must refuse"
+assert_contains "$CS_CAPO_REGISTRY_ERROR" 'claimed by 2 capo entries' "a double claim is named as a registry defect"
+cs_capo_registry_write "$REG" \
+  "$(cs_capo_registry_line one 'One.' /homes/one 'work one' p)" \
+  '- broken (home: ; scope: nothing)'
+cs_capo_registry_owner_of_project "$REG" p >/dev/null && fail "a malformed row anywhere must refuse the lookup"
+assert_contains "$CS_CAPO_REGISTRY_ERROR" 'malformed capo registry entry' "the malformed row is the stated reason"
+rm -f "$REG"
+cs_capo_registry_owner_of_project "$REG" p >/dev/null
+[ "$?" -eq 2 ] || fail "a missing registry must be rc=2, not a plain miss"
+pass "project ownership fails closed on duplicates and malformed rows, rc=2 on no registry"
+
 pass "cs-capo-registry-lib parse, lookup, and fail-closed contract"
