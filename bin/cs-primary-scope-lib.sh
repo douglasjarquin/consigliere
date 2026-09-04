@@ -39,7 +39,7 @@ cs_primary_home_context_matches() {
 cs_primary_scope_matches() {
   local root=$1 state=$2 git_dir git_common_dir
   if cs_root_is_capo_home "$root"; then
-    if [ -n "${CS_TASK_ID:-}" ]; then
+    if [ -n "${CS_HOME:-}" ]; then
       cs_primary_home_context_matches "$root" "$state" || return 1
     fi
   else

@@ -326,10 +326,10 @@ CS_LAYOUT_GATE_SKIP=
 
 # shellcheck source=bin/cs-primary-scope-lib.sh
 . "$SCRIPT_DIR/cs-primary-scope-lib.sh"
-if [ -n "${CS_TASK_ID:-}" ] && [ -n "${CS_ROOT_OVERRIDE:-}" ]; then
+if [ -n "${CS_ROOT_OVERRIDE:-}" ]; then
   if cs_root_is_capo_home "$CS_ROOT"; then
     cs_primary_home_context_matches "$CS_ROOT" "$STATE" || exit 0
-  else
+  elif [ -n "${CS_TASK_ID:-}" ] || ! cs_primary_worktree_matches "$CS_ROOT"; then
     exit 0
   fi
 fi

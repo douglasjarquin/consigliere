@@ -191,6 +191,22 @@ out=$(cd "$SOLDIER_WORKTREE" && printf '%s' '{"source":"startup"}' \
   fail "a forged capo marker overwrote redirected home-pane state"
 pass "a forged capo marker cannot redirect SessionStart state"
 
+printf 'lock-sentinel\n' > "$SOLDIER_HOME/state/.lock"
+printf 'wake-sentinel\n' > "$SOLDIER_HOME/state/.wake-queue"
+printf 'pane-sentinel\n' > "$SOLDIER_HOME/state/.home-pane"
+out=$(cd "$SOLDIER_WORKTREE" && printf '%s' '{"source":"startup"}' \
+  | CS_ROOT_OVERRIDE="$SOLDIER_WORKTREE" CS_HOME="$SOLDIER_HOME" \
+    CS_STATE_OVERRIDE="$SOLDIER_HOME/state" CS_DATA_OVERRIDE="$SOLDIER_HOME/data" \
+    CS_TASK_ID='' "$RUN")
+[ -z "$out" ] || fail "a forged capo marker with no task id must stay silent, got: $out"
+[ "$(cat "$SOLDIER_HOME/state/.lock")" = 'lock-sentinel' ] || \
+  fail "a forged capo marker with no task id overwrote redirected lock state"
+[ "$(cat "$SOLDIER_HOME/state/.wake-queue")" = 'wake-sentinel' ] || \
+  fail "a forged capo marker with no task id drained redirected wake state"
+[ "$(cat "$SOLDIER_HOME/state/.home-pane")" = 'pane-sentinel' ] || \
+  fail "a forged capo marker with no task id overwrote redirected home-pane state"
+pass "a forged capo marker cannot redirect SessionStart state without a task id"
+
 IFS='|' read -r ROOT_DIR HOME_DIR <<<"$(new_world capo)"
 printf 'capo-1\n' > "$ROOT_DIR/.cs-capo-home"
 mkdir -p "$ROOT_DIR/state" "$ROOT_DIR/data" "$ROOT_DIR/config"
