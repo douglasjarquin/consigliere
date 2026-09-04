@@ -5,6 +5,7 @@
 set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+unset CS_TASK_ID
 
 TMP=$(cs_test_tmproot cs-lock)
 export CS_STATE_OVERRIDE="$TMP/state"
@@ -16,6 +17,19 @@ export CS_LOCK_HARNESS_RE='bash|zsh|codex'
 out=$("$ROOT/bin/cs-lock.sh") || fail "acquire on free lock failed"
 assert_contains "$out" "lock acquired" "acquire reports the held pid"
 assert_present "$TMP/state/.lock" "lock file written"
+
+SOLDIER_STATE="$TMP/soldier-state"
+mkdir -p "$SOLDIER_STATE"
+printf 'soldier-lock-sentinel\n' > "$SOLDIER_STATE/.lock"
+set +e
+out=$(CS_TASK_ID=fix-soldier-lock-hijack CS_STATE_OVERRIDE="$SOLDIER_STATE" \
+  "$ROOT/bin/cs-lock.sh" 2>&1)
+code=$?
+expect_code 1 "$code" "soldier context refuses lock acquisition"
+assert_contains "$out" "soldier context" "soldier lock refusal names its context"
+[ "$(cat "$SOLDIER_STATE/.lock")" = 'soldier-lock-sentinel' ] || \
+  fail "soldier lock acquisition overwrote the existing lock"
+pass "CS_TASK_ID prevents a soldier from acquiring the session lock"
 
 # re-acquire by the same session is idempotent
 out=$("$ROOT/bin/cs-lock.sh") || fail "re-acquire by same session failed"

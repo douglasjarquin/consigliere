@@ -48,6 +48,8 @@ fi
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 unset NO_MISTAKES_GATE
+unset CS_TASK_ID
+unset CS_ROOT_OVERRIDE CS_HOME CS_STATE_OVERRIDE CS_DATA_OVERRIDE CS_CONFIG_OVERRIDE CS_HOST_OVERRIDE
 
 TMP=$(cs_test_tmproot cs-sessionstart-run)
 RUN="$ROOT/bin/cs-sessionstart-run.sh"
@@ -80,7 +82,7 @@ new_world() {
 run_router() {
   local root=$1 home=$2 payload=$3
   shift 3
-  printf '%s' "$payload" | CS_ROOT_OVERRIDE="$root" CS_HOME="$home" "$RUN" "$@"
+  (cd "$root" && printf '%s' "$payload" | CS_ROOT_OVERRIDE="$root" CS_HOME="$home" "$RUN" "$@")
 }
 
 # own_lock <home>: record the long-lived fixture shell as this session's lock
@@ -103,6 +105,54 @@ assert_contains "$out" "SESSION START - $HOME_DIR" "an unrecognized source did n
 out=$(run_router "$ROOT_DIR" "$HOME_DIR" 'not json at all')
 assert_contains "$out" "SESSION START - $HOME_DIR" "an unreadable payload did not run the full digest"
 pass "unrecognized and unreadable sources fall through to the full digest"
+
+SOLDIER_PRIMARY="$TMP/soldier-primary"
+SOLDIER_WORKTREE="$TMP/soldier-worktree"
+cs_git_worktree "$SOLDIER_PRIMARY" "$SOLDIER_WORKTREE" cs/soldier
+mkdir -p "$SOLDIER_PRIMARY/bin" "$TMP/soldier-home/state" "$TMP/soldier-home/data" \
+  "$TMP/soldier-home/config"
+: > "$SOLDIER_PRIMARY/AGENTS.md"
+SOLDIER_HOME="$TMP/soldier-home"
+printf 'lock-sentinel\n' > "$SOLDIER_HOME/state/.lock"
+printf 'wake-sentinel\n' > "$SOLDIER_HOME/state/.wake-queue"
+out=$(cd "$SOLDIER_WORKTREE" && printf '%s' '{"source":"startup"}' \
+  | CS_ROOT_OVERRIDE="$SOLDIER_PRIMARY" CS_HOME="$SOLDIER_HOME" \
+    CS_STATE_OVERRIDE="$SOLDIER_HOME/state" CS_DATA_OVERRIDE="$SOLDIER_HOME/data" \
+    CS_TASK_ID=fix-soldier-lock-hijack "$RUN")
+[ -z "$out" ] || fail "a soldier session-start hook must be silent, got: $out"
+[ "$(cat "$SOLDIER_HOME/state/.lock")" = 'lock-sentinel' ] || \
+  fail "a soldier session-start hook overwrote the primary lock"
+[ "$(cat "$SOLDIER_HOME/state/.wake-queue")" = 'wake-sentinel' ] || \
+  fail "a soldier session-start hook drained the primary wake queue"
+assert_absent "$SOLDIER_HOME/state/.session-start-complete" \
+  "a soldier session-start hook recorded completion"
+pass "primary-home overrides plus a soldier task id never start the primary session"
+
+printf 'lock-sentinel\n' > "$SOLDIER_HOME/state/.lock"
+printf 'wake-sentinel\n' > "$SOLDIER_HOME/state/.wake-queue"
+out=$(cd "$SOLDIER_WORKTREE" && printf '%s' '{"source":"startup"}' \
+  | CS_ROOT_OVERRIDE="$SOLDIER_PRIMARY" CS_HOME="$SOLDIER_HOME" \
+    CS_STATE_OVERRIDE="$SOLDIER_HOME/state" CS_DATA_OVERRIDE="$SOLDIER_HOME/data" \
+    CS_TASK_ID='' "$RUN")
+[ -z "$out" ] || fail "a mismatched soldier cwd must be silent, got: $out"
+[ "$(cat "$SOLDIER_HOME/state/.lock")" = 'lock-sentinel' ] || \
+  fail "a mismatched soldier cwd overwrote the primary lock"
+[ "$(cat "$SOLDIER_HOME/state/.wake-queue")" = 'wake-sentinel' ] || \
+  fail "a mismatched soldier cwd drained the primary wake queue"
+assert_absent "$SOLDIER_HOME/state/.session-start-complete" \
+  "a mismatched soldier cwd recorded completion"
+pass "primary-home overrides plus a mismatched soldier cwd never start the primary session"
+
+IFS='|' read -r ROOT_DIR HOME_DIR <<<"$(new_world capo)"
+printf 'capo-1\n' > "$ROOT_DIR/.cs-capo-home"
+out=$(cd "$ROOT_DIR" && printf '%s' '{"source":"startup"}' \
+  | CS_ROOT_OVERRIDE="$ROOT_DIR" CS_HOME="$HOME_DIR" \
+    CS_TASK_ID=capo-task "$RUN")
+assert_contains "$out" "SESSION START - $HOME_DIR" \
+  "a marked capo session with a task id did not run its own startup"
+assert_contains "$out" 'lock acquired' \
+  "a marked capo session with a task id did not acquire its own lock"
+pass "a marked capo session retains project-scoped startup with CS_TASK_ID"
 
 # --- source routing: clear without completion proof runs the full digest -------
 IFS='|' read -r ROOT_DIR HOME_DIR <<<"$(new_world clear-unproven)"

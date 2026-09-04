@@ -37,3 +37,11 @@ cs_primary_scope_matches() {
   [ -d "$root/bin" ] || return 1
   [ -d "$state" ] || return 1
 }
+
+cs_primary_worktree_matches() {
+  local root=$1 cwd root_top
+  cwd=$(pwd -P) || return 1
+  root_top=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null) || return 1
+  root_top=$(CDPATH='' cd -- "$root_top" && pwd -P) || return 1
+  [ "$cwd" = "$root_top" ]
+}

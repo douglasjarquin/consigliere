@@ -38,6 +38,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/cs-root-lib.sh"
 # shellcheck source=bin/cs-session-pid-lib.sh
 . "$SCRIPT_DIR/cs-session-pid-lib.sh"
+# shellcheck source=bin/cs-primary-scope-lib.sh
+. "$SCRIPT_DIR/cs-primary-scope-lib.sh"
 cs_resolve_root
 LOCK="$STATE/.lock"
 mkdir -p "$STATE"
@@ -81,6 +83,11 @@ if [ "${1:-}" = "status" ]; then
   old=$(cat "$LOCK")
   if holder_alive "$old"; then echo "lock: held by live harness pid $old"; else echo "lock: stale (pid $old dead or not a harness)"; fi
   exit 0
+fi
+
+if [ -n "${CS_TASK_ID:-}" ] && ! cs_root_is_capo_home "$CS_ROOT"; then
+  echo "error: soldier context cannot acquire the consigliere session lock" >&2
+  exit 1
 fi
 
 me=$(cs_session_harness_pid) || { echo "error: cannot locate harness process in ancestry" >&2; exit 1; }
