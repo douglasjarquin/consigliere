@@ -126,4 +126,19 @@ PATH="$EMPTYBIN" cs_made_require >/dev/null 2>&1 || err=$?
 [ "$err" -ne 0 ] || fail "cs_made_require must fail when made is not on PATH"
 pass "cs_made_require reports a missing made binary"
 
+# --- header doc: gate init is recorded as verified-working, not forward-ref -
+
+HDR="$ROOT/bin/cs-made-lib.sh"
+assert_grep "Verified live on 2026-09-03" "$HDR" \
+  "header must record the 2026-09-03 live verification of made gate init"
+assert_grep "18 separate project clones" "$HDR" \
+  "header must record the verification method (18 project clones)"
+assert_no_grep 'cmd/made has no `gate` case wired in yet' "$HDR" \
+  "header must drop the stale not-implemented-yet framing for gate init"
+assert_no_grep 'forward reference, see header' "$HDR" \
+  "cs_made_gate_init's own inline tag must not still call it a forward reference"
+assert_grep 'cs_made_abort shells `made axi abort`. This is NOT a real made' "$HDR" \
+  "the unrelated cs_made_abort forward-reference note must stay untouched"
+pass "cs-made-lib header records made gate init as verified-working"
+
 pass "cs-made-lib shim forwards to the made CLI"
