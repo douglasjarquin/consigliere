@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Bring up the local dev stack (dev + web services)"
+set -eu
+
+export DEV_UID="${DEV_UID:-$(id -u)}"
+export DEV_GID="${DEV_GID:-$(id -g)}"
+docker compose up -d dev web

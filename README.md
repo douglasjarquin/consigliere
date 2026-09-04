@@ -84,6 +84,17 @@ Then talk to it in plain language: describe the work, name the project when it i
 - `host/` - machine-local sibling (capo roster, harness pin, activation); never backed up, re-created per machine
 - `data/ state/ projects/` - generated output, volatile runtime state, and clones; boss-private, gitignored, disposable or re-creatable
 
+### Dev-tools suite
+
+`mise.toml`, `mise-tasks/dev/`, `docker/dev/Dockerfile`, `docker-compose.yml`, and `scripts/ci/` are a purely additive dev-tools suite (mise for tooling/tasks, `aube` where JS package-manager work needs it, a single container for local dev and CI) - see [`docs/dev-environment.md`](docs/dev-environment.md).
+No existing `bin/*.sh` script's content changed to add it.
+
+### Grok Bot pack
+
+The `grokbot/` subtree is a vendored, pinned port of [grok-ship](https://github.com/kunchenguid/grok-ship/) for the Grok Bot platform, not consigliere's terminal harnesses.
+It retains grok-ship's third-party MIT license.
+Install and upgrade both mean telling a Grok Bot session to follow [`docs/grokbot.md`](docs/grokbot.md).
+
 Backup and restore need no tool:
 
 ```
@@ -107,6 +118,7 @@ checks cannot drift from what you run before pushing:
 | Repo invariants | `git ls-files -- .env data state config host projects .no-mistakes` prints nothing; tracked symlinks stay symlinks |
 | Coverage guard | `bin/cs-test-run.sh --check-coverage` (proves every `tests/*.test.sh` is in exactly one lane) |
 | Docs site | `mise run web:install && mise run web:build && mise run web:check && mise run web:test` |
+| Dev-tools container | `CS_TEST_DOCKER_LIVE=1 bin/cs-test-run.sh --docker` (needs a live Docker daemon; see [`docs/dev-environment.md`](docs/dev-environment.md)) |
 
 Each lane except repo invariants runs only when the change can affect it.
 The docs-site lane runs for `web/` and the mise pin.

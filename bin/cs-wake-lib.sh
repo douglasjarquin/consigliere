@@ -8,6 +8,9 @@
 CS_WAKE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/cs-session-pid-lib.sh
 . "$CS_WAKE_LIB_DIR/cs-session-pid-lib.sh"
+# cs_lock_path_mtime, the one owner of the portable stat mtime read.
+# shellcheck source=bin/cs-lock-lib.sh
+. "$CS_WAKE_LIB_DIR/cs-lock-lib.sh"
 CS_WAKE_DEFAULT_ROOT="$(cd "$CS_WAKE_LIB_DIR/.." && pwd)"
 CS_ROOT="${CS_ROOT_OVERRIDE:-${CS_ROOT:-$CS_WAKE_DEFAULT_ROOT}}"
 CS_HOME="${CS_HOME:-${CS_ROOT_OVERRIDE:-$CS_ROOT}}"
@@ -36,17 +39,81 @@ cs_pid_alive() {
 }
 
 cs_path_mtime() {
-  if [ "$(uname)" = Darwin ]; then
-    stat -f %m "$1" 2>/dev/null
-  else
-    stat -c %Y "$1" 2>/dev/null
-  fi
+  cs_lock_path_mtime "$1"
 }
 
 cs_path_age() {
   local path=$1 m
   m=$(cs_path_mtime "$path") || { echo 999999; return; }
   echo $(( $(date +%s) - m ))
+}
+
+CS_WATCHER_MATCHED_IDENTITY=
+cs_watcher_lock_matches_pid() {
+  local state=$1 watch_path=$2 pid=$3 home=${4:-$CS_HOME} lockdir lock_home lock_path lock_identity current_identity
+  CS_WATCHER_MATCHED_IDENTITY=
+  lockdir="$state/.watch.lock"
+  lock_home=$(cat "$lockdir/cs-home" 2>/dev/null || true)
+  lock_path=$(cat "$lockdir/watcher-path" 2>/dev/null || true)
+  lock_identity=$(cat "$lockdir/pid-identity" 2>/dev/null || true)
+  [ "$lock_home" = "$home" ] || return 1
+  [ "$lock_path" = "$watch_path" ] || return 1
+  [ -n "$lock_identity" ] || return 1
+  current_identity=$(cs_pid_identity "$pid") || return 1
+  [ "$current_identity" = "$lock_identity" ] || return 1
+  CS_WATCHER_MATCHED_IDENTITY=$lock_identity
+}
+
+CS_WATCHER_HEALTHY_PID=
+CS_WATCHER_HEALTHY_IDENTITY=
+cs_watcher_healthy() {
+  local state=$1 watch_path=$2 grace=${3:-${CS_GUARD_GRACE:-300}} home=${4:-$CS_HOME} lockdir beat pid identity age
+  CS_WATCHER_HEALTHY_PID=
+  CS_WATCHER_HEALTHY_IDENTITY=
+  lockdir="$state/.watch.lock"
+  beat="$state/.last-watcher-beat"
+  pid=$(cat "$lockdir/pid" 2>/dev/null || true)
+  cs_pid_alive "$pid" || return 1
+  cs_watcher_lock_matches_pid "$state" "$watch_path" "$pid" "$home" || return 1
+  identity=$CS_WATCHER_MATCHED_IDENTITY
+  age=$(cs_path_age "$beat")
+  [ "$age" -lt "$grace" ] || return 1
+  export CS_WATCHER_HEALTHY_PID=$pid
+  export CS_WATCHER_HEALTHY_IDENTITY=$identity
+  return 0
+}
+
+# cs_watcher_lock_current_pid <state> -> the live watcher pid recorded in
+# <state>/.watch.lock on stdout, or rc 1 with nothing printed. Unlike
+# cs_watcher_lock_matches_pid, this needs no externally-known expected
+# home/watcher-path: it is the self-consistency check a caller that only has
+# a state directory (issue #152's Herdr event hook, invoked by herdr's own
+# server process with nothing but the state path baked into its plugin
+# manifest) can run before signaling that pid. Rejects a missing lock, a
+# symlinked lock directory or record file (no symlink following - a directory,
+# FIFO, or oversized record fails the same way), a non-numeric or
+# non-positive pid, a dead pid, and a pid whose live cs_pid_identity no
+# longer matches what was recorded - the exact PID-reuse case a stale lock
+# after a crash must never let through.
+cs_watcher_lock_current_pid() {
+  local state=$1 lockdir f size pid identity current
+  lockdir=$state/.watch.lock
+  [ -e "$lockdir" ] && [ ! -L "$lockdir" ] && [ -d "$lockdir" ] || return 1
+  for f in pid pid-identity; do
+    [ -e "$lockdir/$f" ] && [ ! -L "$lockdir/$f" ] && [ -f "$lockdir/$f" ] || return 1
+    size=$(wc -c < "$lockdir/$f" 2>/dev/null | tr -d '[:space:]') || return 1
+    case "$size" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$size" -le 256 ] || return 1
+  done
+  pid=$(cat "$lockdir/pid" 2>/dev/null | tr -d '[:space:]')
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$pid" -gt 1 ] || return 1
+  identity=$(cat "$lockdir/pid-identity" 2>/dev/null | tr -d '\n')
+  [ -n "$identity" ] || return 1
+  cs_pid_alive "$pid" || return 1
+  current=$(cs_pid_identity "$pid") || return 1
+  [ "$current" = "$identity" ] || return 1
+  printf '%s\n' "$pid"
 }
 
 cs_lock_clean_known_files() {
@@ -321,10 +388,64 @@ cs_wake_clean_field() {
   LC_ALL=C tr '\t\r\n' '   '
 }
 
+# --- watcher signal signature and .seen-* marker (one owner) -----------------
+#
+# The watcher detects a status/turn-end signal by comparing a file's current
+# size:mtime signature against the persisted .seen-* marker, and the span
+# classifier (bin/cs-classify-lib.sh signal_reason_is_actionable) reads the
+# marker's size half as the unread-span start. These three helpers own the
+# signature format and the marker path so the writer, the detector, and the
+# reader can never drift apart.
+if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
+  cs_wake_signal_sig() {  # <file> -> "size:mtime", empty on I/O failure
+    LC_ALL=C stat -f '%z:%Fm' "$1" 2>/dev/null
+  }
+else
+  cs_wake_signal_sig() {  # <file> -> "size:mtime", empty on I/O failure
+    LC_ALL=C stat -c '%s:%Y' "$1" 2>/dev/null
+  }
+fi
+
+cs_wake_seen_path() {  # <state-dir> <signal-file>
+  printf '%s/.seen-%s' "$1" "$(basename "$2" | tr '.' '_')"
+}
+
+cs_wake_seen_current() {  # <state-dir> <signal-file> -> 0 if already announced
+  local sig
+  sig=$(cs_wake_signal_sig "$2") || return 1
+  [ -n "$sig" ] || return 1
+  [ "$sig" = "$(cat "$(cs_wake_seen_path "$1" "$2")" 2>/dev/null)" ]
+}
+
+# Bookkeeping append that must not re-wake the session that wrote it: this
+# home's own closes (a cs-send --resolve-key resolved line, a pending-reply
+# escalation close) are already announced by the turn that writes them, so a
+# signal wake for those exact bytes is a duplicate handling turn. The append
+# advances the .seen-* marker ONLY over exactly its own bytes: the pre-append
+# signature must match the current seen marker (nothing foreign pending) and
+# the post-append size must equal pre-append size plus this line, otherwise
+# the marker is left alone and the watcher wakes - failing toward waking on
+# any pending or interleaved foreign write. Escalation OPENS stay plain
+# appends because a new blocker must wake.
+cs_wake_status_append_self_announced() {  # <state-dir> <status-file> <line>
+  local LC_ALL=C state=$1 f=$2 line=$3 marker before seen after expected
+  line=$(printf '%s' "$line" | cs_wake_clean_field)
+  marker=$(cs_wake_seen_path "$state" "$f")
+  before=$(cs_wake_signal_sig "$f" 2>/dev/null || true)
+  seen=$(cat "$marker" 2>/dev/null || true)
+  printf '%s\n' "$line" >> "$f" || return 1
+  [ -n "$before" ] && [ "$before" = "$seen" ] || return 0
+  expected=$(( ${before%%:*} + ${#line} + 1 ))
+  after=$(cs_wake_signal_sig "$f" 2>/dev/null || true)
+  [ -n "$after" ] && [ "${after%%:*}" = "$expected" ] || return 0
+  printf '%s' "$after" > "$marker" 2>/dev/null || true
+  return 0
+}
+
 cs_wake_append() {
   local kind=$1 key=$2 payload=$3 clean_key clean_payload epoch seq seq_file status
   case "$kind" in
-    signal|stale|check|capo|heartbeat) ;;
+    signal|stale|check|heartbeat) ;;
     *) printf 'cs_wake_append: invalid wake kind: %s\n' "$kind" >&2; return 2 ;;
   esac
 
@@ -346,6 +467,53 @@ cs_wake_append() {
   fi
   cs_lock_release "$CS_WAKE_QUEUE_LOCK"
   return "$status"
+}
+
+cs_wake_queued_keys() {  # <kind>
+  awk -F '\t' -v kind="$1" 'NF >= 5 && $3 == kind && !seen[$4]++ { print $4 }' \
+    "$CS_WAKE_QUEUE" 2>/dev/null || true
+}
+
+cs_wake_capo_stall_marker_write() {  # <capo-id> <row-key>
+  local task=$1 row_key=$2 marker tmp
+  case "$task" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "$row_key" in ''|*[!0-9-]*) return 1 ;; esac
+  marker="$STATE/.capo-wake-stall-$task"
+  if [ -e "$marker" ] || [ -L "$marker" ]; then
+    [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+  fi
+  tmp=$(umask 077; mktemp "$STATE/.capo-wake-stall.XXXXXX") || return 1
+  if ! printf '%s\n' "$row_key" > "$tmp" || ! chmod 0600 "$tmp" || ! mv -f -- "$tmp" "$marker"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+}
+
+cs_wake_capo_stall_receipt_write() {  # <capo-id> <row-key>
+  local task=$1 row_key=$2 root task_dir receipt tmp
+  case "$task" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "$row_key" in ''|*[!0-9-]*) return 1 ;; esac
+  root="$STATE/.capo-wake-stall-receipts"
+  task_dir="$root/$task"
+  if [ -e "$root" ] || [ -L "$root" ]; then
+    [ -d "$root" ] && [ ! -L "$root" ] || return 1
+  else
+    mkdir "$root" || return 1
+    chmod 0700 "$root" || return 1
+  fi
+  if [ -e "$task_dir" ] || [ -L "$task_dir" ]; then
+    [ -d "$task_dir" ] && [ ! -L "$task_dir" ] || return 1
+  else
+    mkdir "$task_dir" || return 1
+    chmod 0700 "$task_dir" || return 1
+  fi
+  receipt="$task_dir/$row_key"
+  [ "$(cat "$receipt" 2>/dev/null || true)" = "$row_key" ] && return 0
+  tmp=$(umask 077; mktemp "$task_dir/.receipt.XXXXXX") || return 1
+  if ! printf '%s\n' "$row_key" > "$tmp" || ! chmod 0600 "$tmp" || ! mv -f -- "$tmp" "$receipt"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
 }
 
 # Create an empty rotation batch and print its path. The name is unique rather
@@ -483,13 +651,64 @@ cs_wake_latest_event() {  # <validated-status-path> <tail-byte-cap>
   fi
 }
 
+# Presentation cursor for the unread-span annotation below: byte offset of the
+# last status line already presented to the agent, per task. Owned here so the
+# drain presents EVERY unread line exactly once instead of only the newest one.
+cs_wake_presented_path() {  # <state-dir> <status-key>
+  printf '%s/.last-presented-%s' "$1" "${2%.status}"
+}
+
+# Collect every unread non-blank status line since the presentation cursor
+# into CS_WAKE_UNREAD_LINES (newest-last, bounded by <tail-byte-cap>; an
+# over-cap span keeps only its newest bytes and flags truncation via
+# CS_WAKE_UNREAD_TRUNCATED). Sets CS_WAKE_UNREAD_NEW_OFFSET to the size the
+# cursor should advance to; the CALLER advances it only after successfully
+# presenting the lines, so an I/O failure re-presents rather than silently
+# skips. A missing or invalid cursor collects nothing and returns 1, so the
+# first drain after upgrade (or a rotation) does not replay a whole lifetime
+# log; the latest event still reaches the agent through cs_wake_latest_event's
+# fallback. Sets variables rather than printing so no subshell hides them.
+CS_WAKE_UNREAD_LINES=
+CS_WAKE_UNREAD_NEW_OFFSET=
+CS_WAKE_UNREAD_TRUNCATED=false
+cs_wake_unread_events() {  # <validated-status-path> <cursor-file> <tail-byte-cap>
+  local LC_ALL=C path=$1 cursor_file=$2 cap=$3 offset size start
+  CS_WAKE_UNREAD_LINES=
+  CS_WAKE_UNREAD_NEW_OFFSET=
+  CS_WAKE_UNREAD_TRUNCATED=false
+  [ -f "$path" ] && [ ! -L "$path" ] || return 1
+  size=$({ wc -c < "$path"; } 2>/dev/null) || return 1
+  size=${size//[[:space:]]/}
+  case "$size" in ''|*[!0-9]*) return 1 ;; esac
+  CS_WAKE_UNREAD_NEW_OFFSET=$size
+  offset=$(cat "$cursor_file" 2>/dev/null || true)
+  case "$offset" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$offset" -le "$size" ] || return 1
+  [ "$offset" -lt "$size" ] || return 0
+  start=$offset
+  if [ $((size - offset)) -gt "$cap" ]; then
+    start=$((size - cap))
+    CS_WAKE_UNREAD_TRUNCATED=true
+  fi
+  CS_WAKE_UNREAD_LINES=$(tail -c "+$((start + 1))" "$path" 2>/dev/null \
+    | LC_ALL=C tr '\t\r' '  ' | grep -v '^[[:space:]]*$') || CS_WAKE_UNREAD_LINES=
+  return 0
+}
+
 # Print supplemental drain-time context only after the caller has committed the
 # raw queue consumption and released the append lock. The limits are constants,
 # so status-file volume cannot turn a drain into an unbounded context read.
+# Each signal-named status file presents EVERY unread line since its
+# presentation cursor (so an older note: is never dropped because a newer line
+# followed it), falling back to the single latest event when the cursor is
+# absent or unreadable; the cursor advances only after the lines are queued
+# for output, and a file whose cursor already covers its bytes prints nothing
+# (a turn-ended-only wake no longer re-announces already-presented lines).
 cs_wake_print_annotations() {  # <deduped-raw-rows>
   local rows=$1 manifest status_key mode path prefix line suffix keep bytes
   local output='' used=0 omitted=0 read_omitted=0 annotation_marker marker_reserve=192
   local tail_bytes=8192 item_bytes=2048 global_bytes=8192 read_cap=8 reads=0
+  local cursor_file unread unread_ok new_offset item_omitted file_out file_bytes event_line
   local LC_ALL=C
 
   manifest=$(cs_wake_annotation_manifest "$rows" | awk -F '\t' '
@@ -524,6 +743,50 @@ cs_wake_print_annotations() {  # <deduped-raw-rows>
     fi
     reads=$((reads + 1))
     path="$STATE/$status_key"
+    cursor_file=$(cs_wake_presented_path "$STATE" "$status_key")
+    unread_ok=0
+    cs_wake_unread_events "$path" "$cursor_file" "$tail_bytes" && unread_ok=1
+    unread=$CS_WAKE_UNREAD_LINES
+    new_offset=$CS_WAKE_UNREAD_NEW_OFFSET
+    if [ "$unread_ok" -eq 1 ]; then
+      # Cursor path: present every unread line, then advance the cursor - but
+      # only when the whole span fit the global budget, so an over-budget span
+      # re-presents next drain (duplicates over loss) instead of vanishing.
+      file_out=''
+      file_bytes=0
+      item_omitted=0
+      prefix="wake annotation: unread status event"
+      [ "$CS_WAKE_UNREAD_TRUNCATED" = false ] \
+        || file_out="$prefix: $status_key: [older unread lines truncated]
+"
+      while IFS= read -r event_line; do
+        [ -n "$event_line" ] || continue
+        line="$prefix: $status_key: $event_line"
+        if [ $(( ${#line} + 1 )) -gt "$item_bytes" ]; then
+          suffix=' [truncated]'
+          keep=$((item_bytes - ${#suffix} - 1))
+          line="${line:0:$keep}$suffix"
+        fi
+        bytes=$(( ${#line} + 1 ))
+        if [ $((used + file_bytes + bytes + marker_reserve)) -gt "$global_bytes" ]; then
+          item_omitted=1
+          break
+        fi
+        file_out="$file_out$line
+"
+        file_bytes=$((file_bytes + bytes))
+      done <<UNREAD
+$unread
+UNREAD
+      if [ "$item_omitted" -eq 1 ]; then
+        omitted=$((omitted + 1))
+        continue
+      fi
+      output="$output$file_out"
+      used=$((used + file_bytes))
+      [ -z "$new_offset" ] || printf '%s' "$new_offset" > "$cursor_file" 2>/dev/null || true
+      continue
+    fi
     cs_wake_latest_event "$path" "$tail_bytes" || continue
     prefix="wake annotation: latest wake-EVENT observed at drain, not current state"
     if [ "$mode" = historical ]; then
@@ -546,6 +809,9 @@ cs_wake_print_annotations() {  # <deduped-raw-rows>
     output="$output$line
 "
     used=$((used + bytes))
+    # Initialize the presentation cursor from this fallback read, so the next
+    # drain presents spans instead of only the newest line.
+    [ -z "$new_offset" ] || printf '%s' "$new_offset" > "$cursor_file" 2>/dev/null || true
   done <<EOF
 $manifest
 EOF

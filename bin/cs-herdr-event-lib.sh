@@ -14,7 +14,8 @@
 # Field 1 is the event kind, so a consumer never infers which subscription
 # produced a line and an unknown kind is ignored rather than misread. For the
 # one kind this transport carries, `status` (pane.agent_status_changed), field3
-# is the agent status and field4 the agent name.
+# is the agent status and field4 the agent name. Native hook records may carry a
+# sixth endpoint-generation field; level-reconcile records omit it.
 #
 # WHY A FILE AND NOT A FIFO. The point of moving onto plugin hooks is that the
 # producer outlives every consumer: a fifo would drop every edge with no reader
@@ -62,7 +63,7 @@ cs_event_file_size() {  # <path>
 # place: this runs inside herdr's hook for every status edge of every pane on
 # the machine, and a command substitution per field would fork a subshell each
 # time for work bash does natively. Missing trailing fields are emitted empty,
-# so a record is always exactly five fields.
+# so a record is always exactly five fields before an optional generation field.
 cs_event_record() {  # <kind> <pane_id> <workspace_id> <field3> <field4>
   local out='' n=0 field
   for field in "$@"; do
@@ -78,6 +79,20 @@ cs_event_record() {  # <kind> <pane_id> <workspace_id> <field3> <field4>
     n=$((n + 1))
   done
   printf '%s' "$out"
+}
+
+cs_event_record_with_generation() {  # <kind> <pane_id> <workspace_id> <field3> <field4> <generation>
+  local record generation
+  record=$(cs_event_record "$1" "$2" "$3" "$4" "$5")
+  generation=${6:-}
+  generation=${generation//$'\t'/ }
+  generation=${generation//$'\r'/ }
+  generation=${generation//$'\n'/ }
+  if [ -n "$generation" ]; then
+    printf '%s\t%s' "$record" "$generation"
+  else
+    printf '%s' "$record"
+  fi
 }
 
 # One record, one `printf` to an O_APPEND descriptor: well under PIPE_BUF, so

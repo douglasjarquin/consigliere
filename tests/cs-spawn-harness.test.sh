@@ -96,6 +96,12 @@ case "${1:-} ${2:-}" in
   "pane wait-output")
     # The env-export pre-step's confirmation, always taken for a capo (its
     # CS_HOME/override-clearing prefix is unconditional).
+    if [ "${CS_FAKE_SPAWN_WAIT_FAIL_ONCE:-0}" = 1 ] &&
+      [ ! -f "${CS_FAKE_SPAWN_WAIT_MARKER:-}" ]; then
+      : > "$CS_FAKE_SPAWN_WAIT_MARKER"
+      printf '%s\n' '{"error":{"code":"wait_timeout","message":"shell not ready"}}' >&2
+      exit 1
+    fi
     printf '{"result":{"matched":true}}\n' ;;
   "workspace list") printf '{"result":{"workspaces":[]}}\n' ;;
   "workspace create") printf '{"result":{"workspace":{"workspace_id":"wcapo"}}}\n' ;;
@@ -119,6 +125,21 @@ case "${1:-} ${2:-}" in
 esac
 SH
 chmod +x "$FAKEBIN/herdr"
+
+cat > "$FAKEBIN/cursor-agent" <<'SH'
+#!/usr/bin/env bash
+echo "Start the Cursor Agent"
+SH
+chmod +x "$FAKEBIN/cursor-agent"
+
+cat > "$FAKEBIN/grok" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --help) printf 'Grok Build TUI\nUsage: grok [OPTIONS]\n'; exit 0 ;;
+esac
+exit 0
+SH
+chmod +x "$FAKEBIN/grok"
 
 HOME_DIR="$TMP/home"
 mkdir -p "$HOME_DIR/data" "$HOME_DIR/state" "$HOME_DIR/config"
@@ -149,12 +170,14 @@ spawn_one() {
   # env pre-step these launch assertions do not expect.
   env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE="$harness" CLAUDE_CONFIG_DIR= \
     CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
-    CS_CLAUDE_JSON="$TMP/claude.json" \
+    CS_CLAUDE_JSON="$TMP/claude.json" GROK_HOME="$TMP/grok-home-$id" \
     CS_FAKE_SPAWN_WORKTREE="$wt" CS_FAKE_SPAWN_LAUNCH="$TMP/launch-$id" \
     CS_FAKE_SPAWN_PANE_RUN="$TMP/panerun-$id" \
     CS_FAKE_SPAWN_METADATA="$TMP/metadata-$id" \
     CS_FAKE_SPAWN_META="$HOME_DIR/state/$id.meta" \
     CS_FAKE_SPAWN_META_BEFORE="$TMP/meta-before-$id" \
+    CS_FAKE_SPAWN_WAIT_FAIL_ONCE="${CS_FAKE_SPAWN_WAIT_FAIL_ONCE:-0}" \
+    CS_FAKE_SPAWN_WAIT_MARKER="${CS_FAKE_SPAWN_WAIT_MARKER:-$TMP/wait-once-$id}" \
     CS_FAKE_SPAWN_REPORT_METADATA_FAIL="${CS_FAKE_SPAWN_REPORT_METADATA_FAIL:-0}" \
     "$SPAWN" "$id" "$REPO" "$@" >/dev/null || fail "spawn ($harness) failed"
   # An interactive spawn is captured by `agent start`; a headless scout never
@@ -173,6 +196,9 @@ spawn_one() {
 # --- codex root: unchanged launch shape, harness=codex ----------------------
 launch=$(spawn_one codex t-codex --mode made --yolo off)
 [ "$(cs_meta_get "$HOME_DIR/state/t-codex.meta" harness)" = codex ] || fail "codex meta harness"
+[ "$(cs_meta_get "$HOME_DIR/state/t-codex.meta" parent_task_id)" = root ] || fail "root spawn parent task"
+[ "$(cs_meta_get "$HOME_DIR/state/t-codex.meta" parent_home)" = "$HOME_DIR" ] || fail "root spawn parent home"
+[ "$(cs_meta_get "$HOME_DIR/state/t-codex.meta" endpoint_generation)" != "" ] || fail "root spawn endpoint generation"
 assert_present "$TMP/metadata-t-codex" "spawn reports display metadata for the task pane"
 assert_grep '--source cs-spawn' "$TMP/metadata-t-codex" "display metadata uses the non-reserved spawn source"
 assert_grep '--state-label working=task=t-codex mode=made' "$TMP/metadata-t-codex" \
@@ -184,7 +210,21 @@ assert_contains "$launch" "kind=codex" "codex root launches codex"
 assert_contains "$launch" 'notify=' "codex root wires notify turn-end"
 assert_not_contains "$launch" '--settings' "codex root does not use --settings"
 assert_absent "$HOME_DIR/state/t-codex.claude-settings.json" "codex root writes no claude settings file"
+assert_contains "$(cat "$TMP/panerun-t-codex")" \
+  "export CS_ROOT_OVERRIDE='$ROOT' CS_HOME='$HOME_DIR' CS_DATA_OVERRIDE='$HOME_DIR/data' CS_STATE_OVERRIDE='$HOME_DIR/state' CS_TASK_ID='t-codex'" \
+  "a regular soldier receives its explicit home and task identity before agent start"
 pass "codex root: harness=codex, codex notify launch, no settings file"
+
+cs_meta_write "$HOME_DIR/state/parent.meta" \
+  task_id=parent kind=capo home="$HOME_DIR" worktree="$HOME_DIR" \
+  pane=w1:p1 endpoint_generation=parent-generation-1 harness=codex herdr_session=test
+
+launch=$(spawn_one codex t-nested --mode made --yolo off --parent parent --parent-home "$HOME_DIR" --parent-pane w1:p1 --parent-generation parent-generation-2)
+[ "$(cs_meta_get "$HOME_DIR/state/t-nested.meta" parent_task_id)" = parent ] || fail "nested spawn parent task"
+[ "$(cs_meta_get "$HOME_DIR/state/t-nested.meta" parent_home)" = "$HOME_DIR" ] || fail "nested spawn parent home"
+[ "$(cs_meta_get "$HOME_DIR/state/t-nested.meta" parent_pane)" = w1:p1 ] || fail "nested spawn parent pane"
+[ "$(cs_meta_get "$HOME_DIR/state/t-nested.meta" parent_generation)" = parent-generation-2 ] || fail "nested spawn parent generation"
+pass "nested spawn records its explicit immediate parent edge"
 
 launch=$(spawn_one codex Foo.Bar --mode made --yolo off)
 assert_contains "$launch" "name=n-foo-bar-" "native agent names normalize task ids into the transformed namespace"
@@ -286,6 +326,8 @@ env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude CLAUDE_CONFIG_DIR="$TMP/wor
 launch=$(cat "$TMP/launch-foo")
 capo_native_name=$(printf '%s\n' "$launch" | sed -n 's/^name=//p')
 [ "$(cs_meta_get "$HOME_DIR/state/foo.meta" kind)" = capo ] || fail "capo meta kind"
+[ "$(cs_meta_get "$CAPO_HOME/state/foo.meta" kind)" = capo ] || fail "capo home meta kind"
+[ "$(cs_meta_get "$CAPO_HOME/state/foo.meta" parent_task_id)" = root ] || fail "capo home parent edge"
 [ "$cross_kind_ship_name" != "$capo_native_name" ] \
   || fail "ship capo-foo and capo foo must not collide as native agent names"
 assert_contains "$launch" "name=n-capo-foo-" "capo native names use a delimiter that lands in the normalized namespace"
@@ -299,7 +341,7 @@ assert_not_contains "$launch" 'CONSIGLIERE_OP' "the charter never rides agent st
 # store first, then the override clears, then the capo's own home.
 CAPO_ABS=$(cd "$CAPO_HOME" && pwd -P)
 assert_contains "$(cat "$TMP/panerun-foo")" \
-  "export CLAUDE_CONFIG_DIR='$TMP/work-claude' CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME='$CAPO_ABS'" \
+  "export CLAUDE_CONFIG_DIR='$TMP/work-claude' CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME='$CAPO_ABS' CS_TASK_ID='foo'" \
   "the capo env pre-step must export the credential store, the override clears, and its own home, in that order"
 prompt=$(cat "$TMP/prompt-foo")
 [ "$(printf '%s' "$prompt" | "$ROOT/bin/cs-operational-input.sh" kind)" = launch-brief ] \
@@ -361,8 +403,38 @@ assert_grep 't-claude.turn-ended' "$SETTINGS" "claude settings touches the turn-
 assert_no_grep 'cs-turnend-guard' "$SETTINGS" "soldier settings must not run the root guard"
 # The launch references the settings file by path.
 assert_contains "$launch" "$SETTINGS" "claude launch references the settings file"
-assert_absent "$TMP/panerun-t-claude" "no credential-store split means no env pre-step is typed into the pane"
+assert_contains "$(cat "$TMP/panerun-t-claude")" \
+  "export CS_ROOT_OVERRIDE='$ROOT' CS_HOME='$HOME_DIR' CS_DATA_OVERRIDE='$HOME_DIR/data' CS_STATE_OVERRIDE='$HOME_DIR/state' CS_TASK_ID='t-claude'" \
+  "a claude soldier receives its explicit home and task identity before agent start"
 pass "claude root: harness=claude, --settings launch, settings file written"
+
+# --- grok root: global Stop hook, harness=grok, pointer + registry -----------
+launch=$(spawn_one grok t-grok --mode made --yolo off)
+[ "$(cs_meta_get "$HOME_DIR/state/t-grok.meta" harness)" = grok ] || fail "grok meta harness"
+assert_contains "$launch" "kind=grok" "grok root launches grok"
+assert_contains "$launch" "--always-approve" "grok root autonomy flag"
+assert_not_contains "$launch" 'notify=' "grok root does not use codex notify"
+assert_not_contains "$launch" '--settings' "grok root does not use claude settings"
+assert_present "$TMP/grok-home-t-grok/hooks/cs-turn-end.sh" "grok spawn installs global hook script"
+assert_present "$TMP/grok-home-t-grok/hooks/cs-turn-end.json" "grok spawn installs global hook json"
+assert_present "$TMP/wt-t-grok/.cs-grok-turnend" "grok spawn writes worktree pointer"
+assert_present "$HOME_DIR/state/t-grok.grok-turnend-token" "grok spawn writes state token"
+pass "grok root: harness=grok, global Stop hook wired, no inline notify/settings"
+
+# --- cursor root: workspace launch, sidecar, no inline turn-end wiring --------
+launch=$(spawn_one cursor t-cursor --mode made --yolo off)
+[ "$(cs_meta_get "$HOME_DIR/state/t-cursor.meta" harness)" = cursor ] || fail "cursor meta harness"
+assert_contains "$launch" "kind=cursor" "cursor root launches cursor"
+assert_contains "$launch" "--trust" "cursor root trust flag"
+assert_contains "$launch" "--yolo" "cursor root yolo flag"
+assert_contains "$launch" "--workspace" "cursor root workspace flag"
+assert_contains "$launch" "$TMP/wt-t-cursor" "cursor workspace is the isolated worktree"
+assert_not_contains "$launch" 'notify=' "cursor root does not use codex notify"
+assert_not_contains "$launch" '--settings' "cursor root does not use claude settings"
+assert_present "$HOME_DIR/state/t-cursor.cursor-session" "cursor spawn writes session sidecar"
+assert_contains "$(cat "$TMP/panerun-t-cursor")" 'env -u CLAUDECODE' \
+  "cursor spawn clears inherited foreign harness markers"
+pass "cursor root: harness=cursor, workspace launch, session sidecar, no inline turn-end"
 
 # --- a credential-store split reaches the pane before the agent starts -------
 # The pane's shell is spawned by the herdr daemon and does NOT inherit
@@ -380,6 +452,14 @@ env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=claude CLAUDE_CONFIG_DIR="$TMP/wor
 assert_contains "$(cat "$TMP/panerun-t-claude-env")" "export CLAUDE_CONFIG_DIR='$TMP/work-claude'" \
   "a soldier under a credential-store split must export the store into the pane before agent start"
 pass "a claude credential-store split is exported into the pane shell before the agent starts"
+
+CS_FAKE_SPAWN_WAIT_FAIL_ONCE=1
+CS_FAKE_SPAWN_WAIT_MARKER="$TMP/wait-once-t-env-retry"
+launch=$(spawn_one codex t-env-retry --mode made --yolo off)
+unset CS_FAKE_SPAWN_WAIT_FAIL_ONCE CS_FAKE_SPAWN_WAIT_MARKER
+retry_runs=$(grep -c '^pane_run=' "$TMP/panerun-t-env-retry" 2>/dev/null || true)
+[ "$retry_runs" -ge 2 ] || fail "a swallowed env export must be retried before agent start"
+pass "fresh-pane env export retries after one swallowed confirmation"
 
 # --- config/permission-mode.conf reaches a real spawn ----------------------------
 # End-to-end, not just the launch-string unit: proves the home's config dir
@@ -445,18 +525,20 @@ assert_contains "$output" "no agent appeared" "the swallowed launch must be name
 assert_not_contains "$output" "spawned t-swallowed" "a swallowed launch must never print a spawn success line"
 pass "a launch line the shell swallowed fails loudly instead of reporting a spawn"
 
-# --- optional worker telemetry reaches (only) a real instrumented spawn ------
-# The launch artefacts above are the uninstrumented shape, which is the point:
-# telemetry is resolved at spawn time, so a soldier launched while telemetry is
-# off must be byte identical to one launched before the instrumentation existed.
-# docs/telemetry.md owns the contract; this proves it end to end from cs-spawn.
+# --- worker turn-end recovery and optional telemetry ---------------------------
+# The worker recovery hook is always present; telemetry remains optional.
+# docs/telemetry.md owns the measurement contract; this proves both paths from cs-spawn.
 assert_not_contains "$(cat "$TMP/launch-t-codex")" 'cs-telemetry-emit.sh' \
   "telemetry off must add nothing to a codex soldier launch"
-[ "$(jq -r '.hooks.Stop[0].hooks | length' "$HOME_DIR/state/t-claude.claude-settings.json")" = 1 ] ||
-  fail "telemetry off must leave the claude soldier's Stop hook list at exactly the turn-end touch"
+assert_contains "$(cat "$TMP/launch-t-codex")" 'cs-worker-turnend.sh' \
+  "telemetry off must retain the worker recovery hook"
+[ "$(jq -r '.hooks.Stop[0].hooks | length' "$HOME_DIR/state/t-claude.claude-settings.json")" = 2 ] ||
+  fail "telemetry off must retain the turn-end touch and worker recovery hook"
 [ "$(jq -r '.hooks.Stop[0].hooks[0].command' "$HOME_DIR/state/t-claude.claude-settings.json")" \
   = "touch '$HOME_DIR/state/t-claude.turn-ended'" ] ||
-  fail "telemetry off must leave the claude soldier's single Stop hook command as the bare turn-end touch"
+  fail "telemetry off must leave the claude soldier's first Stop hook as the bare turn-end touch"
+assert_contains "$(jq -r '.hooks.Stop[0].hooks[1].command' "$HOME_DIR/state/t-claude.claude-settings.json")" \
+  'cs-worker-turnend.sh' "telemetry off must retain the worker recovery hook"
 
 mkdir -p "$HOME_DIR/host"
 printf 'enabled true\n' > "$HOME_DIR/host/telemetry.conf"
@@ -483,7 +565,7 @@ jq -e . "$SETTINGS" >/dev/null || fail "an instrumented claude settings file mus
 [ "$(jq -r '.hooks.Stop[0].hooks | length' "$SETTINGS")" = 2 ] ||
   fail "telemetry must be a second hook command, never folded into the touch"
 case "$(jq -r '.hooks.Stop[0].hooks[1].command' "$SETTINGS")" in
-  *cs-telemetry-emit.sh*--stdin) ;;
+  *cs-telemetry-emit.sh*--stdin*) ;;
   *) fail "claude feeds the Stop payload to every hook command, so the emitter must read it from stdin" ;;
 esac
 

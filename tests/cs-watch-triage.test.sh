@@ -112,6 +112,73 @@ test_working_note_not_working_surfaced() {
   pass "a no-verb working: note whose soldier is idle with no running pipeline is surfaced"
 }
 
+# The classifier reads the appended SPAN, not the last line: a boss-relevant
+# event followed by a later routine append inside the same batch must still
+# surface even when the soldier is provably working, because the advancing
+# .seen-* suppressor would otherwise never re-read the buried event.
+test_buried_boss_verb_in_span_surfaced() {
+  local dir state fakebin out status_file pid sz
+  dir=$(make_case buried-span); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  status_file="$state/task.status"
+  printf 'working: setup\n' > "$status_file"
+  sz=$(wc -c < "$status_file" | tr -d '[:space:]')
+  printf '%s:1234567890' "$sz" > "$state/.seen-task_status"
+  printf 'needs-decision: pick A or B\nworking: carrying on meanwhile\n' >> "$status_file"
+  export CS_FAKE_CREW_STATE='state: working · source: run-step · validating (running)'
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" || fail "watcher absorbed a needs-decision buried under a later routine append"
+  grep -F "signal: $status_file" "$out" >/dev/null || fail "watcher did not print the buried-span signal reason"
+  grep "$(printf '\tsignal\t')" "$state/.wake-queue" | grep -F "task.status" >/dev/null \
+    || fail "buried boss verb was not queued"
+  unset CS_FAKE_CREW_STATE
+  pass "a boss verb anywhere in the unread appended span surfaces even under a later routine line"
+}
+
+# The turn-end absorb is reachable without an exact busy verdict: a wake
+# carrying only bare turn-ended markers whose pane content churned since the
+# previous poll is benign, while an unchanged pane still surfaces.
+test_turn_end_with_pane_churn_absorbed() {
+  local dir state fakebin out capture_file pid
+  dir=$(make_case turn-end-churn); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  cs_write_meta "$state/task.meta" "pane=pane-churn-1" "kind=ship"
+  : > "$state/task.turn-ended"
+  capture_file="$dir/capture.txt"
+  printf 'fresh pane content after the turn\n' > "$capture_file"
+  export CS_FAKE_HERDR_CAPTURE="$capture_file"
+  printf 'a-hash-that-cannot-match' > "$state/.hash-pane-churn-1"
+  export CS_FAKE_CREW_STATE='state: unknown · source: none · no current-state source available'
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  if ! absorbed_alive "$pid" "$state/.seen-task_turn-ended"; then
+    reap "$pid"; fail "watcher exited or never absorbed a turn-end with recent pane churn: $(cat "$out")"
+  fi
+  [ ! -s "$state/.wake-queue" ] || fail "churn-absorbable turn-end enqueued a durable wake record"
+  reap "$pid"
+  unset CS_FAKE_CREW_STATE CS_FAKE_HERDR_CAPTURE
+  pass "a turn-ended-only wake with recent pane churn is absorbed without a busy verdict"
+}
+
+test_turn_end_without_pane_churn_surfaced() {
+  local dir state fakebin out capture_file pid h
+  dir=$(make_case turn-end-static); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
+  cs_write_meta "$state/task.meta" "pane=pane-static-1" "kind=ship"
+  : > "$state/task.turn-ended"
+  capture_file="$dir/capture.txt"
+  printf 'a pane that stopped rendering' > "$capture_file"
+  export CS_FAKE_HERDR_CAPTURE="$capture_file"
+  if command -v md5 >/dev/null 2>&1; then h=$(md5 -q < "$capture_file"); else h=$(md5sum < "$capture_file" | cut -d' ' -f1); fi
+  printf '%s' "$h" > "$state/.hash-pane-static-1"
+  export CS_FAKE_CREW_STATE='state: unknown · source: none · no current-state source available'
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" || fail "watcher absorbed a turn-end whose pane did not change"
+  grep "$(printf '\tsignal\t')" "$state/.wake-queue" | grep -F "task.turn-ended" >/dev/null \
+    || fail "static-pane turn-end was not queued"
+  unset CS_FAKE_CREW_STATE CS_FAKE_HERDR_CAPTURE
+  pass "a turn-ended-only wake with an unchanged pane still surfaces"
+}
+
 # --- actionable wakes are surfaced (queue + exit) -----------------------------
 
 test_actionable_signal_surfaced() {
@@ -830,9 +897,31 @@ test_beacon_stays_fresh_while_absorbing() {
 
 spool_append() {  # <state> <kind> <pane> <workspace> <field3> <field4>
   local state=$1; shift
+  local pane=$2 workspace=$3 agent=$5 home meta
+  home=${state%/state}
+  meta="$state/$pane.meta"
+  if [ ! -e "$meta" ] && [ "$pane" != pane-other-1 ]; then
+    cat > "$meta" <<EOF
+task_id=$pane
+kind=ship
+home=$home
+worktree=$home
+workspace=$workspace
+pane=$pane
+harness=$agent
+parent_task_id=root
+parent_home=$home
+parent_state=$state
+parent_pane=unknown
+parent_generation=event-parent-generation
+endpoint_generation=event-generation
+herdr_session=default
+EOF
+  fi
   # shellcheck source=bin/cs-herdr-event-lib.sh
   . "$ROOT/bin/cs-herdr-event-lib.sh"
-  cs_event_append "$(cs_event_spool_path "$state")" "$(cs_event_record "$@")"
+  cs_event_append "$(cs_event_spool_path "$state")" \
+    "$(cs_event_record_with_generation "$@" event-generation)"
 }
 
 test_event_splice_blocked_edge_and_dedupe_clear() {
@@ -992,7 +1081,9 @@ test_event_splice_level_reconcile_catches_already_blocked() {
   # The spool stays empty; the pane is ALREADY blocked when the wait starts (an
   # edge lost while the plugin was absent). The level reconcile must return it.
   spool_append "$state" status pane-other-1 ws-1 working codex
+  spool_append "$state" status pane-lvl-1 ws-1 working codex
   export CS_FAKE_HERDR_AGENT_STATUS=blocked
+  export CS_FAKE_HERDR_PANE_CWD="$dir"
   rec=$(
     cd "$dir" || exit 2
     # shellcheck disable=SC1090,SC1091
@@ -1003,6 +1094,7 @@ test_event_splice_level_reconcile_catches_already_blocked() {
   [ "$(printf '%s' "$rec" | cut -f1)" = pane-lvl-1 ] || fail "level record pane_id wrong: $rec"
   [ "$(printf '%s' "$rec" | cut -f4)" = blocked ] || fail "level record to_status wrong: $rec"
   unset CS_FAKE_HERDR_AGENT_STATUS
+  unset CS_FAKE_HERDR_PANE_CWD
   pass "the level reconcile catches a pane already blocked when the wait starts"
 }
 
@@ -1092,168 +1184,15 @@ test_duplicate_watcher_noops_through_singleton_lock() {
   pass "a duplicate watcher invocation no-ops through the singleton lock"
 }
 
-# --- capo-side worker events are read directly, not waited on ----------------
-
-test_capo_worker_event_surfaced_without_the_capo_taking_a_turn() {
-  local dir state fakebin out capo pid
-  dir=$(make_case capo-worker-event); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
-  # A capo home this parent owns, with a worker parked on a boss-relevant event.
-  # Nothing in that home is polling - its agent is mid-turn - so the parent has
-  # to find this itself instead of waiting to be told.
-  capo="$dir/capo-home"
-  mkdir -p "$capo/state"
-  : > "$capo/.cs-capo-home"
-  printf 'blocked: pipeline is reverting an approved decision\n' > "$capo/state/w-546.status"
-  cs_write_meta "$state/mycapo.meta" "kind=capo" "home=$capo"
-  watch_bg "$state" "$fakebin" "$out"
-  pid=$!
-  wait_until "$CS_WATCH_TEST_TICKS" grep -q '^capo:' "$out" \
-    || { kill "$pid" 2>/dev/null; cat "$out"; fail "capo-side worker event was never surfaced"; }
-  grep -F 'mycapo/w-546' "$out" >/dev/null || { cat "$out"; fail "the wake must name the capo and its worker"; }
-  grep -F 'reverting an approved decision' "$out" >/dev/null || fail "the wake must carry the worker's own line"
-  grep "$(printf '\tcapo\t')" "$state/.wake-queue" | grep -F 'mycapo/w-546' >/dev/null \
-    || { cat "$state/.wake-queue"; fail "capo wake must be durably queued"; }
-  [ -s "$state/.capo-surfaced-mycapo__w-546" ] || fail "the surfaced marker must be written"
-  kill "$pid" 2>/dev/null || true
-  pass "a boss-relevant capo worker event surfaces without the capo taking a turn"
-}
-
-test_capo_worker_event_deduped_and_scoped() {
-  local dir state fakebin out capo pid
-  dir=$(make_case capo-worker-dedupe); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
-  capo="$dir/capo-home"
-  mkdir -p "$capo/state"
-  : > "$capo/.cs-capo-home"
-  printf 'blocked: still the same block\n' > "$capo/state/w-1.status"
-  # Already surfaced: a standing block must not re-wake every poll.
-  printf 'default\tblocked\tstill the same block' > "$state/.capo-surfaced-mycapo__w-1"
-  # A working: line is not boss-relevant, and a directory without the capo-home
-  # marker is not a capo home at all - neither may produce a wake.
-  printf 'working: mid-run\n' > "$capo/state/w-2.status"
-  cs_write_meta "$state/mycapo.meta" "kind=capo" "home=$capo"
-  mkdir -p "$dir/not-a-capo/state"
-  printf 'blocked: must never be read\n' > "$dir/not-a-capo/state/w-9.status"
-  cs_write_meta "$state/bogus.meta" "kind=capo" "home=$dir/not-a-capo"
-  watch_bg "$state" "$fakebin" "$out"
-  pid=$!
-  wait_live "$pid" 25 || { cat "$out"; fail "an already-surfaced capo block must not wake the watcher"; }
-  kill "$pid" 2>/dev/null || true
-  ! grep -q '^capo:' "$out" || { cat "$out"; fail "surfaced, non-boss-relevant, and unmarked-home cases must all stay quiet"; }
-  ! grep -q 'must never be read' "$out" || fail "a home without the capo-home marker must never be read"
-  pass "capo worker events dedupe on the surfaced line and skip unmarked homes"
-}
-
-test_capo_worker_decision_survives_a_later_working_append() {
-  local dir state fakebin out capo pid
-  dir=$(make_case capo-worker-fold-survives); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
-  capo="$dir/capo-home"
-  mkdir -p "$capo/state"
-  : > "$capo/.cs-capo-home"
-  printf 'needs-decision [key=fix-a]: pick an approach\nworking: continuing\n' > "$capo/state/w-1.status"
-  cs_write_meta "$state/mycapo.meta" "kind=capo" "home=$capo"
-  watch_bg "$state" "$fakebin" "$out"
-  pid=$!
-  wait_until "$CS_WATCH_TEST_TICKS" grep -q '^capo:' "$out" \
-    || { kill "$pid" 2>/dev/null; cat "$out"; fail "a decision masked by a later working: append was never surfaced"; }
-  grep -F 'pick an approach' "$out" >/dev/null || { cat "$out"; fail "the wake must still carry the open decision's own text"; }
-  kill "$pid" 2>/dev/null || true
-  pass "a capo decision survives a later working: append (the exact overnight bug class)"
-}
-
-test_capo_worker_resolved_decision_does_not_resurface() {
-  local dir state fakebin out capo pid
-  dir=$(make_case capo-worker-fold-resolved-quiet); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
-  capo="$dir/capo-home"
-  mkdir -p "$capo/state"
-  : > "$capo/.cs-capo-home"
-  printf 'needs-decision [key=fix-a]: pick an approach\nresolved [key=fix-a]: answered via cs-send: use option B\n' \
-    > "$capo/state/w-1.status"
-  cs_write_meta "$state/mycapo.meta" "kind=capo" "home=$capo"
-  watch_bg "$state" "$fakebin" "$out"
-  pid=$!
-  wait_live "$pid" 25 || { cat "$out"; fail "a resolved decision must not resurface as a capo wake"; }
-  kill "$pid" 2>/dev/null || true
-  ! grep -q '^capo:' "$out" || { cat "$out"; fail "a resolved decision must not resurface"; }
-  pass "a resolved capo decision does not resurface"
-}
-
-test_capo_worker_identical_wording_different_tasks_both_surface() {
-  local dir state fakebin out capo pid
-  dir=$(make_case capo-worker-identical-wording); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
-  capo="$dir/capo-home"
-  mkdir -p "$capo/state"
-  : > "$capo/.cs-capo-home"
-  printf 'needs-decision [key=review]: needs boss input\n' > "$capo/state/w-10.status"
-  printf 'needs-decision [key=review]: needs boss input\n' > "$capo/state/w-20.status"
-  cs_write_meta "$state/mycapo.meta" "kind=capo" "home=$capo"
-  watch_bg "$state" "$fakebin" "$out"
-  pid=$!
-  wait_until "$CS_WATCH_TEST_TICKS" grep -q '^capo:' "$out" \
-    || { kill "$pid" 2>/dev/null; cat "$out"; fail "identical-wording decisions on different tasks were never surfaced"; }
-  grep -F 'mycapo/w-10' "$out" >/dev/null || { cat "$out"; fail "the first task's identically-worded decision did not surface"; }
-  grep -F 'mycapo/w-20' "$out" >/dev/null || { cat "$out"; fail "the second task's identically-worded decision did not surface"; }
-  [ -s "$state/.capo-surfaced-mycapo__w-10" ] || fail "the first task's own marker must be written"
-  [ -s "$state/.capo-surfaced-mycapo__w-20" ] || fail "the second task's own marker must be written"
-  kill "$pid" 2>/dev/null || true
-  pass "identically-worded decisions on different tasks each get their own marker and both surface"
-}
-
-test_capo_worker_reopen_after_resolve_resurfaces() {
-  local dir state fakebin out capo pid reopen_pending
-  dir=$(make_case capo-worker-reopen); state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/watch.out"
-  capo="$dir/capo-home"
-  mkdir -p "$capo/state"
-  : > "$capo/.cs-capo-home"
-  printf 'needs-decision [key=x]: pick approach\n' > "$capo/state/w-1.status"
-  cs_write_meta "$state/mycapo.meta" "kind=capo" "home=$capo"
-  watch_bg "$state" "$fakebin" "$out"
-  pid=$!
-  wait_until "$CS_WATCH_TEST_TICKS" grep -q '^capo:' "$out" \
-    || { kill "$pid" 2>/dev/null; cat "$out"; fail "the first open decision under key x was never surfaced"; }
-  reap "$pid"
-
-  # A scan while it sits resolved (the resurfacing regression's actual proof
-  # point): if this pass leaves a stale manifest behind, the reopen below
-  # would wrongly collide with it even though the wording is byte-identical.
-  # Called directly rather than through a live watcher: the escalation
-  # record Task 3 opened for the first surfacing also becomes visible to the
-  # watcher's own ordinary per-task signal scan on its very next pass - an
-  # accepted, separate wake channel for the same underlying event, out of
-  # scope for this dedupe-identity regression (a direct call exercises only
-  # the fold this test is about).
-  printf 'resolved [key=x]: answered via cs-send: use option A\n' >> "$capo/state/w-1.status"
-  (
-    cd "$dir" || exit 2
-    # shellcheck disable=SC1090,SC1091
-    PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
-    scan_capo_worker_events >/dev/null
-  )
-
-  printf 'needs-decision [key=x]: pick approach\n' >> "$capo/state/w-1.status"
-  # Called directly for the same reason as the middle scan above: what this
-  # regression is actually about is scan_capo_worker_events's own dedupe
-  # decision, not which of possibly several independently-valid wake reasons
-  # a live watcher exits on first.
-  reopen_pending=$(
-    cd "$dir" || exit 2
-    # shellcheck disable=SC1090,SC1091
-    PATH="$fakebin:$PATH" CS_STATE_OVERRIDE="$state" . "$WATCH"
-    scan_capo_worker_events
-  )
-  case "$reopen_pending" in
-    *"mycapo"*"w-1"*"x"*) ;;
-    *) fail "a decision reopened under the same key with IDENTICAL wording did not resurface: $reopen_pending" ;;
-  esac
-  pass "a decision reopened under the same key and wording after a resolve is treated as a new surfacing event"
-}
-
-
 test_provably_working_signal_absorbed
 test_turn_ended_provably_working_absorbed
 test_turn_ended_not_working_surfaced
 test_working_note_not_working_surfaced
 test_actionable_signal_surfaced
 test_needs_review_signal_surfaced
+test_buried_boss_verb_in_span_surfaced
+test_turn_end_with_pane_churn_absorbed
+test_turn_end_without_pane_churn_surfaced
 test_boss_verb_signal_takes_the_short_grace
 test_no_verb_signal_keeps_the_long_grace
 test_terminal_stale_surfaced
@@ -1281,11 +1220,5 @@ test_event_splice_without_the_plugin_falls_back_to_polling
 test_event_splice_drains_edges_that_fired_with_no_watcher_running
 test_event_splice_level_reconcile_catches_already_blocked
 test_duplicate_watcher_noops_through_singleton_lock
-test_capo_worker_event_surfaced_without_the_capo_taking_a_turn
-test_capo_worker_event_deduped_and_scoped
-test_capo_worker_decision_survives_a_later_working_append
-test_capo_worker_resolved_decision_does_not_resurface
-test_capo_worker_identical_wording_different_tasks_both_surface
-test_capo_worker_reopen_after_resolve_resurfaces
 test_event_splice_ignores_foreign_panes_and_unknown_kinds
 test_snapshot_answers_panes_and_absence_falls_back

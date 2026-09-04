@@ -4,8 +4,8 @@
 # never executed. Requires bin/cs-herdr-lib.sh to be sourced first
 # (cs_herdr_capture).
 #
-# HARNESSES: recognizes both agent prompt glyphs - codex `›` and claude `❯`
-# (distinct codepoints, so recognition is universal, no harness plumbing). codex
+# HARNESSES: recognizes agent prompt glyphs - codex `›`, claude `❯`, cursor `→`
+# (distinct codepoints, so recognition is universal, no harness plumbing).
 # fills an empty composer with a dim ghost suggestion (stripped below); claude's
 # empty composer (verified 2.1.218, 2026-07-24) is a bare `❯` between horizontal
 # rules with NO ghost text, so the ghost strip is a no-op there and harmless.
@@ -222,8 +222,8 @@ _cs_composer_trim() {  # <text>
 cs_composer_classify_content() {  # <bordered> <content>
   local bordered=$1 content=$2
   case "$content" in
-    '›'|'❯')
-      printf 'empty'; return 0 ;;          # agent glyph (codex ›, claude ❯): empty either way
+    '›'|'❯'|$'\xe2\x86\x92')
+      printf 'empty'; return 0 ;;          # agent glyph (codex ›, claude ❯, cursor →): empty either way
     '>'|'$'|'%'|'#')
       # Shell glyph: empty ONLY inside a composer box (the harness's own
       # prompt). Bare, it is a dead-shell prompt - never a safe target.
@@ -233,8 +233,8 @@ cs_composer_classify_content() {  # <bordered> <content>
   [ -n "$content" ] || { printf 'empty'; return 0; }
   # Strip one leading prompt glyph, then re-judge the remainder.
   case "$content" in
-    '› '*|'❯ '*|'> '*|'$ '*|'% '*|'# '*) content=${content#??} ;;
-    '›'*|'❯'*|'>'*|'$'*|'%'*|'#'*) content=${content#?} ;;
+    '› '*|'❯ '*| $'\xe2\x86\x92 '*|'> '*|'$ '*|'% '*|'# '*) content=${content#??} ;;
+    '›'*|'❯'*|$'\xe2\x86\x92'*|'>'*|'$'*|'%'*|'#'*) content=${content#?} ;;
   esac
   content=$(_cs_composer_trim "$content")
   [ -n "$content" ] || { printf 'empty'; return 0; }
@@ -272,6 +272,8 @@ cs_composer_state() {  # <pane_id>
         bordered=1; raw_match=$line; found=1; proven=1 ;;
       '›'*)
         bordered=0; raw_match=$line; found=1; proven=1 ;;
+      $'\xe2\x86\x92'*)
+        bordered=0; raw_match=$line; found=1; proven=1 ;;
       '❯'*)
         bordered=0; raw_match=$line; found=1; proven=$prev_rule ;;
     esac
@@ -294,6 +296,22 @@ EOF
   fi
   if [ "$verdict" = empty ] && [ "$bordered" != 1 ] \
     && ! cs_herdr_pane_agent_process "$pane" >/dev/null 2>&1; then
+    verdict=unknown
+  fi
+  # BLOCKED-AGENT GATE (ported upstream fix, firstmate #2811): an agent parked
+  # on an interactive dialog - a permission prompt, a trust dialog, a question
+  # menu - reports native agent_status=blocked (docs/codex.md "Directory trust
+  # blocks an unattended launch") while the dialog is drawn OUTSIDE the composer
+  # region, so structure alone can still look like a free composer. Typing there
+  # would answer the dialog - selecting its highlighted default and discarding
+  # the text - which is exactly the pane where typing is unsafe. Structure
+  # cannot disprove that, so a blocked agent forces the empty verdict down to
+  # 'unknown' (defer) here, in the ONE owner of the empty verdict, covering
+  # every consumer. Only native `blocked` demotes: an unreadable status is
+  # 'unknown', not blocked, so the existing structural proof still governs and
+  # availability is unchanged when `agent get` cannot answer.
+  if [ "$verdict" = empty ] \
+    && [ "$(cs_herdr_agent_status_raw "$pane")" = blocked ]; then
     verdict=unknown
   fi
   printf '%s' "$verdict"

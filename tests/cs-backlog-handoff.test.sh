@@ -44,6 +44,7 @@ write_main_backlog() {
 - [ ] qa-2 flaky test triage
 - [ ] odd-1 oddly indented item
  single-space continuation line
+- [ ] wake-item routed backlog item
 
 ## Done
 
@@ -52,9 +53,23 @@ EOF
 }
 write_main_backlog
 
+FAKEBIN=$(cs_fakebin "$TMP")
+cs_capo_fake_herdr "$FAKEBIN"
+export PATH="$FAKEBIN:$PATH"
+export CS_SEND_SETTLE=0
+export FAKE_AGENT=codex FAKE_AGENT_STATUS=idle FAKE_PANE_EXISTS=1
+
+setup_capo_receiver() {
+  cs_write_meta "$HOME_DIR/state/qa-capo.meta" \
+    "workspace=consigliere:qa-capo" \
+    "pane=consigliere:qa-capo" \
+    "kind=capo" \
+    "mode=capo" \
+    "home=$CAPO"
+}
+
 # A fake tasks-axi: compatible probes plus a naive whole-block `mv` that
 # appends each moved block to the destination and deletes it from the source.
-FAKEBIN=$(cs_fakebin "$TMP")
 cat > "$FAKEBIN/tasks-axi" <<'SH'
 #!/usr/bin/env bash
 set -eu
@@ -104,7 +119,6 @@ esac
 exit 1
 SH
 chmod +x "$FAKEBIN/tasks-axi"
-export PATH="$FAKEBIN:$PATH"
 
 # 1. unregistered capo refuses
 out=$("$BIN" ghost-capo qa-1 2>&1) && fail "unregistered capo must refuse"
@@ -146,7 +160,9 @@ assert_contains "$out" "non-2-space continuation" "non-canonical refusal names t
 pass "non-canonical item bodies are refused"
 
 # 7. happy path: queued items move atomically into the capo backlog
-out=$("$BIN" qa-capo qa-1 qa-2 2>&1) || fail "handoff failed: $out"
+setup_capo_receiver
+SEND_LOG="$TMP/handoff-send.log"
+out=$(env CS_SEND_LOG="$SEND_LOG" "$BIN" qa-capo qa-1 qa-2 2>&1) || fail "handoff failed: $out"
 assert_contains "$out" "handed off 2 item(s) to qa-capo" "handoff reports the moved set"
 CAPO_BACKLOG="$CAPO/config/backlog.md"
 assert_present "$CAPO_BACKLOG" "capo backlog scaffold created"
@@ -156,15 +172,20 @@ assert_grep 'needs the staging env' "$CAPO_BACKLOG" "item body moved with the he
 assert_grep '- [ ] qa-2' "$CAPO_BACKLOG" "qa-2 moved into the capo backlog"
 assert_no_grep '- [ ] qa-1' "$MAIN_BACKLOG" "qa-1 removed from the main backlog"
 assert_no_grep '- [ ] qa-2' "$MAIN_BACKLOG" "qa-2 removed from the main backlog"
+assert_contains "$(cat "$SEND_LOG")" "New routed work is in your backlog" \
+  "handoff wakes the capo receiver"
+assert_absent "$HOME_DIR/state/.backlog-handoff-qa-capo.wake-pending" \
+  "confirmed wake clears the pending marker"
 pass "queued items hand off atomically via tasks-axi mv"
 
 # 8. idempotent: an already-present key is skipped, exit 0
-out=$("$BIN" qa-capo qa-1 2>&1) || fail "idempotent re-run failed: $out"
+out=$(env CS_SEND_LOG="$SEND_LOG" "$BIN" qa-capo qa-1 2>&1) || fail "idempotent re-run failed: $out"
 assert_contains "$out" "nothing to move" "already-present key reports a no-op"
 pass "handoff is idempotent for already-moved keys"
 
 # 9. a failed mv leaves both backlogs unchanged and removes only the scaffold
 write_main_backlog
+setup_capo_receiver
 rm -f "$CAPO_BACKLOG"
 cp "$MAIN_BACKLOG" "$TMP/main-before"
 out=$(env FAKE_TASKS_AXI_MV_FAIL=1 "$BIN" qa-capo qa-1 2>&1) && fail "failed mv must fail the handoff"
@@ -172,5 +193,35 @@ assert_contains "$out" "nothing was moved" "failed mv reports nothing moved"
 cmp -s "$MAIN_BACKLOG" "$TMP/main-before" || fail "failed mv must leave the main backlog unchanged"
 assert_absent "$CAPO_BACKLOG" "failed mv removes only the scaffold it created"
 pass "a failed tasks-axi mv changes nothing"
+
+# 10. a failed receiver wake stays retryable while the move is durable
+write_main_backlog
+rm -f "$HOME_DIR/state/qa-capo.meta"
+CAPO_BACKLOG="$CAPO/config/backlog.md"
+rm -f "$CAPO_BACKLOG"
+out=$("$BIN" qa-capo wake-item 2>&1) && fail "handoff without a receiver endpoint must fail the wake"
+assert_contains "$out" "receiver was not woken" "missing endpoint failure is observable"
+assert_grep 'wake-item' "$CAPO_BACKLOG" "failed wake kept the durably handed-off item"
+assert_present "$HOME_DIR/state/.backlog-handoff-qa-capo.wake-pending" \
+  "failed wake leaves a retryable marker"
+setup_capo_receiver
+SEND_LOG="$TMP/retry-send.log"
+out=$(env CS_SEND_LOG="$SEND_LOG" "$BIN" qa-capo wake-item 2>&1) \
+  || fail "already-present handoff did not retry its receiver wake: $out"
+assert_contains "$(cat "$SEND_LOG")" "New routed work is in your backlog" \
+  "recovery handoff rings the capo receiver"
+assert_absent "$HOME_DIR/state/.backlog-handoff-qa-capo.wake-pending" \
+  "confirmed retry clears the pending marker"
+pass "a failed receiver wake retries from an already-present handoff"
+
+# 11. --resume-pending drains outstanding wake markers
+write_main_backlog
+rm -f "$HOME_DIR/state/qa-capo.meta" "$CAPO_BACKLOG"
+out=$("$BIN" qa-capo wake-item 2>&1) && fail "setup handoff must fail without endpoint"
+setup_capo_receiver
+out=$("$BIN" --resume-pending 2>&1) || fail "--resume-pending failed: $out"
+assert_absent "$HOME_DIR/state/.backlog-handoff-qa-capo.wake-pending" \
+  "--resume-pending clears a confirmed pending wake"
+pass "--resume-pending retries outstanding capo handoff wakes"
 
 pass "cs-backlog-handoff validation and delegation"

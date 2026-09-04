@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Open an interactive shell inside the dev container"
+set -eu
+
+export DEV_UID="${DEV_UID:-$(id -u)}"
+export DEV_GID="${DEV_GID:-$(id -g)}"
+exec docker compose run --rm dev bash

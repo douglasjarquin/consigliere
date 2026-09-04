@@ -186,13 +186,70 @@ status_is_paused_or_boss_held() {  # <status-line>
 # format): an OPTIONAL "[key=<slug>]" token sits between the verb and the colon,
 #   needs-decision [key=api-shape]: <summary>
 #   resolved       [key=api-shape]: <how it was decided>
-# A line with no token uses the key "default", preserving one-open-decision-
-# per-task behavior (a bare "resolved:" closes "default").
+# or, equivalently, as a COMPLETE token at the head of the note text,
+#   needs-decision: [key=api-shape] <summary>
+# The before-colon position wins when both are present, a token deeper in the
+# note stays prose, and a stated-but-malformed slug rejects the line rather
+# than silently rewriting it to "default". A line with no token in either
+# position uses the key "default", preserving one-open-decision-per-task
+# behavior (a bare "resolved:" closes "default").
+#
+# Status metadata tags: the verb prefix may also carry bracketed
+# "[name=value]" tags and the bare "corr=<16 hex>" correlation token that
+# bin/cs-pending-reply-lib.sh embeds and a capo echoes back, in any order or
+# count between the verb and the colon. status_line_verb reads the verb
+# through them, so a correlated opener or closer folds exactly like a plain
+# one. An arbitrary bare "name=value" word is deliberately NOT skipped:
+# skipping unknown free text would let prose carrying an equals sign reduce
+# to a bare verb and impersonate a transition. A prefix whose trailing words
+# are not all recognized tags keeps its historical whole-prefix parse.
 status_line_verb() {  # <status-line> -> leading verb word
-  local v=${1%%:*}
-  v=${v%%\[key=*}
-  v=${v#"${v%%[![:space:]]*}"}
-  v=${v%"${v##*[![:space:]]}"}
+  local prefix=${1%%:*} v word spaced hex
+  case "$prefix" in
+    *\[*=*\]*|*corr=*) ;;
+    *)
+      v=$prefix
+      v=${v#"${v%%[![:space:]]*}"}
+      v=${v%"${v##*[![:space:]]}"}
+      printf '%s' "$v"
+      return 0
+      ;;
+  esac
+  # Split bracketed tags off even when glued to the verb, then walk words:
+  # the first word is the candidate verb; every later word must be a
+  # bracketed [name=value] tag or the bare corr=<16 hex> token.
+  spaced=${prefix//\[/ \[}
+  v=''
+  local -a words=()
+  IFS=$' \t' read -r -a words <<EOF
+$spaced
+EOF
+  for word in ${words[@]+"${words[@]}"}; do
+    [ -n "$word" ] || continue
+    if [ -z "$v" ]; then
+      v=$word
+      continue
+    fi
+    case "$word" in
+      \[?*=*\]) continue ;;
+      corr=*)
+        hex=${word#corr=}
+        if [ "${#hex}" -eq 16 ]; then
+          case "$hex" in
+            *[!0-9a-fA-F]*) ;;
+            *) continue ;;
+          esac
+        fi
+        ;;
+    esac
+    # Free text after the verb: keep the historical whole-prefix parse so
+    # prose can never reduce to a bare verb.
+    v=${prefix%%\[key=*}
+    v=${v#"${v%%[![:space:]]*}"}
+    v=${v%"${v##*[![:space:]]}"}
+    printf '%s' "$v"
+    return 0
+  done
   printf '%s' "$v"
 }
 status_line_note() {  # <status-line> -> text after the first colon, trimmed
@@ -202,7 +259,7 @@ status_line_note() {  # <status-line> -> text after the first colon, trimmed
   esac
 }
 _cs_decision_key() {  # <status-line> -> key slug, or "default" when no token
-  local prefix=${1%%:*} k
+  local prefix=${1%%:*} k note
   case "$prefix" in
     *\[key=*\]*)
       k=${prefix#*\[key=}
@@ -212,8 +269,51 @@ _cs_decision_key() {  # <status-line> -> key slug, or "default" when no token
         *) printf '%s' "$k" ;;
       esac
       ;;
-    *) printf 'default' ;;
+    *)
+      # No before-colon token: a complete [key=<slug>] token at the head of
+      # the note is the equivalent stated position (fix for the common
+      # "<verb>: [key=x] note" worker shape); a token deeper in the note
+      # stays prose, and a stated-but-malformed slug rejects the line.
+      note=$(status_line_note "$1")
+      case "$1" in *:*) ;; *) printf 'default'; return 0 ;; esac
+      case "$note" in
+        \[key=*\]*)
+          k=${note#\[key=}
+          k=${k%%\]*}
+          case "$k" in
+            ''|*[!A-Za-z0-9._-]*) return 1 ;;
+            *) printf '%s' "$k" ;;
+          esac
+          ;;
+        *) printf 'default' ;;
+      esac
+      ;;
   esac
+}
+# The note for a folded record: when the stated key came from the note head
+# (see _cs_decision_key above), that consumed token is stripped so both key
+# positions yield identical records.
+_cs_decision_note() {  # <status-line> -> note text minus a consumed head key token
+  local prefix=${1%%:*} note k
+  note=$(status_line_note "$1")
+  case "$prefix" in
+    *\[key=*\]*) printf '%s' "$note"; return 0 ;;
+  esac
+  case "$1" in *:*) ;; *) printf '%s' "$note"; return 0 ;; esac
+  case "$note" in
+    \[key=*\]*)
+      k=${note#\[key=}
+      k=${k%%\]*}
+      case "$k" in
+        ''|*[!A-Za-z0-9._-]*) ;;
+        *)
+          note=${note#"[key=$k]"}
+          note=${note#"${note%%[![:space:]]*}"}
+          ;;
+      esac
+      ;;
+  esac
+  printf '%s' "$note"
 }
 # Drop the record for <key> from a newline-terminated "<key>\t<verb>\t<note>"
 # set. Portable (no associative arrays) so the fold runs on bash 3.2 as well.
@@ -263,7 +363,7 @@ _cs_decision_fold_line() {  # <open-set> <status-line> <resolve-verb> <held-verb
   key=$(_cs_decision_key "$line") || { printf '%s' "$open"; return 0; }
   case "$verb" in
     needs-decision|needs-review|blocked)
-      note=$(status_line_note "$line")
+      note=$(_cs_decision_note "$line")
       open=$(_cs_decision_drop "$open" "$key")
       [ -n "$open" ] && open="${open}"$'\n'
       open="${open}${key}"$'\t'"${verb}"$'\t'"${note}"$'\n'
@@ -326,7 +426,7 @@ _cs_status_open_activities_stream() {
     key=$(_cs_decision_key "$line") || continue
     case "$verb" in
       working|"$pause")
-        note=$(status_line_note "$line")
+        note=$(_cs_decision_note "$line")
         open=$(_cs_decision_drop "$open" "$key")
         [ -n "$open" ] && open="${open}"$'\n'
         open="${open}${key}"$'\t'"${verb}"$'\t'"${note}"$'\n'
@@ -369,16 +469,44 @@ pane_to_task() {
 }
 
 # 0 (actionable) if ANY status file listed in a "signal:" wake carries a
-# boss-relevant last line; 1 otherwise. Pass the space-separated file list that
-# follows the "signal:" prefix. Non-.status arguments (e.g. .turn-ended
-# markers, which never carry a verb) are skipped. A 1 here is NOT "benign" on
-# its own: a no-verb signal is only benign when the soldier is also provably
-# working (signal_crew_provably_working below); otherwise it surfaces.
+# boss-relevant line in its unread appended SPAN, not just its last line. A
+# boss-relevant event followed by a later routine append (a working: note
+# landing inside the watcher's coalescing grace) must still surface: reading
+# an append-only event log last-line-wins would absorb the wake and the
+# advancing .seen-* suppressor would never re-read the buried event. The
+# unread span starts at the byte size recorded in the sibling .seen-<file>
+# marker (the watcher's size:mtime signature, bin/cs-wake-lib.sh); a missing,
+# malformed, or shrunken-past marker falls back to the historical last-line
+# read, so an already-ingested whole-log replay stays quiet. Pass the
+# space-separated file list that follows the "signal:" prefix. Non-.status
+# arguments (e.g. .turn-ended markers, which never carry a verb) are skipped.
+# A 1 here is NOT "benign" on its own: a no-verb signal is only benign when
+# the soldier is also provably working (signal_crew_provably_working below);
+# otherwise it surfaces.
 signal_reason_is_actionable() {  # <file> ...
-  local f last
+  local f last dir marker prev_size size line span_read
   for f in "$@"; do
     [ -e "$f" ] || continue
     case "$f" in *.status) ;; *) continue ;; esac
+    dir=$(dirname "$f")
+    marker="$dir/.seen-$(basename "$f" | tr '.' '_')"
+    prev_size=$(cat "$marker" 2>/dev/null || true)
+    prev_size=${prev_size%%:*}
+    case "$prev_size" in ''|*[!0-9]*) prev_size='' ;; esac
+    span_read=0
+    if [ -n "$prev_size" ]; then
+      size=$(LC_ALL=C wc -c < "$f" 2>/dev/null) || size=''
+      size=${size//[[:space:]]/}
+      case "$size" in ''|*[!0-9]*) size='' ;; esac
+      if [ -n "$size" ] && [ "$prev_size" -lt "$size" ]; then
+        span_read=1
+        while IFS= read -r line || [ -n "$line" ]; do
+          [ -n "${line//[[:space:]]/}" ] || continue
+          status_is_boss_relevant "$line" && return 0
+        done < <(tail -c "+$((prev_size + 1))" "$f" 2>/dev/null)
+      fi
+    fi
+    [ "$span_read" -eq 1 ] && continue
     last=$(last_status_line "$f")
     [ -n "$last" ] || continue
     status_is_boss_relevant "$last" && return 0
@@ -616,7 +744,10 @@ status_open_decisions_incremental() {  # <status-file>
   cf=$(_cs_decision_cursor_path "$f")
   resolve=${CS_CLASSIFY_RESOLVE_VERB:-$CS_CLASSIFY_RESOLVE_VERB_DEFAULT}
   held=${CS_CLASSIFY_BOSS_HELD_VERB:-$CS_CLASSIFY_BOSS_HELD_VERB_DEFAULT}
-  fold_contract="resolve:${resolve}"$'\t'"held:${held}"
+  # The fold version invalidates every cursor persisted under an older line
+  # interpretation (note-head keys and metadata-tagged verbs were once
+  # invisible), forcing a clean full re-fold from the authoritative log.
+  fold_contract="fold:${CS_CLASSIFY_FOLD_VERSION:-2}"$'\t'"resolve:${resolve}"$'\t'"held:${held}"
   offset=0
   ident=''
   cursor_contract=''

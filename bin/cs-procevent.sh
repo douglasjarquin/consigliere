@@ -48,6 +48,13 @@
 # only terminal verdict. A missing command, an error, or any other exit keeps the
 # registration armed, so an adapter with no notion of ending needs no change.
 #
+# Silence is adapter-owned the same way. It calls
+# `bin/cs-procevent-<adapter>.sh silent <result-file>` and treats exit 0 as the
+# only silence verdict. A result its adapter declares a routine no-op is recorded
+# handled and never announced, so it neither wakes a handler now nor comes back
+# on a later reconcile. A missing command, an error, or any other exit publishes
+# the wake unchanged.
+#
 # Ownership is machine-wide per canonical source, because a main home and its
 # capo homes share one machine and one source store. A live owner is never
 # displaced; only a claim whose whole generation is gone is reclaimed. A runner
@@ -99,6 +106,16 @@ adapter_result_is_terminal() {  # <adapter> <result-file>
   script=$(adapter_script "$1")
   [ -f "$script" ] && [ ! -L "$script" ] || return 1
   "$script" terminal "$2" >/dev/null 2>&1
+}
+
+# Ask the source's own adapter whether a captured result is a routine no-op that
+# needs no wake at all. Exit 0 is the only silence verdict; everything else -
+# including a missing adapter command - publishes the wake.
+adapter_result_is_silent() {  # <adapter> <result-file>
+  local script
+  script=$(adapter_script "$1")
+  [ -f "$script" ] && [ ! -L "$script" ] || return 1
+  "$script" silent "$2" >/dev/null 2>&1
 }
 
 source_file()  { printf '%s/%s.source\n' "$REG" "$1"; }
@@ -157,26 +174,46 @@ cmd_register() {
   printf 'registered: %s (%s)\n' "$id" "$adapter"
 }
 
-# Publish every captured result with no handled acknowledgement yet. Capture has
+# Publish one captured result with no handled acknowledgement yet. Capture has
 # already happened, so this only turns durable state into durable events, and it
-# republishes on every call regardless of any earlier publication. The wake line
-# carries IDENTITY ONLY - never a byte of source output.
+# republishes on every call regardless of any earlier publication unless the
+# adapter declares the result a routine no-op. The wake line carries IDENTITY
+# ONLY - never a byte of source output.
+publish_result() {  # <result-file>
+  local result=$1 id seq adapter line status=1 mark_status
+  id=$(cs_procevent_result_source_id "$result")
+  seq=$(cs_procevent_result_sequence "$result")
+  cs_procevent_source_id_valid "$id" || return 1
+  adapter=$(cs_procevent_result_adapter "$result" 2>/dev/null || true)
+  [ -n "$adapter" ] || return 1
+  line=$(cs_procevent_event_line "$adapter" "$id" "$seq") || return 1
+  cs_procevent_source_lock_acquire "$id" || return 1
+  if ! cs_procevent_is_handled "$STATE" "$id" "$seq"; then
+    if adapter_result_is_silent "$adapter" "$result"; then
+      cs_procevent_mark_handled "$STATE" "$id" "$seq"
+      mark_status=$?
+      case "$mark_status" in
+        0|1)
+          cs_procevent_source_lock_release "$id"
+          return 1
+          ;;
+      esac
+    fi
+    if cs_wake_append check "procevent:$id:$seq" "check: $line"; then
+      status=0
+    fi
+  fi
+  cs_procevent_source_lock_release "$id"
+  return "$status"
+}
+
 publish_pending() {
-  local result id seq adapter line published=0
+  local result published=0
   while IFS= read -r result; do
     [ -n "$result" ] || continue
-    id=$(cs_procevent_result_source_id "$result")
-    seq=$(cs_procevent_result_sequence "$result")
-    cs_procevent_source_id_valid "$id" || continue
-    adapter=$(cs_procevent_result_adapter "$result" 2>/dev/null || true)
-    [ -n "$adapter" ] || continue
-    line=$(cs_procevent_event_line "$adapter" "$id" "$seq") || continue
-    cs_procevent_source_lock_acquire "$id" || continue
-    if ! cs_procevent_is_handled "$STATE" "$id" "$seq" \
-      && cs_wake_append check "procevent:$id:$seq" "check: $line"; then
+    if publish_result "$result"; then
       published=$((published + 1))
     fi
-    cs_procevent_source_lock_release "$id"
   done < <(cs_procevent_pending "$STATE")
   printf '%s\n' "$published"
 }

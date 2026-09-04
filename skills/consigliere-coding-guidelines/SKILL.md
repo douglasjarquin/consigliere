@@ -20,7 +20,7 @@ Before writing a new fact anywhere in this repo, ask where it belongs, in this o
 1. Does the consigliere AGENT need this on every session or every turn to operate?
    If yes: `AGENTS.md`, inline.
 2. Does the agent need it only in a nameable situation - a spawn, a recovery, a specific wake type, a specific lifecycle step?
-   If yes: an agent-only skill under `skills/`, plus a one-line trigger pointer left inline in `AGENTS.md` (usually section 13).
+   If yes: an agent-only skill under `skills/`, plus a one-line trigger pointer left inline in `AGENTS.md` (usually section 11).
 3. Is it human/reference detail - a wire format, a verification record, a mechanism narrative, an incident writeup?
    If yes: `docs/`.
 4. Is it mechanics - exact flags, exact commands, exact paths?
@@ -44,7 +44,7 @@ That is the trigger condition for loading the skill, plus any safety-critical fa
 Everything else - the procedure, the mechanism, the surrounding detail - moves out completely.
 Do not leave a partial restatement behind "just in case".
 A partial copy is exactly the duplication the one-owner rule forbids.
-The model to copy is `AGENTS.md` section 8's "Away-mode stub": it keeps only the marker format, the ownership-transfer rule, and the exit condition inline, and points everything else at the `/afk` skill.
+The model to copy is the away-mode paragraph in `AGENTS.md` section 7: it keeps only the marker format, the ownership-transfer rule, and the exit condition inline, and points everything else at the `/afk` skill.
 
 ## Size discipline
 
@@ -57,7 +57,7 @@ When in doubt, write the fact into the skill or doc first, and add only the one-
 ## Trigger hygiene
 
 A new skill is dead weight if nothing loads it.
-Every new skill needs its load trigger declared inline: section 13 for agent-only reference skills, or the relevant operating section for anything else.
+Every new skill needs its load trigger declared inline: section 11 for agent-only reference skills, or the relevant operating section for anything else.
 State the trigger as a condition ("load before X", "load on Y wake"), never as a vague pointer.
 Briefs for tasks that touch consigliere's own tracked material should tell the soldier to load this skill.
 `bin/cs-brief.sh`'s repo argument is a caller-supplied string with no reliable signal that it names consigliere's own repo, unlike a project registered in `config/projects.md`, so there is no clean point inside the scaffold to detect this case automatically.
@@ -66,7 +66,7 @@ Consigliere adds this skill's load instruction to consigliere-repo briefs by han
 ## Compatibility and enforcement
 
 Consigliere runs on one of two harnesses (codex or claude) and one terminal runtime (herdr); `bin/cs-harness-lib.sh` is the whole harness layer and there is no broader adapter matrix to sweep.
-Before changing shared tracked behavior that touches a harness or herdr, re-verify the affected facts against `docs/codex.md`, `docs/claude.md`, and `docs/herdr.md`, and update that verification evidence when behavior changes.
+Before changing shared tracked behavior that touches a harness or herdr, re-verify the affected facts against `docs/codex.md`, `docs/claude.md`, `docs/cursor.md`, `docs/grok.md`, and `docs/herdr.md`, and update that verification evidence when behavior changes.
 
 For critical safety, routing, startup, and supervision infrastructure, prefer deterministic and idempotent enforcement over relying on agent memory alone.
 Keep instructions as the authority and discovery layer, but make repeated execution converge safely and make invalid or unsafe states fail closed wherever the runtime can enforce them.
@@ -81,6 +81,6 @@ Keep instructions as the authority and discovery layer, but make repeated execut
 - A plain local run lints only what this branch changed plus the files linked to it by the source graph, so use `CI=true bin/cs-lint.sh` to reproduce CI's full-set run (README's CI table owns the details).
 - Every `.` or `source` site in that file set needs a `# shellcheck source=<path>` directive in the comment block above it, because `bin/cs-lint.sh` builds that graph from the directives and `tests/cs-ci-contract.test.sh` fails the build when a site has none.
 - Colocate tests with the existing pattern in `tests/`, name them `<subject>.test.sh`, and extend an existing script rather than inventing a new runner.
-- A verified-facts doc (`docs/herdr.md`, `docs/codex.md`, `docs/claude.md`, `docs/lavish.md`, `docs/codegraph.md`) records empirical facts, not assumptions.
+- A verified-facts doc (`docs/herdr.md`, `docs/codex.md`, `docs/claude.md`, `docs/grok.md`, `docs/lavish.md`, `docs/codegraph.md`) records empirical facts, not assumptions.
 - Include the date, version, exact commands run, and exact output.
 - Write incidents the same way, as evidence, not narrative alone.

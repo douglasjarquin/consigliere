@@ -1,0 +1,11 @@
+.git
+config
+host
+data
+state
+projects
+.no-mistakes
+web/node_modules
+web/.astro
+web/test-results
+web/playwright-report

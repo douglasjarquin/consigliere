@@ -58,6 +58,15 @@
 # is a fail-closed refusal naming what survived, downgraded to a named warning
 # only under --force.
 #
+# When the task's metadata records backlog_item= (cs-spawn.sh --backlog-item),
+# a successful ship/scout teardown also records that item done through
+# tasks-axi (with the PR and scout report attached when known), before the
+# final success line, so a finished task never lingers as in flight. A failed
+# backlog write is a loud non-zero exit naming the item still shown in flight;
+# with a manual backend or no compatible tasks-axi the close is skipped with a
+# hand-edit reminder, and with no recorded item the old record-completion
+# reminder is printed instead.
+#
 # Usage: cs-teardown.sh <task-id> [--force]
 #   --force skips ordinary-task dirty and landed-work checks, skips scout
 #   report checks, and discards capo child work for kind=capo. Only use it
@@ -82,6 +91,8 @@ esac
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
 # shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# shellcheck source=bin/cs-message-lib.sh
+. "$SCRIPT_DIR/cs-message-lib.sh"
 # shellcheck source=bin/cs-harness-lib.sh
 . "$SCRIPT_DIR/cs-harness-lib.sh"
 # shellcheck source=bin/cs-made-run-lib.sh
@@ -93,6 +104,10 @@ CS_LOCK_LOG_PREFIX="cs-teardown" . "$SCRIPT_DIR/cs-lock-lib.sh"
 
 # shellcheck source=bin/cs-capo-registry-lib.sh
 . "$SCRIPT_DIR/cs-capo-registry-lib.sh"
+
+# Backlog backend selection and the completion transition (backlog_item=).
+# shellcheck source=bin/cs-tasks-lib.sh
+. "$SCRIPT_DIR/cs-tasks-lib.sh"
 
 # Optional turn telemetry (off unless host/telemetry.conf enables it).
 # shellcheck source=bin/cs-telemetry-lib.sh
@@ -115,10 +130,12 @@ PROJ=$(cs_meta_get "$META" project || true)
 PANE=$(cs_meta_get "$META" pane || true)
 WS=$(cs_meta_get "$META" workspace || true)
 KIND=$(cs_meta_get "$META" kind || echo ship)
+CONTAINER=$(cs_meta_get "$META" container 2>/dev/null || echo workspace)
 MODE=$(cs_meta_get "$META" mode || echo made)
 PR_URL=$(cs_meta_get "$META" pr || true)
 HOME_PATH=$(cs_meta_get "$META" home || true)
 HARNESS=$(cs_meta_get "$META" harness 2>/dev/null || true)
+BACKLOG_ITEM=$(cs_meta_get "$META" backlog_item 2>/dev/null || true)
 
 # Minimum age before a git lock with no live holder is considered abandoned.
 STALE_LOCK_MIN_AGE=${CS_TEARDOWN_STALE_LOCK_MIN_AGE:-30}
@@ -133,6 +150,51 @@ NM_RUNS_LIMIT=200
 # lsof is the verified mechanism for the leaked-process sweep; resolved once.
 LSOF_BIN=$(command -v lsof || true)
 CS_REAP_SURVIVORS=""
+
+message_state_has_open_records() {
+  local state=$1 target=$2 file id ack
+  for file in "$state"/pending/*.pending; do
+    [ -f "$file" ] || continue
+    id=$(cs_message_pending_field "$file" message_id 2>/dev/null || true)
+    [ -n "$id" ] || return 1
+    cs_message_pending_close_validate_file "$state/pending/$id.closed" "$id" || return 1
+  done
+  for file in "$state"/inbox/*.msg; do
+    [ -f "$file" ] || continue
+    cs_message_validate_file "$file" || return 1
+    [ "$(cs_message_field "$file" to_task_id)" = "$target" ] || continue
+    ack="${file%.msg}.ack"
+    if [ -e "$ack" ]; then
+      cs_message_validate_ack "$ack" "$(cs_message_field "$file" message_id)" || return 1
+    else
+      return 1
+    fi
+  done
+  return 0
+}
+
+reconcile_messages_before_teardown() {
+  local parent_state recovery_out recovery_rc=0 has_records=0
+  if [ -d "$STATE/pending" ] || [ -d "$STATE/inbox" ]; then
+    has_records=1
+  fi
+  parent_state=$(cs_meta_get "$META" parent_state 2>/dev/null || true)
+  if [ -n "$parent_state" ] && [ "$parent_state" != "$STATE" ] && {
+    [ -d "$parent_state/inbox" ] || [ -d "$parent_state/pending" ];
+  }; then
+    has_records=1
+  fi
+  [ "$has_records" -eq 1 ] || return 0
+  recovery_out=$(CS_HOME="${HOME_PATH:-$CS_HOME}" CS_STATE_OVERRIDE="$STATE" \
+    "$SCRIPT_DIR/cs-recover.sh" 2>&1) || recovery_rc=$?
+  [ -n "$recovery_out" ] && printf '%s\n' "$recovery_out" >&2
+  [ "$recovery_rc" -eq 0 ] || return 1
+  message_state_has_open_records "$STATE" "$ID" || return 1
+  if [ -n "$parent_state" ] && [ "$parent_state" != "$STATE" ]; then
+    message_state_has_open_records "$parent_state" "$ID" || return 1
+  fi
+  return 0
+}
 
 default_branch() {
   local ref name
@@ -854,6 +916,11 @@ if [ "$KIND" = scout ] && [ "$FORCE" != "--force" ]; then
   fi
 fi
 
+if [ "$FORCE" != "--force" ] && ! reconcile_messages_before_teardown; then
+  echo "REFUSED: message reconciliation for task $ID is unresolved or malformed; records and worktree were preserved." >&2
+  exit 1
+fi
+
 if [ -n "$WT" ] && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
   # Freeze the soldier before proving its worktree is safe to discard: close the
   # pane and wait for the agent to exit so the cleanliness snapshot below sees a
@@ -898,7 +965,16 @@ if [ -n "$WT" ] && [ -d "$WT" ]; then
   if [ "$FORCE" = "--force" ] || [ "$KIND" = scout ]; then
     REMOVE_FORCE="--force"
   fi
-  if [ -n "$WS" ] && cs_herdr_workspace_exists "$WS"; then
+  if [ "$CONTAINER" = tab ]; then
+    # WS here is the capo's own persistent home workspace, not a worktree-bound
+    # one: cs_herdr_worktree_remove would tear down that whole home. Only the
+    # task's own tab (its root pane) and its plain-git worktree are this
+    # task's to remove.
+    cs_herdr_nested_task_remove "$PROJ" "$WT" "$PANE" $REMOVE_FORCE >/dev/null || {
+      echo "error: nested task removal refused for $WT after the safety proofs passed; stop and investigate (do not delete by hand)." >&2
+      exit 1
+    }
+  elif [ -n "$WS" ] && cs_herdr_workspace_exists "$WS"; then
     cs_herdr_worktree_remove "$WS" $REMOVE_FORCE >/dev/null || {
       echo "error: herdr worktree remove refused for $WT after the safety proofs passed; stop and investigate (do not delete by hand)." >&2
       exit 1
@@ -927,6 +1003,8 @@ if [ "$HARNESS" = claude ]; then
   rm -f "$STATE/$ID.claude-settings.json"
 elif [ "$HARNESS" = codex ]; then
   [ -n "$WT" ] && cs_harness_codex_untrust_dir "$WT" || true
+elif [ "$HARNESS" = grok ]; then
+  cs_grok_turnend_disarm "$STATE" "$ID" "$WT"
 fi
 rm -f "$STATE/$ID.status" "$STATE/$ID.turn-ended" "$STATE/$ID.meta"
 remove_watcher_markers || exit 1
@@ -935,9 +1013,31 @@ if [ "$KIND" != scout ] && [ "$MODE" != local-only ] && [ -x "$SCRIPT_DIR/cs-fle
   "$SCRIPT_DIR/cs-fleet-sync.sh" "$PROJ" || true
 fi
 
+# The completion backlog transition, folded into the same cleanup that removed
+# the task's physical record, before the success line below: a torn-down task
+# must never keep showing as in flight. A write failure is a loud non-zero
+# exit - the cleanup itself already happened and is not undone, but the result
+# is not clean until the item is closed by hand.
+BACKLOG_LINE="reminder: record completion in the backlog and re-evaluate queued work."
+if [ -n "$BACKLOG_ITEM" ]; then
+  DONE_ARGS=()
+  [ -n "$PR_URL" ] && DONE_ARGS+=(--pr "$PR_URL")
+  [ "$KIND" = scout ] && [ -f "$DATA/$ID/report.md" ] && DONE_ARGS+=(--report "$DATA/$ID/report.md")
+  backlog_rc=0
+  cs_tasks_backlog_transition "$CONFIG" "done" "$BACKLOG_ITEM" ${DONE_ARGS[@]+"${DONE_ARGS[@]}"} || backlog_rc=$?
+  case "$backlog_rc" in
+    0) BACKLOG_LINE="backlog item '$BACKLOG_ITEM' recorded done; re-evaluate queued work." ;;
+    2) BACKLOG_LINE="reminder: record completion of backlog item '$BACKLOG_ITEM' by hand and re-evaluate queued work." ;;
+    *)
+      echo "error: cleanup for '$ID' finished, but backlog item '$BACKLOG_ITEM' could not be recorded done and still shows as in flight; close it by hand, then re-evaluate queued work." >&2
+      exit 1
+      ;;
+  esac
+fi
+
 # TELEMETRY, measurement only, on a teardown that actually completed. A refusal
 # never reaches this line, so a task cleaned up under protest is never counted as
 # a supervision turn that closed the loop.
 cs_telemetry_crumb teardown "$KIND" || true
 echo "teardown $ID complete (pane ${PANE:-<none>}, worktree ${WT:-<none>})"
-echo "reminder: record completion in the backlog and re-evaluate queued work."
+echo "$BACKLOG_LINE"

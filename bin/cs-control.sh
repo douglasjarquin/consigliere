@@ -100,7 +100,7 @@
 # has it; on a resume it is also delivered as one steer through bin/cs-send.sh,
 # because a resumed session does not re-read the brief.
 #
-# The model and reasoning level are the harness's own (AGENTS.md section 4), so
+# The model and reasoning level are the harness's own (AGENTS.md's intro; bin/cs-harness-lib.sh owns the facts), so
 # there is nothing to carry across or override here. The harness itself is NOT
 # switchable either: a soldier inherits the root session's harness, so moving one
 # soldier alone would break that inheritance.

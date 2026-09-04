@@ -53,7 +53,36 @@ field() {  # <name>
 pane=$(field pane_id) || exit 0
 [ -n "$pane" ] || exit 0
 
+generation=
+for meta in "$STATE"/*.meta; do
+  [ -f "$meta" ] || continue
+  [ "$(awk -F= '$1 == "pane" { value=substr($0, 6) } END { print value }' "$meta")" = "$pane" ] || continue
+  generation=$(awk -F= '$1 == "endpoint_generation" { value=substr($0, 21) } END { print value }' "$meta")
+  break
+done
+[ -n "$generation" ] || exit 0
+
 cs_event_append "$(cs_event_spool_path "$STATE")" \
-  "$(cs_event_record status "$pane" "$(field workspace_id || true)" \
-      "$(field agent_status || true)" "$(field agent || true)")" 2>/dev/null || exit 0
+  "$(cs_event_record_with_generation status "$pane" "$(field workspace_id || true)" \
+      "$(field agent_status || true)" "$(field agent || true)" "$generation")" 2>/dev/null || exit 0
+
+# issue #152: the doorbell. The spool append above already durably recorded
+# this event - everything from here on is best-effort speed, never a second
+# source of truth. One extra process-identity probe here (inside
+# cs_watcher_lock_current_pid, which calls cs_pid_identity) is the cost of
+# this event, not of idle time, since a hook only ever runs once per real
+# Herdr edge.
+#
+# shellcheck source=bin/cs-wake-lib.sh
+. "$HOOK_DIR/cs-wake-lib.sh" 2>/dev/null || exit 0
+watcher_pid=$(cs_watcher_lock_current_pid "$STATE" 2>/dev/null) || exit 0
+case "$watcher_pid" in
+  ''|*[!0-9]*) exit 0 ;;
+esac
+# Never signal PID 0, 1, or this hook's own pid - cs_watcher_lock_current_pid
+# already refuses 0 and 1, this guards only the (structurally near-impossible,
+# since the recorded pid is always the WATCHER's, never a hook's) self-signal
+# case explicitly, per the issue's own list of pids that must never be signaled.
+[ "$watcher_pid" != "$$" ] && [ "$watcher_pid" != "${BASHPID:-$$}" ] || exit 0
+kill -USR1 "$watcher_pid" 2>/dev/null || true
 exit 0

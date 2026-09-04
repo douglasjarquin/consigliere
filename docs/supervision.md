@@ -10,7 +10,7 @@ Codex cannot reason during a foreground tool call, so a background watcher that 
    That scan is cursor-backed (`state/.decision-cursor-<task>`), so each drain folds only status bytes appended since the previous drain instead of every task's whole lifetime log.
 2. Run one checkpoint, and only one this turn: `bin/cs-watch-checkpoint.sh --seconds "${CS_WATCH_CHECKPOINT:-180}"`.
    It ensures `bin/cs-monitor.sh` is alive for this home, reviving it on a stale `state/.last-monitor-beat`, then waits for `state/.wake-queue` to carry something.
-3. Actionable wake (`signal:` / `stale:` / `check:` / `capo:` / `heartbeat`): drain, handle, report, end the turn.
+3. Actionable wake (`signal:` / `stale:` / `check:` / `heartbeat`): drain, handle, report, end the turn.
 4. Quiet checkpoint (`checkpoint:` line, exit 124): drain anyway, process any queued boss message, end the turn.
 5. Never `&`, never background tasks, never a second cycle beside a healthy one.
 6. Failure or missing cycle only: drain, inspect, start a fresh checkpoint.
@@ -60,18 +60,37 @@ Keying it to the print is the one boundary the drain can observe by itself.
 Nothing is ever re-promoted into a new pending batch, which is what keeps repeated adoption from feeding itself: a drain that commits ends the chain outright, and consecutive dying drains accumulate batches whose contents dedupe away the moment one of them commits.
 Restoring an interrupted drain's queue removes the batch it restored from, because those records are back in the queue and a leftover copy would be adopted as a loss that never happened.
 
+## Turn handling by wake type
+
+`AGENTS.md` section 7 requires draining the wake queue before acting on any wake-handling turn.
+Once drained, handle each actionable wake as follows:
+
+1. `signal:` - read the listed event lines first, then reconcile current state only where action depends on it.
+2. `stale:` - inspect the recorded endpoint and load `stuck-soldier-recovery` for a stopped, looping, confused, or unresponsive soldier; a demand-deep-inspection reason also requires current-state and validation-log inspection.
+3. `check:` - act on the named poll result, including a merge the boss has already authorized.
+4. A message wake - drain the addressed inbox through the generic parent/child protocol and act only on the current task's records.
+5. `heartbeat:` - review the whole fleet from `bin/cs-fleet-view.sh`, reconcile suspicious tasks and PR state, update the backlog, and never report an unchanged fleet as progress.
+
+When any wake reports a merged PR for a project cloned in this home, refresh that clone through the guarded fleet-sync path.
+A capo's idle endpoint is healthy, and parent supervision relies on its routed status rather than treating a quiet pane as stale.
+Waiting on a healthy supervision cycle is silent; empty polls, elapsed time, and no-change updates are not boss-facing progress (`escalation-style`).
+
+## Self-activation
+
+Every home activates itself: when its wake queue has sat unattended, its own monitor prompts its own agent through `bin/cs-activate.sh`, so a queue is picked up without anyone injecting into that pane.
+Scope is `host/activation.conf`, which defaults to `always` everywhere because an ended turn now depends on it.
+A `state/.activation-stalled` marker means that home cannot start its own turns and needs recovery; treat it as a blocker, not a warning.
+
 ## Wake vocabulary
 
-- `signal: <files>` - status/turn-end signals; surfaced when a listed status has a boss-relevant verb OR a no-verb signal's soldier is not provably working.
+- `signal: <files>` - status/turn-end signals; surfaced when a listed status carries a boss-relevant verb anywhere in its unread appended span OR a no-verb signal's soldier is not provably working.
+  The span read (not last-line-wins) is what keeps a decision, blocker, failure, or finish visible when a later routine append lands inside the coalescing grace.
+  A no-verb wake carrying only turn-end markers is also absorbed when the task's pane content changed since the previous poll, so a harness with no verified busy source does not surface a contentless wake at every turn boundary; a stopped soldier's now-static pane still surfaces through the staleness backbone.
+  The drain presents every unread status line since its per-task presentation cursor, so an older `note:` is never dropped because a newer line followed it, and this home's own bookkeeping closes (a `cs-send --resolve-key` resolved line) advance the seen marker over exactly their own bytes and do not re-wake the session that wrote them.
 - `stale: <pane>` - endpoint went quiet; absorb-only-when-provably-working, wedge escalation past `CS_STALE_ESCALATE_SECS` with an escalation count and a `demand-deep-inspection` marker at `CS_WEDGE_DEMAND_INSPECT_COUNT` consecutive escalations.
   A pane that stays *busy* is bounded too: past `CS_BUSY_TURN_MAX_SECS` (default 3600) with no completed turn it enters the same wedge timer, because a busy signal alone cannot distinguish real work from a hung foreground tool call.
   The escalation is for inspection only and never interrupts or restarts the soldier; any completed turn resets the age.
 - `check: <script>: <out>` - authenticated poll output (PR merge poll, registered custom checks); always actionable. Unauthenticated state checks are rejected without execution.
-- `capo: <capo>/<worker>: <line>` - a boss-relevant status a worker inside one of this home's capo homes raised, read directly by this watcher rather than waited on.
-  A capo home is polled only while its own agent sits idle on a checkpoint, so an event there can otherwise wait as long as that agent's turn lasts.
-  The wake reports that the event exists; the capo still owns the lane.
-  Discovery is from this home's own `state/<id>.meta` records with `kind=capo`, and a recorded home is read only when it still carries the `.cs-capo-home` marker.
-  Dedup is per capo, worker task, and decision key against a per-task open-decision manifest (`state/.capo-surfaced-<capo>__<worker>`), not the surfaced line's text, so a standing block wakes the parent once and a resolve-then-reopen under the same key and wording still surfaces again; `bin/cs-watch.sh`'s `scan_capo_worker_events` owns the fold.
 - `heartbeat` - fleet-scan backstop found an unsurfaced boss-relevant status.
 
 `bin/cs-classify-lib.sh` is the single owner of the verb vocabulary and delegates machine-input typing to `bin/cs-operational-input.sh`.
@@ -87,6 +106,8 @@ Native `idle`/`unknown` is corroborated against the `esc to interrupt` rendered-
 When this home's herdr event plugin is installed, the watcher replaces its poll sleep with a bounded wait on the spool that plugin feeds, surfacing `blocked` sub-second.
 herdr itself runs the hook (`bin/cs-herdr-event-hook.sh`) on every `pane.agent_status_changed` edge, so edges that fire while no watcher is running are still waiting in `state/.herdr-events` when one starts; `bin/cs-herdr-event-plugin.sh` owns the install and `bin/cs-herdr-event-lib.sh` the spool contract.
 A machine without the plugin has no spool and simply keeps polling, and the poll loop remains live every cycle as the permanent fail-closed backstop either way.
+
+That bounded wait (issue #152) is one interruptible `sleep` for the whole remaining budget, not a fixed re-check tick: the hook signals the watcher's own pid (SIGUSR1, read and identity-verified from the existing `state/.watch.lock/pid`/`pid-identity` files - no separate endpoint record was needed) the instant it durably appends an event this home owns, and the watcher's trap wakes its `wait` immediately instead of polling every 0.5s. `bin/cs-watch.sh`'s `cs_watch_block_for_wake` and `cs_watch_wait_transition` headers, and `bin/cs-wake-lib.sh`'s `cs_watcher_lock_current_pid`, are the one owners of the exact mechanics and the empirically-verified bash signal/subshell constraints behind them (in particular: command substitution forks a real subshell, so the interruptible wait must never be called through `$(...)`) - not restated here. `tests/cs-watch-signal-wait.test.sh` is the regression suite; a lost, coalesced, or entirely absent signal only costs latency up to the remaining wait budget, never a missed event, since the spool and its cursor remain the sole transport authority and the next wait always drains unconditionally regardless of why the previous one ended.
 
 ## Structural backstop
 

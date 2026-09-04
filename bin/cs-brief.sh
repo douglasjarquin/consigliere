@@ -103,6 +103,8 @@ esac
 PAUSED_VERB=${CS_CLASSIFY_PAUSED_VERB:-$CS_CLASSIFY_PAUSED_VERB_DEFAULT}
 # shellcheck source=bin/cs-delivery-lib.sh
 . "$SCRIPT_DIR/cs-delivery-lib.sh"
+# shellcheck source=bin/cs-dod-lib.sh
+. "$SCRIPT_DIR/cs-dod-lib.sh"
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
 # shellcheck source=bin/cs-exec-mode-lib.sh
@@ -270,6 +272,18 @@ arm_plan_progress_check() {
 }
 
 STATUS_FILE=$(shell_quote "$STATE/$ID.status")
+REPORT_COMMAND="$(shell_quote "$CS_ROOT/bin/cs-report.sh")"
+INBOX_COMMAND="$(shell_quote "$CS_ROOT/bin/cs-inbox.sh")"
+IFS= read -r -d '' REPORTING_SECTION <<EOF || true
+# Semantic parent reporting
+At the beginning of a turn, inspect actionable messages addressed to this task with \`CS_TASK_ID=$(shell_quote "$ID") $INBOX_COMMAND\`.
+Use \`CS_TASK_ID=$(shell_quote "$ID") $REPORT_COMMAND question "{question}"\` or \`decision-required "{decision}"\` before guessing outside delegated authority.
+Use \`CS_TASK_ID=$(shell_quote "$ID") $REPORT_COMMAND blocked "{reason}"\` when work cannot continue, and use \`failed "{reason}"\` for terminal failure.
+Use \`CS_TASK_ID=$(shell_quote "$ID") $REPORT_COMMAND checkpoint "{artifact-ready phase}"\` only when a concrete artifact or commit lets the parent continue.
+Use \`CS_TASK_ID=$(shell_quote "$ID") $REPORT_COMMAND result "{outcome}" --artifact "{relative report}" --commit "{sha}" --pr "{number}"\` only after the bounded report and evidence exist.
+A terminal buffer saying done is not a semantic result. After a parent handles a message, acknowledge it with \`CS_TASK_ID=$(shell_quote "$ID") $INBOX_COMMAND --ack {message-id}\`.
+EOF
+REPORTING_SECTION=${REPORTING_SECTION%$'\n'}
 
 if [ "$KIND" = capo ]; then
 CAPO_PROJECTS=""
@@ -309,6 +323,7 @@ You are in an isolated consigliere home. The local \`AGENTS.md\` is your job des
 $PROJECT_CLONES_NOTE
 Delegate project work to your own soldiers with the normal consigliere lifecycle: brief, spawn, status, watcher, steer, teardown, and recovery.
 Do not invent a second delegation system.
+$REPORTING_SECTION
 You do not generate your own work.
 Act only on tasks the main consigliere routes to you.
 Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
@@ -395,7 +410,7 @@ HERDR_SECTION=$(printf '%s\n' \
 else
 IFS= read -r -d '' HERDR_SECTION <<'EOF' || true
 # Herdr lifecycle declaration - NOT ENABLED
-**HARD SAFETY GATE:** this scaffold cannot inspect the task text that replaces `{TASK}` later.
+**HARD SAFETY GATE:** this scaffold cannot inspect the task text filled in above.
 If the task will start, stop, delete, restart, profile, or otherwise drive herdr lifecycle behavior, stop and regenerate the brief with `--herdr-lab` before dispatch.
 Do not add herdr lifecycle commands to this unguarded brief by hand.
 EOF
@@ -410,6 +425,8 @@ You are a soldier: an autonomous worker agent managed by consigliere. Work on yo
 {TASK}
 
 $HERDR_SECTION
+
+$REPORTING_SECTION
 
 # Setup
 You are in a disposable git worktree of $REPO on the task branch \`cs/$ID\`.
@@ -477,98 +494,27 @@ case "$EXEC_MODE" in
     ;;
 esac
 
-# Shared by direct-PR and made only (local-only never opens a PR, so it
-# is out of this section's scope): the render-then-commit recipe for any
-# bossless-mode auto-decision recorded against this task, per
-# bin/cs-auto-decision-lib.sh's SCHEMA-OWNER header. The ledger lives in THIS
-# consigliere home's own data/, not the target project, so CS_HOME/CS_ROOT are
-# baked in now as concrete absolute paths rather than left for the soldier to
-# resolve inside a different worktree. Sourcing the library pulls in
-# cs-afk-start.sh, which unconditionally calls cs_resolve_root - a live
-# reproduction proved that recomputes STATE/DATA from CS_STATE_OVERRIDE/
-# CS_DATA_OVERRIDE (or CS_HOME), silently stomping a plain STATE=/DATA=
-# assignment, so the override names are the only ones that actually stick.
-# shellcheck disable=SC2016  # single quotes are deliberate: literal brief text; only interpolates the already-resolved $CS_HOME/$CS_ROOT/$ID paths, never re-expanded.
-IFS= read -r -d '' AUTO_DECISIONS_RENDER <<EOF || true
-If any ask-user finding during this task was auto-decided under bossless mode, its record lives in this consigliere home's own ledger, not yet in this project. Render and commit it before you finish, as an ordinary part of your diff:
-\`\`\`
-CS_HOME=$CS_HOME CS_STATE_OVERRIDE=$STATE CS_DATA_OVERRIDE=$DATA bash -c ". $CS_ROOT/bin/cs-auto-decision-lib.sh && cs_auto_decision_render $ID" > /tmp/auto-decisions-$ID.md
-if [ -s /tmp/auto-decisions-$ID.md ]; then mkdir -p docs/auto-decisions && mv /tmp/auto-decisions-$ID.md docs/auto-decisions/$ID.md && git add docs/auto-decisions/$ID.md; fi
-\`\`\`
-Skip this entirely when the temp file ends up empty (no bossless decisions occurred) - never commit an empty file, and never touch the ledger itself.
-EOF
-AUTO_DECISIONS_RENDER=${AUTO_DECISIONS_RENDER%$'\n'}
-
-# Ship task: shape Setup / Rule 1 / Definition of done by the explicit --mode,
-# already validated against the closed set above.
+# Ship task: shape Setup and Rule 1 by the explicit --mode, already validated
+# against the closed set above. The mode-specific Definition of done itself
+# comes from bin/cs-dod-lib.sh, the single owner shared with cs-promote.sh so
+# a briefed worker and a promoted scout receive the byte-identical contract.
 case "$MODE" in
   direct-PR)
     SETUP2=""
     RULE1='1. Never push to the default branch (push only your `cs/'"$ID"'` branch). Never merge a PR.'
-    IFS= read -r -d '' DOD <<EOF || true
-# Definition of done
-This task ships **direct-PR**: you raise the PR yourself, without the made pipeline.
-The task is complete only when committed on your branch.
-
-$AUTO_DECISIONS_RENDER
-When docs/auto-decisions/$ID.md exists, include this short section in the PR body you write yourself, with its path as a real repo-relative link:
-\`\`\`
-## Auto-decisions (bossless mode)
-See \`docs/auto-decisions/$ID.md\` in this diff.
-\`\`\`
-
-When it is implemented and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file and stop.
-Do NOT run /made. The configured merge authority decides whether to merge the PR; consigliere relays the outcome.
-EOF
     ;;
   local-only)
     SETUP2=""
     RULE1="1. Never push to any remote and never open a PR. Work only on your \`cs/$ID\` branch; consigliere handles the merge into local \`main\`."
-    IFS= read -r -d '' DOD <<EOF || true
-# Definition of done
-This task ships **local-only**: no remote, no PR, no pipeline.
-The task is complete only when committed on your branch \`cs/$ID\`. Do NOT push, do NOT open a PR, do NOT merge.
-Keep your branch a clean fast-forward onto the current default branch - if \`main\` has advanced, rebase onto it so the eventual merge stays a fast-forward.
-When it is implemented and committed, append \`done: ready in branch cs/$ID\` to the status file and stop.
-The configured merge authority approves the ready branch, then consigliere merges it into local \`main\` through the guarded fast-forward path.
-EOF
     ;;
   *)  # made; the closed-set validation above admits nothing else
     SETUP2="
 2. Run \`made doctor\`; if it reports the repo is not initialized here, run \`made gate init\`."
     RULE1='1. Never push to the default branch. Never merge a PR.'
-    IFS= read -r -d '' DOD <<EOF || true
-# Definition of done
-The task is complete only when committed on your branch.
-When you believe it is complete, append \`needs-review: {summary of what you built}\` to the status file and stop.
-Use \`needs-review:\` here, NOT \`done:\` - this mode adds that one state to the list in rule 4.
-Consigliere reviews your commit against the task, then instructs you to run \$made to validate and ship a PR.
-\`needs-review:\` stays open above you until consigliere acts on it, so an unreviewed commit cannot be mistaken for finished work; \`done:\` would read as complete and could sit unnoticed.
-When consigliere tells you to validate, append \`resolved: {how it was reviewed or unblocked}\` (carrying the same \`[key=<slug>]\` if you opened one) before you start the run.
-
-$AUTO_DECISIONS_RENDER
-If docs/auto-decisions/$ID.md exists, append one more sentence to the same \`--intent\` text below: "N ask-user findings were auto-decided under bossless mode; see \`docs/auto-decisions/$ID.md\` in this diff." (fill in N with \`grep -c '^- \\*\\*\\[' docs/auto-decisions/$ID.md\`). Never call \`gh-axi pr edit\` or any other direct PR-mutation command to add this yourself - made owns the PR object end to end in this mode, and the committed file, not this sentence, is the durable evidence.
-
-You drive made by responding to its gates, not by implementing fixes.
-Follow the guidance made itself provides for the mechanics: it loads when you invoke \$made, and \`made doctor\` plus \`made status --json\` are authoritative and version-matched to the installed binary.
-When you start the run, make \`--intent\` preserve all relevant content from this brief's \`# Task\` section plus every later accepted consigliere requirement, clarification, constraint, exclusion, and supersession, carrying only each requirement's current accepted form; retain the direct requirements instead of substituting a summary of your diff, and leave out generic operational, status, delivery, and other scaffold boilerplate unless it is task-specific.
-Do not hand-edit, commit, or fix findings yourself while a run is active - the pipeline applies every fix.
-
-Two consigliere-specific rules layer on top of that guidance:
-- ask-user findings are not yours to answer: escalate to consigliere (rule 6) and stop.
-  When the decision comes back, feed it to the gate with \`made review\` and let the pipeline apply it - do not route the question to "the user" or implement the fix yourself.
-- Avoid \`--yes\`: the boss, not you, owns the ask-user decisions it would silently auto-resolve.
-
-After \$made reports CI green (the CI-ready return point - do not wait for it to keep monitoring in the background until merge), append \`done: PR {url} checks green\` and stop. You are finished.
-In this mode \`done:\` means exactly that green-PR state and nothing else.
-EOF
     ;;
 esac
 
-# read -r -d '' preserves the heredoc's trailing newline that a $(...) command
-# substitution would have stripped. Drop that one newline so generated briefs
-# keep their exact prior shape.
-DOD=${DOD%$'\n'}
+DOD=$(cs_dod_render "$MODE" "$ID")
 
 # The machine-readable contract cs-spawn.sh cross-checks its own --mode against.
 # It is emitted last, after every section a caller rewrites while filling in
@@ -620,6 +566,8 @@ $ISSUE_SECTION
 $EXEC_SECTION
 
 $HERDR_SECTION
+
+$REPORTING_SECTION
 
 # Setup
 You are in a disposable git worktree of $REPO on the task branch \`cs/$ID\`, created for you at spawn.

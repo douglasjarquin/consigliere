@@ -27,6 +27,9 @@
 #             of those are therefore triggers.
 #   herdr     the real-herdr suite drives bin/ through tests/, and the install and
 #             cleanup steps live in the workflow.
+#   docker    the real-docker lane exercises the dev-tools suite itself; nothing
+#             outside mise.toml, mise-tasks/dev/*, docker/*, docker-compose.yml,
+#             and scripts/ci/* can change its verdict.
 #   web       the Astro docs site under web/, plus the mise toolchain pin that
 #             selects Node and Aube for it.
 #
@@ -43,7 +46,7 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-LANES='lint coverage portable herdr web'
+LANES='lint coverage portable herdr docker web'
 
 usage() {
   awk 'NR > 1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
@@ -126,6 +129,7 @@ lint=false
 coverage=false
 portable=false
 herdr=false
+docker=false
 web=false
 
 while IFS= read -r path; do
@@ -137,6 +141,7 @@ while IFS= read -r path; do
       coverage=true
       portable=true
       herdr=true
+      docker=true
       web=true
       ;;
     # Shell changes move the shell lanes, not the docs site.
@@ -150,7 +155,21 @@ while IFS= read -r path; do
     skills/* | docs/* | README.md | .tasks.toml)
       portable=true
       ;;
-    web/* | mise.toml | mise.lock)
+    grokbot/*)
+      portable=true
+      ;;
+    mise.toml | mise.lock)
+      lint=true
+      portable=true
+      docker=true
+      web=true
+      ;;
+    mise-tasks/* | docker/* | docker-compose.yml | scripts/ci/*)
+      lint=true
+      portable=true
+      docker=true
+      ;;
+    web/*)
       web=true
       ;;
   esac
@@ -172,4 +191,5 @@ emit_lane lint "$lint"
 emit_lane coverage "$coverage"
 emit_lane portable "$portable"
 emit_lane herdr "$herdr"
+emit_lane docker "$docker"
 emit_lane web "$web"

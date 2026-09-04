@@ -109,6 +109,13 @@ if [ -n "$CS_TELEMETRY_LIB_DIR" ] && [ -r "$CS_TELEMETRY_LIB_DIR/cs-session-pid-
   # shellcheck source=bin/cs-session-pid-lib.sh
   . "$CS_TELEMETRY_LIB_DIR/cs-session-pid-lib.sh"
 fi
+# cs_lock_path_mtime, the one owner of the portable stat mtime read, guarded by
+# the same failure policy: a checkout that lacks it leaves cs_telemetry_mtime
+# failing silently rather than failing any caller.
+if [ -n "$CS_TELEMETRY_LIB_DIR" ] && [ -r "$CS_TELEMETRY_LIB_DIR/cs-lock-lib.sh" ]; then
+  # shellcheck source=bin/cs-lock-lib.sh
+  . "$CS_TELEMETRY_LIB_DIR/cs-lock-lib.sh"
+fi
 
 # --- path resolution ---------------------------------------------------------
 #
@@ -345,7 +352,7 @@ cs_telemetry_on() {
 #
 # Vocabulary (the folding table is below; docs/telemetry.md restates it for an
 # analyst):
-#   wake <kind>    one drained wake row of kind signal|stale|check|capo|heartbeat
+#   wake <kind>    one drained wake row of kind signal|stale|check|heartbeat
 #   checkpoint     a bounded foreground supervision checkpoint ran
 #   spawn <kind>   a soldier or capo was dispatched
 #   steer          a direct report was messaged
@@ -529,7 +536,7 @@ cs_telemetry_emit() {
 # guessing: bad telemetry is worse than missing telemetry.
 #
 # The one inference in the table is purpose rule 5, and it is a property of the
-# operating contract rather than a guess about content: AGENTS.md section 8
+# operating contract rather than a guess about content: AGENTS.md section 7
 # requires every wake-handling turn to drain the queue first and to hold exactly
 # one live checkpoint while work is under way, so a ROOT turn that ran neither,
 # and dispatched, steered, merged, tore down, or promoted nothing, supervised
@@ -971,15 +978,13 @@ cs_telemetry_quote() {
 # attempt, which covers a hard kill (a Stop-hook timeout) that no trap can catch.
 # A genuinely held FRESH lock is still skipped silently.
 
-# Portable mtime in epoch seconds. A deliberate local copy rather than a
-# dependency on bin/cs-lock-lib.sh, for the same reason cs_telemetry_quote is:
-# this library is sourced by callers with no reason to load the git-lock layer.
+# Portable mtime in epoch seconds, delegated to its one owner,
+# bin/cs-lock-lib.sh's cs_lock_path_mtime (sourced guardedly near the top of
+# this file). The failure policy holds: a missing owner or an unreadable mtime
+# returns non-zero with no output and never touches stderr.
 cs_telemetry_mtime() {
-  if [ "$(uname 2>/dev/null)" = Darwin ]; then
-    stat -f %m "$1" 2>/dev/null
-  else
-    stat -c %Y "$1" 2>/dev/null
-  fi
+  declare -F cs_lock_path_mtime >/dev/null 2>&1 || return 1
+  cs_lock_path_mtime "$1"
 }
 
 cs_telemetry_prune() {

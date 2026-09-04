@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a soldier in a herdr-native task worktree, or a capo
 # in its isolated consigliere home.
-# Usage: cs-spawn.sh <task-id> <project-dir> --mode <made|direct-PR|local-only> --yolo <on|off> [--base <ref>] [--issue <n>]
+# Usage: cs-spawn.sh <task-id> <project-dir> --mode <made|direct-PR|local-only> --yolo <on|off> [--base <ref>] [--issue <n>] [--here]
+#        cs-spawn.sh <task-id> <project-dir> [--parent <task-id>] [--parent-home <path>] [--parent-pane <pane>] [--parent-generation <generation>] [--parent-herdr-session <name>]
 #        cs-spawn.sh <task-id> <project-dir> --scout [--headless] [--base <ref>]
 #        cs-spawn.sh <task-id> <capo-home> --capo
 #        cs-spawn.sh --relaunch <task-id>
@@ -24,7 +25,7 @@
 #   promoted scout first states one.
 #
 #   Model and reasoning level are NOT selectable here: the harness resolves its own
-#   profile per task (AGENTS.md section 4), so no launch built here names either.
+#   profile per task (AGENTS.md's intro; bin/cs-harness-lib.sh owns the facts), so no launch built here names either.
 #   A claude home whose account policy forbids --dangerously-skip-permissions
 #   selects a narrower launch mode in config/permission-mode.conf (auto|acceptEdits|
 #   bypassPermissions); an unusable or malformed record blocks the dispatch.
@@ -41,6 +42,28 @@
 #   --issue <n> records issue=<n> in meta for board-driven work (the Closes-#n
 #     contract itself lives in the brief via cs-brief.sh --issue). Correlates
 #     the task to a GitHub issue for the fleet view and the contracts skill.
+#   --backlog-item <id> (ship/scout) names the backlog work item this dispatch
+#     begins. The spawn records backlog_item=<id> in meta and moves the item to
+#     In flight through tasks-axi as part of dispatch, under the spawn lock and
+#     before reporting success, so the task record and the backlog row cannot
+#     drift apart. A failed transition fails the spawn loudly and removes the
+#     provisional record. With a manual backend or no compatible tasks-axi the
+#     transition is skipped with a printed hand-edit reminder; with no
+#     --backlog-item the spawn prints a reminder to move the item yourself.
+#     Refused on --capo (a capo is never a backlog item) and --relaunch (the
+#     dispatch transition already happened).
+#   Capo routing gate (ship/scout): when host/capos.md registers a capo whose
+#     `projects:` list names this project, the project is that capo's work, and
+#     a spawn from any OTHER home is refused before anything is created, naming
+#     the owning capo and its home. That gate is what turns task-lifecycle's
+#     "route in-scope work to the fitting capo" from agent memory into a
+#     runtime rule; it is how a root-spawned dotfiles task once landed in its
+#     own dangling workspace instead of nesting under the private capo
+#     (bin/cs-herdr-nest-lib.sh nests only a capo's OWN spawns).
+#     --here is the explicit boss redirect: it records route_override=here in
+#     meta and spawns in this home anyway. A home with no registry has no capos
+#     and no routing; a malformed registry or a project two capos claim is a
+#     registry defect and refuses (cs-capo-registry-lib.sh owns the reasons).
 #
 # Ship/scout mechanics:
 #   - Requires the brief at data/<id>/brief.md (scaffold with cs-brief.sh first).
@@ -132,6 +155,10 @@ esac
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
 # shellcheck source=bin/cs-meta-lib.sh
 . "$SCRIPT_DIR/cs-meta-lib.sh"
+# shellcheck source=bin/cs-herdr-nest-lib.sh
+. "$SCRIPT_DIR/cs-herdr-nest-lib.sh"
+# shellcheck source=bin/cs-capo-registry-lib.sh
+. "$SCRIPT_DIR/cs-capo-registry-lib.sh"
 # shellcheck source=bin/cs-operational-input.sh
 . "$SCRIPT_DIR/cs-operational-input.sh"
 # shellcheck source=bin/cs-harness-lib.sh
@@ -148,6 +175,13 @@ esac
 
 # shellcheck source=bin/cs-root-lib.sh
 . "$SCRIPT_DIR/cs-root-lib.sh"
+# cs_lock_path_mtime, the one owner of the portable stat mtime read, for the
+# spawn-lock staleness check.
+# shellcheck source=bin/cs-lock-lib.sh
+. "$SCRIPT_DIR/cs-lock-lib.sh"
+# Backlog backend selection and the dispatch transition (--backlog-item).
+# shellcheck source=bin/cs-tasks-lib.sh
+. "$SCRIPT_DIR/cs-tasks-lib.sh"
 cs_resolve_root
 # Optional turn telemetry (off unless host/telemetry.conf enables it). Sourced
 # after cs_resolve_root so it sees this home's resolved DATA/STATE/HOST_DIR.
@@ -204,9 +238,16 @@ report_task_metadata() {
 # pre-step is how a launch's environment reaches the agent at all. A no-op
 # (success) when the prefix is empty.
 _cs_spawn_env_export_confirmed() {
-  local pane=$1 prefix=$2
+  local pane=$1 prefix=$2 started=$SECONDS elapsed remaining_ms attempt_ms
   [ -n "$prefix" ] || return 0
-  cs_herdr_pane_run_confirmed "$pane" "export $prefix" "$(cs_herdr_agent_start_timeout_ms "$ENV_STEP_WAIT")"
+  while :; do
+    elapsed=$((SECONDS - started))
+    [ "$elapsed" -lt "$ENV_STEP_WAIT" ] || return 1
+    remaining_ms=$(( (ENV_STEP_WAIT - elapsed) * 1000 ))
+    attempt_ms=$remaining_ms
+    [ "$attempt_ms" -gt 1000 ] && attempt_ms=1000
+    cs_herdr_pane_run_confirmed "$pane" "export $prefix" "$attempt_ms" && return 0
+  done
 }
 
 # _cs_spawn_deliver_brief <pane> <encoded-brief>: delivers the brief as the
@@ -247,6 +288,11 @@ MODE=
 YOLO=
 BASE=
 HEADLESS=0
+PARENT_TASK=
+PARENT_HOME=
+PARENT_PANE=
+PARENT_GENERATION=
+PARENT_HERDR_SESSION=
 # Seconds to wait for an agent to appear after the launch line is delivered.
 # Generous on purpose: a cold codex/claude start on a busy machine is slow, and
 # a false abort tears down a worktree that was about to work.
@@ -273,6 +319,8 @@ case "$BRIEF_DELIVER_WAIT" in ''|*[!0-9]*|0) BRIEF_DELIVER_WAIT=50 ;; esac
 BRIEF_DELIVER_RETRY_SECS=${CS_SPAWN_BRIEF_DELIVER_RETRY_SECS:-5}
 case "$BRIEF_DELIVER_RETRY_SECS" in ''|*[!0-9]*|0) BRIEF_DELIVER_RETRY_SECS=5 ;; esac
 ISSUE=
+BACKLOG_ITEM=
+ROUTE_HERE=0
 RELAUNCH=0
 POS=()
 while [ "$#" -gt 0 ]; do
@@ -285,6 +333,13 @@ while [ "$#" -gt 0 ]; do
     --yolo) YOLO=${2:?--yolo requires a value}; shift ;;
     --base) BASE=${2:?--base requires a value}; shift ;;
     --issue) ISSUE=${2:?--issue requires a value}; shift ;;
+    --backlog-item) BACKLOG_ITEM=${2:?--backlog-item requires a value}; shift ;;
+    --here) ROUTE_HERE=1 ;;
+    --parent) PARENT_TASK=${2:?--parent requires a task id}; shift ;;
+    --parent-home) PARENT_HOME=${2:?--parent-home requires a path}; shift ;;
+    --parent-pane) PARENT_PANE=${2:?--parent-pane requires a pane}; shift ;;
+    --parent-generation) PARENT_GENERATION=${2:?--parent-generation requires a generation}; shift ;;
+    --parent-herdr-session) PARENT_HERDR_SESSION=${2:?--parent-herdr-session requires a session}; shift ;;
     -*) echo "error: unknown flag $1" >&2; exit 2 ;;
     *) POS+=("$1") ;;
   esac
@@ -309,6 +364,13 @@ if [ "$RELAUNCH" -eq 1 ]; then
   relaunch_refuse_flag --yolo "$YOLO"
   relaunch_refuse_flag --base "$BASE"
   relaunch_refuse_flag --issue "$ISSUE"
+  relaunch_refuse_flag --backlog-item "$BACKLOG_ITEM"
+  [ "$ROUTE_HERE" -eq 0 ] || relaunch_refuse_flag --here 1
+  relaunch_refuse_flag --parent "$PARENT_TASK"
+  relaunch_refuse_flag --parent-home "$PARENT_HOME"
+  relaunch_refuse_flag --parent-pane "$PARENT_PANE"
+  relaunch_refuse_flag --parent-generation "$PARENT_GENERATION"
+  relaunch_refuse_flag --parent-herdr-session "$PARENT_HERDR_SESSION"
   ID=${POS[0]}
 else
   [ "${#POS[@]}" -ge 2 ] || { usage >&2; exit 2; }
@@ -319,6 +381,47 @@ fi
 case "$ID" in
   *[!A-Za-z0-9._-]*|'') echo "error: task id must be [A-Za-z0-9._-]+: '$ID'" >&2; exit 2 ;;
 esac
+
+if [ -n "$PARENT_TASK" ] && [ -z "$PARENT_HOME" ]; then
+  PARENT_META="$STATE/$PARENT_TASK.meta"
+  if [ -f "$PARENT_META" ]; then
+    PARENT_HOME=$(cs_meta_get "$PARENT_META" home 2>/dev/null || true)
+    PARENT_PANE=${PARENT_PANE:-$(cs_meta_get "$PARENT_META" pane 2>/dev/null || true)}
+    PARENT_GENERATION=${PARENT_GENERATION:-$(cs_meta_get "$PARENT_META" endpoint_generation 2>/dev/null || true)}
+    PARENT_HERDR_SESSION=${PARENT_HERDR_SESSION:-$(cs_meta_get "$PARENT_META" herdr_session 2>/dev/null || true)}
+  elif [ "$PARENT_TASK" != root ]; then
+    echo "error: immediate parent '$PARENT_TASK' is not recorded in $STATE; pass a complete cross-home parent edge or repair the parent first" >&2
+    exit 2
+  fi
+fi
+if [ -n "$PARENT_TASK" ] && [ "$PARENT_TASK" != root ] && {
+  [ -z "$PARENT_HOME" ] || [ -z "$PARENT_PANE" ] || [ -z "$PARENT_GENERATION" ];
+}; then
+  echo "error: nested spawn requires parent home, pane, and endpoint generation" >&2
+  exit 2
+fi
+PARENT_TASK=${PARENT_TASK:-root}
+PARENT_HOME=${PARENT_HOME:-$CS_HOME}
+PARENT_STATE=${PARENT_HOME}/state
+PARENT_PANE=${PARENT_PANE:-${HERDR_PANE_ID:-unknown}}
+if [ -z "$PARENT_HERDR_SESSION" ] && [ -f "$PARENT_STATE/$PARENT_TASK.meta" ]; then
+  PARENT_HERDR_SESSION=$(cs_meta_get "$PARENT_STATE/$PARENT_TASK.meta" herdr_session 2>/dev/null || true)
+fi
+if [ -z "$PARENT_GENERATION" ] && [ "$PARENT_TASK" = root ] && [ -f "$PARENT_STATE/.home-endpoint-generation" ]; then
+  PARENT_GENERATION=$(sed -n '1p' "$PARENT_STATE/.home-endpoint-generation")
+fi
+PARENT_GENERATION=${PARENT_GENERATION:-${CS_PARENT_ENDPOINT_GENERATION:-unknown}}
+PARENT_HERDR_SESSION=${PARENT_HERDR_SESSION:-${CS_PARENT_HERDR_SESSION:-$(cs_herdr_session)}}
+ENDPOINT_GENERATION=${CS_ENDPOINT_GENERATION:-task-$$-$(date +%s)-$RANDOM}
+if ! cs_meta_validate_parent_values "$PARENT_TASK" "$PARENT_HOME" "$PARENT_STATE" \
+  "$PARENT_PANE" "$PARENT_GENERATION" "$ENDPOINT_GENERATION"; then
+  echo "error: invalid or unavailable immediate-parent edge for '$ID'" >&2
+  exit 2
+fi
+cs_meta_validate_herdr_session "$PARENT_HERDR_SESSION" || {
+  echo "error: invalid immediate-parent Herdr session for '$ID'" >&2
+  exit 2
+}
 # Resolve config/permission-mode.conf up front. The launch builders read it too, but
 # they run after the worktree and metadata exist; validating here keeps a
 # malformed file from leaving a half-created task behind.
@@ -361,6 +464,10 @@ else
     echo "error: --yolo applies only to ship spawns; approval posture belongs to a ship task's contract" >&2
     exit 2
   fi
+  if [ "$KIND" = capo ] && [ -n "$BACKLOG_ITEM" ]; then
+    echo "error: --backlog-item applies only to ship and scout spawns; a capo is never a backlog item" >&2
+    exit 2
+  fi
 fi
 
 cs_herdr_protocol_check
@@ -393,12 +500,7 @@ _cs_spawn_pid_alive() { # <pid>: 0 iff a live process currently holds this PID
 
 _cs_spawn_path_age() { # <path>: whole-second mtime age on stdout; non-zero on failure
   local m now
-  if [ "$(uname)" = Darwin ]; then
-    m=$(stat -f %m "$1" 2>/dev/null) || m=
-  else
-    m=$(stat -c %Y "$1" 2>/dev/null) || m=
-  fi
-  case "$m" in ''|*[!0-9]*) return 1 ;; esac
+  m=$(cs_lock_path_mtime "$1") || return 1
   now=$(date +%s)
   printf '%s\n' "$(( now - m ))"
 }
@@ -618,9 +720,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
   R_TURNEND="$STATE/$ID.turn-ended"
   R_TELEMETRY=
   case "$R_HARNESS" in
-    claude) R_TELEMETRY=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" stdin) ;;
+    claude|grok) R_TELEMETRY=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" stdin) ;;
     codex) R_TELEMETRY=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" nostdin) ;;
   esac
+  R_WORKER_HOOK=$(shell_quote "$SCRIPT_DIR/cs-worker-turnend.sh")
+  if [ -n "$R_TELEMETRY" ]; then R_TELEMETRY="$R_TELEMETRY; $R_WORKER_HOOK"; else R_TELEMETRY=$R_WORKER_HOOK; fi
   SETTINGS_FILE=''
   if [ "$R_HARNESS" = claude ]; then
     SETTINGS_FILE="$STATE/$ID.claude-settings.json"
@@ -642,6 +746,13 @@ if [ "$RELAUNCH" -eq 1 ]; then
       echo "error: could not pre-trust codex worktree $R_WT_REAL; the pane is untouched" >&2
       exit 1
     }
+  elif [ "$R_HARNESS" = grok ]; then
+    cs_grok_turnend_arm "$R_TURNEND" "$STATE" "$ID" "$R_WT_REAL" "$R_TELEMETRY" || {
+      echo "error: could not arm grok turn-end wiring for $ID; the pane is untouched" >&2
+      exit 1
+    }
+  elif [ "$R_HARNESS" = cursor ]; then
+    cs_cursor_write_session_sidecar "$STATE" "$ID" "$R_WT_REAL"
   fi
 
   spawn_codegraph_prep "$R_PROJ_REAL" "$R_WT_REAL"
@@ -649,7 +760,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # CLAUDE_CONFIG_DIR under a work/personal account split, exported once here
   # (this pane's shell keeps it for both the resume attempt and any cold-launch
   # fallback below) rather than per-attempt - see _cs_spawn_env_export_confirmed.
-  R_ENV_PREFIX=$(cs_harness_launch_env "$R_HARNESS")
+  R_ENV_PREFIX="$(cs_harness_launch_env "$R_HARNESS")CS_ROOT_OVERRIDE=$(shell_quote "$CS_ROOT") CS_HOME=$(shell_quote "$CS_HOME") CS_DATA_OVERRIDE=$(shell_quote "$DATA") CS_STATE_OVERRIDE=$(shell_quote "$STATE") CS_TASK_ID=$(shell_quote "$ID")"
   if ! _cs_spawn_env_export_confirmed "$R_PANE" "$R_ENV_PREFIX"; then
     echo "error: could not confirm $ID's launch environment landed on pane $R_PANE before relaunching; the export line was typed at the pane's shell but never confirmed executed, and no replacement agent was started" >&2
     exit 1
@@ -682,6 +793,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
   elif [ "$R_HARNESS" = codex ]; then
     cs_harness_codex_notify_argv RESUME_ARGV "$R_TURNEND" "$R_TELEMETRY" || {
       echo "error: turn-end path $R_TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash); no replacement agent was started" >&2
+      exit 1
+    }
+  elif [ "$R_HARNESS" = cursor ]; then
+    cs_harness_cursor_workspace_argv RESUME_ARGV "$R_WT_REAL" || {
+      echo "error: could not bind cursor workspace for $ID" >&2
       exit 1
     }
   fi
@@ -723,6 +839,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
         echo "error: turn-end path $R_TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash); no cold launch was attempted" >&2
         exit 1
       }
+    elif [ "$R_HARNESS" = cursor ]; then
+      cs_harness_cursor_workspace_argv COLD_ARGV "$R_WT_REAL" || {
+        echo "error: could not bind cursor workspace for $ID" >&2
+        exit 1
+      }
     fi
     if ! cs_herdr_agent_start "$R_PANE" "$ID" "$R_HARNESS" "$(cs_herdr_agent_start_timeout_ms "$LAUNCH_WAIT")" "${COLD_ARGV[@]}"; then
       echo "error: no session was resumable for '$ID' and the cold launch brought up no agent within ${LAUNCH_WAIT}s; no replacement is running on pane $R_PANE and the work is preserved in $R_WT_REAL" >&2
@@ -738,6 +859,12 @@ if [ "$RELAUNCH" -eq 1 ]; then
     _cs_spawn_deliver_brief "$R_PANE" "$encoded_brief" ||
       echo "warning: the cold launch of '$ID' started an agent on pane $R_PANE but its brief was never confirmed delivered within ${BRIEF_DELIVER_WAIT}s - steer it manually" >&2
   fi
+
+  previous_generation=$(cs_meta_get "$META" endpoint_generation 2>/dev/null || true)
+  [ -n "$previous_generation" ] || previous_generation=unknown
+  cs_meta_set "$META" previous_endpoint_generation "$previous_generation"
+  cs_meta_set "$META" previous_endpoint_generation_at "$(date +%s)"
+  cs_meta_set "$META" endpoint_generation "$ENDPOINT_GENERATION"
 
   report_human_gate "$R_PANE" "$R_HARNESS" "$ID"
   report_task_metadata "$R_PANE" "$ID" \
@@ -776,7 +903,34 @@ if [ "$KIND" = capo ]; then
     "mode=capo" \
     "yolo=off" \
     "harness=$HARNESS" \
-    "home=$HOME_ABS"
+    "home=$HOME_ABS" \
+    "parent_task_id=$PARENT_TASK" \
+    "parent_home=$PARENT_HOME" \
+    "parent_state=$PARENT_STATE" \
+    "parent_pane=$PARENT_PANE" \
+    "parent_generation=$PARENT_GENERATION" \
+    "parent_herdr_session=$PARENT_HERDR_SESSION" \
+    "endpoint_generation=$ENDPOINT_GENERATION" \
+    "herdr_session=$(cs_herdr_session)"
+  mkdir -p "$HOME_ABS/state"
+  cs_meta_write "$HOME_ABS/state/$ID.meta" \
+    "workspace=$WS" \
+    "pane=$PANE" \
+    "worktree=$HOME_ABS" \
+    "project=$HOME_ABS" \
+    "kind=capo" \
+    "mode=capo" \
+    "yolo=off" \
+    "harness=$HARNESS" \
+    "home=$HOME_ABS" \
+    "parent_task_id=$PARENT_TASK" \
+    "parent_home=$PARENT_HOME" \
+    "parent_state=$PARENT_STATE" \
+    "parent_pane=$PARENT_PANE" \
+    "parent_generation=$PARENT_GENERATION" \
+    "parent_herdr_session=$PARENT_HERDR_SESSION" \
+    "endpoint_generation=$ENDPOINT_GENERATION" \
+    "herdr_session=$(cs_herdr_session)"
   report_task_metadata "$PANE" "$ID" capo
 
   encoded_brief=$("$SCRIPT_DIR/cs-operational-input.sh" encode launch-brief < "$BRIEF") || {
@@ -788,7 +942,7 @@ if [ "$KIND" = capo ]; then
   # home. `agent start`'s trailing argv has no shell prefix-assignment support
   # and neither it nor `worktree create` has an --env flag, so this must land
   # via its own confirmed pane-shell export before the agent starts.
-  ENV_PREFIX="$(cs_harness_launch_env "$HARNESS")CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME=$(shell_quote "$HOME_ABS")"
+  ENV_PREFIX="$(cs_harness_launch_env "$HARNESS")CS_ROOT_OVERRIDE= CS_STATE_OVERRIDE= CS_DATA_OVERRIDE= CS_CONFIG_OVERRIDE= CS_PROJECTS_OVERRIDE= CS_HOME=$(shell_quote "$HOME_ABS") CS_TASK_ID=$(shell_quote "$ID")"
   if ! _cs_spawn_env_export_confirmed "$PANE" "$ENV_PREFIX"; then
     echo "error: could not confirm capo $ID's launch environment landed on pane $PANE before starting the agent; the home and its workspace are left intact - retry the spawn" >&2
     exit 1
@@ -827,6 +981,36 @@ git -C "$PROJ_ABS" rev-parse --show-toplevel >/dev/null 2>&1 || {
   echo "error: '$PROJ_ABS' is not a git checkout" >&2; exit 1; }
 
 PROJECT_NAME=$(basename "$PROJ_ABS")
+
+# Capo routing gate: a project a registered capo owns spawns from that capo's
+# home, or not at all. Runs ahead of every create step, so a refusal leaves no
+# worktree, workspace, branch, or metadata behind. See the header.
+CAPO_REG="$HOST_DIR/capos.md"
+ROUTE_RC=0
+cs_capo_registry_owner_of_project "$CAPO_REG" "$PROJECT_NAME" >/dev/null || ROUTE_RC=$?
+case "$ROUTE_RC" in
+  0)
+    ROUTE_CAPO=$CS_CAPO_REGISTRY_OWNER_ID
+    ROUTE_HOME=$CS_CAPO_REGISTRY_OWNER_HOME
+    ROUTE_HOME_ABS=$(cd "$ROUTE_HOME" 2>/dev/null && pwd -P) || ROUTE_HOME_ABS=$ROUTE_HOME
+    if [ "$ROUTE_HOME_ABS" != "$(cd "$CS_HOME" && pwd -P)" ]; then
+      if [ "$ROUTE_HERE" -eq 1 ]; then
+        echo "warn: project $PROJECT_NAME is capo $ROUTE_CAPO's ($ROUTE_HOME); spawning here on --here (boss redirect)" >&2
+      else
+        echo "error: project $PROJECT_NAME belongs to capo $ROUTE_CAPO (home: $ROUTE_HOME); route this work to that capo instead of spawning it from $CS_HOME" >&2
+        echo "A capo-spawned task nests as a tab in the capo's own workspace; a spawn from here would leave a dangling dedicated workspace. Pass --here only on an explicit boss redirect." >&2
+        exit 2
+      fi
+    fi
+    ;;
+  1)
+    case "$CS_CAPO_REGISTRY_ERROR" in
+      "no registered capo owns project "*) ;;
+      *) echo "error: capo routing table refused: $CS_CAPO_REGISTRY_ERROR" >&2; exit 2 ;;
+    esac
+    ;;
+  *) ;; # no registry in this home: no capos, nothing to route.
+esac
 
 # Cross-check the brief against --mode, and note an advisory deviation from the
 # project's standing registry posture. Both run here, ahead of
@@ -912,9 +1096,24 @@ refresh_base() {
 # implicit current-HEAD base to keep fresh: skip the check entirely.
 [ -n "$BASE" ] || refresh_base
 
-if ! TUPLE=$(cs_herdr_task_create "$PROJ_ABS" "$BRANCH" "$ID" "$BASE"); then
-  echo "error: herdr worktree create failed for '$ID' (a pre-existing worktree directory may hold unlanded work; inspect ~/.herdr/worktrees/$PROJECT_NAME/ - never pre-delete it to force the spawn)" >&2
-  exit 1
+# A soldier spawned by a capo joins the capo's OWN live workspace as a new
+# tab instead of getting a dedicated workspace-per-task container - the
+# nesting the boss asked for (cs-herdr-nest-lib.sh). Empty when this spawn
+# has no capo to nest under, or that capo's recorded workspace is stale, in
+# which case the ordinary dedicated container below is unchanged.
+NEST_WS=$(cs_herdr_nest_target_workspace "$CS_HOME" "${CS_TASK_ID:-}" 2>/dev/null || true)
+if [ -n "$NEST_WS" ]; then
+  CONTAINER=tab
+  if ! TUPLE=$(cs_herdr_task_create_nested "$PROJ_ABS" "$BRANCH" "$ID" "$NEST_WS" "$BASE"); then
+    echo "error: nested herdr tab create failed for '$ID' under capo workspace $NEST_WS (a pre-existing worktree directory may hold unlanded work; inspect ${CS_HERDR_WORKTREES_ROOT:-$HOME/.herdr/worktrees}/$PROJECT_NAME/nested/ - never pre-delete it to force the spawn)" >&2
+    exit 1
+  fi
+else
+  CONTAINER=workspace
+  if ! TUPLE=$(cs_herdr_task_create "$PROJ_ABS" "$BRANCH" "$ID" "$BASE"); then
+    echo "error: herdr worktree create failed for '$ID' (a pre-existing worktree directory may hold unlanded work; inspect ~/.herdr/worktrees/$PROJECT_NAME/ - never pre-delete it to force the spawn)" >&2
+    exit 1
+  fi
 fi
 WS=$(printf '%s' "$TUPLE" | cut -f1)
 PANE=$(printf '%s' "$TUPLE" | cut -f2)
@@ -922,7 +1121,11 @@ WT=$(printf '%s' "$TUPLE" | cut -f3)
 
 abort_task() { # <message>
   echo "error: $1" >&2
-  cs_herdr_worktree_remove "$WS" >/dev/null 2>&1 || true
+  if [ "$CONTAINER" = tab ]; then
+    cs_herdr_nested_task_remove "$PROJ_ABS" "$WT" "$PANE" >/dev/null 2>&1 || true
+  else
+    cs_herdr_worktree_remove "$WS" >/dev/null 2>&1 || true
+  fi
   exit 1
 }
 
@@ -941,15 +1144,65 @@ META_LINES=(
   "worktree=$WT_REAL"
   "project=$PROJ_ABS"
   "kind=$KIND"
+  "container=$CONTAINER"
+  "parent_task_id=$PARENT_TASK"
+  "parent_home=$PARENT_HOME"
+  "parent_state=$PARENT_STATE"
+  "parent_pane=$PARENT_PANE"
+  "parent_generation=$PARENT_GENERATION"
+  "parent_herdr_session=$PARENT_HERDR_SESSION"
+  "endpoint_generation=$ENDPOINT_GENERATION"
 )
 # A scout records no delivery posture at all: its deliverable is a report, so
 # there is no mode to honour and no approval posture to apply. cs-promote.sh
 # states both explicitly when a scout is promoted to ship.
 [ "$KIND" = ship ] && META_LINES+=("mode=$MODE" "yolo=$YOLO")
-META_LINES+=("harness=$HARNESS")
+META_LINES+=("harness=$HARNESS" "herdr_session=$(cs_herdr_session)")
 [ "$HEADLESS" -eq 1 ] && META_LINES+=("headless=1")
 [ -n "$ISSUE" ] && META_LINES+=("issue=$ISSUE")
+[ -n "$BACKLOG_ITEM" ] && META_LINES+=("backlog_item=$BACKLOG_ITEM")
+[ "$ROUTE_HERE" -eq 1 ] && META_LINES+=("route_override=here")
+
+# Record the phase-2 context-pack audit trail: the deterministic
+# role/workflow/harness scaffold hash this task's brief was rendered from
+# (bin/cs-context-pack.sh, issue #151). Measurement/reproducibility only -
+# never a dispatch gate, so a failure here (missing sha256 tool, unexpected
+# state) warns and proceeds exactly like the base-freshness check above,
+# rather than aborting a real dispatch over audit metadata.
+PACK_ROLE=$KIND
+case "$KIND" in
+  ship) PACK_WORKFLOW=$MODE ;;
+  scout) PACK_WORKFLOW=report-only ;;
+  capo) PACK_WORKFLOW=none ;;
+esac
+if PACK_JSON=$("$CS_ROOT/bin/cs-context-pack.sh" "$PACK_ROLE" "$PACK_WORKFLOW" "$HARNESS" 2>/dev/null); then
+  PACK_HASH=$(printf '%s\n' "$PACK_JSON" | sed -n 's/.*"pack_sha256": "\([^"]*\)".*/\1/p')
+  PACK_SCHEMA=$(printf '%s\n' "$PACK_JSON" | sed -n 's/.*"schema": "\([^"]*\)".*/\1/p')
+  if [ -n "$PACK_HASH" ] && [ -n "$PACK_SCHEMA" ]; then
+    META_LINES+=("pack_sha256=$PACK_HASH" "pack_schema=$PACK_SCHEMA")
+  else
+    echo "warn: cs-context-pack.sh produced no parseable pack_sha256/schema for $PACK_ROLE/$PACK_WORKFLOW/$HARNESS; dispatch proceeds without the pack audit fields" >&2
+  fi
+else
+  echo "warn: cs-context-pack.sh failed composing the $PACK_ROLE/$PACK_WORKFLOW/$HARNESS audit pack; dispatch proceeds without the pack audit fields" >&2
+fi
+
 cs_meta_write "$STATE/$ID.meta" "${META_LINES[@]}"
+
+# The dispatch backlog transition, folded into the same physical change under
+# the same spawn lock: the record above and the In-flight row land together,
+# before this spawn can report success. A write failure fails the dispatch and
+# removes the provisional record, so the two can never disagree.
+if [ -n "$BACKLOG_ITEM" ]; then
+  backlog_rc=0
+  cs_tasks_backlog_transition "$CONFIG" start "$BACKLOG_ITEM" || backlog_rc=$?
+  if [ "$backlog_rc" -eq 1 ]; then
+    rm -f "$STATE/$ID.meta"
+    abort_task "backlog item '$BACKLOG_ITEM' could not be moved to In flight, so dispatch of '$ID' failed; its provisional record was removed"
+  fi
+else
+  echo "reminder: no --backlog-item was named; move the backlog work item for '$ID' to In flight yourself" >&2
+fi
 DISPLAY_MODE=$KIND
 [ "$KIND" = ship ] && DISPLAY_MODE=$MODE
 report_task_metadata "$PANE" "$ID" "$DISPLAY_MODE"
@@ -966,9 +1219,11 @@ sq_brief=$(shell_quote "$BRIEF")
 TELEMETRY_HOOK=
 if [ "$HEADLESS" -eq 0 ]; then
   case "$HARNESS" in
-    claude) TELEMETRY_HOOK=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" stdin) ;;
+    claude|grok) TELEMETRY_HOOK=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" stdin) ;;
     codex) TELEMETRY_HOOK=$(cs_telemetry_worker_hook_command "$ID" "$SCRIPT_DIR" nostdin) ;;
   esac
+  WORKER_HOOK=$(shell_quote "$SCRIPT_DIR/cs-worker-turnend.sh")
+  if [ -n "$TELEMETRY_HOOK" ]; then TELEMETRY_HOOK="$TELEMETRY_HOOK; $WORKER_HOOK"; else TELEMETRY_HOOK=$WORKER_HOOK; fi
 fi
 if [ "$HEADLESS" -eq 1 ]; then
   # Fire-and-forget scout: the harness runs the brief non-interactively (codex
@@ -978,7 +1233,7 @@ if [ "$HEADLESS" -eq 1 ]; then
   # A headless process has no composer or agent_status lifecycle, so it stays
   # on the shell-string mechanism permanently; `agent start` does not apply.
   sq_status=$(shell_quote "$STATE/$ID.status")
-  LAUNCH=$(cs_harness_scout_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_status")
+  LAUNCH=$(cs_harness_scout_launch "$HARNESS" "$sq_operational" "$sq_brief" "$sq_status" "$WT_REAL")
   cs_herdr_run "$PANE" "$LAUNCH" >/dev/null
   # No launch verification follows, deliberately. `pane run` hands the line to
   # the pane's SHELL and reports success whether or not the shell was ready to
@@ -1006,6 +1261,13 @@ else
     # either. A codex parked there takes no turn until a human answers, so an
     # unattended soldier needs the dialog gone before launch, not escalated after.
     cs_harness_codex_trust_dir "$WT_REAL" || abort_task "could not pre-trust codex worktree $WT_REAL"
+  elif [ "$HARNESS" = grok ]; then
+    cs_grok_turnend_arm "$TURNEND" "$STATE" "$ID" "$WT_REAL" "$TELEMETRY_HOOK" ||
+      abort_task "could not arm grok turn-end wiring for $ID"
+  elif [ "$HARNESS" = cursor ]; then
+    cs_cursor_resolve_binary >/dev/null ||
+      abort_task "cursor-agent is not installed or not reachable"
+    cs_cursor_write_session_sidecar "$STATE" "$ID" "$WT_REAL"
   fi
   spawn_codegraph_prep "$PROJ_ABS" "$WT_REAL"
 
@@ -1016,7 +1278,7 @@ else
   # prefix-assignment support and neither it nor `worktree create` has an
   # --env flag, so this must land via its own confirmed pane-shell export
   # before the agent starts - skipped entirely when there is nothing to export.
-  ENV_PREFIX=$(cs_harness_launch_env "$HARNESS")
+  ENV_PREFIX="$(cs_harness_launch_env "$HARNESS")CS_ROOT_OVERRIDE=$(shell_quote "$CS_ROOT") CS_HOME=$(shell_quote "$CS_HOME") CS_DATA_OVERRIDE=$(shell_quote "$DATA") CS_STATE_OVERRIDE=$(shell_quote "$STATE") CS_TASK_ID=$(shell_quote "$ID")"
   if ! _cs_spawn_env_export_confirmed "$PANE" "$ENV_PREFIX"; then
     abort_task "could not confirm $ID's launch environment landed on pane $PANE before starting the agent"
   fi
@@ -1028,6 +1290,9 @@ else
   elif [ "$HARNESS" = codex ]; then
     cs_harness_codex_notify_argv AGENT_ARGV "$TURNEND" "$TELEMETRY_HOOK" ||
       abort_task "turn-end path $TURNEND cannot be embedded safely in codex's notify value (it carries a quote or backslash)"
+  elif [ "$HARNESS" = cursor ]; then
+    cs_harness_cursor_workspace_argv AGENT_ARGV "$WT_REAL" ||
+      abort_task "could not bind cursor workspace for $ID"
   fi
 
   # Verify the launch actually started an agent. Native `agent start` waits

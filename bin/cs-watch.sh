@@ -10,9 +10,11 @@
 # pause is the separate idle absorb case and re-surfaces only on its long
 # bounded cadence, although its initial no-verb status signal still surfaces in
 # normal mode. Printed reason lines:
-#   signal: <file>...      status/turn-end signals, surfaced when a listed status
-#                          has a boss-relevant verb OR a no-verb signal's soldier
-#                          is not provably working
+#   signal: <file>...      status/turn-end signals, surfaced when a listed
+#                          status carries a boss-relevant verb anywhere in its
+#                          unread appended span (not just the last line) OR a
+#                          no-verb signal's soldier is neither provably working
+#                          nor a turn-ended-only wake with recent pane churn
 #   stale: <pane>          a provably-working stale is ALWAYS absorbed (with a wedge
 #                          timer) regardless of what the status log says - an active
 #                          run-step or busy pane outranks even a boss-relevant log
@@ -103,26 +105,27 @@ fi
 WATCH_LOCK="$STATE/.watch.lock"
 WATCH_PATH="$SCRIPT_DIR/cs-watch.sh"
 WATCHER_STALE_GRACE=${CS_WATCHER_STALE_GRACE:-${CS_GUARD_GRACE:-300}}
+CAPO_WAKE_STALL_SECS=${CS_CAPO_WAKE_STALL_SECS:-60}
 # The singleton-lock acquisition, EXIT trap, and the blocking supervision loop
 # all live below the source guard at the very bottom of this file (see "Main
 # entry"). Sourcing this file for unit tests therefore loads the functions -
 # including the event-wait splice below - and returns before acquiring the lock
 # or starting the loop. Running it as a script executes the runtime.
 
-# Portable stat. macOS (BSD) stat uses `-f <fmt>`; Linux (GNU) stat uses `-c <fmt>`.
-# Do NOT use the `stat -f <fmt> ... || stat -c <fmt> ...` fallback form: on Linux
-# `stat -f` is *filesystem* stat and writes a partial filesystem dump ("File: ...",
-# "Blocks: ...") to stdout before failing, so the fallback's correct output gets
-# appended to that garbage. Arithmetic under `set -u` then aborts on the stray
-# token (e.g. the word "File" read as an unset variable), which silently kills the
-# watcher mid-cycle. Detect the platform once and pick the right form.
-if [ "$(uname)" = Darwin ]; then
-  stat_mtime() { stat -f %m "$1" 2>/dev/null; }        # epoch seconds of mtime
-  stat_sig()   { stat -f '%z:%Fm' "$1" 2>/dev/null; }   # size:mtime signature
-else
-  stat_mtime() { stat -c %Y "$1" 2>/dev/null; }
-  stat_sig()   { stat -c '%s:%Y' "$1" 2>/dev/null; }
-fi
+# Portable stat. stat_mtime delegates to cs_lock_path_mtime (bin/cs-lock-lib.sh,
+# sourced through cs-wake-lib.sh above), the one owner of the portable mtime
+# read. stat_sig delegates to cs_wake_signal_sig (bin/cs-wake-lib.sh), the one
+# owner of the size:mtime signal signature that the span classifier and the
+# self-announced bookkeeping append also read.
+stat_mtime() { cs_lock_path_mtime "$1"; }              # epoch seconds of mtime
+stat_sig() { cs_wake_signal_sig "$1"; }                # size:mtime signature
+
+# Initialized here (not only where the USR1 trap is installed, in the
+# executed-only runtime section below) so cs_watch_wait_transition stays
+# callable under `set -u` when this file is merely sourced for unit testing,
+# which never reaches that section. Only the runtime section's trap ever
+# advances it - the same default here just means "no wake seen yet".
+CS_WATCH_WAKE_GENERATION=${CS_WATCH_WAKE_GENERATION:-0}
 
 POLL=${CS_POLL:-15}                   # seconds between cycles
 HEARTBEAT=${CS_HEARTBEAT:-600}        # base seconds between heartbeat scans
@@ -537,6 +540,74 @@ surface_nonterminal_stale() {  # <pane> <hash>
   wake "stale: $win"
 }
 
+capo_oldest_queue_row() {  # <queue-path>
+  local queue=$1
+  [ -f "$queue" ] && [ ! -L "$queue" ] || return 0
+  awk -F '\t' '
+    NF >= 5 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {
+      if (!found || $2 < seq) {
+        found = 1
+        seq = $2
+        row = $0
+      }
+    }
+    END { if (found) print row }
+  ' "$queue" 2>/dev/null || true
+}
+
+capo_wake_stall_tick() {
+  local now=$(( $(date +%s) )) threshold=$CAPO_WAKE_STALL_SECS
+  local meta task kind home queue row epoch seq row_key marker receipt receipt_dir notify_key queued age reason
+  case "$threshold" in ''|*[!0-9]*|0) threshold=60 ;; esac
+  for meta in "$STATE"/*.meta; do
+    [ -e "$meta" ] || continue
+    kind=$(cs_meta_get "$meta" kind 2>/dev/null || true)
+    [ "$kind" = capo ] || continue
+    task=${meta##*/}
+    task=${task%.meta}
+    case "$task" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
+    home=$(cs_meta_get "$meta" home 2>/dev/null || true)
+    [ -n "$home" ] || continue
+    [ -f "$home/.cs-capo-home" ] && [ ! -L "$home/.cs-capo-home" ] || continue
+    [ "$(cat "$home/.cs-capo-home" 2>/dev/null || true)" = "$task" ] || continue
+    queue="$home/state/.wake-queue"
+    row=$(capo_oldest_queue_row "$queue")
+    marker="$STATE/.capo-wake-stall-$task"
+    receipt_dir="$STATE/.capo-wake-stall-receipts/$task"
+    if [ -z "$row" ]; then
+      rm -f "$marker"
+      if [ -e "$receipt_dir" ] || [ -L "$receipt_dir" ]; then
+        [ -d "$receipt_dir" ] && [ ! -L "$receipt_dir" ] || return 1
+        rm -rf -- "$receipt_dir" || return 1
+      fi
+      continue
+    fi
+    IFS=$(printf '\t') read -r epoch seq _row_kind _row_key _row_payload <<EOF
+$row
+EOF
+    case "$epoch" in ''|*[!0-9]*) continue ;; esac
+    case "$seq" in ''|*[!0-9]*) continue ;; esac
+    age=$((now - epoch))
+    [ "$age" -ge "$threshold" ] || continue
+    row_key="$epoch-$seq"
+    receipt="$receipt_dir/$row_key"
+    if [ -e "$marker" ] || [ -L "$marker" ]; then
+      [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+    fi
+    [ "$(cat "$marker" 2>/dev/null || true)" = "$row_key" ] && continue
+    [ "$(cat "$receipt" 2>/dev/null || true)" = "$row_key" ] && continue
+    notify_key="capo-wake-loop-$task-$row_key"
+    reason="check: capo wake-loop stalled: capo=$task row=$seq age=${age}s"
+    queued=$(cs_wake_queued_keys check)
+    if ! printf '%s\n' "$queued" | grep -Fx "$notify_key" >/dev/null 2>&1; then
+      cs_wake_append check "$notify_key" "$reason" || return 1
+    fi
+    cs_wake_capo_stall_receipt_write "$task" "$row_key" || return 1
+    cs_wake_capo_stall_marker_write "$task" "$row_key" || return 1
+    wake "$reason"
+  done
+}
+
 # Check and heartbeat cadence must survive actionable exits and restarts: the
 # watcher may be relaunched before in-memory counters reach their threshold on a
 # busy fleet. Persist the schedule as file mtimes instead.
@@ -559,7 +630,7 @@ scan_signals() {
   for f in "$STATE"/*.status "$STATE"/*.turn-ended; do
     [ -e "$f" ] || continue
     sig=$(stat_sig "$f") || continue
-    sf="$STATE/.seen-$(basename "$f" | tr '.' '_')"
+    sf=$(cs_wake_seen_path "$STATE" "$f")
     if [ "$sig" != "$(cat "$sf" 2>/dev/null)" ]; then
       printf '%s\t%s\t%s\n' "$sf" "$sig" "$f"
     fi
@@ -580,6 +651,48 @@ signal_files_of() {  # <pending-blob> -> " <file> <file> ..."
 $blob
 EOF
   printf '%s' "$files"
+}
+
+# Second absorb proof for a no-verb turn-end wake, making the benign-turn-end
+# triage reachable for a harness whose semantic busy state has no verified
+# source (cs-crew-state.sh can only answer unknown for it, so every turn
+# boundary would otherwise surface a contentless signal wake per soldier).
+# 0 (benign) ONLY when the wake carries nothing but bare .turn-ended markers
+# AND every named task's pane content changed since the previous poll - a
+# fresh bounded capture hashing differently from the same state/.hash-<key>
+# marker the staleness backbone already records and trusts as liveness. It
+# claims no harness semantics and fabricates no busy verdict. The absorb
+# defers rather than swallows: a soldier that has stopped renders nothing
+# further, so its now-static pane surfaces through the staleness backbone
+# within a poll or two. Any status file in the wake, an unresolvable task, a
+# missing prior hash, a failed or empty capture, or an unchanged pane
+# surfaces exactly as before. Owned here with the .hash-* marker format.
+signal_turn_end_churn_absorbable() {  # <file> ...
+  local f base task meta pane key prev tail40 h seen=''
+  for f in "$@"; do
+    base=${f##*/}
+    case "$base" in
+      *.turn-ended) task=${base%.turn-ended} ;;
+      *) return 1 ;;
+    esac
+    [ -n "$task" ] || return 1
+    case " $seen " in *" $task "*) continue ;; esac
+    seen="$seen $task"
+    meta="$STATE/$task.meta"
+    [ -e "$meta" ] || return 1
+    pane=$(cs_meta_get "$meta" pane 2>/dev/null) || return 1
+    [ -n "$pane" ] || return 1
+    key=$(printf '%s' "$pane" | tr ':/.' '___')
+    prev=$(cat "$STATE/.hash-$key" 2>/dev/null || true)
+    [ -n "$prev" ] || return 1
+    tail40=$(cs_herdr_capture "$pane" 40 text 2>/dev/null) || return 1
+    [ -n "$tail40" ] || return 1
+    h=$(printf '%s' "$tail40" | hash_pane)
+    [ -n "$h" ] || return 1
+    [ "$h" != "$prev" ] || return 1
+  done
+  [ -n "$seen" ] || return 1
+  return 0
 }
 
 run_check_process() {
@@ -713,177 +826,6 @@ heartbeat_scan_finds_actionable() {
   return 1
 }
 
-# --- capo-side worker events -------------------------------------------------
-# Reaching INTO a capo home is deliberate and bounded. The alternative - a capo
-# home pushing events up - needs a parent pointer that capo homes do not record,
-# so it would silently do nothing for every home seeded before that pointer
-# existed. Reading is also strictly less dangerous: the parent never writes
-# there, and a capo home that is unreadable or unmarked is skipped, never
-# guessed at.
-_capo_surfaced_path() {  # <capo-id> <worker-task>
-  printf '%s/.capo-surfaced-%s' "$STATE" "$(printf '%s__%s' "$1" "$2" | tr ':/.' '___')"
-}
-
-# Every capo this home actually owns, from its own runtime records: one
-# state/<id>.meta with kind=capo and a home= that still carries the capo-home
-# marker. Registry prose is not consulted - the meta is what dispatch wrote.
-capo_worker_homes() {  # -> <capo-id>\t<capo-state-dir>
-  local m id home
-  for m in "$STATE"/*.meta; do
-    [ -e "$m" ] || continue
-    [ "$(cs_meta_get "$m" kind 2>/dev/null || true)" = capo ] || continue
-    id=$(basename "$m"); id=${id%.meta}
-    home=$(cs_meta_get "$m" home 2>/dev/null || true)
-    [ -n "$home" ] || continue
-    case "$home" in /*) ;; *) continue ;; esac
-    [ -f "$home/.cs-capo-home" ] || continue
-    [ -d "$home/state" ] || continue
-    printf '%s\t%s\n' "$id" "$home/state"
-  done
-}
-
-# One "<key>\t<verb>\t<note>" line per still-open decision belonging to
-# <task>, filtered out of the whole-capo <open-set> (scan_open_decisions's own
-# output shape - <task>\t<key>\t<verb>\t<note> - with the task field stripped
-# since the caller already knows it). Portable line-at-a-time filter, no
-# associative arrays, matching the fold helpers in cs-classify-lib.sh.
-_capo_open_lines_for_task() {  # <open-set> <task>
-  local open=$1 task=$2 ttask key verb note
-  while IFS=$(printf '\t') read -r ttask key verb note; do
-    [ "$ttask" = "$task" ] || continue
-    printf '%s\t%s\t%s\n' "$key" "$verb" "$note"
-  done <<EOF
-$open
-EOF
-}
-
-# 0 if <line> ("<key>\t<verb>\t<note>") appears verbatim in <manifest>
-# (one such line per still-open decision as of the last scan); 1 otherwise.
-_capo_manifest_has_line() {  # <manifest> <line>
-  local manifest=$1 line=$2 l
-  while IFS= read -r l; do
-    [ "$l" = "$line" ] && return 0
-  done <<EOF
-$manifest
-EOF
-  return 1
-}
-
-# 0 if <key> appears as the first field of any line in <manifest>; 1
-# otherwise. Unlike _capo_manifest_has_line, this ignores verb/note - it
-# answers "is this key still open at all," which a partial resolve (one of
-# several open keys on the same task closes while another stays open) needs:
-# the key vanishing is the close signal, regardless of what its note said.
-_capo_manifest_key_present() {  # <manifest> <key>
-  local manifest=$1 key=$2 l lkey
-  while IFS= read -r l; do
-    [ -n "$l" ] || continue
-    lkey=${l%%$'\t'*}
-    [ "$lkey" = "$key" ] && return 0
-  done <<EOF
-$manifest
-EOF
-  return 1
-}
-
-# Boss-relevant worker events inside this home's capos that this home has not
-# surfaced yet. Emits <capo-id>\t<worker-task>\t<key>\t<verb>\t<display-line>,
-# one line per currently-OPEN decision this scan has not already surfaced -
-# folding each capo task file's full history through scan_open_decisions
-# (bin/cs-classify-lib.sh), the SAME whole-file open/resolved fold
-# status_open_decisions applies everywhere else, instead of reading only the
-# last status line. A last-line read silently loses an open needs-decision the
-# moment a later working:/done: append lands, which is the exact mechanism
-# that stalled the overnight casino sweep this fold replaces.
-# Dedup compares against a per-task MANIFEST (every currently-open key's own
-# "<key>\t<verb>\t<note>" line), not a single last-surfaced line's raw text:
-# comparing raw text alone cannot tell "still open, unchanged" apart from "was
-# resolved, then reopened under the same key with the same wording" - both
-# read identical. Rewriting the manifest to exactly today's open set on every
-# pass also means a resolved key's entry is dropped with no separate cleanup
-# pass, so a later reopen has nothing stale left to collide with.
-# A capo's OWN parent-facing status file lives in this home and is already
-# covered by the ordinary signal path, so only its workers are read here.
-# Newly-open decisions are read-only here: writing their manifest entry is
-# _capo_mark_surfaced's job, called by the caller AFTER the wake this pass
-# reports is durably enqueued - the same enqueue-before-suppress ordering the
-# signal path uses below, so a crash between the two re-fires the same wake
-# next poll instead of losing it. A task whose manifest is now fully empty
-# (every previously-open key resolved) is different: nothing is pending to
-# lose, so its stale marker is cleared immediately below rather than left to
-# linger - otherwise a later reopen under the same key and wording would
-# match that leftover marker and wrongly look already-surfaced.
-scan_capo_worker_events() {
-  local cid cstate open f task old_manifest new_manifest key verb note line kline okey
-  local have_escalation=0
-  command -v cs_pending_reply_capo_escalation_open >/dev/null 2>&1 && have_escalation=1
-  while IFS=$(printf '\t') read -r cid cstate; do
-    [ -n "$cid" ] || continue
-    open=$(scan_open_decisions "$cstate")
-    for f in "$cstate"/*.status; do
-      [ -e "$f" ] || continue
-      task=$(basename "$f"); task=${task%.status}
-      old_manifest=$(cat "$(_capo_surfaced_path "$cid" "$task")" 2>/dev/null || true)
-      new_manifest=$(_capo_open_lines_for_task "$open" "$task")
-      # A key present in the OLD manifest but gone from the new one just
-      # resolved on the capo's own side - close its Task 3 escalation record
-      # now, regardless of whether other keys on this task are still open.
-      if [ "$have_escalation" = 1 ] && [ -n "$old_manifest" ]; then
-        while IFS=$(printf '\t') read -r okey verb note; do
-          [ -n "$okey" ] || continue
-          _capo_manifest_key_present "$new_manifest" "$okey" && continue
-          cs_pending_reply_capo_escalation_close "$STATE" "$cid" "$task" "$okey" 2>/dev/null || true
-        done <<EOF
-$old_manifest
-EOF
-      fi
-      if [ -z "$new_manifest" ]; then
-        [ -z "$old_manifest" ] || : > "$(_capo_surfaced_path "$cid" "$task")"
-        continue
-      fi
-      while IFS=$(printf '\t') read -r key verb note; do
-        [ -n "$key" ] || continue
-        kline="${key}"$'\t'"${verb}"$'\t'"${note}"
-        _capo_manifest_has_line "$old_manifest" "$kline" && continue
-        case "$key" in
-          default) line="${verb}: ${note}" ;;
-          *)       line="${verb} [key=${key}]: ${note}" ;;
-        esac
-        if [ "$have_escalation" = 1 ]; then
-          cs_pending_reply_capo_escalation_open "$STATE" "$CS_HOME" "$cid" "$task" "$key" "$verb" "$note" 2>/dev/null || true
-        fi
-        printf '%s\t%s\t%s\t%s\t%s\n' "$cid" "$task" "$key" "$verb" "$line"
-      done <<EOF
-$new_manifest
-EOF
-    done
-  done < <(capo_worker_homes)
-  return 0
-}
-
-# Persist Task 2's surfaced manifest for <capo-id>/<task> as exactly today's
-# open-decision set: a resolved key's entry drops out with no separate
-# cleanup pass, so a later reopen of the same key has nothing stale left to
-# collide with. Called only after the caller has durably enqueued the wake
-# scan_capo_worker_events reported for this pass (see that function's own
-# ordering note); recomputes the open set itself rather than threading it
-# through the pending-lines stream, which stays one row per decision.
-_capo_mark_surfaced() {  # <capo-id> <task>
-  local cid=$1 task=$2 cstate
-  cstate=$(_capo_state_dir "$cid") || return 0
-  _capo_open_lines_for_task "$(scan_open_decisions "$cstate")" "$task" \
-    > "$(_capo_surfaced_path "$cid" "$task")"
-}
-
-# Resolve a known capo id back to its state directory, for _capo_mark_surfaced.
-_capo_state_dir() {  # <capo-id>
-  local id=$1 cid cstate
-  while IFS=$(printf '\t') read -r cid cstate; do
-    [ "$cid" = "$id" ] && { printf '%s' "$cstate"; return 0; }
-  done < <(capo_worker_homes)
-  return 1
-}
-
 # --- normalized transition shape + status->action policy ---------------------
 #
 # The NORMALIZED TRANSITION RECORD is the one shape herdr's events are
@@ -923,7 +865,43 @@ cs_transition_field() {  # <record> <n>
 }
 
 cs_transition_pane_id()   { cs_transition_field "$1" 1; }
+cs_transition_workspace() { cs_transition_field "$1" 2; }
 cs_transition_to_status() { cs_transition_field "$1" 4; }
+cs_transition_agent()     { cs_transition_field "$1" 5; }
+
+cs_transition_validate_route() { # <state_dir> <record>
+  local state=$1 record=$2 pane meta route parent_state state_real
+  pane=$(cs_transition_pane_id "$record")
+  meta=$(meta_for_pane "$pane" 2>/dev/null || true)
+  [ -n "$meta" ] || return 0
+  route=$(cs_meta_event_route "$state" "$pane" "$(cs_transition_workspace "$record")" \
+    "$(cs_transition_agent "$record")") || return 1
+  parent_state=$(printf '%s' "$route" | cut -f4)
+  state_real=$(cd "$state" 2>/dev/null && pwd -P) || return 1
+  [ "$parent_state" = "$state" ] || {
+    parent_state=$(cd "$parent_state" 2>/dev/null && pwd -P) || return 1
+    [ "$parent_state" = "$state_real" ] || return 1
+  }
+}
+
+cs_transition_validate_event_generation() { # <state_dir> <record>
+  local state=$1 record=$2 pane workspace agent event_generation route expected_generation first
+  first=$(printf '%s' "$record" | cut -f1)
+  event_generation=$(printf '%s' "$record" | cut -f6)
+  if [ "$first" = status ]; then
+    pane=$(printf '%s' "$record" | cut -f2)
+    workspace=$(printf '%s' "$record" | cut -f3)
+    agent=$(printf '%s' "$record" | cut -f5)
+  else
+    pane=$first
+    workspace=$(printf '%s' "$record" | cut -f2)
+    agent=$(printf '%s' "$record" | cut -f5)
+  fi
+  [ -n "$workspace" ] && [ -n "$agent" ] && [ -n "$event_generation" ] || return 1
+  route=$(cs_meta_event_route "$state" "$pane" "$workspace" "$agent" 2>/dev/null || true)
+  expected_generation=$(printf '%s' "$route" | cut -f7)
+  [ -n "$expected_generation" ] && [ "$event_generation" = "$expected_generation" ]
+}
 
 # cs_transition_policy: THE single-owner status -> supervision-action table.
 #   actionable - escalate IMMEDIATELY. `blocked` is the only immediately-
@@ -1011,14 +989,55 @@ cs_watch_events_capable() {
   [ -e "$(cs_event_spool_path "$STATE")" ]
 }
 
-# How often the bounded wait re-checks the spool. An idle tick costs two
-# short-lived processes - one `stat` of the spool and the `sleep` itself; the
-# cursor is read with bash's own `read`, and the drain's `tail` runs only when
-# the spool actually grew. That is the trade between escalation latency and the
-# idle cost of a watcher with panes but no events; half a second keeps a blocked
-# soldier's wake sub-second in practice (the hook itself runs the moment herdr
-# sees the edge).
-EVENT_SPOOL_TICK=${CS_EVENT_SPOOL_TICK:-0.5}
+# issue #152: replaced the 500ms poll tick. CS_EVENT_SPOOL_TICK no longer
+# does anything - it is not read anywhere in this file - because the bounded
+# wait below blocks a single interruptible sleep for the whole remaining
+# budget instead of re-checking the spool every half second:
+# bin/cs-herdr-event-hook.sh signals this watcher's own pid (SIGUSR1) the
+# instant it appends an event this home owns, and cs_watch_block_for_wake
+# returns immediately when that arrives instead of waiting out the tick. The
+# idle cost drops from two processes twice a second (~240/min) to one
+# `sleep` per full wait (~4/min at the default 15s POLL). The durable spool
+# and its cursor remain the sole transport authority; a lost, coalesced, or
+# entirely absent signal only costs latency up to the remaining budget,
+# never a missed event - the next loop iteration drains unconditionally
+# regardless of why the wait ended.
+
+# cs_watch_block_for_wake <seconds> - blocks up to <seconds>, one background
+# `sleep` plus a `wait` on it. Interrupted immediately when
+# CS_WATCH_WAKE_GENERATION changes (bumped only by the USR1 trap installed at
+# watcher startup): empirically verified on bash 5.3.15/macOS-Darwin
+# (tests/cs-watch-signal-wait.test.sh) that a trapped signal delivered WHILE
+# blocked in `wait` on a background child returns `wait` immediately, with
+# the child still alive and needing an explicit reap - which this always
+# does when `wait` returned early. A signal delivered BEFORE this function is
+# even called still runs its trap, but the `wait` that follows blocks its
+# full duration regardless (an accepted, self-healing race: the caller
+# always re-drains at the top of its next loop iteration either way, so this
+# only ever costs one iteration's worth of latency on that one occurrence,
+# never a lost or duplicated event) - callers close the realistic instance of
+# that race (a signal arriving during the drain that precedes this call, not
+# the sub-millisecond gap between checking and forking) by comparing
+# CS_WATCH_WAKE_GENERATION before and after their own drain, and skipping
+# straight back to draining instead of calling this at all when it changed.
+# MUST be called as a plain statement, never via `$(...)` or a pipeline: bash
+# forks a real subshell for command substitution (verified: BASHPID differs
+# inside one even though `$$` misleadingly does not), and a signal sent to
+# the pid recorded in state/.watch.lock - the top-level script's original
+# pid - would then arrive at a process that is not the one actually blocked
+# in `wait`, and never interrupt it at all.
+cs_watch_block_for_wake() {
+  local seconds=$1 sp
+  case "$seconds" in ''|*[!0-9.]*) return 0 ;; esac
+  awk -v s="$seconds" 'BEGIN { exit !(s > 0) }' || return 0
+  sleep "$seconds" &
+  sp=$!
+  wait "$sp" 2>/dev/null
+  if kill -0 "$sp" 2>/dev/null; then
+    kill "$sp" 2>/dev/null
+    wait "$sp" 2>/dev/null
+  fi
+}
 
 # cs_watch_wait_transition: the bounded event wait. Blocks up to <timeout_secs>
 # for one of <pane...> to reach a fresh `blocked` edge, then prints the
@@ -1042,7 +1061,8 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
   cursor=$(cs_event_cursor_path "$state")
   [ -e "$spool" ] || return 2
 
-  local p raw record hit line kind ws status agent mine=
+  local p raw record hit line kind ws status agent event_generation route expected_generation mine=
+  local expected_agent expected_workspace expected_generation actual_worktree session event_line
   for p in "${panes[@]}"; do
     mine="$mine|$p|"
   done
@@ -1051,9 +1071,26 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
   # because the edge predates the plugin install, or was lost to a spool
   # rotation - is returned now, once. `working` panes clear their marker here too.
   for p in "${panes[@]}"; do
-    raw=$(cs_herdr_agent_status_raw "$p")
+    meta=$(meta_for_pane "$p" 2>/dev/null || true)
+    [ -n "$meta" ] || continue
+    session=$(cs_meta_get "$meta" herdr_session 2>/dev/null || true)
+    expected_agent=$(cs_meta_get "$meta" harness 2>/dev/null || true)
+    expected_workspace=$(cs_meta_get "$meta" workspace 2>/dev/null || true)
+    expected_generation=$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)
+    [ -n "$session" ] && [ -n "$expected_agent" ] && [ -n "$expected_workspace" ] &&
+      [ -n "$expected_generation" ] || continue
+    CS_HERDR_SESSION="$session" cs_herdr_agent_kind_matches "$p" "$expected_agent" || continue
+    expected_worktree=$(cs_meta_get "$meta" worktree 2>/dev/null || true)
+    actual_worktree=$(CS_HERDR_SESSION="$session" cs_herdr_pane_cwd "$p" 2>/dev/null || true)
+    [ -n "$actual_worktree" ] && [ -n "$expected_worktree" ] &&
+      [ "$(cd "$actual_worktree" 2>/dev/null && pwd -P)" = "$(cd "$expected_worktree" 2>/dev/null && pwd -P)" ] || continue
+    raw=$(CS_HERDR_SESSION="$session" cs_herdr_agent_status_raw "$p")
     [ -n "$raw" ] || continue
-    record=$(cs_transition_normalize "$p" "" "$raw" "")
+    record=$(cs_transition_normalize "$p" "$expected_workspace" "$raw" "$expected_agent")
+    cs_transition_validate_route "$state" "$record" || continue
+    event_line=$(printf 'status\t%s\t%s\t%s\t%s\t%s' \
+      "$p" "$expected_workspace" "$raw" "$expected_agent" "$expected_generation")
+    cs_transition_validate_event_generation "$state" "$event_line" || continue
     if hit=$(cs_transition_apply "$state" "$record"); then
       printf '%s' "$hit"
       return 0
@@ -1066,9 +1103,15 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
   # absent workspace_id) and shift the remaining columns. `cut` preserves them.
   # $SECONDS is a bash builtin, so the tick loop costs no extra process to
   # know the time.
-  local started=$SECONDS i n idx
+  local started=$SECONDS i n idx wake_gen
   local -a pending_panes pending_recs
   while :; do
+    # Recorded before this iteration's drain, not after: a signal that lands
+    # anywhere during the drain below still shows up as a generation change
+    # once the drain returns, so it is caught below and re-drained
+    # immediately instead of paying for a full wait that would only
+    # rediscover the same event.
+    wake_gen=$CS_WATCH_WAKE_GENERATION
     # A drained batch is consumed whether or not it holds an actionable edge,
     # so EVERY line in it is applied before returning: stopping at the first hit
     # would silently discard the rest of that batch, including the `working`
@@ -1103,7 +1146,10 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
       ws=$(printf '%s' "$line" | cut -f3)
       status=$(printf '%s' "$line" | cut -f4)
       agent=$(printf '%s' "$line" | cut -f5)
+      event_generation=$(printf '%s' "$line" | cut -f6)
       record=$(cs_transition_normalize "$p" "$ws" "$status" "$agent")
+      cs_transition_validate_route "$state" "$record" || continue
+      cs_transition_validate_event_generation "$state" "$line" || continue
       idx=-1
       n=${#pending_panes[@]}
       for ((i = 0; i < n; i++)); do
@@ -1131,7 +1177,10 @@ cs_watch_wait_transition() {  # <timeout_secs> <state_dir> <pane...>
       return 0
     done
     [ "$((SECONDS - started))" -lt "$timeout" ] || return 1
-    sleep "$EVENT_SPOOL_TICK"
+    if [ "$CS_WATCH_WAKE_GENERATION" != "$wake_gen" ]; then
+      continue
+    fi
+    cs_watch_block_for_wake $((timeout - (SECONDS - started)))
   done
 }
 
@@ -1167,8 +1216,19 @@ event_wait_or_sleep() {
     return
   fi
 
-  rec=$(cs_watch_wait_transition "$POLL" "$STATE" "${panes[@]}")
+  # NOT `rec=$(cs_watch_wait_transition ...)`: command substitution forks a
+  # real subshell (verified - see cs_watch_block_for_wake's header), and the
+  # interruptible wait deep inside this call needs to run in THIS process,
+  # the one whose pid is recorded in state/.watch.lock and actually signaled.
+  # A plain temp-file redirect keeps it here; only the harmless post-hoc
+  # `cat` below forks, after the wait it might have interrupted already
+  # returned.
+  local wait_tmp
+  wait_tmp=$(mktemp "${TMPDIR:-/tmp}/cs-watch-wait.XXXXXX") || { sleep "$POLL"; return; }
+  cs_watch_wait_transition "$POLL" "$STATE" "${panes[@]}" > "$wait_tmp"
   rc=$?
+  rec=$(cat "$wait_tmp" 2>/dev/null)
+  rm -f "$wait_tmp"
   case "$rc" in
     0) handle_push_transition "$rec" ;;
     2)
@@ -1245,6 +1305,20 @@ watcher_cleanup() {
 }
 trap watcher_cleanup EXIT
 trap 'exit 1' HUP INT TERM
+# The doorbell (issue #152): a coalescing wake generation counter, bumped by
+# the trap handler alone - nothing else may write it. Bash delivers a trapped
+# signal at the next safe point; while blocked in `wait` on a background
+# child that point is immediate (empirically verified against bash 5.3.15 on
+# macOS/Darwin - see tests/cs-watch-signal-wait.test.sh; the Linux CI lane
+# running the same suite is this fact's Linux proof, not a separate claim
+# recorded here), so cs_watch_wait
+# below can tell "a signal arrived since I last checked" from a plain integer
+# comparison with no lock of its own. Multiple coalesced signals still only
+# bump this once per delivery, which is fine: the counter's job is "did
+# anything happen", never "how many", and a coalesced doorbell can never lose
+# the durable spool record a real event already appended before ringing it.
+CS_WATCH_WAKE_GENERATION=0
+trap 'CS_WATCH_WAKE_GENERATION=$((CS_WATCH_WAKE_GENERATION + 1))' USR1
 # This watcher's own pid, as recorded in the lock by the wake-lib claim (which
 # writes ${BASHPID:-$$} from this same main shell). Read directly, never via a
 # command substitution, so it matches the stored holder pid for the
@@ -1283,6 +1357,11 @@ while :; do
   if command -v cs_pending_reply_tick >/dev/null 2>&1 || declare -F cs_pending_reply_tick >/dev/null 2>&1; then
     cs_pending_reply_tick "$STATE" || true
   fi
+
+  capo_wake_stall_tick || {
+    echo "watcher: capo wake-loop observation failed" >&2
+    exit 1
+  }
 
   # Armed blocking sources (bin/cs-procevent.sh). Liveness repair only: it
   # republishes captured results that have no durable acknowledgement yet and
@@ -1410,8 +1489,22 @@ while :; do
     # made status query - crew_is_provably_working over cs-crew-state.sh, a
     # `made status --json` read, never a log scrape), so the || ordering
     # evaluates it only for a no-boss-verb signal.
+    # A no-verb wake has a second absorb proof after provably-working: bounded
+    # recent pane churn for a turn-ended-only wake (signal_turn_end_churn_absorbable
+    # above), which never applies once any listed span carries a boss verb.
     # shellcheck disable=SC2086  # $files is a space-separated status-path list (ids carry no spaces)
-    if signal_reason_is_actionable $files || ! signal_crew_provably_working $files; then
+    if signal_reason_is_actionable $files; then
+      signal_benign=false
+    elif signal_crew_provably_working $files; then
+      signal_benign=true
+      signal_absorb_proof="provably working"
+    elif signal_turn_end_churn_absorbable $files; then
+      signal_benign=true
+      signal_absorb_proof="turn-end with recent pane churn"
+    else
+      signal_benign=false
+    fi
+    if [ "$signal_benign" = false ]; then
       while IFS=$(printf '\t') read -r sf sig f; do
         [ -n "$sf" ] || continue
         cs_wake_append signal "$(basename "$f")" "$reason" || exit 1
@@ -1433,45 +1526,8 @@ EOF
       done <<EOF
 $pending
 EOF
-      triage_log "absorbed benign $reason"
+      triage_log "absorbed benign ($signal_absorb_proof) $reason"
     fi
-  fi
-
-  # Layer 1b: capo-side worker events, read directly instead of relayed.
-  # A capo home is watched only while its own agent sits idle on a checkpoint;
-  # the moment that agent does real work, nothing in that home is polling, so a
-  # boss-relevant worker event can wait there for as long as the turn lasts.
-  # This parent already knows every capo home, so it reads those events itself
-  # rather than waiting for the capo to relay them. Cost is one status tail per
-  # capo worker per poll.
-  #
-  # This wake says an event EXISTS, never that the parent should take the work
-  # over: the capo still owns its lane. Dedup is per (capo, worker) on the
-  # surfaced line, so a standing block wakes the parent once, not every poll.
-  capo_pending=$(scan_capo_worker_events)
-  if [ -n "$capo_pending" ]; then
-    capo_reason="capo:"
-    while IFS=$(printf '\t') read -r cid ctask _ _ cline; do
-      [ -n "$cid" ] || continue
-      capo_reason="$capo_reason $cid/$ctask: $cline"
-    done <<EOF
-$capo_pending
-EOF
-    while IFS=$(printf '\t') read -r cid ctask _ _ cline; do
-      [ -n "$cid" ] || continue
-      cs_wake_append capo "$cid/$ctask" "$cline" || exit 1
-    done <<EOF
-$capo_pending
-EOF
-    # Enqueue before suppress, exactly as the signal path does: a crash between
-    # the two re-fires the wake rather than losing it.
-    while IFS=$(printf '\t') read -r cid ctask _ _ _; do
-      [ -n "$cid" ] || continue
-      _capo_mark_surfaced "$cid" "$ctask"
-    done <<EOF
-$capo_pending
-EOF
-    wake "$capo_reason"
   fi
 
   # Layer 1 backbone: pane staleness. Two consecutive identical hashes with no
@@ -1536,7 +1592,10 @@ EOF
     # otherwise reach is unreachable by construction. A capo's pane is a
     # supervisor's, not a supervised turn-taker's, so it is exempt.
     if [ "$kind" != capo ] && pane_is_busy "$bs" "$tail40"; then
-      if bage=$(busy_turn_age "$task") && [ "$bage" -ge "$BUSY_TURN_MAX_SECS" ]; then
+      if status_is_paused_or_boss_held "$(last_status_line "$STATE/$task.status")"; then
+        rm -f "$btf"
+        handle_paused_stale "$w" "$task" "$h"
+      elif bage=$(busy_turn_age "$task") && [ "$bage" -ge "$BUSY_TURN_MAX_SECS" ]; then
         wedge_timer_check "$w" "$btf" "busy ${bage}s with no completed turn" "$ewf"
       else
         # Within the bound, or unreadable: no wedge in progress.

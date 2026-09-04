@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# cs-lint.sh - the single owner of consigliere's shell-lint definition.
+# cs-lint.sh - the single owner of consigliere's lint definition.
 #
 # Runs ShellCheck over consigliere's tracked shell scripts at ShellCheck's
-# default severity (info, warning, error - the levels CI fails on). The lint
-# command, the file set, the config, AND the pinned ShellCheck version live here
-# and ONLY here, so the gates cannot drift apart: every caller invokes this
-# script with no arguments.
-#   - CI:       .github/workflows/ci.yml installs the version this script prints
-#               via `--required-version`, then runs `bin/cs-lint.sh`.
+# default severity (info, warning, error - the levels CI fails on), and on its
+# default (no explicit-path) path also runs bin/cs-lint-workflows.sh so a
+# self-broken ci.yml fails before merge. The shell lint command, the file set,
+# the config, AND the pinned ShellCheck version live here and ONLY here, so the
+# gates cannot drift apart: every caller invokes this script with no arguments.
+#   - CI:       .github/workflows/ci.yml installs the versions this script and
+#               cs-lint-workflows.sh print via `--required-version`, then runs
+#               `bin/cs-lint.sh`.
 #   - Local:    developers and any pre-push gate run `bin/cs-lint.sh`, so local
 #               runs the SAME ShellCheck rule set as CI, over the files this
 #               branch changed; `CI=true bin/cs-lint.sh` reproduces CI's full-set
@@ -76,11 +78,14 @@ cd "$ROOT" || exit 1
 # The globs are kept as patterns because the set has to answer two questions: what
 # is on disk now (their expansion) and whether a path a branch deleted was one of
 # ours (no expansion can match a file that is gone).
-canonical_globs=('bin/*.sh' 'tests/*.sh')
+canonical_globs=('bin/*.sh' 'tests/*.sh' 'scripts/ci/*.sh' 'mise-tasks/dev/*')
 canonical=()
 for glob in "${canonical_globs[@]}"; do
   # shellcheck disable=SC2086  # unquoted on purpose: $glob is a pattern to expand
   for path in $glob; do
+    # A glob that matches nothing (no nullglob set) leaves $path as the literal,
+    # non-existent pattern string; skip it rather than adding a bogus "file".
+    [ -e "$path" ] || continue
     canonical+=("$path")
   done
 done
@@ -109,24 +114,36 @@ if [ "${1:-}" = "--canonical-set" ]; then
   exit 0
 fi
 
+# Default no-args lint also validates GitHub workflows. Explicit paths stay a
+# ShellCheck-only override so callers can target one shell root.
+cs_lint_run_workflows() {
+  [ "$EXPLICIT_PATHS" -eq 0 ] || return 0
+  "$ROOT/bin/cs-lint-workflows.sh"
+}
+
+EXPLICIT_PATHS=0
+if [ "$#" -gt 0 ]; then
+  EXPLICIT_PATHS=1
+fi
+
 # Enforce the pin so local and CI resolve the identical rule set.
 if ! command -v shellcheck >/dev/null 2>&1; then
-  printf 'cs-lint.sh: ShellCheck not found; install ShellCheck %s for CI parity.\n' \
+  printf 'cs-lint.sh: ShellCheck not found; install ShellCheck %s with bin/cs-install-shellcheck.sh <destination-directory> and put that directory on PATH.\n' \
     "$REQUIRED_SHELLCHECK" >&2
-  exit 127
+  exit 1
 fi
 unset SHELLCHECK_OPTS
 resolved=$(shellcheck --version | awk '/^version:/ {print $2; exit}')
 # Log the resolved version to stderr so both CI and local runs record it.
 printf 'cs-lint.sh: ShellCheck %s (pinned %s)\n' "$resolved" "$REQUIRED_SHELLCHECK" >&2
 if [ "$resolved" != "$REQUIRED_SHELLCHECK" ]; then
-  printf 'cs-lint.sh: ShellCheck %s required for CI parity, found %s. Install %s.\n' \
+  printf 'cs-lint.sh: ShellCheck %s required for CI parity, found %s. Install %s with bin/cs-install-shellcheck.sh <destination-directory>.\n' \
     "$REQUIRED_SHELLCHECK" "$resolved" "$REQUIRED_SHELLCHECK" >&2
   exit 1
 fi
 
 # Explicit paths bypass the change selection: lint exactly what was named.
-if [ "$#" -gt 0 ]; then
+if [ "$EXPLICIT_PATHS" -eq 1 ]; then
   exec shellcheck --norc "$@"
 fi
 
@@ -190,6 +207,7 @@ fi
 
 if [ -n "$full_reason" ]; then
   printf 'cs-lint.sh: linting the full canonical set (%s)\n' "$full_reason" >&2
+  cs_lint_run_workflows || exit $?
   exec shellcheck --norc "${canonical[@]}"
 fi
 
@@ -211,6 +229,7 @@ deleted_canonical=$(
 if [ "${#selected[@]}" -eq 0 ] && [ -z "$deleted_canonical" ]; then
   printf 'cs-lint.sh: no canonical-set file changed since %s; nothing to lint.\n' \
     "$BASE_REF" >&2
+  cs_lint_run_workflows || exit $?
   exit 0
 fi
 
@@ -313,9 +332,11 @@ done <<<"$inputs"
 if [ "${#lint_set[@]}" -eq 0 ]; then
   printf 'cs-lint.sh: only deleted canonical files changed since %s; nothing to lint.\n' \
     "$BASE_REF" >&2
+  cs_lint_run_workflows || exit $?
   exit 0
 fi
 
 printf 'cs-lint.sh: linting %s changed file(s) plus %s source-linked file(s) since %s (CI lints the full set)\n' \
   "${#selected[@]}" "$((${#lint_set[@]} - ${#selected[@]}))" "$BASE_REF" >&2
+cs_lint_run_workflows || exit $?
 exec shellcheck --norc "${lint_set[@]}"

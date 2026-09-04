@@ -26,6 +26,8 @@ set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+export CS_LOCK_HARNESS_RE='bash|zsh|codex|claude'
+
 TMP=$(cs_test_tmproot cs-session-start)
 mkdir -p "$TMP"
 BIN="$ROOT/bin/cs-session-start.sh"
@@ -54,6 +56,8 @@ printf 'The boss prefers plain outcome language.\n' > "$HOME_DIR/config/boss.md"
 out=$(CS_HOME="$HOME_DIR" CS_STARTUP_MEMORY_MAX_BYTES=8192 "$BIN" 2>/dev/null)
 assert_not_contains "$out" 'OVER STARTUP-MEMORY BUDGET' "a small startup-memory file is not flagged"
 assert_contains "$out" 'The boss prefers plain outcome language.' "the digest still prints the file"
+assert_contains "$out" 'MESSAGE RECOVERY' "startup does not expose its durable message recovery stage"
+assert_contains "$out" 'recover: checked=0 re-woke=0' "startup did not run one bounded recovery pass"
 pass "startup memory under budget is printed without a report"
 
 # --- over budget: reported, named, and still printed in full ------------------
@@ -630,7 +634,7 @@ pass "manual actionable groups are bounded while public-followup obligations sta
 # The backlog section tells the agent how to recover a withheld row; the
 # contract two sections earlier forbids bulk-reading the same file. They have to
 # agree, or an agent obeying the contract literally cannot recover the rows
-# AGENTS.md sections 7 and 10 make most actionable.
+# AGENTS.md sections 6 and 9 make most actionable.
 assert_contains "$out" 'the backlog listing disclosed omitted rows in any of its groups - in-flight,' \
   "the read-once contract still sanctions only omitted queued items"
 assert_contains "$out" 'targeted follow-up that disclosure names' \

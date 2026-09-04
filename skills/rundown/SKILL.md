@@ -18,7 +18,7 @@ Recap only the events already visible in the current conversation.
    Do not restate its contract or combine its output with a session recap.
 4. If a prior real boss message exists, preserve the ordinary recap interval: recap what happened after that message and before the current invocation.
    Include concrete outcomes, landed work, failures, decisions made, new decisions needed, and work still running only when they appear in that visible interval.
-   Use the boss-facing outcome language required by `AGENTS.md` section 9.
+   Use the boss-facing outcome language required by `AGENTS.md` section 8.
    Preserve every full `https` PR URL present in the interval.
 5. Additionally inspect the entire session history visible to the current consigliere before the current invocation for every explicit boss decision that remains unanswered, including decisions raised before the ordinary recap boundary.
    A later unrelated boss message establishes a recap boundary but does not close an earlier decision.
@@ -35,7 +35,7 @@ A recap that hands back a list of unanswered decisions tends to leave them unans
 
 After the recap, when step 5 found at least one visibly open boss decision, raise only the single one you judge most consequential.
 Say plainly that the order is your judgment about what matters most right now, not a computed ranking.
-Give it escalation-quality context per `AGENTS.md` section 9: the decision, why it matters, the options, and your recommendation.
+Give it escalation-quality context per `AGENTS.md` section 8: the decision, why it matters, the options, and your recommendation.
 When the boss answers, raise the next most consequential one the same way, until none are left.
 
 Draw only on what session history already shows; step 6's no-fresh-state boundary holds throughout the flow.

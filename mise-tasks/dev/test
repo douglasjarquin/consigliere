@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Run consigliere's existing portable test suite inside the dev container"
+set -eu
+
+export DEV_UID="${DEV_UID:-$(id -u)}"
+export DEV_GID="${DEV_GID:-$(id -g)}"
+exec docker compose run --rm dev bin/cs-test-run.sh --portable

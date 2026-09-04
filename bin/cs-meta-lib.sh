@@ -22,15 +22,95 @@ cs_meta_set() { # <meta-file> <key> <value>  - append; last occurrence wins
   printf '%s=%s\n' "$2" "$3" >> "$1"
 }
 
+CS_META_ERROR=
+
+cs_meta_canonical_existing() {
+  LC_ALL=C perl -MCwd=realpath -e '
+    my $resolved = realpath($ARGV[0]);
+    exit 1 unless defined $resolved;
+    print $resolved;
+  ' "$1" 2>/dev/null
+}
+
+cs_meta_record_parent_authorized() {
+  local path=$1 label=$2 root=$3 parent base parent_resolved expected_path
+  local path_resolved root_resolved final_matches=1
+  parent=${path%/*}
+  [ "$parent" != "$path" ] || parent=.
+  base=${path##*/}
+  root_resolved=$(cs_meta_canonical_existing "$root") || {
+    CS_META_ERROR="$label authorized directory cannot be resolved at $root"
+    return 1
+  }
+  [ -d "$root_resolved" ] || {
+    CS_META_ERROR="$label authorized directory is not a directory at $root"
+    return 1
+  }
+  parent_resolved=$(cs_meta_canonical_existing "$parent") || {
+    CS_META_ERROR="$label parent directory cannot be resolved at $path"
+    return 1
+  }
+  expected_path=${parent_resolved%/}/$base
+  if [ -e "$path" ] || [ -L "$path" ]; then
+    path_resolved=$(cs_meta_canonical_existing "$path") || {
+      CS_META_ERROR="$label cannot be resolved at $path"
+      return 1
+    }
+    [ "$path_resolved" = "$expected_path" ] || final_matches=0
+  else
+    path_resolved=$expected_path
+  fi
+  case "$path_resolved" in
+    "$root_resolved"/*) ;;
+    *)
+      CS_META_ERROR="$label resolves outside its authorized directory at $path"
+      return 1
+      ;;
+  esac
+  if [ "$final_matches" != 1 ]; then
+    CS_META_ERROR="$label resolves through a different final path at $path"
+    return 1
+  fi
+}
+
+cs_meta_record_present() {
+  local path=$1 label=${2:-record} root=$3
+  cs_meta_record_parent_authorized "$path" "$label" "$root" || return 1
+  if [ ! -f "$path" ]; then
+    CS_META_ERROR="$label is not a regular file at $path"
+    return 1
+  fi
+  return 0
+}
+
+cs_meta_publish_contained() {
+  local source=$1 target=$2 label=${3:-record} root=$4
+  cs_meta_record_present "$source" "$label staged record" "$root" || return 1
+  cs_meta_record_parent_authorized "$target" "$label target" "$root" || return 1
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    cs_meta_record_present "$target" "$label target" "$root" || return 1
+  fi
+  if ! mv -f "$source" "$target" 2>/dev/null || ! cs_meta_record_present "$target" "$label" "$root"; then
+    [ -n "$CS_META_ERROR" ] \
+      || CS_META_ERROR="$label publication failed at $target"
+    return 1
+  fi
+  return 0
+}
+
 cs_meta_write() { # <meta-file> <key=val>...  - atomic full write
-  local file=$1 tmp kv
+  local file=$1 tmp kv root
   shift
+  root=${file%/*}
   tmp="$file.tmp.$$"
   : > "$tmp"
   for kv in "$@"; do
     printf '%s\n' "$kv" >> "$tmp"
   done
-  mv "$tmp" "$file"
+  cs_meta_publish_contained "$tmp" "$file" "task record" "$root" || {
+    rm -f "$tmp"
+    return 1
+  }
 }
 
 cs_meta_list_ids() { # <state-dir> -> task ids with meta files, one per line
@@ -39,4 +119,90 @@ cs_meta_list_ids() { # <state-dir> -> task ids with meta files, one per line
     [ -e "$f" ] || continue
     basename "$f" .meta
   done
+}
+
+cs_meta_validate_parent_values() {
+  local parent_task=$1 parent_home=$2 parent_state=$3 parent_pane=$4
+  local parent_generation=$5 endpoint_generation=$6
+  case "$parent_task" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "$parent_home" in /*) ;; *) return 1 ;; esac
+  case "$parent_state" in "$parent_home/state") ;; *) return 1 ;; esac
+  [ -d "$parent_home" ] && [ -d "$parent_state" ] || return 1
+  case "$parent_pane" in w[[:alnum:]_-]*:p[[:alnum:]_-]*) ;; unknown) ;; *) return 1 ;; esac
+  case "$parent_generation" in ''|*[!A-Za-z0-9._:-]*) return 1 ;; esac
+  case "$endpoint_generation" in ''|*[!A-Za-z0-9._:-]*) return 1 ;; esac
+}
+
+cs_meta_validate_herdr_session() {
+  case "${1:-}" in
+    [A-Za-z0-9._-][A-Za-z0-9._-]*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+cs_meta_validate_parent_edge() {
+  local meta=$1 child_home parent_home parent_session
+  [ -f "$meta" ] || return 1
+  cs_meta_validate_parent_values \
+    "$(cs_meta_get "$meta" parent_task_id 2>/dev/null || true)" \
+    "$(cs_meta_get "$meta" parent_home 2>/dev/null || true)" \
+    "$(cs_meta_get "$meta" parent_state 2>/dev/null || true)" \
+    "$(cs_meta_get "$meta" parent_pane 2>/dev/null || true)" \
+    "$(cs_meta_get "$meta" parent_generation 2>/dev/null || true)" \
+    "$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)" || return 1
+  child_home=$(cs_meta_get "$meta" home 2>/dev/null || true)
+  parent_home=$(cs_meta_get "$meta" parent_home 2>/dev/null || true)
+  parent_session=$(cs_meta_get "$meta" parent_herdr_session 2>/dev/null || true)
+  if [ -n "$parent_session" ]; then
+    cs_meta_validate_herdr_session "$parent_session" || return 1
+  elif [ -n "$child_home" ] && [ "$child_home" != "$parent_home" ]; then
+    return 1
+  fi
+}
+
+cs_meta_endpoint_generation_known() {
+  local meta=$1 generation=$2 created_at=${3:-} current previous previous_at
+  current=$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)
+  [ "$current" = "$generation" ] && return 0
+  case "$created_at" in ''|*[!0-9]*) return 1 ;; esac
+  while IFS=$'\t' read -r previous previous_at; do
+    [ "$previous" = "$generation" ] || continue
+    case "$previous_at" in ''|*[!0-9]*) continue ;; esac
+    [ "$created_at" -le "$previous_at" ] && return 0
+  done < <(awk -F= '
+    $1 == "previous_endpoint_generation" { previous=substr($0, 30); next }
+    $1 == "previous_endpoint_generation_at" && previous != "" {
+      print previous "\t" substr($0, 33); previous=""
+    }
+  ' "$meta")
+  return 1
+}
+
+cs_meta_event_route() {
+  local state=$1 pane=$2 workspace=$3 agent=$4 meta id found=''
+  [ -d "$state" ] || return 1
+  [ -n "$pane" ] || return 1
+  for meta in "$state"/*.meta; do
+    [ -f "$meta" ] || continue
+    [ "$(cs_meta_get "$meta" pane 2>/dev/null || true)" = "$pane" ] || continue
+    [ -z "$found" ] || return 1
+    found=$meta
+  done
+  [ -n "$found" ] || return 1
+  if [ -n "$workspace" ] && [ "$(cs_meta_get "$found" workspace 2>/dev/null || true)" != "$workspace" ]; then
+    return 1
+  fi
+  if [ -n "$agent" ] && [ "$(cs_meta_get "$found" harness 2>/dev/null || true)" != "$agent" ]; then
+    return 1
+  fi
+  cs_meta_validate_parent_edge "$found" || return 1
+  id=$(basename "$found" .meta)
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' \
+    "$id" \
+    "$(cs_meta_get "$found" parent_task_id)" \
+    "$(cs_meta_get "$found" parent_home)" \
+    "$(cs_meta_get "$found" parent_state)" \
+    "$(cs_meta_get "$found" parent_pane)" \
+    "$(cs_meta_get "$found" parent_generation)" \
+    "$(cs_meta_get "$found" endpoint_generation)"
 }

@@ -154,18 +154,29 @@ run_watcher_inline() {  # fallback only: no monitor could be started
   fi
   set -e
 
-  if grep -E '^(signal:|stale:|check:|capo:|heartbeat($|:))' "$OUT" >/dev/null 2>&1; then
+  if grep -E '^(signal:|stale:|check:|heartbeat($|:))' "$OUT" >/dev/null 2>&1; then
     cat "$OUT"
     [ ! -s "$ERR" ] || cat "$ERR" >&2
     exit 0
   fi
   if [ "$RC" -eq 124 ]; then
+    recover_messages_on_timeout
     printf 'checkpoint: no actionable wake within %ss\n' "$SECONDS_ARG"
     exit 124
   fi
   [ ! -s "$OUT" ] || cat "$OUT"
   [ ! -s "$ERR" ] || cat "$ERR" >&2
   exit "$RC"
+}
+
+recover_messages_on_timeout() {
+  local recovery_out recovery_rc=0
+  recovery_out=$(CS_HOME="$CS_HOME" CS_STATE_OVERRIDE="$STATE" \
+    "$SCRIPT_DIR/cs-recover.sh" 2>&1) || recovery_rc=$?
+  [ -n "$recovery_out" ] && printf '%s\n' "$recovery_out" >&2
+  if [ "$recovery_rc" -ne 0 ]; then
+    printf 'recovery: unresolved records remain; inspect the errors above before acting on them.\n' >&2
+  fi
 }
 
 if ! cs_monitor_ensure "$STATE"; then
@@ -192,4 +203,5 @@ while [ "$WAITED" -lt "$SECONDS_ARG" ]; do
 done
 
 printf 'checkpoint: no actionable wake within %ss\n' "$SECONDS_ARG"
+recover_messages_on_timeout
 exit 124

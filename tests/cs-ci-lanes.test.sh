@@ -36,13 +36,15 @@ for lane in lint coverage portable herdr; do
   assert_lane "$out" "$lane" true "a bin/ change needs $lane"
 done
 assert_lane "$out" web false "a bin/ change does not need the docs site"
+assert_lane "$out" docker false "a bin/ change does not need the real-docker lane"
 out=$(lanes_for tests/cs-doctor.test.sh)
 for lane in lint coverage portable herdr; do
   assert_lane "$out" "$lane" true "a tests/ change needs $lane"
 done
 assert_lane "$out" web false "a tests/ change does not need the docs site"
+assert_lane "$out" docker false "a tests/ change does not need the real-docker lane"
 out=$(lanes_for .github/workflows/ci.yml)
-for lane in lint coverage portable herdr web; do
+for lane in lint coverage portable herdr docker web; do
   assert_lane "$out" "$lane" true "a workflow change needs $lane"
 done
 pass 'shell changes run the shell lanes; workflow changes run every lane'
@@ -62,10 +64,30 @@ for path in docs/herdr.md skills/rundown/SKILL.md README.md .tasks.toml; do
 done
 pass 'documentation and skill changes run only the hermetic suite'
 
+# --- vendored Grok Bot content is a portable-suite dependency ---------------
+
+out=$(lanes_for grokbot/README.md)
+assert_lane "$out" portable true "grokbot content is a portable-suite dependency"
+assert_lane "$out" lint false "grokbot content cannot change the lint verdict"
+assert_lane "$out" herdr false "grokbot content cannot change the real-herdr verdict"
+assert_lane "$out" coverage false "grokbot content cannot change the lane partition"
+pass 'grokbot changes run only the hermetic suite'
+
+# --- dev-tools suite changes need lint, portable, and the real-docker lane ---
+
+out=$(lanes_for mise-tasks/dev/test)
+assert_lane "$out" lint true "a mise-tasks/dev change needs shellcheck coverage"
+assert_lane "$out" portable true "a mise-tasks/dev change is a portable-suite dependency"
+assert_lane "$out" docker true "a mise-tasks/dev change needs the real-docker lane"
+assert_lane "$out" herdr false "a mise-tasks/dev change cannot change the real-herdr verdict"
+assert_lane "$out" coverage false "a mise-tasks/dev change cannot change the lane partition"
+assert_lane "$out" web false "a mise-tasks/dev change does not need the docs site"
+pass 'dev-tools suite changes run lint, portable, and real-docker only'
+
 # --- a change no lane reads ---------------------------------------------------
 
 out=$(lanes_for AGENTS.md .gitignore)
-for lane in lint coverage portable herdr web; do
+for lane in lint coverage portable herdr docker web; do
   assert_lane "$out" "$lane" false "AGENTS.md/.gitignore does not need $lane"
 done
 pass 'a change no lane reads skips every filtered lane'
@@ -77,19 +99,27 @@ for lane in lint coverage portable herdr; do
   assert_lane "$out" "$lane" true "a mixed change unions into $lane"
 done
 assert_lane "$out" web false "a mixed shell/docs change does not need the docs site"
+assert_lane "$out" docker false "a mixed shell/docs change does not need the real-docker lane"
 pass 'a mixed change unions every triggered lane'
 
 # --- docs site changes run only the web lane ---------------------------------
 
 out=$(lanes_for web/package.json)
 assert_lane "$out" web true "a web/ change needs the docs-site lane"
-for lane in lint coverage portable herdr; do
+for lane in lint coverage portable herdr docker; do
   assert_lane "$out" "$lane" false "a web/ change does not need $lane"
 done
+pass 'docs site changes run only the web lane'
+
+# --- mise.toml is shared by docker and the docs site --------------------------
+
 out=$(lanes_for mise.toml)
 assert_lane "$out" web true "mise.toml is a docs-site toolchain pin"
-assert_lane "$out" lint false "mise.toml cannot change the lint verdict"
-pass 'docs site changes run only the web lane'
+assert_lane "$out" docker true "mise.toml is a real-docker toolchain pin"
+assert_lane "$out" lint true "mise.toml is in the shellcheck set via the docker lane"
+assert_lane "$out" portable true "mise.toml is a portable-suite dependency"
+assert_lane "$out" herdr false "mise.toml cannot change the real-herdr verdict"
+pass 'mise.toml runs docker and web together'
 
 # --- fail-open cases ----------------------------------------------------------
 
@@ -99,7 +129,7 @@ check_fail_open() {
   local label=$1 out
   shift
   out=$("$BIN" "$@" 2>/dev/null)
-  for lane in lint coverage portable herdr web; do
+  for lane in lint coverage portable herdr docker web; do
     assert_lane "$out" "$lane" true "$label must fail open into $lane"
   done
 }
@@ -120,7 +150,7 @@ pass 'an undeterminable change set runs every lane, loudly'
 # --- an empty change set ------------------------------------------------------
 
 out=$(printf '' | "$BIN" --paths-from - 2>/dev/null)
-for lane in lint coverage portable herdr web; do
+for lane in lint coverage portable herdr docker web; do
   assert_lane "$out" "$lane" false "an empty change set skips $lane"
 done
 pass 'an empty change set skips every filtered lane'
@@ -128,7 +158,7 @@ pass 'an empty change set skips every filtered lane'
 # --- real refs ----------------------------------------------------------------
 
 out=$("$BIN" HEAD HEAD 2>/dev/null)
-for lane in lint coverage portable herdr web; do
+for lane in lint coverage portable herdr docker web; do
   assert_lane "$out" "$lane" false 'a no-op diff of real refs skips every lane'
 done
 pass 'the two-ref form diffs real commits'
@@ -136,7 +166,7 @@ pass 'the two-ref form diffs real commits'
 # --- the workflow gates on exactly these lanes -------------------------------
 
 WF="$ROOT/.github/workflows/ci.yml"
-for lane in lint coverage portable herdr web; do
+for lane in lint coverage portable herdr docker web; do
   assert_grep "outputs.$lane == 'true'" "$WF" "the workflow must gate a job on the $lane lane"
 done
 assert_grep 'bin/cs-ci-lanes.sh' "$WF" 'the workflow must call the lane map, not re-spell it'

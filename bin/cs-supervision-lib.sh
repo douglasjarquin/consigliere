@@ -14,13 +14,15 @@
 # a live supervision cycle will read, so a home whose only work is an armed
 # source must NOT be told supervision is unnecessary.
 
-# Portable mtime; Linux stat lacks -f, macOS stat lacks -c.
+# bin/cs-lock-lib.sh is the one owner of the portable stat mtime read. It is a
+# leaf of pure function definitions with no side effects, so this per-turn
+# turn-end-hook dependency stays as cheap as the inlined copy it replaces.
+_CS_SUP_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/cs-lock-lib.sh
+. "$_CS_SUP_LIB_DIR/cs-lock-lib.sh"
+
 cs_sup_stat_mtime() {
-  if [ "$(uname)" = Darwin ]; then
-    stat -f %m "$1" 2>/dev/null
-  else
-    stat -c %Y "$1" 2>/dev/null
-  fi
+  cs_lock_path_mtime "$1"
 }
 
 # cs_supervision_status <state-dir> [grace-seconds]
@@ -83,6 +85,13 @@ cs_supervision_status() {
 cs_supervision_unhealthy() {
   cs_supervision_status "$@"
   [ "$CS_SUP_SUPERVISED" -gt 0 ] && [ "$CS_SUP_WATCHER_FRESH" = false ]
+}
+
+# cs_supervision_needed <state-dir> [grace-seconds]
+# Exit 0 (true) exactly when the home has work needing supervision.
+cs_supervision_needed() {
+  cs_supervision_status "$@"
+  [ "$CS_SUP_SUPERVISED" -gt 0 ]
 }
 
 # cs_supervision_work_desc

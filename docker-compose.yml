@@ -1,0 +1,34 @@
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: docker/dev/Dockerfile
+      args:
+        UID: ${DEV_UID:-1000}
+        GID: ${DEV_GID:-1000}
+    working_dir: /workspace
+    command: ["sleep", "infinity"]
+    volumes:
+      - .:/workspace
+      # Anonymous volumes shadow these six gitignored, boss-private paths so
+      # the container can never see their real host content, regardless of
+      # what this machine actually has on disk in them.
+      - /workspace/config
+      - /workspace/host
+      - /workspace/data
+      - /workspace/state
+      - /workspace/projects
+      - /workspace/.no-mistakes
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/dev/Dockerfile
+      args:
+        UID: ${DEV_UID:-1000}
+        GID: ${DEV_GID:-1000}
+    command: ["python3", "-m", "http.server", "8080", "--directory", "/srv/web"]
+    volumes:
+      - ./web/dist:/srv/web:ro
+    ports:
+      - "8080:8080"

@@ -54,6 +54,8 @@ CS_LAYOUT_GATE_SKIP=
 
 # shellcheck source=bin/cs-primary-scope-lib.sh
 . "$SCRIPT_DIR/cs-primary-scope-lib.sh"
+# shellcheck source=bin/cs-hook-host-lib.sh
+. "$SCRIPT_DIR/cs-hook-host-lib.sh"
 cs_primary_scope_matches "$CS_ROOT" "$STATE" || exit 0
 
 COMPLETION_FILE="$STATE/.session-start-complete"
@@ -82,6 +84,9 @@ if [ -z "$SOURCE" ] && [ ! -t 0 ]; then
   # depending on greedy-regex luck, and it cannot mistake a string VALUE of
   # "source" for the key, because only a key is followed by a bare colon.
   PAYLOAD=$(cat 2>/dev/null || true)
+  if cs_hook_payload_is_foreign_host "$PAYLOAD"; then
+    exit 0
+  fi
   SOURCE=$(printf '%s' "$PAYLOAD" | awk '
     BEGIN { RS = "\"" }
     seen == 2 { print; exit }

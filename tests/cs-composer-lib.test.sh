@@ -34,6 +34,13 @@ case "${1:-} ${2:-}" in
       cat "$CS_FAKE_HERDR_CAPTURE" 2>/dev/null
     fi
     exit 0 ;;
+  "agent get")
+    # Unset = no native status (agent get fails), matching a herdr that cannot
+    # answer; a value is served as the pane's native agent_status.
+    [ -n "${CS_FAKE_HERDR_AGENT_STATUS:-}" ] || exit 1
+    printf '{"result":{"agent":{"agent":"claude","agent_status":"%s"}}}\n' \
+      "$CS_FAKE_HERDR_AGENT_STATUS"
+    exit 0 ;;
   "pane process-info")
     if [ "${CS_FAKE_HERDR_AGENT_PROC:-claude}" = none ]; then
       printf '{"result":{"process_info":{"shell_pid":100,"foreground_processes":[{"pid":100,"argv0":"zsh"}]}}}\n'
@@ -143,8 +150,33 @@ test_composer_classifier() {
       [ "$verdict" = pending ] \
         || { echo "NBSP-separated typed input read '$verdict' under LC_ALL=$loc, want pending" >&2; exit 1; }
     done
+    # REGRESSION (ported upstream fix, firstmate #2811): a BLOCKED agent -
+    # parked on a permission prompt, trust dialog, or question menu - can draw
+    # a blank composer region, so structure alone looks free. A blocked native
+    # status must never yield the empty verdict that authorizes typing: the
+    # keys would answer the dialog, not compose a message.
+    printf '%s\n%s\n%s\n%s\n' "$RULE" "$CLAUDE_EMPTY_ROW" "$RULE" "$CLAUDE_HINTS" > "$cap"
+    verdict=$(export CS_FAKE_HERDR_AGENT_STATUS=blocked; cs_composer_state w1:p1)
+    [ "$verdict" = unknown ] \
+      || { echo "blocked agent with empty-looking claude composer read '$verdict', want unknown" >&2; exit 1; }
+    printf '\342\224\202 > \342\224\202\n' > "$cap"
+    verdict=$(export CS_FAKE_HERDR_AGENT_STATUS=blocked; cs_composer_state w1:p1)
+    [ "$verdict" = unknown ] \
+      || { echo "blocked agent with bordered empty composer read '$verdict', want unknown" >&2; exit 1; }
+    # An idle native status leaves the structural empty proof in charge, so
+    # ordinary steering is unchanged.
+    printf '%s\n%s\n%s\n%s\n' "$RULE" "$CLAUDE_EMPTY_ROW" "$RULE" "$CLAUDE_HINTS" > "$cap"
+    verdict=$(export CS_FAKE_HERDR_AGENT_STATUS=idle; cs_composer_state w1:p1)
+    [ "$verdict" = empty ] \
+      || { echo "idle agent with empty claude composer read '$verdict', want empty" >&2; exit 1; }
+    # A blocked agent demotes only the empty verdict; leftover text stays
+    # pending so pre-exit flush callers keep working.
+    printf '%s\n\342\235\257\302\240land the PR now\r\n%s\n' "$RULE" "$RULE" > "$cap"
+    verdict=$(export CS_FAKE_HERDR_AGENT_STATUS=blocked; cs_composer_state w1:p1)
+    [ "$verdict" = pending ] \
+      || { echo "blocked agent with typed input read '$verdict', want pending" >&2; exit 1; }
   ) || fail "composer classifier verdicts wrong"
-  pass "composer classifier (codex › and claude ❯): ghost-empty, typed-pending, stripped-transport-pending, dead-shell-unknown, bordered-empty, NBSP-padded-empty under UTF-8 and LC_ALL=C, and on real claude 2.1.227 bytes - live composer empty, exited-to-shell ❯ never empty, stale composer above a shell unknown, composer shape without an agent process unknown"
+  pass "composer classifier (codex › and claude ❯): ghost-empty, typed-pending, stripped-transport-pending, dead-shell-unknown, bordered-empty, NBSP-padded-empty under UTF-8 and LC_ALL=C, and on real claude 2.1.227 bytes - live composer empty, exited-to-shell ❯ never empty, stale composer above a shell unknown, composer shape without an agent process unknown, blocked agent never empty (idle stays empty, typed input stays pending)"
 }
 
 test_composer_classifier

@@ -33,8 +33,8 @@ cs_herdr_session() {
   printf '%s' "${CS_HERDR_SESSION:-default}"
 }
 
-# cs_herdr_argv_with_session <out-array-name> <session> <herdr arguments...>
-# Populates <out-array-name> with argv plus --session <session> inserted
+# cs_herdr_argv_with_session <session> <herdr arguments...>
+# Populates CS_HERDR_ARGV with argv plus --session <session> inserted
 # immediately before a trailing "--" separator when one is present (e.g.
 # `agent start ... -- AGENT_ARG...`), else appended at the end. Appending
 # --session after a subcommand's own "--" would make it a literal passthrough
@@ -43,25 +43,23 @@ cs_herdr_session() {
 # caller (cs_herdr below and bin/cs-herdr-lab.sh's cs_herdr_lab_raw), not
 # reintroduced independently per caller.
 cs_herdr_argv_with_session() {
-  local -n _cs_herdr_argv_out=$1
-  local session=$2
-  shift 2
+  local session=$1
+  shift
   local arg saw_sep=0
-  _cs_herdr_argv_out=()
+  CS_HERDR_ARGV=()
   for arg in "$@"; do
     if [ "$saw_sep" -eq 0 ] && [ "$arg" = "--" ]; then
-      _cs_herdr_argv_out+=(--session "$session")
+      CS_HERDR_ARGV+=(--session "$session")
       saw_sep=1
     fi
-    _cs_herdr_argv_out+=("$arg")
+    CS_HERDR_ARGV+=("$arg")
   done
-  [ "$saw_sep" -eq 1 ] || _cs_herdr_argv_out+=(--session "$session")
+  [ "$saw_sep" -eq 1 ] || CS_HERDR_ARGV+=(--session "$session")
 }
 
 cs_herdr() { # <herdr arguments...>
-  local -a _cs_herdr_call_argv
-  cs_herdr_argv_with_session _cs_herdr_call_argv "$(cs_herdr_session)" "$@"
-  herdr "${_cs_herdr_call_argv[@]}"
+  cs_herdr_argv_with_session "$(cs_herdr_session)" "$@"
+  herdr "${CS_HERDR_ARGV[@]}"
 }
 
 cs_herdr_require() {
@@ -151,6 +149,74 @@ cs_herdr_task_create() { # <project-path> <branch> <task-label> [base-ref]
   fi
   printf '%s' "$out" | jq -re \
     '.result | [.workspace.workspace_id, .root_pane.pane_id, .worktree.path, .worktree.branch] | @tsv'
+}
+
+# --- task nesting (tab-in-existing-workspace, no dedicated container) ------
+# herdr's own worktree-aware create (`worktree create`) unconditionally binds
+# a BRAND NEW workspace to the worktree - `--workspace` there only names the
+# SOURCE workspace whose repo is used, never a target to join (docs/herdr.md
+# "Container shape: workspace-per-task"). There is no flag that opens a new
+# git worktree as a tab inside an EXISTING workspace, so nesting a task under
+# its capo without a dangling workspace means never routing the worktree
+# itself through herdr: the checkout is plain git, and only the pane is
+# herdr's (`tab create --workspace <target>`), live-verified (cs-lab,
+# 2026-09-02, herdr 0.8.2) to add a tab to the target workspace with its
+# other tabs and the workspace itself untouched, and to have `pane close` on
+# that tab's root pane remove exactly that one tab and nothing else in the
+# workspace. cs_herdr_worktree_remove (herdr's OWN worktree-bound teardown)
+# must never be called for a task created this way - see
+# cs_herdr_nested_task_remove below.
+
+# Mirrors the layout herdr's own worktree create uses (cs-spawn.sh's
+# worktree-create failure message points at ~/.herdr/worktrees/<project>/),
+# kept under its own "nested" subtree so a nested and a herdr-owned worktree
+# for the same project can never collide on one path.
+cs_herdr_nested_worktree_path() { # <project-root> <task-label> -> path
+  local root=$1 label=$2
+  printf '%s/%s/nested/%s\n' "${CS_HERDR_WORKTREES_ROOT:-$HOME/.herdr/worktrees}" "$(basename "$root")" "$label"
+}
+
+cs_herdr_task_create_nested() { # <project-path> <branch> <task-label> <target-workspace> [base-ref]
+  # Same TAB-separated shape as cs_herdr_task_create (workspace_id pane_id
+  # worktree_path branch): workspace_id here is always the caller's own
+  # <target-workspace> echoed back, never a new one.
+  local src=$1 branch=$2 label=$3 target_ws=$4 base=${5:-} root wt out pane
+  cs_herdr_workspace_exists "$target_ws" || return 1
+  root=$(git -C "$src" rev-parse --show-toplevel 2>/dev/null) || return 1
+  wt=$(cs_herdr_nested_worktree_path "$root" "$label") || return 1
+  [ -e "$wt" ] && return 1
+  mkdir -p "$(dirname "$wt")" >/dev/null 2>&1 || return 1
+  if [ -n "$base" ]; then
+    git -C "$src" worktree add -b "$branch" "$wt" "$base" >/dev/null 2>&1 || return 1
+  else
+    git -C "$src" worktree add -b "$branch" "$wt" >/dev/null 2>&1 || return 1
+  fi
+  out=$(cs_herdr tab create --workspace "$target_ws" --cwd "$wt" --label "$label" --no-focus 2>/dev/null) || {
+    git -C "$src" worktree remove --force "$wt" >/dev/null 2>&1 || true
+    return 1
+  }
+  pane=$(printf '%s' "$out" | jq -re '.result.root_pane.pane_id // empty' 2>/dev/null)
+  if [ -z "$pane" ]; then
+    git -C "$src" worktree remove --force "$wt" >/dev/null 2>&1 || true
+    return 1
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$target_ws" "$pane" "$wt" "$branch"
+}
+
+cs_herdr_nested_task_remove() { # <project-path> <worktree-path> <pane-id> [--force]
+  # Dirty worktrees fail closed on plain `git worktree remove`, same contract
+  # as cs_herdr_worktree_remove's herdr-side dirty_worktree_requires_force;
+  # --force is passed only on an explicit boss-authorized discard. The pane
+  # close happens ONLY after the worktree is confirmed gone, so a refused
+  # (dirty) removal leaves the task's pane in place to inspect rather than
+  # closing the tab out from under surviving work.
+  local src=$1 wt=$2 pane=$3 force=${4:-}
+  if [ "$force" = --force ]; then
+    git -C "$src" worktree remove --force "$wt" >/dev/null 2>&1 || return 1
+  else
+    git -C "$src" worktree remove "$wt" >/dev/null 2>&1 || return 1
+  fi
+  cs_herdr_pane_close "$pane" >/dev/null 2>&1 || true
 }
 
 cs_herdr_worktree_open() { # <path> <label> -> same TAB-separated tuple
@@ -396,6 +462,13 @@ cs_herdr_agent_alive() { # <pane_id>  - is a real agent (codex or claude) in the
   printf '%s' "$out" | jq -e '.result.agent.agent // empty | select(. != "")' >/dev/null 2>&1
 }
 
+cs_herdr_agent_kind_matches() { # <pane_id> <expected-kind>
+  local out kind
+  out=$(cs_herdr agent get "$1" 2>/dev/null) || return 1
+  kind=$(printf '%s' "$out" | jq -er '.result.agent.agent // empty' 2>/dev/null) || return 1
+  [ "$kind" = "$2" ]
+}
+
 # cs_herdr_agent_start_timeout_ms <seconds> - seconds converted to milliseconds
 # for `agent start --timeout`, clamped to herdr's own documented ceiling
 # (`herdr agent start --help`: max 300000). LAUNCH_WAIT and its
@@ -575,7 +648,7 @@ cs_herdr_pane_agent_process() { # <pane_id> -> <pid>\t<argv0>, rc 1 if absent
   [ -n "$out" ] || return 1
   printf '%s' "$out" | jq -er '
     .result.process_info.foreground_processes // []
-    | map(select((.argv0 // "") | test("^(codex|claude)$")))
+    | map(select((.argv0 // "") | test("^(codex|claude|grok|cursor-agent)$")))
     | first
     | select(. != null)
     | "\(.pid)\t\(.argv0)"

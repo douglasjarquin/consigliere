@@ -98,29 +98,31 @@ pass "CS_HARNESS_OVERRIDE has highest precedence"
 # `env` cannot run a shell function).
 mkdir -p "$TMP/cfg"
 printf 'claude\n' > "$TMP/cfg/harness.conf"
-got=$(unset CS_HARNESS_OVERRIDE CLAUDECODE; CS_HOST_OVERRIDE="$TMP/cfg" cs_harness_detect_root)
+got=$(unset CS_HARNESS_OVERRIDE CLAUDECODE CURSOR_AGENT CURSOR_INVOKED_AS GROK_AGENT; CS_HOST_OVERRIDE="$TMP/cfg" cs_harness_detect_root)
 [ "$got" = claude ] || fail "host/harness.conf must be read (got $got)"
 printf '  codex \n' > "$TMP/cfg/harness.conf"  # whitespace tolerated
-got=$(unset CS_HARNESS_OVERRIDE; CLAUDECODE=1 CS_HOST_OVERRIDE="$TMP/cfg" cs_harness_detect_root)
+got=$(unset CS_HARNESS_OVERRIDE CURSOR_AGENT CURSOR_INVOKED_AS GROK_AGENT; CLAUDECODE=1 CS_HOST_OVERRIDE="$TMP/cfg" cs_harness_detect_root)
 [ "$got" = codex ] || fail "host/harness.conf must beat CLAUDECODE (got $got)"
 printf 'garbage\n' > "$TMP/cfg/harness.conf"  # invalid value ignored
-got=$(unset CS_HARNESS_OVERRIDE CLAUDECODE; CS_HOST_OVERRIDE="$TMP/cfg" cs_harness_detect_root)
+got=$(unset CS_HARNESS_OVERRIDE CLAUDECODE CURSOR_AGENT CURSOR_INVOKED_AS GROK_AGENT; CS_HOST_OVERRIDE="$TMP/cfg" cs_harness_detect_root)
 [ "$got" = codex ] || fail "invalid host/harness.conf must fall through to default (got $got)"
 pass "host/harness.conf beats env and ignores invalid values"
 
 # CLAUDECODE env, then default codex.
-got=$(unset CS_HARNESS_OVERRIDE; CLAUDECODE=1 CS_HOST_OVERRIDE="$TMP/empty" cs_harness_detect_root)
+got=$(unset CS_HARNESS_OVERRIDE CURSOR_AGENT CURSOR_INVOKED_AS GROK_AGENT; CLAUDECODE=1 CS_HOST_OVERRIDE="$TMP/empty" cs_harness_detect_root)
 [ "$got" = claude ] || fail "CLAUDECODE=1 must resolve claude (got $got)"
-got=$(unset CS_HARNESS_OVERRIDE CLAUDECODE; CS_HOST_OVERRIDE="$TMP/empty" cs_harness_detect_root)
+got=$(unset CS_HARNESS_OVERRIDE CLAUDECODE CURSOR_AGENT CURSOR_INVOKED_AS GROK_AGENT; CS_HOST_OVERRIDE="$TMP/empty" cs_harness_detect_root)
 [ "$got" = codex ] || fail "default must be codex (got $got)"
 pass "CLAUDECODE env then default codex"
 
 # --- valid / binary ---------------------------------------------------------
 cs_harness_valid codex || fail "codex must be valid"
 cs_harness_valid claude || fail "claude must be valid"
+cs_harness_valid grok || fail "grok must be valid"
 cs_harness_valid gpt && fail "unknown harness must be invalid" || true
 [ "$(cs_harness_binary codex)" = codex ] || fail "codex binary"
 [ "$(cs_harness_binary claude)" = claude ] || fail "claude binary"
+[ "$(cs_harness_binary grok)" = grok ] || fail "grok binary"
 pass "valid and binary"
 
 # --- flags ------------------------------------------------------------------
@@ -132,6 +134,7 @@ export CS_HOST_OVERRIDE="$TMP/no-such-host"
 
 [ "$(cs_harness_autonomy_flag codex)" = "--dangerously-bypass-approvals-and-sandbox" ] || fail "codex autonomy"
 [ "$(cs_harness_autonomy_flag claude)" = "--dangerously-skip-permissions" ] || fail "claude autonomy"
+[ "$(cs_harness_autonomy_flag grok)" = "--always-approve" ] || fail "grok autonomy"
 pass "the autonomy flag per harness"
 
 # --- config/permission-mode.conf -------------------------------------------------
@@ -151,6 +154,12 @@ for mode in auto acceptEdits bypassPermissions; do
     fail "claude $mode must render --permission-mode '$mode'"
 done
 
+for mode in default auto acceptEdits bypassPermissions; do
+  pm_write "grok $mode"
+  [ "$(pm_flag grok)" = "--permission-mode '$mode'" ] ||
+    fail "grok $mode must render --permission-mode '$mode'"
+done
+
 pm_write "claude auto"
 [ "$(pm_flag codex)" = "--dangerously-bypass-approvals-and-sandbox" ] ||
   fail "a claude-only record must leave codex on its own flag"
@@ -163,6 +172,7 @@ pass "config/permission-mode.conf selects a narrower claude launch mode"
 # Rejections. Every one must fail closed: a bad file stops the dispatch instead
 # of silently launching a soldier with wider or unusable permissions.
 for bad in "claude plan" "claude manual" "claude dontAsk" "claude bogus" \
+           "grok plan" "grok dontAsk" "grok bogus" \
            "codex never" "gemini auto" "claude" "claude auto extra"; do
   printf '%s\n' "$bad" > "$PM/permission-mode.conf"
   if pm_flag claude 2>/dev/null; then
@@ -190,6 +200,9 @@ scout_codex=$(cs_harness_scout_launch codex "$op" "$br" "$st")
 assert_contains "$scout_codex" 'codex exec ' "codex scout uses codex exec"
 scout_claude=$(cs_harness_scout_launch claude "$op" "$br" "$st")
 assert_contains "$scout_claude" 'claude -p ' "claude scout uses claude -p"
+scout_grok=$(cs_harness_scout_launch grok "$op" "$br" "$st")
+assert_contains "$scout_grok" 'grok -p ' "grok scout uses grok -p"
+assert_contains "$scout_grok" '--always-approve' "grok scout carries autonomy"
 assert_contains "$scout_claude" 'done: headless scout finished' "scout appends terminal status"
 pass "headless scout launch string"
 
@@ -216,6 +229,10 @@ argv=()
 cs_harness_resume_argv argv claude
 { [ "${#argv[@]}" -eq 1 ] && [ "${argv[0]}" = "--continue" ]; } \
   || fail "claude resume argv (got: ${argv[*]-<empty>})"
+argv=()
+cs_harness_resume_argv argv grok
+{ [ "${#argv[@]}" -eq 1 ] && [ "${argv[0]}" = "--continue" ]; } \
+  || fail "grok resume argv (got: ${argv[*]-<empty>})"
 pass "the resume argv builder per harness"
 
 # The notify value embeds `touch <path>` inside a JSON string that codex execs
@@ -467,6 +484,11 @@ done
 for fn in cs_harness_plan_skill cs_harness_start_work_skill; do
   "$fn" bogus >/dev/null 2>&1 && fail "$fn must refuse an unknown harness"
 done
+[ "$(cs_harness_interrupt_key grok)" = C-c ] || fail "grok interrupt key"
+[ "$(cs_harness_exit_command grok)" = '/exit' ] || fail "grok exit command"
+[ "$(cs_harness_skill_prefix grok)" = '/' ] || fail "grok skill prefix"
+[ "$(cs_harness_composer_command_settle grok)" = 1 ] || fail "grok needs settle"
+[ "$(cs_harness_instruction_file grok)" = AGENTS.md ] || fail "grok instruction file"
 pass "skill/instruction/busy accessors"
 
 # --- omo install detection ---------------------------------------------------

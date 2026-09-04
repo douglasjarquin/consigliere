@@ -209,7 +209,7 @@ test_changes_requested_review_produces_a_wake() {
 # Task 17: teardown already refuses until landing is proven
 # (bin/cs-teardown.sh), so a rejected PR's soldier and worktree stay alive -
 # the only missing piece was Task 9's detection above. This proves the wake it
-# produces reaches the SAME generic AGENTS.md section-8-item-3 check: handling
+# produces reaches the SAME generic AGENTS.md section-7-item-3 check: handling
 # any other check wake uses (drained with no PR-specific code), and that the
 # still-live soldier can then be steered with the boss's real review feedback
 # through the completely unmodified cs-send.sh - no new "resume for rework"

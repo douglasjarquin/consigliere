@@ -11,6 +11,83 @@ The main home is the repo checkout itself; each capo has a persistent isolated `
 
 Test and script overrides: `CS_ROOT_OVERRIDE`, `CS_STATE_OVERRIDE` narrow a single script's resolution; production flows never set them.
 
+## Complete home layout
+
+This section is the single owner of the complete tree; the sections below it add field-level reference detail, and each producing script's header owns exact mutation mechanics.
+
+```text
+AGENTS.md            always-loaded kernel
+README.md            public overview
+.codex/              codex SessionStart digest run and Stop-hook turn-end guard, committed
+.claude/              claude SessionStart digest run and Stop-hook turn-end guard (settings.json), committed
+CLAUDE.md            symlink to AGENTS.md (claude loads CLAUDE.md; codex loads AGENTS.md)
+.tasks.toml          tracked tasks-axi backlog backend config
+.no-mistakes.yaml    tracked per-repo no-mistakes overrides; gate-agent scope, canonical lint, and local evidence placement
+skills/              consigliere-loaded skills, committed (source of truth)
+.claude/skills       symlink to ../skills, so claude discovers project skills
+.agents/skills       symlink to ../skills, so codex discovers project skills
+bin/                 helper scripts, committed; read each script's header before first use
+docs/                architecture, configuration schema, herdr and codex verified facts, supervision protocol, upstream-review ledger
+mise.toml            dev-tools suite: pinned tool versions (node, aube, npm:tasks-axi); docs/dev-environment.md
+mise-tasks/dev/      file-based mise tasks (install, up, down, shell, test) for the dev-tools suite; docs/dev-environment.md
+docker/dev/Dockerfile  dev-tools suite's single dev/CI container image; docs/dev-environment.md
+docker-compose.yml   dev-tools suite: dev + web services, with mount-masking over the six LOCAL/gitignored paths below; docs/dev-environment.md
+scripts/ci/          CI-only helper scripts, committed; run-in-container.sh wraps a command inside the dev-tools image
+config/              THE USER-OWNED TREE; LOCAL, gitignored; back it up wholesale; per-file inventory and symlink policy below
+  boss.md            boss preferences and working style; canonical even if harness memory mirrors it; inspect-then-update
+  boss-shared.md     main-authoritative shared boss preferences propagated read-only to capo homes
+  learnings.md       fleet-local operational facts; dated, evidence-backed, curated; created lazily
+  projects.md        thin fleet navigation registry
+  boards.md          per-project GitHub Projects board mapping for the contracts and casino skills; parsed by bin/cs-board.sh
+  backlog.md         task queue, dependencies, history; done-archive.md and note-archive.md are its tasks-axi siblings
+  charter.md         capo homes only; the capo's filled charter brief
+  backlog-backend.conf  backlog backend override; absent or "tasks-axi" = default, "manual" = hand-edit
+  permission-mode.conf  optional narrower claude launch permission mode; a Claude ACCOUNT policy, portable across that account's machines; absent = full autonomy
+  wedge-alarm.conf   optional away-mode wedge-alarm directives; absent = auto, which adapts per OS; a command: directive naming a machine-local path is the one non-portable use
+host/                MACHINE-LOCAL; LOCAL, gitignored; not backed up, re-created per machine, never propagated
+  capos.md           capo routing table; maintained by cs-home-seed.sh; parsed by bin/cs-capo-registry-lib.sh
+  harness.conf       pins the root harness (codex or claude); absent = auto-detect
+  herdr-plugin/      generated manifest for this home's herdr push-event plugin; bin/cs-herdr-event-plugin.sh
+  upstream.conf      path of the firstmate checkout used by /upstream-review; absent = ../firstmate
+  activation.conf    per-home activation scope; absent = afk-only
+  telemetry.conf     optional per-home turn telemetry switch; absent = off; docs/telemetry.md
+data/                generated and task-scoped output; LOCAL, gitignored, DISPOSABLE as a tree
+  sweeps.md          standing board sweeps that outlive the session that started one; armed, converged, and retired only by bin/cs-board-watch.sh
+  telemetry/turns.jsonl  append-only turn telemetry, written only while enabled; docs/telemetry.md
+  <id>/brief.md      per-task soldier brief, or per-capo charter brief when kind=capo
+  <id>/report.md     scout task deliverable, written by the soldier; survives teardown
+  session-start/<timestamp>-<home-id>.md  expanded-recovery snapshot published by a locked, non-`--recover`/`--full` session-start run; pruned to CS_SESSION_START_SNAPSHOT_KEEP, diagnostic only, never a second source of operational truth
+projects/            cloned repos; gitignored; READ-ONLY for you
+state/               volatile runtime signals; gitignored
+  <id>.status        appended by soldiers: "<state>: <note>" wake-event lines, not current-state truth
+  <id>.turn-ended    touched every turn end by the harness turn-end hook (codex notify / claude Stop-hook)
+  <id>.meta          written by cs-spawn; kind-specific posture fields and the complete schema, including cs-pr-check's PR-ready fields, live below
+  <id>.check.sh      authenticated slow poll; watcher runs registered checks from hash-validated snapshots only
+  .home-pane         this home's own agent pane, recorded at session start; revalidated before any activation
+  .session-start-complete  completion proof gating the session-open re-emit; bin/cs-sessionstart-run.sh
+  .startup-network.*  the deferred network stage's status, current result, pending unread results, claim, delivery proof, elapsed-time timeline, and lock; bin/cs-startup-network.sh
+  .activation-stalled  present when this home cannot self-activate (pane gone or agent dead); needs recovery
+  <id>.check-trust   content binding created by cs-check-register.sh
+  <id>.pr-poll       validated data sidecar for the byte-static PR merge poll
+  pending-replies/   parent-owned capo pending-reply records; cs-pending-reply-lib.sh
+  procevent/         armed blocking sources supervised outside a turn; bin/cs-procevent.sh
+  procevent-inbox/   their captured results, adapter records, and handled acknowledgements
+  .herdr-events .herdr-events-cursor  push-event spool fed by herdr's plugin hook, and the watcher's cursor into it; bin/cs-herdr-event-lib.sh
+  .wake-queue        durable queued wakes: epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload
+  .afk               durable away-mode flag; present = cs-activate.sh may afk-only-inject and cs-auto-decision-lib.sh may decide bosslessly
+  .watch.lock .wake-queue.lock .monitor.lock   watcher, queue, and monitor singleton locks
+  .last-watcher-beat watcher liveness beacon; guard scripts read it
+  .last-monitor-beat .monitor.log .monitor-stop   persistent monitor liveness, lifecycle log, and stop request; cs-monitor.sh
+  .checkpoint-turn   per-turn checkpoint counter; written by cs-watch-checkpoint.sh, cleared at every turn end
+  .decision-cursor-*   per-task byte cursor and folded open-decision set bounding the wake drain's open-decision scan to new status appends; written only by cs-classify-lib.sh; safe to delete (forces one full re-fold)
+  .hash-* .count-* .stale-* .paused-* .seen-* .last-*   watcher internals; never touch
+  .subsuper-*        away-mode delivery internals (cs-activate.sh, cs-afk-start.sh, cs-afk-return.sh); never touch
+.no-mistakes/        local validation state and evidence (`.no-mistakes/evidence`); gitignored
+```
+
+A `state/<id>.status` line is a wake event, not current-state truth; `bin/cs-crew-state.sh` owns current-state reconciliation.
+Treat `config/boss.md` as the record of boss preferences and `config/learnings.md` as curated home-local knowledge, regardless of harness memory.
+
 ## Herdr layout
 
 - One herdr session: `default` (labs excepted; see `bin/cs-herdr-lab.sh`).
@@ -43,8 +120,9 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 | `config/backlog-backend.conf` | portable | absent or `tasks-axi` = tasks-axi against `config/backlog.md`; `manual` = hand-edit the markdown |
 | `config/permission-mode.conf` | portable | optional narrower claude launch permission mode; absent = full autonomy; `bin/cs-harness-lib.sh` owns the two-column schema below. This is a Claude ACCOUNT policy, not a machine property - the record is `<harness> <mode>` with no machine-specific content, so the same file is correct verbatim on every machine that account uses; do not re-derive it as host-specific |
 | `config/wedge-alarm.conf` | portable | wedge-alarm active-alert directives, read through `bin/cs-prompt-lib.sh` by every guarded-prompt caller (currently `bin/cs-activate.sh`, for a failing stretch past `CS_ACTIVATE_WEDGE_MAX_SECS`); absent = auto (macOS Notification Center when available, degrading elsewhere). A boss preference, boss-authored only; the directives are channel selectors that adapt per OS, so the file is portable. The one non-portable use is a `command:` directive naming a machine-local path - keep such a value out of shared dotfiles |
+| `config/vault-pass-horizon.conf` | portable | optional presence flag opting this home in to the pass-count decay horizon in `skills/vault`; absent = wall-clock-only decay; present = aging entries also stale after 10 unreinforced passes and perishable entries after 3, judged against whichever horizon hits first |
 | `host/capos.md` | host | capo routing table; every record embeds an absolute machine-local home path |
-| `host/harness.conf` | host | pins the root harness (`codex` or `claude`) regardless of environment |
+| `host/harness.conf` | host | pins the root harness (`codex`, `claude`, `grok`, or `cursor`) regardless of environment |
 | `host/upstream.conf` | host | path of the firstmate checkout for `/upstream-review`; absent = `../firstmate` |
 | `host/activation.conf` | host | per-home activation scope: `always`, `afk-only`, or `off`; absent = `always`, because a turn that ends depends on activation to start the next one; `bin/cs-activate.sh` owns the policy, and `bin/cs-home-seed.sh --help` owns capo seed and bootstrap convergence |
 | `host/herdr-plugin/herdr-plugin.toml` | host | generated manifest for this home's herdr push-event plugin, written and linked by `bin/cs-herdr-event-plugin.sh` (its header owns the mechanics). Machine-local by nature: herdr's plugin registry is global to the user and lives in `~/.config/herdr`. Never hand-edited; re-run `install` to regenerate |
@@ -52,7 +130,7 @@ Prose and records use `.md`; settings use `.conf`; the extension marks the forma
 
 Symlink policy, established empirically (2026-08-06, tasks-axi 0.2.x):
 
-- `boss.md`, `boss-shared.md`, `learnings.md`, `memory-archive.md`, `projects.md`, `boards.md`, and the three portable `.conf` files are read-only to scripts and safe to symlink out to a dotfiles repository.
+- `boss.md`, `boss-shared.md`, `learnings.md`, `memory-archive.md`, `projects.md`, `boards.md`, `vault-pass-horizon.conf`, and the three portable `.conf` files are read-only to scripts and safe to symlink out to a dotfiles repository.
 - `backlog.md`, `done-archive.md`, `note-archive.md`, and `host/capos.md` are rewritten by rename (tasks-axi and the registry writers), which replaces a symlink with a regular file and silently forks the content; they must be real files, and the doctor fails when one is a symlink.
 - A `host/` entry whose symlink target resolves outside the home defeats the host tier (the `capos.md`-across-two-machines mistake); the doctor fails on it.
 
@@ -97,7 +175,7 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
 
 ## data/ and state/
 
-`AGENTS.md` section 2 owns the every-session file tree; this section owns field-level reference detail; producing scripts own mutation:
+The "Complete home layout" section above owns the every-session file tree; this section owns field-level reference detail; producing scripts own mutation:
 
 - `config/boards.md` - per-project GitHub Projects (v2) board mapping for the `contracts` and `casino` skills, kept beside `config/projects.md` and keyed by the same project name. Blank lines and `#` comments ignored; every other line is `<project> <owner> <number> [ready-label] [in-progress-label] [status-field] [inbox-label] [backlog-label]`. Labels/field default to `Ready` / `In Progress` / `Status` / `Inbox` / `Backlog`; use `_` for spaces in a label token. `<owner>` is a user/org login or `@me`. `bin/cs-board.sh` reads it; the board mapping is optional (only projects worked via the board need a line), and the Inbox/Backlog columns matter only to `casino`.
 - `data/sweeps.md` - the boss's standing intent to work a project's board, so a sweep outlives the session that started it.
@@ -106,22 +184,35 @@ That pane looks busy rather than failed, so it surfaces through the ordinary sta
   Each record arms `state/sweep-<project>.check.sh`, an ordinary hash-bound custom watcher check that reports column depth and never moves a card.
   `cs-board-watch.sh sync` converges the two in both directions and runs at every locked session start.
 - `state/sweep-<project>.board-seen` - the sweep poll's own memory: last reported Ready count, Inbox count, and epoch, one per line. It is what makes the poll silent on a column consigliere shrank and loud on one the boss grew. Deleted on arm and disarm; safe to delete by hand, which only costs one extra report.
-- `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `kind=` (ship|scout|capo), `harness=` (codex|claude, inherited from the root session). No model or reasoning level is recorded, because the harness selects both.
+- `state/<id>.meta` - written by `cs-spawn.sh`: `workspace=`, `pane=`, `worktree=`, `project=`, `kind=` (ship|scout|capo), `container=` (ship/scout only: `workspace` for the ordinary dedicated container, `tab` when nested inside a capo's own live workspace - `docs/herdr.md` "Nested tab shape"), `harness=` (codex|claude|grok|cursor, inherited from the root session), and `herdr_session=` (the task endpoint's Herdr session).
+  No model or reasoning level is recorded, because the harness selects both.
+  Parent-aware tasks also record `parent_task_id=`, `parent_home=`, `parent_state=`, `parent_pane=`, `parent_generation=`, `parent_herdr_session=`, and `endpoint_generation=`; `bin/cs-meta-lib.sh` validates this exact edge and `bin/cs-report.sh` routes only through it.
+  A parent drains its durable inbox with `bin/cs-inbox.sh`; the command filters by `to_task_id`, validates the sender's recorded parent edge and endpoint generation, and creates a separate acknowledgement only after explicit handling.
+  `question` and `decision-required` reports also create `state/pending/<message-id>.pending` before delivery; the parent closes that sender-side obligation before writing the inbox acknowledgement.
+  A sender may retry with `bin/cs-report.sh --message-id <message-id>`; matching bytes remain one logical record while the Herdr doorbell may be retried.
+  A parent answers a response-required message with `bin/cs-inbox.sh --ack <message-id> --reply <bounded-answer>`; the child pane and worktree are revalidated before delivery.
+  A parent escalates a response-required message with `bin/cs-inbox.sh --escalate <message-id> --summary <bounded-summary>`; the deterministic upward transfer is published before the child obligation is closed.
+  `bin/cs-recover.sh` performs one bounded pass over pending and unacknowledged messages, revalidating the recipient generation and worktree before re-waking it.
+  `bin/cs-status.sh` prints bounded message counts and exact inbox or recovery next actions without mutating state.
   A `kind=ship` task also records the posture its spawn stated explicitly: `mode=` (no-mistakes|direct-PR|local-only) and `yolo=` (on|off).
   A `kind=scout` records NEITHER, because a report deliverable has no mode to honour and no approval posture to apply, which is why `cs-promote.sh` is where a promoted scout first states both.
   `kind=capo` records `mode=capo`, `yolo=off`, and `home=`.
-  `cs-spawn.sh` also records `issue=` for board-driven work and `headless=1` for a headless scout (`codex exec` / `claude -p`); `cs-pr-check.sh` appends `pr=` and any available `pr_head=`.
+  `cs-spawn.sh` also records `issue=` for board-driven work, `backlog_item=` when `--backlog-item` named the backlog work item this dispatch began (`cs-teardown.sh` records that item done on successful cleanup), `route_override=here` when `--here` spawned a capo-owned project outside its capo on an explicit boss redirect, and `headless=1` for a headless scout (`codex exec` / `claude -p`); `cs-pr-check.sh` appends `pr=` and any available `pr_head=`.
+  It also records the phase-2 context-pack audit trail (`bin/cs-context-pack.sh`, issue #151): `pack_sha256=` and `pack_schema=`, the deterministic role/workflow/harness scaffold hash the task's brief was rendered from, for measurement and reproducibility. Audit metadata only, never a dispatch gate - a computation failure warns and proceeds without these two fields rather than blocking the spawn, so their absence on an older or degraded-environment task is expected, not corruption.
+  `cs-pr-merge.sh` appends `merged=1` and `merged_at=` (GitHub's `mergedAt` timestamp) only after GitHub itself confirms the merge, alongside a `done: PR <url> merged` event in `state/<id>.status`, so a landed merge leaves a durable record beyond agent memory.
   Herdr pane state labels and tokens are optional display metadata only; `state/<id>.meta` remains authoritative when the display report is unavailable or stale.
 - `state/<id>.check.sh` - an authenticated custom watcher check. A plan-first ship brief generates this check with `bin/cs-brief.sh --exec-mode plan-first`; it reads the recorded worktree's plain `.omo/boulder.json` and active `.omo/plans/<slug>.md` files, reports changed `remaining/total` checkbox progress, and stays silent when those inputs are unavailable or unchanged.
   `state/<id>.plan-progress` stores only the last emitted `remaining/total` pair so the check does not repeat an unchanged wake; it is disposable task state and is removed when a fresh plan-first check is armed or the task is torn down.
 - `state/<id>.status` - appended by soldiers; wake events, never current state. `bin/cs-classify-lib.sh` owns the verb vocabulary.
-- Pending-reply records (including capo-decision-escalation records) - see `bin/cs-pending-reply-lib.sh`'s `SCHEMA-OWNER` header comment for the full field list.
+- `state/inbox/<message-id>.msg` and `state/inbox/<message-id>.ack` - bounded durable parent/child messages and acknowledgements written by `bin/cs-message-lib.sh`; the full field contract and atomic publication rules live in that script's header.
+- `state/inbox/<message-id>.route` - the separately durable recipient route for a message, written atomically before its doorbell and repaired only by `bin/cs-recover.sh` after the recipient task, pane worktree, and current endpoint generation are revalidated.
+- Pending-reply records - see `bin/cs-pending-reply-lib.sh`'s `SCHEMA-OWNER` header comment for the full field list.
 - Auto-decision ledger (`data/<task_id>/auto-decisions.log`) - see `bin/cs-auto-decision-lib.sh`'s `SCHEMA-OWNER` header comment for the full field list.
 - `state/<id>.control-relaunch` - the agent-control plane's relaunch transaction journal, in the same flat key=value format as the meta file; `bin/cs-control.sh --help` owns the fields and `docs/agent-control.md` the phase sequence. A journal in a non-terminal phase blocks the next relaunch until `--clear-journal` acknowledges it, which sets it aside as `state/<id>.control-relaunch.abandoned`. Both are removed by teardown; deleting one by hand only costs that acknowledgement.
 - `state/.decision-cursor-<task>` - per-status-file byte cursor plus folded open-decision set, written only by `bin/cs-classify-lib.sh`'s `status_open_decisions_incremental` so the wake drain's fleet-wide open-decision scan folds only newly appended status bytes. Removed by teardown with the other watcher markers, along with any `.read.*` / `.tmp.*` staging temps a killed drain left beside it; always safe to delete by hand, which only costs one full re-fold of that task's status log.
   If `state/` is unwritable so no cursor can be staged at all, the drain falls back to the unbounded whole-file fold for that call rather than reporting nothing open.
 - `data/telemetry/turns.jsonl` - append-only JSON Lines turn telemetry for this home, written only while `host/telemetry.conf` enables it, with `state/.telemetry-crumbs-<pid>-<hash>` (turn-scoped breadcrumbs, keyed to the harness process and its reuse-proof identity, discarded once older than `CS_BUSY_TURN_MAX_SECS`) and `state/.telemetry-cursor-<session>` (per-harness-session transcript byte offset plus the effort and model that session last stated) as its disposable working state. `docs/telemetry.md` owns the schema, the folding rules, retention, and the privacy contract; `bin/cs-telemetry-lib.sh` implements them.
-- `state/.herdr-events` - the push-event spool herdr's own plugin hook appends to, one `<kind><TAB><pane><TAB><workspace><TAB><status><TAB><agent>` record per `pane.agent_status_changed` edge, size-capped and rotated by truncation. Its PRESENCE is also the watcher's capability gate, so it is created only once herdr accepts the plugin link. Deleting it costs at most the edges until the next one: while the plugin stays linked, the next `pane.agent_status_changed` edge recreates the spool and the capability gate flips straight back on, with no reinstall.
+- `state/.herdr-events` - the push-event spool herdr's own plugin hook appends to, one `<kind><TAB><pane><TAB><workspace><TAB><status><TAB><agent>[<TAB><endpoint-generation>]` record per `pane.agent_status_changed` edge, size-capped and rotated by truncation. Its PRESENCE is also the watcher's capability gate, so it is created only once herdr accepts the plugin link. Deleting it costs at most the edges until the next one: while the plugin stays linked, the next `pane.agent_status_changed` edge recreates the spool and the capability gate flips straight back on, with no reinstall.
 Only `bin/cs-herdr-event-plugin.sh uninstall` durably disables the transport and drops the watcher back to pure polling.
 - `state/.herdr-events-cursor` - the watcher's byte offset into that spool, which is what lets edges that fired while no watcher ran still be delivered. Safe to delete: the next drain re-reads the spool from the start, costing at most a repeated escalation the per-pane dedupe marker already absorbs.
 - `state/.wake-queue` - `epoch<TAB>seq<TAB>kind<TAB>key<TAB>payload`; `bin/cs-wake-lib.sh` owns it.
@@ -211,8 +302,11 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_SESSION_START_STATUS_TAIL` | cs-session-start | `state/*.status` lines printed per task in the session-start digest; default 5; each line is capped by `bin/cs-line-cap-lib.sh` |
 | `CS_SESSION_START_QUEUED_LIMIT` | cs-session-start | plain queued backlog rows in the session-start digest; default 20; done rows are never listed |
 | `CS_SESSION_START_ACTIVE_LIMIT` | cs-session-start | in-flight, held, and blocked backlog rows per group in the session-start digest; default 40; each row is shown in full and any remainder is disclosed with the targeted follow-up that prints the rest; queued public-followup rows are outside this bound and always print in full |
+| `CS_SESSION_START_TASK_LIMIT` | cs-session-start | `state/*.meta` task blocks shown in full in the session-start digest's live-task inventory; default 15; a remainder is disclosed with an exact count and a pointer to `bin/cs-fleet-view.sh`. `--recover`/`--full` raise this (and `CS_SESSION_START_ACTIVE_LIMIT`/`CS_SESSION_START_QUEUED_LIMIT`) to unbounded |
+| `CS_SESSION_START_SNAPSHOT_KEEP` | cs-session-start | how many `data/session-start/<timestamp>-<home-id>.md` expanded-recovery snapshots a locked, non-`--recover`/`--full` run retains after publishing a new one; default 20 |
+| `CS_CAPO_WAKE_STALL_SECS` | cs-watch | minimum age of the oldest valid wake-queue row in a registered capo home before the main watcher publishes one durable parent capo wake-loop stall notification; zero or invalid values use 60 |
 | `CS_PAUSE_RESURFACE_SECS` | cs-watch | declared external-wait recheck cadence |
-| `CS_EVENT_SPOOL_TICK` | cs-watch | how often the bounded event wait re-reads the spool, in seconds; default 0.5. The direct trade between blocked-escalation latency and the idle cost of a watcher with panes but no events - each tick is one `stat` plus the `sleep` |
+| `CS_EVENT_SPOOL_TICK` | cs-watch | DEPRECATED (issue #152): no longer drives a production loop. Kept only so a value some host still sets does not become an unbound-variable failure. The bounded event wait now blocks one interruptible `sleep` for the whole remaining budget, woken immediately by `bin/cs-herdr-event-hook.sh`'s SIGUSR1 doorbell instead of re-checking the spool on a fixed tick; see `cs_watch_block_for_wake`'s header in `bin/cs-watch.sh` |
 | `CS_EVENT_SPOOL_MAX_BYTES` | cs-herdr-event-lib | size cap for `state/.herdr-events`; default 262144. An append past the cap TRUNCATES the spool, so the edges in it are dropped rather than delivered; the watcher's level reconcile is what covers that gap |
 | `CS_EVENT_PLUGIN_DISABLE` | cs-herdr-event-plugin | set to `1` to make install and uninstall no-ops that report `disabled`. herdr's plugin registry is global to the user, so `tests/lib.sh` sets it for every suite to keep a throwaway temp home out of the developer's real registry |
 | `CS_BOARD_SWEEP_LANES` | cs-board-watch | default lane cap baked into a new sweep record; default 3, matching the `contracts` skill |
@@ -243,15 +337,15 @@ Never describe this path as at-least-once, no-loss, or lossless.
 | `CS_PROCEVENT_CLAIM_ROOT` | cs-procevent | machine-wide process-event claim root; default `${XDG_STATE_HOME:-~/.local/state}/consigliere/procevent-claims` |
 | `CS_PROCEVENT_MAX_OUTPUT_BYTES` | cs-procevent | cap on one captured result; default 1048576. Over the cap the result is truncated and still captured |
 | `CS_LOCK_HARNESS_RE` | cs-session-pid-lib | test-only harness ancestry override, honored by every caller of that lib (the home lock and the telemetry breadcrumb key) |
-| `CS_HARNESS_OVERRIDE` | cs-harness-lib | force the root harness (codex\|claude); highest precedence, test/escape seam |
+| `CS_HARNESS_OVERRIDE` | cs-harness-lib | force the root harness (codex\|claude\|grok\|cursor); highest precedence, test/escape seam |
 | `CS_CLAUDE_JSON`, `CS_CODEX_TOML` | cs-harness-lib | test/escape seam pointing a harness's folder-trust store at a throwaway file instead of `~/.claude.json` / `~/.codex/config.toml`; `tests/lib.sh` defaults both for every suite that drives `cs-spawn.sh`, and the two live lifecycle suites clear them to exercise the real store (docs/codex.md) |
 | `CS_TELEMETRY_DISABLE` | cs-telemetry-lib | test/escape seam, unset in production: `1` forces turn telemetry off whatever `host/telemetry.conf` says. `tests/lib.sh` pins it for every suite, because most suites resolve `DATA` to the real repo checkout and would otherwise append synthetic test turns to a developer's own dataset |
 | `CS_ROOT_OVERRIDE` `CS_STATE_OVERRIDE` | single scripts | test-only resolution overrides |
 
-Root harness resolution (`cs_harness_detect_root`): `CS_HARNESS_OVERRIDE` → `host/harness.conf` file → `CLAUDECODE=1` ⇒ claude → default codex. A soldier inherits the resolved value (persisted as `harness=` in meta).
+Root harness resolution (`cs_harness_detect_root`): `CS_HARNESS_OVERRIDE` → `host/harness.conf` file → cursor markers → `GROK_AGENT=1` ⇒ grok → `CLAUDECODE=1` ⇒ claude → default codex. A soldier inherits the resolved value (persisted as `harness=` in meta).
 
 
-Per-harness launch flags and hook facts: `docs/codex.md`, `docs/claude.md`.
+Per-harness launch flags and hook facts: `docs/codex.md`, `docs/claude.md`, `docs/grok.md`.
 Verified `lavish-axi` facts: `docs/lavish.md`.
 Supervision protocol: `docs/supervision.md`.
 Optional turn telemetry: `docs/telemetry.md`.
