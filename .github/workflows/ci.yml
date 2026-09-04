@@ -33,6 +33,7 @@ jobs:
       coverage: ${{ steps.lanes.outputs.coverage }}
       portable: ${{ steps.lanes.outputs.portable }}
       herdr: ${{ steps.lanes.outputs.herdr }}
+      web: ${{ steps.lanes.outputs.web }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -199,6 +200,27 @@ jobs:
             herdr session list --json || true
             exit 1
           }
+
+
+  web:
+    name: Docs site
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v2
+      - name: Install Astro dependencies
+        run: mise run web:install
+      - name: Install Playwright Chromium
+        run: aube -C web exec playwright install --with-deps chromium
+      - name: Build
+        run: mise run web:build
+      - name: Check
+        run: mise run web:check
+      - name: Test
+        run: mise run web:test
 
   # UNCONDITIONAL ON PURPOSE: no `needs: changes`, no `if:`. Any commit at all can
   # track a boss-private path or land a tracked symlink as a resolved regular file,

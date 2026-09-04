@@ -1,0 +1,29 @@
+---
+import { DOCS_NAV, SITE_NAV } from "../lib/pages.mjs";
+import { sitePath } from "../lib/site-path.mjs";
+
+const { current = "" } = Astro.props;
+---
+
+<div class="overlay" data-overlay="drawer" hidden>
+  <div class="drawer" data-overlay-panel id="site-drawer" role="dialog" aria-label="Site menu">
+    <div class="drawer__head">
+      <a class="drawer__brand" href={sitePath()}>Consigliere</a>
+      <button class="drawer__close" type="button" data-close-overlay aria-label="Close menu">✕</button>
+    </div>
+    {
+      [...DOCS_NAV, ...SITE_NAV].map((group) => (
+        <div>
+          <div class="docs-sidebar__heading">{group.heading}</div>
+          {
+            group.items.map((item) => (
+              <a href={sitePath(item.slug)} aria-current={item.slug === current ? "page" : undefined}>
+                {item.label}
+              </a>
+            ))
+          }
+        </div>
+      ))
+    }
+  </div>
+</div>

@@ -1,0 +1,83 @@
+---
+import CommandPalette from "../components/CommandPalette.astro";
+import NavDrawer from "../components/NavDrawer.astro";
+import ShortcutSheet from "../components/ShortcutSheet.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import SiteHeader from "../components/SiteHeader.astro";
+import { PAGE_ORDER } from "../lib/pages.mjs";
+import { paletteItems } from "../lib/palette.mjs";
+import {
+  PRODUCT_DESCRIPTION,
+  PRODUCT_NAME,
+  canonicalUrl,
+  productJsonLd,
+} from "../lib/seo.mjs";
+import { sitePath } from "../lib/site-path.mjs";
+import "../styles/global.css";
+
+const {
+  current = "",
+  description = PRODUCT_DESCRIPTION,
+  home = false,
+  noindex = false,
+  pageSlug = "",
+  title,
+} = Astro.props;
+
+const pageTitle = title === PRODUCT_NAME ? title : `${title} | ${PRODUCT_NAME}`;
+const pageUrl = canonicalUrl(Astro.url.pathname);
+const jsonLd = noindex ? "" : JSON.stringify(productJsonLd());
+const palettePayload = JSON.stringify(paletteItems()).replaceAll("<", "\\u003c");
+const pageOrderPayload = JSON.stringify(
+  PAGE_ORDER.map((slug) => ({ slug, href: sitePath(slug) })),
+).replaceAll("<", "\\u003c");
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="description" content={description} />
+    {noindex ? <meta name="robots" content="noindex" /> : null}
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="canonical" href={pageUrl} />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={pageUrl} />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={description} />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Text:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <script is:inline>
+      (() => {
+        const theme = localStorage.getItem("cs-theme") === "light" ? "light" : "dark";
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
+    <title>{pageTitle}</title>
+    {noindex ? null : <script is:inline type="application/ld+json" set:html={jsonLd} />}
+  </head>
+  <body data-page-slug={pageSlug}>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <div class="site-shell">
+      <SiteHeader current={current} />
+      <slot />
+      <SiteFooter home={home} />
+    </div>
+    <CommandPalette />
+    <NavDrawer current={pageSlug} />
+    <ShortcutSheet />
+    <script is:inline type="application/json" id="site-palette-data" set:html={palettePayload} />
+    <script is:inline type="application/json" id="site-page-order" set:html={pageOrderPayload} />
+    <script>
+      import "../scripts/site-chrome.mjs";
+    </script>
+  </body>
+</html>

@@ -27,6 +27,8 @@
 #             of those are therefore triggers.
 #   herdr     the real-herdr suite drives bin/ through tests/, and the install and
 #             cleanup steps live in the workflow.
+#   web       the Astro docs site under web/, plus the mise toolchain pin that
+#             selects Node and Aube for it.
 #
 # Repo invariants are deliberately NOT a lane here: any commit at all can track a
 # boss-private path or flatten a tracked symlink, so that job stays unconditional
@@ -41,7 +43,7 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-LANES='lint coverage portable herdr'
+LANES='lint coverage portable herdr web'
 
 usage() {
   awk 'NR > 1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
@@ -124,12 +126,21 @@ lint=false
 coverage=false
 portable=false
 herdr=false
+web=false
 
 while IFS= read -r path; do
   [ -n "$path" ] || continue
   case "$path" in
-    # Shell and workflow changes can move every lane's verdict.
-    bin/* | tests/* | .github/workflows/*)
+    # A workflow change can move every lane, including the docs-site job.
+    .github/workflows/*)
+      lint=true
+      coverage=true
+      portable=true
+      herdr=true
+      web=true
+      ;;
+    # Shell changes move the shell lanes, not the docs site.
+    bin/* | tests/*)
       lint=true
       coverage=true
       portable=true
@@ -138,6 +149,9 @@ while IFS= read -r path; do
     # Content the hermetic suite asserts on, but that no shell lane reads.
     skills/* | docs/* | README.md | .tasks.toml)
       portable=true
+      ;;
+    web/* | mise.toml | mise.lock)
+      web=true
       ;;
   esac
 done <<EOF
@@ -158,3 +172,4 @@ emit_lane lint "$lint"
 emit_lane coverage "$coverage"
 emit_lane portable "$portable"
 emit_lane herdr "$herdr"
+emit_lane web "$web"
