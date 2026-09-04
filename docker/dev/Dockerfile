@@ -60,7 +60,7 @@ RUN set -eu; \
     useradd -m -u "${UID}" -g "${GID}" -s /bin/bash cs
 
 WORKDIR /workspace
-COPY . /workspace
+COPY --chown=cs:cs . /workspace
 
 # Pinned ShellCheck via this repo's own installer (bin/cs-lint.sh
 # --required-version owns the exact pin; this never floats to latest).
