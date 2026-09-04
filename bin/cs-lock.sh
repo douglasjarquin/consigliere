@@ -84,8 +84,12 @@ if [ "${1:-}" = "status" ]; then
   exit 0
 fi
 
-if ! cs_root_is_capo_home "$CS_ROOT" \
-  && { [ -n "${CS_TASK_ID:-}" ] || ! cs_primary_worktree_matches "$CS_ROOT"; }; then
+if cs_root_is_capo_home "$CS_ROOT"; then
+  if ! cs_primary_home_context_matches "$CS_ROOT" "$STATE"; then
+    echo "error: soldier context cannot acquire the consigliere session lock" >&2
+    exit 1
+  fi
+elif [ -n "${CS_TASK_ID:-}" ] || ! cs_primary_worktree_matches "$CS_ROOT"; then
   echo "error: soldier context cannot acquire the consigliere session lock" >&2
   exit 1
 fi

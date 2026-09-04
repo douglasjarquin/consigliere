@@ -324,6 +324,16 @@ CS_LAYOUT_GATE_SKIP=1
 cs_resolve_root
 CS_LAYOUT_GATE_SKIP=
 
+# shellcheck source=bin/cs-primary-scope-lib.sh
+. "$SCRIPT_DIR/cs-primary-scope-lib.sh"
+if [ -n "${CS_TASK_ID:-}" ] && [ -n "${CS_ROOT_OVERRIDE:-}" ]; then
+  if cs_root_is_capo_home "$CS_ROOT"; then
+    cs_primary_home_context_matches "$CS_ROOT" "$STATE" || exit 0
+  else
+    exit 0
+  fi
+fi
+
 # shellcheck source=bin/cs-herdr-lib.sh
 . "$SCRIPT_DIR/cs-herdr-lib.sh"
 # shellcheck source=bin/cs-meta-lib.sh

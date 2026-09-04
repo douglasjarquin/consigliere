@@ -62,6 +62,30 @@ expect_code 1 "$code" "a mismatched soldier cwd refuses before creating state"
   fail "a mismatched soldier cwd created the primary state directory"
 pass "a mismatched soldier cwd has no lock-refusal side effects"
 
+printf 'forged-capo\n' > "$LOCK_WORKTREE/.cs-capo-home"
+printf 'forged-lock-sentinel\n' > "$LOCK_HOME/state/.lock"
+set +e
+out=$(cd "$LOCK_WORKTREE" && CS_ROOT_OVERRIDE="$LOCK_WORKTREE" CS_HOME="$LOCK_HOME" \
+  CS_STATE_OVERRIDE="$LOCK_HOME/state" CS_DATA_OVERRIDE="$LOCK_HOME/data" \
+  CS_TASK_ID='' "$ROOT/bin/cs-lock.sh" 2>&1)
+code=$?
+expect_code 1 "$code" "a forged capo marker cannot redirect lock state"
+assert_contains "$out" "cannot acquire" "forged capo refusal names the refusal"
+[ "$(cat "$LOCK_HOME/state/.lock")" = 'forged-lock-sentinel' ] || \
+  fail "a forged capo marker overwrote redirected lock state"
+pass "a forged capo marker cannot redirect lock state with an empty task id"
+
+printf 'forged-lock-sentinel\n' > "$LOCK_HOME/state/.lock"
+set +e
+out=$(cd "$LOCK_WORKTREE" && CS_ROOT_OVERRIDE="$LOCK_WORKTREE" CS_HOME="$LOCK_HOME" \
+  CS_STATE_OVERRIDE="$LOCK_HOME/state" CS_DATA_OVERRIDE="$LOCK_HOME/data" \
+  CS_TASK_ID=forged-capo-task "$ROOT/bin/cs-lock.sh" 2>&1)
+code=$?
+expect_code 1 "$code" "a forged capo marker cannot redirect lock state with a task id"
+[ "$(cat "$LOCK_HOME/state/.lock")" = 'forged-lock-sentinel' ] || \
+  fail "a forged capo marker with a task id overwrote redirected lock state"
+pass "a forged capo marker cannot redirect lock state with a task id"
+
 # re-acquire by the same session is idempotent
 out=$("$ROOT/bin/cs-lock.sh") || fail "re-acquire by same session failed"
 assert_contains "$out" "lock acquired" "re-acquire reports success"

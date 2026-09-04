@@ -155,12 +155,49 @@ assert_absent "$SOLDIER_HOME/state/.session-start-complete" \
   "a mismatched soldier cwd recorded completion"
 pass "primary-home overrides plus a mismatched soldier cwd never start the primary session"
 
+printf 'lock-sentinel\n' > "$SOLDIER_HOME/state/.lock"
+printf 'wake-sentinel\n' > "$SOLDIER_HOME/state/.wake-queue"
+printf 'pane-sentinel\n' > "$SOLDIER_HOME/state/.home-pane"
+printf 'checkpoint-sentinel\n' > "$SOLDIER_HOME/state/.checkpoint-turn"
+out=$(cd "$SOLDIER_WORKTREE" && HERDR_PANE_ID=worker:p1 \
+  CS_ROOT_OVERRIDE="$SOLDIER_PRIMARY" CS_HOME="$SOLDIER_HOME" \
+  CS_STATE_OVERRIDE="$SOLDIER_HOME/state" CS_DATA_OVERRIDE="$SOLDIER_HOME/data" \
+  CS_TASK_ID=fix-soldier-lock-hijack "$SESSION_START" 2>&1)
+[ -z "$out" ] || fail "a direct soldier session-start command must be silent, got: $out"
+[ "$(cat "$SOLDIER_HOME/state/.lock")" = 'lock-sentinel' ] || \
+  fail "a direct soldier session-start command overwrote the primary lock"
+[ "$(cat "$SOLDIER_HOME/state/.wake-queue")" = 'wake-sentinel' ] || \
+  fail "a direct soldier session-start command drained the primary wake queue"
+[ "$(cat "$SOLDIER_HOME/state/.home-pane")" = 'pane-sentinel' ] || \
+  fail "a direct soldier session-start command overwrote the primary home pane"
+[ "$(cat "$SOLDIER_HOME/state/.checkpoint-turn")" = 'checkpoint-sentinel' ] || \
+  fail "a direct soldier session-start command cleared the checkpoint marker"
+pass "a direct soldier session-start command cannot mutate the primary home"
+
+printf 'forged-capo\n' > "$SOLDIER_WORKTREE/.cs-capo-home"
+printf 'lock-sentinel\n' > "$SOLDIER_HOME/state/.lock"
+printf 'wake-sentinel\n' > "$SOLDIER_HOME/state/.wake-queue"
+printf 'pane-sentinel\n' > "$SOLDIER_HOME/state/.home-pane"
+out=$(cd "$SOLDIER_WORKTREE" && printf '%s' '{"source":"startup"}' \
+  | CS_ROOT_OVERRIDE="$SOLDIER_WORKTREE" CS_HOME="$SOLDIER_HOME" \
+    CS_STATE_OVERRIDE="$SOLDIER_HOME/state" CS_DATA_OVERRIDE="$SOLDIER_HOME/data" \
+    CS_TASK_ID=forged-capo-task "$RUN")
+[ -z "$out" ] || fail "a forged capo marker must not start a session against redirected state"
+[ "$(cat "$SOLDIER_HOME/state/.lock")" = 'lock-sentinel' ] || \
+  fail "a forged capo marker overwrote redirected lock state"
+[ "$(cat "$SOLDIER_HOME/state/.wake-queue")" = 'wake-sentinel' ] || \
+  fail "a forged capo marker drained redirected wake state"
+[ "$(cat "$SOLDIER_HOME/state/.home-pane")" = 'pane-sentinel' ] || \
+  fail "a forged capo marker overwrote redirected home-pane state"
+pass "a forged capo marker cannot redirect SessionStart state"
+
 IFS='|' read -r ROOT_DIR HOME_DIR <<<"$(new_world capo)"
 printf 'capo-1\n' > "$ROOT_DIR/.cs-capo-home"
+mkdir -p "$ROOT_DIR/state" "$ROOT_DIR/data" "$ROOT_DIR/config"
 out=$(cd "$ROOT_DIR" && printf '%s' '{"source":"startup"}' \
-  | CS_ROOT_OVERRIDE="$ROOT_DIR" CS_HOME="$HOME_DIR" \
+  | CS_ROOT_OVERRIDE="$ROOT_DIR" CS_HOME="$ROOT_DIR" \
     CS_TASK_ID=capo-task "$RUN")
-assert_contains "$out" "SESSION START - $HOME_DIR" \
+assert_contains "$out" "SESSION START - $ROOT_DIR" \
   "a marked capo session with a task id did not run its own startup"
 assert_contains "$out" 'lock acquired' \
   "a marked capo session with a task id did not acquire its own lock"

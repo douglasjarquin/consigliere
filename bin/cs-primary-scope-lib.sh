@@ -17,6 +17,16 @@ cs_root_is_capo_home() {
   return 0
 }
 
+cs_primary_home_context_matches() {
+  local root=$1 state=$2 home_root root_path state_path
+  home_root=${CS_HOME:-$root}
+  root_path=$(CDPATH='' cd -- "$root" && pwd -P) || return 1
+  home_root=$(CDPATH='' cd -- "$home_root" && pwd -P) || return 1
+  state_path=$(CDPATH='' cd -- "$state" && pwd -P) || return 1
+  [ "$home_root" = "$root_path" ] || return 1
+  [ "$state_path" = "$home_root/state" ]
+}
+
 # Return 0 when $1 is a genuine primary root whose effective state dir is $2.
 # A valid capo marker force-includes a linked capo home (a capo runs its OWN
 # primary consigliere session, guarded like the main primary).
@@ -28,7 +38,11 @@ cs_root_is_capo_home() {
 # guarding every real capo home.
 cs_primary_scope_matches() {
   local root=$1 state=$2 git_dir git_common_dir
-  if ! cs_root_is_capo_home "$root"; then
+  if cs_root_is_capo_home "$root"; then
+    if [ -n "${CS_TASK_ID:-}" ]; then
+      cs_primary_home_context_matches "$root" "$state" || return 1
+    fi
+  else
     git_dir=$(git -C "$root" rev-parse --git-dir 2>/dev/null) || return 1
     git_common_dir=$(git -C "$root" rev-parse --git-common-dir 2>/dev/null) || return 1
     [ "$git_dir" = "$git_common_dir" ] || return 1

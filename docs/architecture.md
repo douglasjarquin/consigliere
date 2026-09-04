@@ -29,7 +29,8 @@ Typed text is the data plane; a soldier's agent lifecycle is a separate control 
 `herdr worktree create --cwd <project> --branch cs/<id> --label <id>` creates the isolated task worktree at `~/.herdr/worktrees/<repo>/<branch>` AND its own workspace whose root pane is the task pane.
 There is no worktree pool: create is fast, dirty removal fails closed upstream, a clean removal preserves the branch, and a surviving worktree is recovered with `herdr worktree open --path` after a workspace or server loss.
 `bin/cs-spawn.sh` refuses to launch unless the physically-resolved worktree root is a real git toplevel distinct from the project primary checkout.
-The SessionStart hook and session lock operate only from the resolved home checkout's own top-level worktree and, unless that checkout is a marked capo home, a context without `CS_TASK_ID`, so a soldier's inherited primary-home overrides cannot mutate the primary fleet.
+The direct session-start command, SessionStart hook, and session lock operate only from the resolved home checkout's own top-level worktree and, unless that checkout is a marked capo home, a context without `CS_TASK_ID`, so a soldier's inherited primary-home overrides cannot mutate the primary fleet.
+The marked-capo exception is valid only when `CS_HOME` and `STATE` resolve to that same physical home, so a forged marker cannot redirect mutations into another home's state.
 Capo homes are the exception: a capo home must survive server restarts and empty workspaces, so it is a plain detached `git worktree` of the consigliere repo under `~/.consigliere/capos/<id>`, marked by `.cs-capo-home`, never herdr-managed.
 
 ## Event-driven supervision
