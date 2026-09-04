@@ -91,6 +91,10 @@ RUN set -eu; \
 
 ENV MISE_YES=1
 ENV PATH="/home/cs/.local/share/mise/shims:${PATH}"
+# WORKDIR creates /workspace as root. COPY --chown retitles the files, not the
+# directory, and `mise install` with lockfile=true writes a sibling tempfile
+# next to mise.lock - that needs the directory itself writable by cs.
+RUN chown cs:cs /workspace
 USER cs
 # Installs node/aube per mise.toml, baked into the image rather than lazily
 # fetched at container-run time. Runs as the non-root "cs" user, not root,
