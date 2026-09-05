@@ -62,7 +62,7 @@ Restoring an interrupted drain's queue removes the batch it restored from, becau
 
 ## Turn handling by wake type
 
-`AGENTS.md` section 7 requires draining the wake queue before acting on any wake-handling turn.
+`AGENTS.md` section 7 requires draining the wake queue at the start of every turn, not only ones judged wake-handling.
 Once drained, handle each actionable wake as follows:
 
 1. `signal:` - read the listed event lines first, then reconcile current state only where action depends on it.
@@ -121,6 +121,14 @@ Anything else is an ordinary turn end and the guard stays silent.
 Its continuation is typed `turn-end-guard`, so it cannot be confused with boss input after rewording.
 The guard scopes itself to a genuine primary home (main checkout or marked capo home) via `bin/cs-primary-scope-lib.sh`; soldier task worktrees are exempt.
 The same scope test is what makes the guard the one component able to observe a turn boundary, which is why clearing `state/.checkpoint-turn` lives here too.
+
+## Drain backstop
+
+A claude root or capo also registers a `UserPromptSubmit` hook (`.claude/settings.json`) that runs `bin/cs-wake-drain.sh` before every user turn - self-verifying and foreign-host-guarded the same way as the Stop-hook registration above, and scoped to a primary home via the same `bin/cs-primary-scope-lib.sh` predicate (`bin/cs-userpromptsubmit-run.sh` owns the wiring).
+It exists because an ordinary conversational reply is not a wake-handling turn by AGENTS.md section 7's own former wording, so nothing else prompted a drain on that turn - a transcript-verified gap that let a capo's `blocked:`/`needs-decision:` status sit unnoticed through several routine turns. The drain itself is cheap and prints nothing on an empty queue with no open decisions (`bin/cs-wake-drain.sh`'s header).
+Per-harness coverage (docs/codex.md, docs/grok.md, docs/cursor.md own the underlying hook vocabulary; not restated here): claude is hook-covered, as above.
+Codex has no documented pre-turn hook event (only `SessionStart` and the `notify` turn-end, docs/codex.md) and grok has only a global Stop hook wired (docs/grok.md, no `SessionStart` either) - both depend entirely on the plain instruction in AGENTS.md section 7 and the checkpoint cycle above, exactly as grok already depends on that instruction alone for session start.
+Cursor loads `.claude/settings.json` alongside its own native `.cursor/hooks.json` and stands its Claude-shaped registrations down on any payload carrying `cursor_version` (`bin/cs-hook-host-lib.sh`), so if Cursor's compatibility map fires this `UserPromptSubmit` entry it is inert by the same guard already covering the tracked `SessionStart`/`Stop` entries - not verified live (no `cursor-agent` binary in this repo's dev environment) and not currently registered as a native Cursor pre-prompt hook in `.cursor/hooks.json` either, so a cursor primary should be treated as instruction-only until that gap is verified one way or the other.
 
 ## Optional measurement
 
