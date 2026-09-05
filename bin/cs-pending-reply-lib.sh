@@ -428,18 +428,26 @@ cs_pending_reply_discard_undelivered() {  # <state-dir> <corr_id>
   rm -f "$rec"
 }
 
-# 0 if a status line is a correlated acknowledgement for <corr_id>.
+# 0 if a status line is a correlated BOSS-FACING acknowledgement for <corr_id>.
 # Accepts short status replies and status lines that point at a document.
 # Unrelated verbs without the token never match. Stale/wrong corr never match.
 # The parent's own pending-reply-missed escalation line must not self-resolve:
 # it names the request with pending-reply-id= rather than corr=.
+# A correlated blocked/needs-decision line still needs the boss, so it must NOT
+# resolve the way a done/resolved line does - the durable escalation contract
+# stays live until an actual boss-facing resolution lands.
 cs_pending_reply_line_resolves() {  # <line> <corr_id>
-  local line=$1 corr=$2
+  local line=$1 corr=$2 verb
   [ -n "$line" ] && [ -n "$corr" ] || return 1
   case "$line" in
     *pending-reply-missed*|*pending-reply-delivery-unknown*|*pending-reply-recovery-delivery-*) return 1 ;;
   esac
-  cs_pending_reply_text_has_corr "$line" "$corr"
+  cs_pending_reply_text_has_corr "$line" "$corr" || return 1
+  verb=$(status_line_verb "$line")
+  case "$verb" in
+    blocked|needs-decision) return 1 ;;
+  esac
+  return 0
 }
 
 # Scan a status file for a correlated resolve. Prints the matching line or empty.

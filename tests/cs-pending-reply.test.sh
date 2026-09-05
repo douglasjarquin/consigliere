@@ -353,6 +353,27 @@ cs_pending_reply_tick "$state" || fail "the tick must survive a corrupt record"
   || fail "a NUL-bearing record must never write into the spliced-together home"
 pass "a NUL-bearing pending-reply record is refused before field parsing"
 
+# 17. a correlated blocked:/needs-decision: reply must not resolve the pending
+#     record the way done:/resolved: does - it still needs the boss, so the
+#     durable escalation contract must keep applying until an actual
+#     boss-facing resolution lands. (Transcript-verified gap: the resolve check
+#     was verb-agnostic and let a still-open blocked/needs-decision reply
+#     silently close the record exactly like a finished one.)
+home=$(setup_parent verb-aware); state="$home/state"
+export CS_PENDING_REPLY_NOW=15000
+corr=$(cs_pending_reply_create "$home" "$state" capo1 "should we ship the risky migration")
+cs_pending_reply_mark_delivered "$state" "$corr"
+printf 'blocked [corr=%s]: waiting on a decision\n' "$corr" > "$state/capo1.status"
+cs_pending_reply_try_resolve "$state" "$corr" && fail "a correlated blocked reply must not resolve"
+[ "$(phase_of "$state" "$corr")" = awaiting_report ] || fail "blocked reply must leave awaiting_report"
+printf 'needs-decision [corr=%s]: ship or hold?\n' "$corr" >> "$state/capo1.status"
+cs_pending_reply_try_resolve "$state" "$corr" && fail "a correlated needs-decision reply must not resolve"
+[ "$(phase_of "$state" "$corr")" = awaiting_report ] || fail "needs-decision reply must leave awaiting_report"
+printf 'done [corr=%s]: shipped after the decision came back\n' "$corr" >> "$state/capo1.status"
+cs_pending_reply_try_resolve "$state" "$corr" || fail "a correlated done reply must still resolve"
+[ "$(phase_of "$state" "$corr")" = resolved ] || fail "expected resolved after the done reply"
+pass "a correlated blocked/needs-decision reply does not resolve like done/resolved does"
+
 # 20. one-owner rule: exactly one SCHEMA-OWNER marker for the pending-reply
 #     schema, and every doc that references the library points at it rather
 #     than restating the field list.

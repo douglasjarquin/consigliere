@@ -116,6 +116,16 @@ is what catches that miss and makes a retry safe.
   claude scrutinizes hook stderr and will refuse a bare instruction as an injection,
   so the typed marker (honored per the loaded CLAUDE.md contract) is what makes it
   legitimate supervision.
+- The same file also registers a self-verifying `UserPromptSubmit` hook that pipes
+  the payload into `bin/cs-userpromptsubmit-run.sh`, which runs `bin/cs-wake-drain.sh`
+  before every user turn in a primary session (`docs/supervision.md`'s "Drain
+  backstop" owns the mechanism). Verified live in this repo's own session,
+  claude 2.1.261, 2026-09-05: unrelated project `UserPromptSubmit` hooks already
+  registered here (`pstack`'s and `caveman`'s) fire on every prompt and their stdout
+  reaches the model as additional context before the turn starts, the same
+  hook-stdout-into-context delivery the session-open hook uses (see below) - so a
+  drain hook registered the same way is delivered the same way, with no separate
+  throwaway-lab measurement needed.
 
 ## Stop payload and per-turn usage (verified 2026-08-08, claude 2.1.226)
 

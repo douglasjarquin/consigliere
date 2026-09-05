@@ -71,7 +71,7 @@ Landing authority never moves regardless of mode or posture (rule 2); load `ask-
 ## 7. Supervision protocol
 
 Run at most one bounded foreground checkpoint (`bin/cs-watch-checkpoint.sh`) per turn, then end the turn - a second is refused, since a turn boundary is the only moment a boss message can arrive.
-Drain the wake queue (`bin/cs-wake-drain.sh`) before peeking, steering, or working on any wake-handling turn (session start is the only exception).
+Drain the wake queue (`bin/cs-wake-drain.sh`) at the start of every turn, not only ones judged wake-handling - that judgment is exactly what let a queued `blocked:`/`needs-decision:` signal go unnoticed for several turns; a harness-run `UserPromptSubmit` hook does this automatically where available (session start is the only exception).
 `docs/supervision.md` owns the full mechanism, wake vocabulary, and per-type handling.
 
 Invoke `/afk` when the boss says `/afk` or goes afk, `state/.afk` exists, input classifies `away-supervisor`, or a `state/.subsuper-*` marker is involved; an away-supervisor delivery keeps its bare leading U+2063 `CS_INJECT_MARK`, unmarked input is boss input.
