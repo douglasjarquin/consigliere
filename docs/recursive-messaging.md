@@ -66,9 +66,10 @@ The command creates one deterministic transfer message to the current parent's p
 Repeating the escalation returns the existing transfer without another wake.
 
 `bin/cs-status.sh` renders bounded open-message, pending-obligation, and malformed-message counts with exact inbox and recovery next actions.
-`bin/cs-recover.sh` reports whether it re-woke recipients, refused a record, or found no work, and prints the next action for each outcome.
+`bin/cs-recover.sh` reports whether it re-woke recipients, skipped an already-delivered one, refused a record, or found no work, and prints the next action for each outcome.
 
 `bin/cs-recover.sh` is the cold backstop: it makes one bounded pass over durable pending and unacknowledged messages, revalidates the current endpoint, and either re-wakes the exact message ID or reports the concrete repair action.
+A message already durably confirmed delivered to the recipient's current endpoint generation is reported as skipped rather than re-woken, so an unacknowledged message is nudged once per endpoint identity, never on every pass.
 
 Locked startup runs this recovery pass after draining the wake queue.
 An otherwise quiet supervision checkpoint runs the same bounded pass when its wait expires.

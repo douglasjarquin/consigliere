@@ -8,6 +8,7 @@ CS_MESSAGE_SCHEMA='cs-message.v1'
 CS_MESSAGE_PENDING_SCHEMA='cs-message-obligation.v1'
 CS_MESSAGE_REPLY_SCHEMA='cs-message-reply.v1'
 CS_MESSAGE_ROUTE_SCHEMA='cs-message-route.v1'
+CS_MESSAGE_WAKE_SCHEMA='cs-message-wake.v1'
 CS_MESSAGE_MAX_SUMMARY=512
 CS_MESSAGE_MAX_PATH=512
 
@@ -190,6 +191,67 @@ cs_message_route_write() {
     "$generation" "$(cs_message_now)" > "$tmp" || { rm -f "$tmp"; return 1; }
   cs_message_route_validate_file "$tmp" || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$route"
+}
+
+cs_message_wake_path() { printf '%s.woken\n' "${1%.msg}"; }
+
+cs_message_wake_validate_file() {
+  local file=$1 line key value seen='' required filename_id
+  local -a required_keys=(schema message_id to_task_id endpoint_generation confirmed_at)
+  [ -f "$file" ] || return 1
+  [ "$(wc -l < "$file" | tr -d ' ')" = 5 ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    key=${line%%=*}
+    value=${line#*=}
+    case "$key" in
+      schema) [ "$value" = "$CS_MESSAGE_WAKE_SCHEMA" ] || return 1 ;;
+      message_id|to_task_id) cs_message_id "$value" || return 1 ;;
+      endpoint_generation) cs_message_generation "$value" || return 1 ;;
+      confirmed_at)
+        case "$value" in ''|*[!0-9]*) return 1 ;; esac
+        [ "${#value}" -le 20 ] || return 1
+        ;;
+      *) return 1 ;;
+    esac
+    case " $seen " in *" $key "*) return 1 ;; esac
+    seen="$seen $key"
+  done < "$file"
+  for required in "${required_keys[@]}"; do
+    case " $seen " in *" $required "*) ;; *) return 1 ;; esac
+  done
+  filename_id=$(cs_message_filename_id "$file" .woken) || return 1
+  [ "$(awk -F= '$1 == "message_id" { print substr($0, 12) }' "$file")" = "$filename_id" ] || return 1
+}
+
+# Reports the endpoint generation a wake was last durably CONFIRMED delivered
+# to, or nothing (rc 1) when no valid marker exists. Never falls back to a
+# message-file field the way cs_message_route_generation does: a missing or
+# malformed marker must read as "not yet confirmed", never as a guessed match.
+cs_message_wake_generation() {
+  local file=$1 wake
+  wake=$(cs_message_wake_path "$file")
+  [ -e "$wake" ] || return 1
+  cs_message_wake_validate_file "$wake" || return 1
+  awk -F= '$1 == "endpoint_generation" { print substr($0, 21) }' "$wake"
+}
+
+# Records that a wake for $file was durably confirmed delivered to $target at
+# $generation. Callers must invoke this ONLY after cs_herdr_agent_prompt_confirmed
+# has already succeeded - never before, and never for a merely-attempted or
+# route-repaired delivery - so a marker's presence is always proof of a
+# confirmed receipt, never proof-of-attempt alone.
+cs_message_wake_mark() {
+  local file=$1 target=$2 generation=$3 wake tmp
+  cs_message_validate_file "$file" || return 1
+  cs_message_task "$target" && cs_message_generation "$generation" || return 1
+  [ "$(cs_message_field "$file" to_task_id)" = "$target" ] || return 1
+  wake=$(cs_message_wake_path "$file")
+  tmp="$wake.tmp.$$.$RANDOM"
+  printf 'schema=%s\nmessage_id=%s\nto_task_id=%s\nendpoint_generation=%s\nconfirmed_at=%s\n' \
+    "$CS_MESSAGE_WAKE_SCHEMA" "$(cs_message_field "$file" message_id)" "$target" \
+    "$generation" "$(cs_message_now)" > "$tmp" || { rm -f "$tmp"; return 1; }
+  cs_message_wake_validate_file "$tmp" || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$wake"
 }
 
 cs_message_validate_file() {

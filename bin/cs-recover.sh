@@ -24,6 +24,7 @@ case "$MAX_RECORDS" in ''|*[!0-9]*|0) MAX_RECORDS=64 ;; esac
 seen=''
 checked=0
 rewoken=0
+skipped=0
 failed=0
 requested=0
 
@@ -53,14 +54,19 @@ endpoint_ready() {
 }
 
 wake_message() {
-  local file=$1 recipient_meta=$2 message_id to_generation pane recipient_task session
+  local file=$1 recipient_meta=$2 message_id to_generation pane recipient_task session existing_wake_gen
   message_id=$(cs_message_field "$file" message_id)
   recipient_task=$(cs_message_field "$file" to_task_id)
+  to_generation=$(cs_meta_get "$recipient_meta" endpoint_generation 2>/dev/null || true)
+  [ -n "$to_generation" ] || { echo "error: message '$message_id' recipient has no endpoint generation" >&2; return 1; }
   pane=$(cs_meta_get "$recipient_meta" pane 2>/dev/null || true)
   [ -n "$pane" ] || { echo "error: message '$message_id' recipient has no pane" >&2; return 1; }
   endpoint_ready "$recipient_meta" "$pane" "message '$message_id' recipient" || return 1
-  to_generation=$(cs_meta_get "$recipient_meta" endpoint_generation 2>/dev/null || true)
-  [ -n "$to_generation" ] || { echo "error: message '$message_id' recipient has no endpoint generation" >&2; return 1; }
+  existing_wake_gen=$(cs_message_wake_generation "$file" 2>/dev/null || true)
+  if [ -n "$existing_wake_gen" ] && [ "$existing_wake_gen" = "$to_generation" ]; then
+    printf 'recover: already-delivered message=%s task=%s\n' "$message_id" "$recipient_task"
+    return 2
+  fi
   cs_message_route_write "$file" "$recipient_task" "$to_generation" || {
     echo "error: message '$message_id' route could not be repaired" >&2
     return 1
@@ -71,11 +77,12 @@ wake_message() {
     echo "error: message '$message_id' wake was not confirmed" >&2
     return 1
   }
+  cs_message_wake_mark "$file" "$recipient_task" "$to_generation" || true
   printf 'recover: re-woke message=%s task=%s\n' "$message_id" "$(cs_message_field "$file" to_task_id)"
 }
 
 wake_root_message() {
-  local file=$1 root_state=$2 root_home=$3 message_id pane root_generation cwd source_task source_home source_meta expected_agent session
+  local file=$1 root_state=$2 root_home=$3 message_id pane root_generation cwd source_task source_home source_meta expected_agent session existing_wake_gen
   message_id=$(cs_message_field "$file" message_id)
   pane=$(sed -n '1p' "$root_state/.home-pane" 2>/dev/null || true)
   root_generation=$(sed -n '1p' "$root_state/.home-endpoint-generation" 2>/dev/null || true)
@@ -98,6 +105,11 @@ wake_root_message() {
     echo "error: message '$message_id' root endpoint '$pane' does not contain the recorded $expected_agent agent" >&2
     return 1
   fi
+  existing_wake_gen=$(cs_message_wake_generation "$file" 2>/dev/null || true)
+  if [ -n "$existing_wake_gen" ] && [ "$existing_wake_gen" = "$root_generation" ]; then
+    printf 'recover: already-delivered message=%s task=root\n' "$message_id"
+    return 2
+  fi
   cs_message_route_write "$file" root "$root_generation" || {
     echo "error: message '$message_id' root route could not be repaired" >&2
     return 1
@@ -106,6 +118,7 @@ wake_root_message() {
     echo "error: message '$message_id' root wake was not confirmed" >&2
     return 1
   }
+  cs_message_wake_mark "$file" root "$root_generation" || true
   printf 'recover: re-woke message=%s task=root\n' "$message_id"
 }
 
@@ -238,6 +251,8 @@ for pending in "$STATE"/pending/*.pending; do
   if [ "$parent_task" = root ]; then
     if wake_root_message "$message_file" "$parent_state" "$(cs_meta_get "$child_meta" parent_home)"; then
       rewoken=$((rewoken + 1))
+    elif [ "$?" -eq 2 ]; then
+      skipped=$((skipped + 1))
     else
       failed=1
     fi
@@ -247,6 +262,8 @@ for pending in "$STATE"/pending/*.pending; do
     continue
   elif wake_message "$message_file" "$recipient_meta"; then
     rewoken=$((rewoken + 1))
+  elif [ "$?" -eq 2 ]; then
+    skipped=$((skipped + 1))
   else
     failed=1
   fi
@@ -296,6 +313,8 @@ for message_file in "$STATE"/inbox/*.msg; do
   if [ "$task" = root ]; then
     if wake_root_message "$message_file" "$STATE" "$CS_HOME"; then
       rewoken=$((rewoken + 1))
+    elif [ "$?" -eq 2 ]; then
+      skipped=$((skipped + 1))
     else
       failed=1
     fi
@@ -308,6 +327,8 @@ for message_file in "$STATE"/inbox/*.msg; do
   fi
   if wake_message "$message_file" "$recipient_meta"; then
     rewoken=$((rewoken + 1))
+  elif [ "$?" -eq 2 ]; then
+    skipped=$((skipped + 1))
   else
     failed=1
   fi
@@ -320,7 +341,7 @@ for meta in "$STATE"/*.meta; do
   reconcile_settled_child "$meta" || failed=1
 done
 
-printf 'recover: checked=%s re-woke=%s requested=%s\n' "$checked" "$rewoken" "$requested"
+printf 'recover: checked=%s re-woke=%s requested=%s skipped=%s\n' "$checked" "$rewoken" "$requested" "$skipped"
 if [ "$failed" -ne 0 ]; then
   printf 'recover: next=inspect the named endpoint, metadata, or message before retrying\n'
   exit 1
