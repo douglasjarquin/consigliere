@@ -16,9 +16,10 @@
 # bin/cs-primary-scope-lib.sh (contract from its header + code):
 #   cs_root_is_capo_home <root> is true iff <root>/.cs-capo-home is a real file
 #   (not a symlink) holding a single non-empty id of only [A-Za-z0-9._-].
-#   cs_primary_scope_matches <root> <state> is true iff:
-#     - <root> is a plain checkout (git-dir == git-common-dir) OR a valid capo
-#       home, AND
+#   cs_primary_scope_matches <root> <state> is true iff the caller is at the
+#     root's physical top-level path, has no task id unless <root> is a valid
+#     capo home with matching CS_HOME/state, and <root> is a plain checkout
+#     (git-dir == git-common-dir) OR a valid capo home, AND
 #     - <root>/AGENTS.md is a file, <root>/bin is a dir, <state> is a dir.
 #   A linked task worktree (git-dir != git-common-dir, no capo marker) is NOT
 #   primary.
@@ -27,6 +28,7 @@
 set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+unset CS_TASK_ID CS_ROOT_OVERRIDE CS_HOME CS_STATE_OVERRIDE CS_DATA_OVERRIDE
 
 # shellcheck source=bin/cs-supervision-lib.sh
 . "$ROOT/bin/cs-supervision-lib.sh"
@@ -189,7 +191,9 @@ for r in "$PROJ" "$WT"; do
 done
 
 # 14. a plain checkout with AGENTS.md, bin/, and a state dir -> matches.
-cs_primary_scope_matches "$PROJ" "$STATE_DIR" && rc=0 || rc=1
+(
+  cd "$PROJ" && cs_primary_scope_matches "$PROJ" "$STATE_DIR"
+) && rc=0 || rc=1
 [ "$rc" = 0 ] || fail "a plain primary checkout should match"
 pass "cs_primary_scope_matches is true for a plain checkout with the primary shape"
 
@@ -208,7 +212,9 @@ pass "cs_primary_scope_matches requires AGENTS.md on a plain checkout"
 
 # 17. a valid capo marker force-includes a linked worktree that otherwise fails.
 printf 'capo-1\n' > "$WT/.cs-capo-home"
-cs_primary_scope_matches "$WT" "$STATE_DIR" && rc=0 || rc=1
+(
+  cd "$WT" && cs_primary_scope_matches "$WT" "$STATE_DIR"
+) && rc=0 || rc=1
 [ "$rc" = 0 ] || fail "a capo-home worktree with the primary shape should match"
 pass "cs_primary_scope_matches force-includes a valid capo home even in a linked worktree"
 

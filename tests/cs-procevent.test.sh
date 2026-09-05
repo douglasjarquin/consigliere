@@ -359,7 +359,7 @@ pass "cs-procevent: cs-guard.sh treats an armed source as work needing supervisi
 
 if command -v jq >/dev/null 2>&1; then
   : > "$GHOME/state/procevent/lavish-deadbeef.source"
-  OUT=$(printf '{"stop_hook_active":false}' | \
+  OUT=$(cd "$GHOME" && printf '{"stop_hook_active":false}' | \
     CS_ROOT_OVERRIDE="$GHOME" CS_HOME="$GHOME" CS_GUARD_GRACE=999 \
     CS_LOCK_HARNESS_RE='sleep|bash|zsh|codex|claude' \
     CS_MONITOR_BIN="$GHOME/no-such-monitor" \
