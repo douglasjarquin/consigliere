@@ -175,4 +175,87 @@ output=$("$ROOT"/bin/cs-recover.sh) || fail "repeated recovery should remain bou
   || fail "repeated recovery prompted the settled child twice"
 pass "recovery requests one missing report from a live settled child"
 
+ordinary_child_id='message-recover-ordinary-child-0000000001'
+cat > "$STATE/ordinary-child.meta" <<EOF
+task_id=ordinary-child
+kind=ship
+pane=w-oc:p1
+parent_task_id=root
+parent_home=$HOME_DIR
+parent_state=$STATE
+parent_pane=w-root:p1
+parent_generation=root-generation-2
+endpoint_generation=oc-generation
+harness=codex
+EOF
+cs_message_publish "$STATE/inbox" \
+  "schema=cs-message.v1" "message_id=$ordinary_child_id" "correlation_id=$ordinary_child_id" \
+  "sequence=1" "kind=failed" "from_task_id=ordinary-child" "to_task_id=root" \
+  "from_home=$HOME_DIR" "from_endpoint_generation=oc-generation" \
+  "to_endpoint_generation=root-generation-2" "summary=ordinary child needs recovery" "artifact=" \
+  "commit_sha=" "pull_request=" "created_at=1700000000" || fail "ordinary-child message setup"
+output=$("$ROOT/bin/cs-recover.sh" 2>"$TMP/ordinary-child.err") \
+  || fail "recover should re-wake an ordinary (non-capo) child's durable message"
+printf '%s\n' "$output" | grep -F "re-woke message=$ordinary_child_id" >/dev/null \
+  || fail "recover did not re-wake the ordinary child's message"
+pass "recovery re-wakes an ordinary (non-capo) child's durable message"
+
+cat > "$STATE/forged-child.meta" <<EOF
+task_id=forged-child
+kind=ship
+pane=w-oc:p1
+parent_task_id=root
+parent_home=$HOME_DIR
+parent_state=$STATE
+parent_pane=w-root:p1
+parent_generation=root-generation-2
+endpoint_generation=fc-generation
+harness=codex
+home=$TMP/not-the-real-home
+EOF
+forged_id='message-recover-forged-child-0000000001'
+cs_message_publish "$STATE/inbox" \
+  "schema=cs-message.v1" "message_id=$forged_id" "correlation_id=$forged_id" \
+  "sequence=1" "kind=failed" "from_task_id=forged-child" "to_task_id=root" \
+  "from_home=$HOME_DIR" "from_endpoint_generation=fc-generation" \
+  "to_endpoint_generation=root-generation-2" "summary=forged sender home" "artifact=" \
+  "commit_sha=" "pull_request=" "created_at=1700000000" || fail "forged-child message setup"
+if "$ROOT/bin/cs-recover.sh" >"$TMP/forged-child.out" 2>"$TMP/forged-child.err"; then
+  fail "recovery accepted a message whose explicit sender home does not match its claimed origin"
+fi
+grep -F 'invalid sender lineage or generation' "$TMP/forged-child.err" >/dev/null \
+  || fail "forged sender-home refusal lacked its lineage reason"
+rm -f "$STATE/inbox/$forged_id.msg" "$STATE/forged-child.meta"
+pass "recovery still refuses an explicit sender home that does not match its claimed origin"
+
+already_reported_id='message-recover-already-reported-0000000001'
+cat > "$STATE/already-reported-child.meta" <<EOF
+task_id=already-reported-child
+kind=ship
+pane=w-arc:p1
+parent_task_id=root
+parent_home=$HOME_DIR
+parent_state=$STATE
+parent_pane=w-root:p1
+parent_generation=root-generation-2
+endpoint_generation=arc-generation
+harness=codex
+EOF
+printf '%s\n' 'done: finished' > "$STATE/already-reported-child.status"
+cs_message_publish "$STATE/inbox" \
+  "schema=cs-message.v1" "message_id=$already_reported_id" "correlation_id=$already_reported_id" \
+  "sequence=1" "kind=result" "from_task_id=already-reported-child" "to_task_id=root" \
+  "from_home=$HOME_DIR" "from_endpoint_generation=arc-generation" \
+  "to_endpoint_generation=root-generation-2" "summary=already reported normally" "artifact=" \
+  "commit_sha=" "pull_request=" "created_at=1700000000" || fail "already-reported-child message setup"
+cs_message_ack "$STATE/inbox" "$already_reported_id" || fail "already-reported-child ack setup"
+recovery_marker=$(cs_message_recovery_id already-reported-child arc-generation) \
+  || fail "could not derive the already-reported-child recovery id"
+output=$("$ROOT/bin/cs-recover.sh") || fail "recover should not fail reconciling an already-reported child"
+printf '%s\n' "$output" | grep -F 'requested-report task=already-reported-child' >/dev/null \
+  && fail "recover re-escalated a child that already reported normally"
+[ -e "$STATE/.report-requested-$recovery_marker" ] \
+  && fail "recover marked a report as requested for a child that already reported normally"
+pass "recovery does not re-escalate an ordinary child that already reported normally"
+
 pass "bounded durable-message recovery contract"
