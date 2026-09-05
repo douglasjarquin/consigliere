@@ -200,6 +200,14 @@ printf '%s\n' "$output" | grep -F "re-woke message=$ordinary_child_id" >/dev/nul
   || fail "recover did not re-wake the ordinary child's message"
 pass "recovery re-wakes an ordinary (non-capo) child's durable message"
 
+output=$("$ROOT/bin/cs-recover.sh" 2>"$TMP/ordinary-child-second.err") \
+  || fail "a second recovery of the same unchanged ordinary-child-sourced message should still succeed"
+printf '%s\n' "$output" | grep -F "already-delivered message=$ordinary_child_id" >/dev/null \
+  || fail "second recovery did not report the ordinary-child-sourced message as already delivered"
+[ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$ordinary_child_id" "$TMP/prompts")" = 1 ] \
+  || fail "second recovery re-sent a wake for an unchanged, already-delivered ordinary-child-sourced message"
+pass "recovery delivers an ordinary (non-capo) child's message to root at most once per unchanged endpoint generation"
+
 cat > "$STATE/forged-child.meta" <<EOF
 task_id=forged-child
 kind=ship
@@ -257,5 +265,76 @@ printf '%s\n' "$output" | grep -F 'requested-report task=already-reported-child'
 [ -e "$STATE/.report-requested-$recovery_marker" ] \
   && fail "recover marked a report as requested for a child that already reported normally"
 pass "recovery does not re-escalate an ordinary child that already reported normally"
+
+storm_id='message-recover-storm-0000000000000001'
+cs_message_publish "$STATE/inbox" \
+  "schema=cs-message.v1" "message_id=$storm_id" "correlation_id=$storm_id" \
+  "sequence=1" "kind=question" "from_task_id=child" "to_task_id=root" \
+  "from_home=$HOME_DIR" "from_endpoint_generation=child-generation" \
+  "to_endpoint_generation=root-generation-2" "summary=must not flood root" "artifact=" \
+  "commit_sha=" "pull_request=" "created_at=1700000000" || fail "storm message setup"
+cs_message_pending_create "$STATE" "$storm_id" "$storm_id" child root question 1700000000 \
+  "$HOME_DIR" child-generation root-generation-2 || fail "storm pending setup"
+output=$("$ROOT/bin/cs-recover.sh") || fail "first recovery of the storm message should succeed"
+printf '%s\n' "$output" | grep -F "re-woke message=$storm_id" >/dev/null \
+  || fail "first recovery did not deliver the storm message"
+[ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$storm_id" "$TMP/prompts")" = 1 ] \
+  || fail "first recovery did not send exactly one wake"
+output=$("$ROOT/bin/cs-recover.sh") || fail "second recovery with nothing changed should still succeed"
+printf '%s\n' "$output" | grep -F "already-delivered message=$storm_id" >/dev/null \
+  || fail "second recovery did not report the message as already delivered"
+[ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$storm_id" "$TMP/prompts")" = 1 ] \
+  || fail "second recovery re-sent a wake for an unchanged, already-delivered message (the redelivery storm regression)"
+[ ! -f "$STATE/inbox/$storm_id.ack" ] \
+  || fail "the message must remain durably unacked - the fix nudges root once, it never acks on root's behalf"
+pass "recovery delivers a root-directed message at most once per unchanged endpoint generation, never a redelivery storm"
+
+cat > "$STATE/mid-child.meta" <<EOF
+task_id=mid-child
+kind=ship
+pane=w-mid:p1
+worktree=$HOME_DIR
+parent_task_id=root
+parent_home=$HOME_DIR
+parent_state=$STATE
+parent_pane=w-root:p1
+parent_generation=root-generation-2
+endpoint_generation=mid-generation
+harness=codex
+EOF
+cat > "$STATE/grandchild.meta" <<EOF
+task_id=grandchild
+kind=ship
+home=$HOME_DIR
+worktree=$HOME_DIR
+pane=w-gc:p1
+parent_task_id=mid-child
+parent_home=$HOME_DIR
+parent_state=$STATE
+parent_pane=w-mid:p1
+parent_generation=mid-generation
+endpoint_generation=gc-generation
+harness=codex
+EOF
+child_recipient_id='message-recover-child-recipient-0000000001'
+cs_message_publish "$STATE/inbox" \
+  "schema=cs-message.v1" "message_id=$child_recipient_id" "correlation_id=$child_recipient_id" \
+  "sequence=1" "kind=question" "from_task_id=grandchild" "to_task_id=mid-child" \
+  "from_home=$HOME_DIR" "from_endpoint_generation=gc-generation" \
+  "to_endpoint_generation=mid-generation" "summary=child-to-child delivery must not storm" "artifact=" \
+  "commit_sha=" "pull_request=" "created_at=1700000000" || fail "child-recipient message setup"
+cs_message_pending_create "$STATE" "$child_recipient_id" "$child_recipient_id" grandchild mid-child question 1700000000 \
+  "$HOME_DIR" gc-generation mid-generation || fail "child-recipient pending setup"
+output=$("$ROOT/bin/cs-recover.sh") || fail "first recovery of the child-recipient message should succeed"
+printf '%s\n' "$output" | grep -F "re-woke message=$child_recipient_id" >/dev/null \
+  || fail "first recovery did not deliver the child-recipient message"
+[ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$child_recipient_id" "$TMP/prompts")" = 1 ] \
+  || fail "first recovery of the child-recipient message did not send exactly one wake"
+output=$("$ROOT/bin/cs-recover.sh") || fail "second recovery of the unchanged child-recipient message should still succeed"
+printf '%s\n' "$output" | grep -F "already-delivered message=$child_recipient_id" >/dev/null \
+  || fail "second recovery did not report the child-recipient message as already delivered"
+[ "$(grep -Fc "CONSIGLIERE_WAKE v1 message=$child_recipient_id" "$TMP/prompts")" = 1 ] \
+  || fail "second recovery re-sent a wake for an unchanged, already-delivered child-recipient message (wake_message must be as bounded as wake_root_message)"
+pass "recovery delivers a non-root (child) recipient's message at most once per unchanged endpoint generation"
 
 pass "bounded durable-message recovery contract"
