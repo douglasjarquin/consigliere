@@ -21,3 +21,11 @@ __pycache__/
 # store) holding the graph database; codegraph's own .gitignore inside it
 # only covers its own contents, never the project root.
 .codegraph
+
+# Docs site generated output.
+/web/node_modules/
+/web/.astro/
+/web/dist/
+web/test-results/
+web/playwright-report/
+web/artifacts/

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /consigliere/
+
+Sitemap: https://douglasjarquin.github.io/consigliere/sitemap.xml

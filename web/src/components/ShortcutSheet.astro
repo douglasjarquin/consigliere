@@ -1,0 +1,31 @@
+---
+const rows = [
+  ["Search", "⌘K"],
+  ["Shortcuts", "?"],
+  ["Toggle lights", "L"],
+  ["Open menu", "M"],
+  ["Close anything", "esc"],
+  ["Next / previous page", "] ["],
+  ["Move in palette", "↑ ↓"],
+  ["Confirm", "↵"],
+];
+---
+
+<div class="overlay overlay--center" data-overlay="sheet" hidden>
+  <div class="sheet" data-overlay-panel role="dialog" aria-label="Keyboard shortcuts">
+    <div class="sheet__head">
+      <span class="sheet__title">Keyboard shortcuts</span>
+      <span class="sheet__hint">? or esc to close</span>
+    </div>
+    <div class="sheet__grid">
+      {
+        rows.map(([label, key]) => (
+          <div class="sheet__row">
+            <span>{label}</span>
+            <kbd>{key}</kbd>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</div>

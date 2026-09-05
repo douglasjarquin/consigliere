@@ -1,0 +1,47 @@
+---
+import { sitePath } from "../lib/site-path.mjs";
+
+const { current = "" } = Astro.props;
+
+const navigation = [
+  { key: "quick-start", label: "Quick start", href: sitePath("quick-start") },
+  { key: "docs", label: "Docs", href: sitePath("architecture") },
+  { key: "skills", label: "Skills", href: sitePath("skills") },
+  { key: "cli", label: "CLI", href: sitePath("cli") },
+  { key: "changelog", label: "Changelog", href: sitePath("changelog") },
+  { key: "design", label: "Design", href: sitePath("design") },
+];
+---
+
+<header class="site-header">
+  <div style="display:flex;align-items:center;gap:16px;flex-shrink:0">
+    <button
+      class="icon-button icon-button--menu"
+      type="button"
+      data-open-drawer
+      aria-controls="site-drawer"
+      aria-expanded="false"
+      title="Menu">☰</button>
+    <a class="site-brand" href={sitePath()}>Consigliere</a>
+  </div>
+  <div class="site-header__tools">
+    <nav class="site-header__nav" aria-label="Primary">
+      {
+        navigation.map((item) => (
+          <a href={item.href} aria-current={current === item.key ? "page" : undefined}>
+            {item.label}
+          </a>
+        ))
+      }
+    </nav>
+    <button
+      class="icon-button icon-button--search"
+      type="button"
+      data-open-palette
+      aria-controls="site-palette"
+      aria-expanded="false"
+      title="Search (⌘K)"><kbd>⌘K</kbd></button>
+    <button class="icon-button" type="button" data-theme-toggle>Lights on</button>
+    <a class="site-header__github" href="https://github.com/douglasjarquin/consigliere" rel="noreferrer">GitHub ↗</a>
+  </div>
+</header>

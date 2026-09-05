@@ -1,0 +1,41 @@
+---
+import { DOCS_NAV, SITE_NAV } from "../lib/pages.mjs";
+import { sitePath } from "../lib/site-path.mjs";
+
+const { current = "", variant = "docs", toc = [] } = Astro.props;
+const groups = variant === "site" ? SITE_NAV : DOCS_NAV;
+---
+
+<aside class="docs-sidebar" aria-label="Section">
+  {
+    groups.map((group) => (
+      <div>
+        <div class="docs-sidebar__heading">{group.heading}</div>
+        {
+          group.items.map((item) => (
+            <a
+              href={sitePath(item.slug)}
+              aria-current={item.slug === current ? "page" : undefined}>
+              {item.label}
+            </a>
+          ))
+        }
+      </div>
+    ))
+  }
+  {
+    toc.length > 0 ? (
+      <div>
+        <div class="docs-sidebar__heading">On this page</div>
+        {
+          toc.map((item: { id: string; title: string }) => (
+            <a class="docs-sidebar__toc-link" data-toc-link href={`#${item.id}`}>
+              <span class="docs-sidebar__dot" aria-hidden="true"></span>
+              {item.title}
+            </a>
+          ))
+        }
+      </div>
+    ) : null
+  }
+</aside>
