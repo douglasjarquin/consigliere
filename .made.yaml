@@ -1,0 +1,15 @@
+version: 1
+agent: codex
+disable_project_settings: true
+review:
+  required: true
+  guides:
+    - ".made/features/README.md"
+ci:
+  required: true
+commands:
+  lint: bin/cs-lint.sh
+test:
+  evidence:
+    store_in_repo: true
+    dir: .made/evidence
