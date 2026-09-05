@@ -5,23 +5,27 @@
 # The status file (state/<id>.status) is a best-effort append-only EVENT LOG, so
 # `tail -1` of it reports the last event, not the current state. cs-crew-state
 # reads the AUTHORITATIVE source (a matching made pipeline run-step via `made
-# status --json`, else the pane busy-signature) and reconciles the possibly-
+# run list --json`, else the pane busy-signature) and reconciles the possibly-
 # stale log against it. These cases pin every branch of that logic,
 # hermetically, over real throwaway git repos with a fake `made` (run-step
-# source, JSON) and a fake `herdr` (pane source):
+# source, JSON shaped like made's real StatusReport/run-list output,
+# docs/made.md) and a fake `herdr` (pane source):
 #   (a) active run-step is authoritative                          -> run-step
 #   (b) needs-decision/blocked log + resumed run = SUPERSEDED     -> run-step
-#   (c) genuine parked run + needs-decision log = NOT superseded  -> run-step
-#   (d) terminal run-step (completed/failed) is authoritative     -> run-step
-#   (e) cross-branch attribution: this branch's own run found via list lookup
+#   (c) genuine parked (awaiting_review) run + needs-decision log
+#       = NOT superseded                                          -> run-step
+#   (d) terminal run-step (succeeded/failed/awaiting_merge/
+#       canceled/superseded) is authoritative                     -> run-step
+#   (e) branch filtering: this branch's own run found among other branches'
+#       rows in one `run list --json` listing, never misattributed
 #   (f) no run + busy pane                                        -> pane
 #   (g) no run + idle pane falls to the status-log verb           -> status-log
 #   (h) dead pane: no run -> unknown/none; with a run -> run-step (not the shell)
 #   (i) kind=scout skips the run lookup                           -> pane/status-log
 #   (j) torn-down worktree / missing meta                         -> unknown/none
 #   (k) crew_is_provably_working end-to-end over the REAL helper (not a canned
-#       fake cs-crew-state.sh verdict): cross-branch attribution via the runs
-#       list -> absorbed; genuinely no run anywhere + idle pane -> surfaced.
+#       fake cs-crew-state.sh verdict): this branch's own run found among
+#       others -> absorbed; genuinely no run anywhere + idle pane -> surfaced.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -29,7 +33,7 @@ set -u
 # shellcheck source=bin/cs-classify-lib.sh
 . "$ROOT/bin/cs-classify-lib.sh"
 
-command -v jq >/dev/null 2>&1 || fail "jq is required (cs-crew-state.sh parses made status --json with it)"
+command -v jq >/dev/null 2>&1 || fail "jq is required (cs-crew-state.sh parses made run list --json with it)"
 
 CREW_STATE="$ROOT/bin/cs-crew-state.sh"
 TMP_ROOT=$(cs_test_tmproot cs-crew-state)
@@ -45,23 +49,22 @@ make_repo_on_branch() {  # <dir> <branch>
   git -C "$dir" checkout -q -b "$branch"
 }
 
-# A fakebin with a fake `made` (serves `status --json` from CS_FAKE_STATUS_JSON
-# and the coarse `runs --limit N` listing from CS_FAKE_RUNS_LIST, plain text as
-# bin/cs-made-run-lib.sh's forward-referenced fallback expects) and a fake
-# `herdr` (serves a live/dead pane, its rendered text, and the native agent
-# status). The fake herdr tolerates the trailing `--session <name>` cs_herdr
-# always appends.
+# A fakebin with a fake `made` (serves `run list --json [--active]` from
+# CS_FAKE_RUN_LIST_JSON - the same listing for both, since cs_made_resolve_run's
+# two-pass fallback only needs SOME well-formed answer to resolve against, not
+# real --active filtering semantics, which bin/cs-made-run-lib.sh's own tests
+# already pin) and a fake `herdr` (serves a live/dead pane, its rendered text,
+# and the native agent status). The fake herdr tolerates the trailing
+# `--session <name>` cs_herdr always appends.
 make_fakebin() {  # <dir> -> echoes fakebin path
   local dir=$1 fb
   fb=$(cs_fakebin "$dir")
   cat > "$fb/made" <<'SH'
 #!/usr/bin/env bash
 set -u
-case "${1:-}" in
-  status)
-    printf '%s\n' "${CS_FAKE_STATUS_JSON:-}" ;;
-  runs)
-    printf '%s\n' "${CS_FAKE_RUNS_LIST:-}" ;;
+case "${1:-} ${2:-}" in
+  "run list")
+    printf '%s\n' "${CS_FAKE_RUN_LIST_JSON:-}" ;;
 esac
 exit 0
 SH
@@ -132,19 +135,19 @@ new_case() {  # <name> -> echoes case dir with an empty state/
 # assignments below stay exported into the fakes without an `export VAR=$(...)`
 # command-substitution assignment (SC2155).
 reset_fakes() {
-  CS_FAKE_STATUS_JSON=""
-  CS_FAKE_RUNS_LIST=""
+  CS_FAKE_RUN_LIST_JSON=""
   CS_FAKE_HERDR_BUSY=0
   CS_FAKE_HERDR_MISSING=0
   CS_FAKE_HERDR_AGENT_STATUS=""
   CS_FAKE_HERDR_PROC=""
-  export CS_FAKE_STATUS_JSON CS_FAKE_RUNS_LIST
+  export CS_FAKE_RUN_LIST_JSON
   export CS_FAKE_HERDR_BUSY CS_FAKE_HERDR_MISSING CS_FAKE_HERDR_AGENT_STATUS CS_FAKE_HERDR_PROC
 }
 
-# --- run-object fixtures (`made status --json`'s schema: schema_version,
-# run_id, repo, branch, state, error, stages[]{name,result},
-# pending_findings[]{stage,message}) -----------------------------------------
+# --- run-object fixtures (made's real StatusReport/run-list schema,
+# docs/made.md: schema_version, run_id, repo, branch, state, input_sha,
+# output_sha, execution_finished, error, errors[], pr_url,
+# stages[]{name,result}, pending_findings[]{stage,message}) -----------------
 #
 # Only the fields each scenario actually exercises are populated - jq reads a
 # missing/empty array the same as one that lists every one of made's 9
@@ -161,42 +164,67 @@ findings_json() {  # <stage> <count>
   printf '%s]' "$out"
 }
 
-run_json() {  # <branch> <state> [<stages-json>] [<findings-json>] [<error>]
-  local branch=$1 state=$2 stages=${3:-[]} findings=${4:-[]} err=${5:-}
-  printf '{"schema_version":1,"run_id":"01RUN","repo":"o/r","branch":"%s","state":"%s","error":"%s","stages":%s,"pending_findings":%s}\n' \
-    "$branch" "$state" "$err" "$stages" "$findings"
+# true for the states made's own execution_finished reports true for
+# (docs/made.md): awaiting_merge plus the 4 terminal states.
+exec_finished_for() {
+  case "$1" in
+    awaiting_merge|succeeded|failed|canceled|superseded) printf 'true' ;;
+    *) printf 'false' ;;
+  esac
 }
 
-run_queued() { run_json "$1" queued; }  # <branch>
-
-run_active() { run_json "$1" running "[{\"name\":\"$2\",\"result\":\"pending\"}]"; }  # <branch> <stage>
-
-run_parked() {  # <branch> <gate-stage> <finding-count>
-  run_json "$1" running "[{\"name\":\"$2\",\"result\":\"pending\"}]" "$(findings_json "$2" "$3")"
+# One StatusReport row. <branch> <head> <state> [<stages-json>] [<findings-json>]
+# [<error>] [<errors-json>] [<pr_url>] [<queued_at>]
+run_row_json() {
+  local branch=$1 head=$2 state=$3 stages=${4:-[]} findings=${5:-[]} err=${6:-} \
+    errs=${7:-[]} pr=${8:-} qat=${9:-2026-07-02T22:00:00Z}
+  printf '{"schema_version":1,"run_id":"01RUN","repo":"o/r","branch":"%s","state":"%s","input_sha":"%s","output_sha":"%s","execution_finished":%s,"error":"%s","errors":%s,"pr_url":"%s","queued_at":"%s","stages":%s,"pending_findings":%s}\n' \
+    "$branch" "$state" "$head" "$head" "$(exec_finished_for "$state")" "$err" "$errs" "$pr" "$qat" "$stages" "$findings"
 }
 
-run_completed() { run_json "$1" completed; }  # <branch>
+# A {"runs":[...]} listing from N row JSON args.
+run_list_json() {
+  local IFS=,
+  printf '{"schema_version":1,"protocol_version":1,"runs":[%s]}\n' "$*"
+}
 
-run_failed() {  # <branch> [<failed-stage>] [<error>]
-  local branch=$1 stage=${2:-} err=${3:-}
+run_queued() { run_list_json "$(run_row_json "$1" "$2" queued)"; }  # <branch> <head>
+
+run_active() { run_list_json "$(run_row_json "$1" "$2" running "[{\"name\":\"$3\",\"result\":\"pending\"}]")"; }  # <branch> <head> <stage>
+
+run_parked() {  # <branch> <head> <gate-stage> <finding-count>
+  run_list_json "$(run_row_json "$1" "$2" awaiting_review "[{\"name\":\"$3\",\"result\":\"pending\"}]" "$(findings_json "$3" "$4")")"
+}
+
+run_completed() { run_list_json "$(run_row_json "$1" "$2" succeeded)"; }  # <branch> <head>
+
+run_failed() {  # <branch> <head> [<failed-stage>] [<error>]
+  local branch=$1 head=$2 stage=${3:-} err=${4:-}
   local stages=[]
   [ -n "$stage" ] && stages="[{\"name\":\"$stage\",\"result\":\"fail\"}]"
-  run_json "$branch" failed "$stages" [] "$err"
+  run_list_json "$(run_row_json "$branch" "$head" failed "$stages" [] "$err")"
 }
 
-run_ci_pending() { run_json "$1" running '[{"name":"ci","result":"pending"}]'; }  # <branch>
+run_ci_pending() { run_list_json "$(run_row_json "$1" "$2" running '[{"name":"ci","result":"pending"}]')"; }  # <branch> <head>
 
-run_ci_passed() { run_json "$1" running '[{"name":"ci","result":"pass"}]'; }  # <branch>
+run_ci_passed() { run_list_json "$(run_row_json "$1" "$2" running '[{"name":"ci","result":"pass"}]')"; }  # <branch> <head>
+
+run_awaiting_merge() { run_list_json "$(run_row_json "$1" "$2" awaiting_merge [] [] "" [] "${3:-}")"; }  # <branch> <head> [<pr_url>]
+
+run_canceled() { run_list_json "$(run_row_json "$1" "$2" canceled)"; }  # <branch> <head>
+
+run_superseded() { run_list_json "$(run_row_json "$1" "$2" superseded)"; }  # <branch> <head>
 
 # ---------------------------------------------------------------------------
 # (a) active run-step is authoritative
 test_active_run_is_authoritative() {
   reset_fakes
-  local d; d=$(new_case active)
+  local d head; d=$(new_case active)
   make_repo_on_branch "$d/wt" cs/feat-a
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-a.meta" "pane=p-feat-a" "workspace=w-feat-a" "worktree=$d/wt" "kind=ship"
-  CS_FAKE_STATUS_JSON="$(run_active cs/feat-a review)"
+  CS_FAKE_RUN_LIST_JSON="$(run_active cs/feat-a "$head" review)"
   local out; out=$(run_crew_state "$d" feat-a)
   assert_contains "$out" "state: working" "active run -> working"
   assert_contains "$out" "source: run-step" "active run -> run-step source"
@@ -206,11 +234,12 @@ test_active_run_is_authoritative() {
 
 test_active_run_queued_is_working() {
   reset_fakes
-  local d; d=$(new_case queued)
+  local d head; d=$(new_case queued)
   make_repo_on_branch "$d/wt" cs/feat-q
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-q.meta" "pane=p-feat-q" "workspace=w-feat-q" "worktree=$d/wt" "kind=ship"
-  CS_FAKE_STATUS_JSON="$(run_queued cs/feat-q)"
+  CS_FAKE_RUN_LIST_JSON="$(run_queued cs/feat-q "$head")"
   local out; out=$(run_crew_state "$d" feat-q)
   assert_contains "$out" "state: working" "queued run -> working"
   assert_contains "$out" "source: run-step" "queued run -> run-step source"
@@ -221,12 +250,13 @@ test_active_run_queued_is_working() {
 # (b) needs-decision log + a resumed (active) run = SUPERSEDED
 test_stale_needs_decision_superseded() {
   reset_fakes
-  local d; d=$(new_case superseded)
+  local d head; d=$(new_case superseded)
   make_repo_on_branch "$d/wt" cs/feat-b
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-b.meta" "pane=p-feat-b" "workspace=w-feat-b" "worktree=$d/wt" "kind=ship"
   printf 'working: started\nneeds-decision: pick A or B\n' > "$d/state/feat-b.status"
-  CS_FAKE_STATUS_JSON="$(run_active cs/feat-b test)"
+  CS_FAKE_RUN_LIST_JSON="$(run_active cs/feat-b "$head" test)"
   local out; out=$(run_crew_state "$d" feat-b)
   assert_contains "$out" "state: working" "resumed run -> working despite needs-decision log"
   assert_contains "$out" "source: run-step" "resumed run -> run-step source"
@@ -237,12 +267,13 @@ test_stale_needs_decision_superseded() {
 # blocked log + a resumed run is also superseded
 test_stale_blocked_superseded() {
   reset_fakes
-  local d; d=$(new_case superseded-blocked)
+  local d head; d=$(new_case superseded-blocked)
   make_repo_on_branch "$d/wt" cs/feat-bb
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-bb.meta" "pane=p-feat-bb" "workspace=w-feat-bb" "worktree=$d/wt" "kind=ship"
   printf 'blocked: waiting on review answer\n' > "$d/state/feat-bb.status"
-  CS_FAKE_STATUS_JSON="$(run_active cs/feat-bb review)"
+  CS_FAKE_RUN_LIST_JSON="$(run_active cs/feat-bb "$head" review)"
   local out; out=$(run_crew_state "$d" feat-bb)
   assert_contains "$out" "state: working" "resumed run -> working despite blocked log"
   assert_contains "$out" "superseded" "stale blocked log flagged superseded"
@@ -254,12 +285,13 @@ test_stale_blocked_superseded() {
 # parked at a later gate.
 test_needs_review_superseded_once_run_exists() {
   reset_fakes
-  local d; d=$(new_case needs-review-run-exists)
+  local d head; d=$(new_case needs-review-run-exists)
   make_repo_on_branch "$d/wt" cs/feat-review-run
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-review-run.meta" "pane=p-feat-review-run" "workspace=w-feat-review-run" "worktree=$d/wt" "kind=ship"
   printf 'needs-review [key=pre-validation]: implementation committed\n' > "$d/state/feat-review-run.status"
-  CS_FAKE_STATUS_JSON="$(run_parked cs/feat-review-run review 2)"
+  CS_FAKE_RUN_LIST_JSON="$(run_parked cs/feat-review-run "$head" review 2)"
   local out; out=$(run_crew_state "$d" feat-review-run)
   assert_contains "$out" "state: parked" "later parked run remains parked"
   assert_contains "$out" "source: run-step" "run existence is authoritative"
@@ -267,15 +299,16 @@ test_needs_review_superseded_once_run_exists() {
   pass "needs-review is superseded once a validation run exists"
 }
 
-# (c) genuine parked run + needs-decision log AGREE -> parked, NOT superseded
+# (c) genuine parked (awaiting_review) run + needs-decision log AGREE -> parked, NOT superseded
 test_genuine_parked_not_superseded() {
   reset_fakes
-  local d; d=$(new_case parked)
+  local d head; d=$(new_case parked)
   make_repo_on_branch "$d/wt" cs/feat-c
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-c.meta" "pane=p-feat-c" "workspace=w-feat-c" "worktree=$d/wt" "kind=ship"
   printf 'needs-decision: review gate\n' > "$d/state/feat-c.status"
-  CS_FAKE_STATUS_JSON="$(run_parked cs/feat-c review 2)"
+  CS_FAKE_RUN_LIST_JSON="$(run_parked cs/feat-c "$head" review 2)"
   local out; out=$(run_crew_state "$d" feat-c)
   assert_contains "$out" "state: parked" "genuine parked run -> parked"
   assert_contains "$out" "source: run-step" "parked -> run-step source"
@@ -289,24 +322,26 @@ test_genuine_parked_not_superseded() {
 # (d) terminal run-step is authoritative
 test_terminal_completed() {
   reset_fakes
-  local d; d=$(new_case completed)
+  local d head; d=$(new_case completed)
   make_repo_on_branch "$d/wt" cs/feat-d
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-d.meta" "pane=p-feat-d" "workspace=w-feat-d" "worktree=$d/wt" "kind=ship"
-  CS_FAKE_STATUS_JSON="$(run_completed cs/feat-d)"
+  CS_FAKE_RUN_LIST_JSON="$(run_completed cs/feat-d "$head")"
   local out; out=$(run_crew_state "$d" feat-d)
-  assert_contains "$out" "state: done" "completed run -> done"
-  assert_contains "$out" "source: run-step" "completed -> run-step source"
-  pass "terminal completed run is authoritative"
+  assert_contains "$out" "state: done" "succeeded run -> done"
+  assert_contains "$out" "source: run-step" "succeeded -> run-step source"
+  pass "terminal succeeded run is authoritative"
 }
 
 test_terminal_failed() {
   reset_fakes
-  local d; d=$(new_case failed)
+  local d head; d=$(new_case failed)
   make_repo_on_branch "$d/wt" cs/feat-e
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-e.meta" "pane=p-feat-e" "workspace=w-feat-e" "worktree=$d/wt" "kind=ship"
-  CS_FAKE_STATUS_JSON="$(run_failed cs/feat-e test "exit status 1")"
+  CS_FAKE_RUN_LIST_JSON="$(run_failed cs/feat-e "$head" test "exit status 1")"
   local out; out=$(run_crew_state "$d" feat-e)
   assert_contains "$out" "state: failed" "failed run -> failed"
   assert_contains "$out" "source: run-step" "failed -> run-step source"
@@ -316,15 +351,74 @@ test_terminal_failed() {
 
 test_terminal_failed_names_stage_without_error() {
   reset_fakes
-  local d; d=$(new_case failed-no-error)
+  local d head; d=$(new_case failed-no-error)
   make_repo_on_branch "$d/wt" cs/feat-ee
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-ee.meta" "pane=p-feat-ee" "workspace=w-feat-ee" "worktree=$d/wt" "kind=ship"
-  CS_FAKE_STATUS_JSON="$(run_failed cs/feat-ee lint)"
+  CS_FAKE_RUN_LIST_JSON="$(run_failed cs/feat-ee "$head" lint)"
   local out; out=$(run_crew_state "$d" feat-ee)
   assert_contains "$out" "state: failed" "failed run with no error message -> failed"
   assert_contains "$out" "run failed at lint" "failed detail names the failing stage"
   pass "a failed run with no error message still names the failing stage"
+}
+
+test_failed_run_surfaces_plural_errors_array() {
+  reset_fakes
+  local d head row; d=$(new_case failed-errors-array)
+  make_repo_on_branch "$d/wt" cs/feat-errs
+  head=$(git -C "$d/wt" rev-parse HEAD)
+  make_fakebin "$d" >/dev/null
+  cs_write_meta "$d/state/feat-errs.meta" "pane=p-feat-errs" "workspace=w-feat-errs" "worktree=$d/wt" "kind=ship"
+  row=$(run_row_json cs/feat-errs "$head" failed [] [] "" '["lint: 2 issues","test: timeout"]')
+  CS_FAKE_RUN_LIST_JSON="$(run_list_json "$row")"
+  local out; out=$(run_crew_state "$d" feat-errs)
+  assert_contains "$out" "state: failed" "failed run with a plural errors[] array -> failed"
+  assert_contains "$out" "run failed: lint: 2 issues; test: timeout" "failed detail joins the errors[] array when .error is empty"
+  pass "a failed run with an empty singular error falls back to the plural errors[] array"
+}
+
+test_awaiting_merge_reports_done_with_pr_url() {
+  reset_fakes
+  local d head; d=$(new_case awaiting-merge)
+  make_repo_on_branch "$d/wt" cs/feat-merge
+  head=$(git -C "$d/wt" rev-parse HEAD)
+  make_fakebin "$d" >/dev/null
+  cs_write_meta "$d/state/feat-merge.meta" "pane=p-feat-merge" "workspace=w-feat-merge" "worktree=$d/wt" "kind=ship"
+  CS_FAKE_RUN_LIST_JSON="$(run_awaiting_merge cs/feat-merge "$head" https://github.com/o/r/pull/9)"
+  local out; out=$(run_crew_state "$d" feat-merge)
+  assert_contains "$out" "state: done" "awaiting_merge run -> done"
+  assert_contains "$out" "source: run-step" "awaiting_merge -> run-step source"
+  assert_contains "$out" "https://github.com/o/r/pull/9" "awaiting_merge detail carries the PR url"
+  pass "an awaiting_merge run reports done with the PR url"
+}
+
+test_canceled_reports_failed() {
+  reset_fakes
+  local d head; d=$(new_case canceled)
+  make_repo_on_branch "$d/wt" cs/feat-canceled
+  head=$(git -C "$d/wt" rev-parse HEAD)
+  make_fakebin "$d" >/dev/null
+  cs_write_meta "$d/state/feat-canceled.meta" "pane=p-feat-canceled" "workspace=w-feat-canceled" "worktree=$d/wt" "kind=ship"
+  CS_FAKE_RUN_LIST_JSON="$(run_canceled cs/feat-canceled "$head")"
+  local out; out=$(run_crew_state "$d" feat-canceled)
+  assert_contains "$out" "state: failed" "canceled run -> failed"
+  assert_contains "$out" "run cancelled" "canceled run names its detail"
+  pass "a canceled run reports failed"
+}
+
+test_superseded_reports_stale() {
+  reset_fakes
+  local d head; d=$(new_case superseded-state)
+  make_repo_on_branch "$d/wt" cs/feat-superseded
+  head=$(git -C "$d/wt" rev-parse HEAD)
+  make_fakebin "$d" >/dev/null
+  cs_write_meta "$d/state/feat-superseded.meta" "pane=p-feat-superseded" "workspace=w-feat-superseded" "worktree=$d/wt" "kind=ship"
+  CS_FAKE_RUN_LIST_JSON="$(run_superseded cs/feat-superseded "$head")"
+  local out; out=$(run_crew_state "$d" feat-superseded)
+  assert_contains "$out" "state: stale" "superseded run -> stale"
+  assert_contains "$out" "source: run-step" "superseded -> run-step source"
+  pass "a superseded run reports the new stale state"
 }
 
 # --- ci-stage-driven "checks green" detection -------------------------------
@@ -334,11 +428,12 @@ test_terminal_failed_names_stage_without_error() {
 
 test_ci_stage_pass_surfaces_done_without_a_log_line() {
   reset_fakes
-  local d; d=$(new_case ci-pass-no-log)
+  local d head; d=$(new_case ci-pass-no-log)
   make_repo_on_branch "$d/wt" cs/feat-cipass
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-cipass.meta" "pane=p-feat-cipass" "workspace=w-feat-cipass" "worktree=$d/wt" "kind=ship"
-  CS_FAKE_STATUS_JSON="$(run_ci_passed cs/feat-cipass)"
+  CS_FAKE_RUN_LIST_JSON="$(run_ci_passed cs/feat-cipass "$head")"
   local out; out=$(run_crew_state "$d" feat-cipass)
   assert_contains "$out" "state: done" "a passed ci stage -> done even with no status-log confirmation"
   assert_contains "$out" "source: run-step" "ci-stage-pass detection is run-step sourced"
@@ -348,12 +443,13 @@ test_ci_stage_pass_surfaces_done_without_a_log_line() {
 
 test_ci_stage_pass_and_log_agree_stays_run_step_sourced() {
   reset_fakes
-  local d; d=$(new_case ci-pass-log-agrees)
+  local d head; d=$(new_case ci-pass-log-agrees)
   make_repo_on_branch "$d/wt" cs/feat-cipasslog
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-cipasslog.meta" "pane=p-feat-cipasslog" "workspace=w-feat-cipasslog" "worktree=$d/wt" "kind=ship"
   printf 'done: PR https://github.com/o/r/pull/2 checks green\n' > "$d/state/feat-cipasslog.status"
-  CS_FAKE_STATUS_JSON="$(run_ci_passed cs/feat-cipasslog)"
+  CS_FAKE_RUN_LIST_JSON="$(run_ci_passed cs/feat-cipasslog "$head")"
   local out; out=$(run_crew_state "$d" feat-cipasslog)
   assert_contains "$out" "state: done" "ci-stage-pass with an agreeing log -> done"
   assert_contains "$out" "source: run-step" "the live stage result wins over a duplicate log confirmation"
@@ -362,12 +458,13 @@ test_ci_stage_pass_and_log_agree_stays_run_step_sourced() {
 
 test_ci_stage_pending_ignores_a_stale_done_log() {
   reset_fakes
-  local d; d=$(new_case ci-pending-stale-log)
+  local d head; d=$(new_case ci-pending-stale-log)
   make_repo_on_branch "$d/wt" cs/feat-cipending
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-cipending.meta" "pane=p-feat-cipending" "workspace=w-feat-cipending" "worktree=$d/wt" "kind=ship"
   printf 'done: PR https://github.com/o/r/pull/2 checks green\n' > "$d/state/feat-cipending.status"
-  CS_FAKE_STATUS_JSON="$(run_ci_pending cs/feat-cipending)"
+  CS_FAKE_RUN_LIST_JSON="$(run_ci_pending cs/feat-cipending "$head")"
   local out; out=$(run_crew_state "$d" feat-cipending)
   assert_contains "$out" "state: working" "a live pending ci stage is never masked by a stale done log"
   assert_contains "$out" "source: run-step" "pending ci stage remains run-step sourced"
@@ -377,103 +474,69 @@ test_ci_stage_pending_ignores_a_stale_done_log() {
 
 test_ci_stage_pending_stays_working_without_a_log() {
   reset_fakes
-  local d; d=$(new_case ci-pending-no-log)
+  local d head; d=$(new_case ci-pending-no-log)
   make_repo_on_branch "$d/wt" cs/feat-cipendingnolog
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-cipendingnolog.meta" "pane=p-feat-cipendingnolog" "workspace=w-feat-cipendingnolog" "worktree=$d/wt" "kind=ship"
-  CS_FAKE_STATUS_JSON="$(run_ci_pending cs/feat-cipendingnolog)"
+  CS_FAKE_RUN_LIST_JSON="$(run_ci_pending cs/feat-cipendingnolog "$head")"
   local out; out=$(run_crew_state "$d" feat-cipendingnolog)
   assert_contains "$out" "state: working" "pending ci stage with no log claim -> working"
   assert_not_contains "$out" "checks green" "no green marker present -> no checks-green detail"
   pass "a pending ci stage with no log claim stays working"
 }
 
-# (e) cross-branch attribution: `made status --json` returns ANOTHER branch's
-# run (the routine case once more than one soldier validates the same
-# underlying repo concurrently - the most-recently-queued run across the whole
-# daemon need not be this soldier's), so the helper falls back to the coarse
-# `made runs` listing to learn whether THIS branch has an active run of its own.
+# (e) branch filtering: `made run list --json` returns rows for OTHER
+# branches alongside this one (the routine case once more than one soldier
+# validates the same underlying repo concurrently) - cs_made_resolve_run
+# filters by branch itself, so this branch's own row is found directly in one
+# listing; a cross-branch misattribution is structurally impossible.
 test_cross_branch_attribution_via_runs_list() {
   reset_fakes
-  local d short; d=$(new_case crossbranch)
+  local d head; d=$(new_case crossbranch)
   make_repo_on_branch "$d/wt" cs/feat-f
-  short=$(git -C "$d/wt" rev-parse --short=7 HEAD)
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-f.meta" "pane=p-feat-f" "workspace=w-feat-f" "worktree=$d/wt" "kind=ship"
-  # The daemon-wide most-recently-queued run belongs to a different soldier's branch.
-  CS_FAKE_STATUS_JSON="$(run_active cs/other-soldier review)"
-  # The coarse `made runs` shape (forward reference, bin/cs-made-run-lib.sh):
-  # plain text, newest-first, no run id, no quoting - "<status> <branch>
-  # <short-sha> <date> [<pr-url>]".
-  CS_FAKE_RUNS_LIST="$(cat <<EOF
-  running    cs/other-soldier aaaaaaa  2026-07-02 22:10
-  running    cs/feat-f ${short}  2026-07-02 22:05
-EOF
-)"
+  CS_FAKE_RUN_LIST_JSON="$(run_list_json \
+    "$(run_row_json cs/other-soldier "$head" running)" \
+    "$(run_row_json cs/feat-f "$head" running "[{\"name\":\"review\",\"result\":\"pending\"}]")")"
   local out; out=$(run_crew_state "$d" feat-f)
-  assert_contains "$out" "state: working" "this branch's own run attributed via the runs list"
-  assert_contains "$out" "source: run-step" "runs-list-resolved run -> run-step source"
-  pass "cross-branch run is attributed via the real runs list"
+  assert_contains "$out" "state: working" "this branch's own run attributed via the run list"
+  assert_contains "$out" "source: run-step" "run-list-resolved run -> run-step source"
+  pass "this branch's own run is found among other branches' rows in one listing"
 }
 
-# The runs list is newest-first; a branch with an OLDER completed run must not
-# shadow its own newer active one - the first (topmost) matching row wins.
+# Multiple rows for the SAME branch: the more recent (by queued_at) row wins,
+# even when it is not the first row in the listing.
 test_cross_branch_attribution_picks_most_recent_row() {
   reset_fakes
-  local d short; d=$(new_case crossbranch-mostrecent)
+  local d head; d=$(new_case crossbranch-mostrecent)
   make_repo_on_branch "$d/wt" cs/feat-fq
-  short=$(git -C "$d/wt" rev-parse --short=7 HEAD)
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-fq.meta" "pane=p-feat-fq" "workspace=w-feat-fq" "worktree=$d/wt" "kind=ship"
-  CS_FAKE_STATUS_JSON="$(run_active cs/other-soldier review)"
-  CS_FAKE_RUNS_LIST="$(cat <<EOF
-  running    cs/other-soldier aaaaaaa  2026-07-02 22:10
-  running    cs/feat-fq ${short}  2026-07-02 21:50
-  completed  cs/feat-fq bbbbbbb  2026-07-02 20:00  https://github.com/o/r/pull/1
-EOF
-)"
+  CS_FAKE_RUN_LIST_JSON="$(run_list_json \
+    "$(run_row_json cs/other-soldier "$head" running [] [] "" [] "" 2026-07-02T22:10:00Z)" \
+    "$(run_row_json cs/feat-fq "$head" running [] [] "" [] "" 2026-07-02T21:50:00Z)" \
+    "$(run_row_json cs/feat-fq "$head" succeeded [] [] "" [] "" 2026-07-02T20:00:00Z)")"
   local out; out=$(run_crew_state "$d" feat-fq)
-  assert_contains "$out" "state: working" "most recent (running) row wins over an older completed row"
+  assert_contains "$out" "state: working" "most recent (running) row wins over an older succeeded row"
   assert_contains "$out" "source: run-step" "most-recent-row resolution -> run-step source"
   pass "cross-branch attribution picks the branch's most recent row"
 }
 
-# The coarse listing has no per-stage detail at all, so a status-log claim of
-# "checks green" is trusted outright there - it is the only signal available.
-test_coarse_run_trusts_the_status_log_for_ready_status() {
-  reset_fakes
-  local d short; d=$(new_case coarse-ready-other-log)
-  make_repo_on_branch "$d/wt" cs/feat-coarseready
-  short=$(git -C "$d/wt" rev-parse --short=7 HEAD)
-  make_fakebin "$d" >/dev/null
-  cs_write_meta "$d/state/feat-coarseready.meta" "pane=p-feat-coarseready" "workspace=w-feat-coarseready" "worktree=$d/wt" "kind=ship"
-  printf 'done: PR https://github.com/o/r/pull/4 checks green\n' > "$d/state/feat-coarseready.status"
-  CS_FAKE_STATUS_JSON="$(run_active cs/other-soldier ci)"
-  CS_FAKE_RUNS_LIST="$(cat <<EOF
-  running    cs/other-soldier aaaaaaa  2026-07-02 22:10
-  running    cs/feat-coarseready ${short}  2026-07-02 22:05
-EOF
-)"
-  local out; out=$(run_crew_state "$d" feat-coarseready)
-  assert_contains "$out" "state: done" "coarse ready status -> done"
-  assert_contains "$out" "source: status-log" "coarse ready status is status-log sourced"
-  pass "the coarse path trusts the status log for checks-green detection"
-}
-
-# A different-branch run with NO matching runs-list row must NOT be
+# A different-branch run with NO matching row for this branch must NOT be
 # misattributed, and must not be treated as a false "working" verdict either.
 test_other_branch_run_ignored() {
   reset_fakes
-  local d; d=$(new_case otherbranch)
+  local d head; d=$(new_case otherbranch)
   make_repo_on_branch "$d/wt" cs/feat-g
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-g.meta" "pane=p-feat-g" "workspace=w-feat-g" "worktree=$d/wt" "kind=ship"
   printf 'done: implemented, ready to validate\n' > "$d/state/feat-g.status"
-  CS_FAKE_STATUS_JSON="$(run_active cs/some-other review)"
-  CS_FAKE_RUNS_LIST="$(cat <<'EOF'
-  running    cs/some-other aaaaaaa  2026-07-02 22:10
-EOF
-)"
+  CS_FAKE_RUN_LIST_JSON="$(run_list_json "$(run_row_json cs/some-other "$head" running)")"
   CS_FAKE_HERDR_BUSY=0
   local out; out=$(run_crew_state "$d" feat-g)
   assert_not_contains "$out" "source: run-step" "another branch's run not misattributed"
@@ -491,12 +554,12 @@ test_malformed_status_json_falls_back() {
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-malformed.meta" "pane=p-feat-malformed" "workspace=w-feat-malformed" "worktree=$d/wt" "kind=ship"
   printf 'done: implemented, ready to validate\n' > "$d/state/feat-malformed.status"
-  CS_FAKE_STATUS_JSON="not json at all"
+  CS_FAKE_RUN_LIST_JSON="not json at all"
   CS_FAKE_HERDR_BUSY=0
   local out; out=$(run_crew_state "$d" feat-malformed)
-  assert_not_contains "$out" "source: run-step" "malformed made status output is not attributed"
-  assert_contains "$out" "source: status-log" "malformed made status output falls back to status-log"
-  pass "malformed made status --json output falls back gracefully"
+  assert_not_contains "$out" "source: run-step" "malformed made run-list output is not attributed"
+  assert_contains "$out" "source: status-log" "malformed made run-list output falls back to status-log"
+  pass "malformed made run list --json output falls back gracefully"
 }
 
 # (f) no run for this soldier + a busy pane -> working via pane. Native
@@ -508,8 +571,7 @@ test_no_run_busy_pane() {
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-h.meta" "pane=p-feat-h" "workspace=w-feat-h" "worktree=$d/wt" "kind=ship"
   # No matching run anywhere.
-  CS_FAKE_STATUS_JSON=""
-  CS_FAKE_RUNS_LIST=""
+  CS_FAKE_RUN_LIST_JSON=""
   CS_FAKE_HERDR_AGENT_STATUS=working
   local out; out=$(run_crew_state "$d" feat-h)
   assert_contains "$out" "state: working" "busy pane -> working"
@@ -525,8 +587,7 @@ test_no_run_unknown_agent_status_uses_pane_capture() {
   make_repo_on_branch "$d/wt" cs/feat-herdr
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-herdr.meta" "pane=p-feat-herdr" "workspace=w-feat-herdr" "worktree=$d/wt" "kind=ship"
-  CS_FAKE_STATUS_JSON=""
-  CS_FAKE_RUNS_LIST=""
+  CS_FAKE_RUN_LIST_JSON=""
   CS_FAKE_HERDR_AGENT_STATUS=""
   CS_FAKE_HERDR_BUSY=1
   local out; out=$(run_crew_state "$d" feat-herdr)
@@ -550,8 +611,7 @@ test_no_run_idle_agent_status_corroborated_by_busy_pane() {
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-herdr-idle.meta" "pane=p-feat-herdr-idle" "workspace=w-feat-herdr-idle" "worktree=$d/wt" "kind=ship"
   # No run attributable: the pane fallback is the only remaining signal.
-  CS_FAKE_STATUS_JSON=""
-  CS_FAKE_RUNS_LIST=""
+  CS_FAKE_RUN_LIST_JSON=""
   CS_FAKE_HERDR_AGENT_STATUS=idle
   CS_FAKE_HERDR_BUSY=1
   local out; out=$(run_crew_state "$d" feat-herdr-idle)
@@ -569,8 +629,7 @@ test_no_run_idle_agent_status_and_idle_pane_stays_idle() {
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-herdr-stopped.meta" "pane=p-feat-herdr-stopped" "workspace=w-feat-herdr-stopped" "worktree=$d/wt" "kind=ship"
   printf 'working: implementing\n' > "$d/state/feat-herdr-stopped.status"
-  CS_FAKE_STATUS_JSON=""
-  CS_FAKE_RUNS_LIST=""
+  CS_FAKE_RUN_LIST_JSON=""
   CS_FAKE_HERDR_AGENT_STATUS=idle
   CS_FAKE_HERDR_BUSY=0
   local out; out=$(run_crew_state "$d" feat-herdr-stopped)
@@ -587,7 +646,7 @@ test_no_run_idle_pane_uses_log() {
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-i.meta" "pane=p-feat-i" "workspace=w-feat-i" "worktree=$d/wt" "kind=ship"
   printf 'needs-decision: which database?\n' > "$d/state/feat-i.status"
-  CS_FAKE_STATUS_JSON=""
+  CS_FAKE_RUN_LIST_JSON=""
   CS_FAKE_HERDR_BUSY=0
   local out; out=$(run_crew_state "$d" feat-i)
   assert_contains "$out" "state: parked" "needs-decision log -> parked"
@@ -607,7 +666,7 @@ test_no_run_idle_pane_needs_review_is_parked() {
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-review.meta" "pane=p-feat-review" "workspace=w-feat-review" "worktree=$d/wt" "kind=ship"
   printf 'needs-review: retired the legacy flag; awaiting review before validation\n' > "$d/state/feat-review.status"
-  CS_FAKE_STATUS_JSON=""
+  CS_FAKE_RUN_LIST_JSON=""
   CS_FAKE_HERDR_BUSY=0
   local out; out=$(run_crew_state "$d" feat-review)
   assert_contains "$out" "state: parked" "needs-review log -> parked, not done"
@@ -648,7 +707,7 @@ test_no_run_idle_pane_uses_keyed_log() {
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-keyed.meta" "pane=p-feat-keyed" "workspace=w-feat-keyed" "worktree=$d/wt" "kind=ship"
   printf 'needs-decision [key=q1]: which database?\n' > "$d/state/feat-keyed.status"
-  CS_FAKE_STATUS_JSON=""
+  CS_FAKE_RUN_LIST_JSON=""
   CS_FAKE_HERDR_BUSY=0
   local out; out=$(run_crew_state "$d" feat-keyed)
   assert_contains "$out" "state: parked" "keyed needs-decision log -> parked"
@@ -666,7 +725,7 @@ test_no_run_idle_pane_paused() {
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-pause.meta" "pane=p-feat-pause" "workspace=w-feat-pause" "worktree=$d/wt" "kind=ship"
   printf 'paused: holding for the upstream tool release\n' > "$d/state/feat-pause.status"
-  CS_FAKE_STATUS_JSON=""
+  CS_FAKE_RUN_LIST_JSON=""
   CS_FAKE_HERDR_BUSY=0
   local out; out=$(run_crew_state "$d" feat-pause)
   assert_contains "$out" "state: paused" "paused log -> paused"
@@ -682,7 +741,7 @@ test_no_run_idle_pane_custom_paused_verb() {
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-custom-pause.meta" "pane=p-feat-custom-pause" "workspace=w-feat-custom-pause" "worktree=$d/wt" "kind=ship"
   printf 'awaiting: vendor maintenance window\n' > "$d/state/feat-custom-pause.status"
-  CS_FAKE_STATUS_JSON=""
+  CS_FAKE_RUN_LIST_JSON=""
   CS_FAKE_HERDR_BUSY=0
   local out; out=$(CS_CLASSIFY_PAUSED_VERB=awaiting run_crew_state "$d" feat-custom-pause)
   assert_contains "$out" "state: paused" "custom paused verb -> paused"
@@ -708,7 +767,7 @@ test_no_run_idle_capo_resolved_event_not_state() {
   cs_write_meta "$d/state/mate.meta" "pane=p-mate" "workspace=w-mate" "worktree=$d/wt" "kind=capo" "home=$d/wt"
   printf 'needs-decision [key=race]: pick subscribe order\n' > "$d/state/mate.status"
   printf 'resolved [key=race]: went with subscribe-before-write\n' >> "$d/state/mate.status"
-  CS_FAKE_STATUS_JSON=""
+  CS_FAKE_RUN_LIST_JSON=""
   CS_FAKE_HERDR_BUSY=0
   local out; out=$(run_crew_state "$d" mate)
   assert_contains "$out" "state: unknown" "resolved-then-idle capo is not a spurious run-state"
@@ -734,8 +793,7 @@ test_dead_pane_ignores_stale_status_log() {
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-dead.meta" "pane=p-feat-dead" "workspace=w-feat-dead" "worktree=$d/wt" "kind=ship"
   printf 'done: old completion event\n' > "$d/state/feat-dead.status"
-  CS_FAKE_STATUS_JSON=""
-  CS_FAKE_RUNS_LIST=""
+  CS_FAKE_RUN_LIST_JSON=""
   CS_FAKE_HERDR_MISSING=1
   local out; out=$(run_crew_state "$d" feat-dead)
   assert_contains "$out" "state: unknown" "dead pane -> unknown"
@@ -750,12 +808,13 @@ test_dead_pane_ignores_stale_status_log() {
 # it must still report its terminal run-step state (e.g. done), never unknown.
 test_dead_pane_still_reports_terminal_run_step() {
   reset_fakes
-  local d; d=$(new_case dead-pane-done)
+  local d head; d=$(new_case dead-pane-done)
   make_repo_on_branch "$d/wt" cs/feat-dead-done
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-dead-done.meta" "pane=p-feat-dead-done" "workspace=w-feat-dead-done" "worktree=$d/wt" "kind=ship"
   printf 'done: PR https://github.com/o/r/pull/3 checks green\n' > "$d/state/feat-dead-done.status"
-  CS_FAKE_STATUS_JSON="$(run_completed cs/feat-dead-done)"
+  CS_FAKE_RUN_LIST_JSON="$(run_completed cs/feat-dead-done "$head")"
   CS_FAKE_HERDR_MISSING=1   # the soldier's pane has closed
   local out; out=$(run_crew_state "$d" feat-dead-done)
   assert_contains "$out" "state: done" "closed pane still reports terminal run-step done"
@@ -768,11 +827,12 @@ test_dead_pane_still_reports_terminal_run_step() {
 # daemon-backed run continues must report the live run-step, not unknown.
 test_dead_pane_still_reports_active_run_step() {
   reset_fakes
-  local d; d=$(new_case dead-pane-active)
+  local d head; d=$(new_case dead-pane-active)
   make_repo_on_branch "$d/wt" cs/feat-dead-act
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-dead-act.meta" "pane=p-feat-dead-act" "workspace=w-feat-dead-act" "worktree=$d/wt" "kind=ship"
-  CS_FAKE_STATUS_JSON="$(run_active cs/feat-dead-act review)"
+  CS_FAKE_RUN_LIST_JSON="$(run_active cs/feat-dead-act "$head" review)"
   CS_FAKE_HERDR_MISSING=1
   local out; out=$(run_crew_state "$d" feat-dead-act)
   assert_contains "$out" "state: working" "closed pane still reports active run-step"
@@ -801,29 +861,31 @@ SH
   start=$SECONDS
   out=$(CS_FAKE_MADE_CALLS="$calls_file" PATH="$d/fakebin:$toolbin" CS_STATE_OVERRIDE="$d/state" CS_CREW_STATE_NM_TIMEOUT=1 "$CREW_STATE" feat-timeout)
   elapsed=$((SECONDS - start))
-  assert_contains "$out" "state: working" "timed-out made status falls back to pane"
-  assert_contains "$out" "source: pane" "timed-out made status -> pane source"
+  assert_contains "$out" "state: working" "timed-out made run-list falls back to pane"
+  assert_contains "$out" "source: pane" "timed-out made run-list -> pane source"
   [ "$elapsed" -lt 5 ] || fail "perl timeout did not bound the made call (elapsed ${elapsed}s)"
   calls=$(awk 'END { print NR + 0 }' "$calls_file" 2>/dev/null || echo 0)
-  # The property is that a bounded lookup returning nothing is not RETRIED, so
-  # the ceiling is what matters. Zero is a legitimate outcome of the same bound:
-  # cs_run_timed forks, then alarms after the 1s this case configures, and on a
-  # loaded host that alarm can fire before the forked child has finished exec'ing
-  # the fake, which records its call from inside the exec'd script. Asserting
-  # exactly one made this case fail intermittently under a full suite run.
-  [ "$calls" -le 1 ] || fail "empty made status triggered extra lookups ($calls calls)"
+  # The property is that a bounded lookup returning nothing is not RETRIED
+  # beyond the two calls cs_made_resolve_run's active/full fallback makes, so
+  # the ceiling is what matters. A lower count is a legitimate outcome of the
+  # same bound: cs_run_timed forks, then alarms after the 1s this case
+  # configures, and on a loaded host that alarm can fire before the forked
+  # child has finished exec'ing the fake, which records its call from inside
+  # the exec'd script.
+  [ "$calls" -le 2 ] || fail "empty made run-list triggered extra lookups ($calls calls)"
   pass "no timeout command uses perl bound"
 }
 
 # (i) kind=scout skips the run lookup entirely (its deliverable is a report).
 test_scout_skips_run_lookup() {
   reset_fakes
-  local d; d=$(new_case scout)
+  local d head; d=$(new_case scout)
   make_repo_on_branch "$d/wt" cs/scout-j
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/scout-j.meta" "pane=p-scout-j" "workspace=w-scout-j" "worktree=$d/wt" "kind=scout"
   # Even if a run existed on this branch, a scout must not read it.
-  CS_FAKE_STATUS_JSON="$(run_active cs/scout-j review)"
+  CS_FAKE_RUN_LIST_JSON="$(run_active cs/scout-j "$head" review)"
   CS_FAKE_HERDR_AGENT_STATUS=working
   local out; out=$(run_crew_state "$d" scout-j)
   assert_not_contains "$out" "source: run-step" "scout ignores the made run-step"
@@ -858,27 +920,24 @@ test_missing_meta() {
 }
 
 # (k) crew_is_provably_working end-to-end over the REAL cs-crew-state.sh (not a
-# canned fake verdict): a validating soldier whose bare `made status --json`
-# answer belongs to another branch must still be absorbed by the watcher via
-# the runs-list fallback (working), while a soldier with genuinely no run
+# canned fake verdict): a validating soldier whose own row appears alongside
+# another branch's row in one `made run list --json` listing must still be
+# absorbed by the watcher (working), while a soldier with genuinely no run
 # anywhere and an idle pane must still surface (the safety property the
-# fallback must never widen away).
+# lookup must never widen away).
 test_provably_working_via_runs_list_fallback() {
   reset_fakes
-  local d short; d=$(new_case provably-working-crossbranch)
+  local d head; d=$(new_case provably-working-crossbranch)
   make_repo_on_branch "$d/wt" cs/feat-provable
-  short=$(git -C "$d/wt" rev-parse --short=7 HEAD)
+  head=$(git -C "$d/wt" rev-parse HEAD)
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-provable.meta" "pane=p-feat-provable" "workspace=w-feat-provable" "worktree=$d/wt" "kind=ship"
-  CS_FAKE_STATUS_JSON="$(run_active cs/other-soldier review)"
-  CS_FAKE_RUNS_LIST="$(cat <<EOF
-  running    cs/other-soldier aaaaaaa  2026-07-02 22:10
-  running    cs/feat-provable ${short}  2026-07-02 22:05
-EOF
-)"
+  CS_FAKE_RUN_LIST_JSON="$(run_list_json \
+    "$(run_row_json cs/other-soldier "$head" running)" \
+    "$(run_row_json cs/feat-provable "$head" running)")"
   PATH="$d/fakebin:$PATH" CS_STATE_OVERRIDE="$d/state" crew_is_provably_working feat-provable \
-    || fail "cross-branch attribution via the runs list was not treated as provably working"
-  pass "crew_is_provably_working absorbs a validating soldier found only via the runs-list fallback"
+    || fail "this branch's own row among others was not treated as provably working"
+  pass "crew_is_provably_working absorbs a validating soldier found among other branches' rows"
 }
 
 test_not_provably_working_when_stopped() {
@@ -887,14 +946,11 @@ test_not_provably_working_when_stopped() {
   make_repo_on_branch "$d/wt" cs/feat-stopped
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/feat-stopped.meta" "pane=p-feat-stopped" "workspace=w-feat-stopped" "worktree=$d/wt" "kind=ship"
-  # Repo-wide run belongs to someone else, and this branch has no row in the
-  # runs list either (it never validated, or genuinely finished/stopped) - the
-  # only remaining signal is the pane, which is idle.
-  CS_FAKE_STATUS_JSON="$(run_active cs/other-soldier review)"
-  CS_FAKE_RUNS_LIST="$(cat <<'EOF'
-  running    cs/other-soldier aaaaaaa  2026-07-02 22:10
-EOF
-)"
+  # The listing has a row for someone else, and this branch has no row of its
+  # own (it never validated, or genuinely finished/stopped) - the only
+  # remaining signal is the pane, which is idle.
+  head=$(git -C "$d/wt" rev-parse HEAD)
+  CS_FAKE_RUN_LIST_JSON="$(run_list_json "$(run_row_json cs/other-soldier "$head" running)")"
   CS_FAKE_HERDR_BUSY=0
   PATH="$d/fakebin:$PATH" CS_STATE_OVERRIDE="$d/state" crew_is_provably_working feat-stopped \
     && fail "a stopped soldier with no run anywhere and an idle pane was treated as provably working"
@@ -910,21 +966,19 @@ test_usage_error() {
   pass "usage error exits 2"
 }
 
-# --- head-identity safety net: coarse-listing only --------------------------
-# `made status --json` carries no per-run head/commit field yet (see the
-# script's own header note), so the DIRECT match attributes by branch name
-# alone; only the coarse `made runs` listing still carries a short-sha and can
-# still reject a reused branch name whose tip was rewritten or has diverged
+# --- head-identity safety net -----------------------------------------------
+# made's real run-list rows carry both branch and head (output_sha, falling
+# back to input_sha) on every row, so head identity (a reused branch name
+# whose tip was rewritten or has diverged) is verified on every lookup
 # (cs_made_head_matches_worktree, bin/cs-made-run-lib.sh). These pin that
-# safety net at its one remaining enforcement point.
+# safety net.
 
 test_historical_same_branch_rewritten_head_not_current() {
   reset_fakes
-  local d old_head old_short out
+  local d old_head out
   d=$(new_case rewritten-head)
   make_repo_on_branch "$d/wt" cs/todo-flag
   old_head=$(git -C "$d/wt" rev-parse HEAD)
-  old_short=$(git -C "$d/wt" rev-parse --short=7 "$old_head")
   # Simulate a rebase rewrite: orphan new history on the same branch name.
   git -C "$d/wt" checkout -q --orphan tmp-rewrite
   git -C "$d/wt" commit -q --allow-empty -m 'rewritten tip'
@@ -932,15 +986,9 @@ test_historical_same_branch_rewritten_head_not_current() {
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/wishlist.meta" "pane=p-wishlist" "workspace=w-wishlist" "worktree=$d/wt" "kind=ship"
   printf 'working: stage 2 setup complete rebased onto merged #76\n' > "$d/state/wishlist.status"
-  # The direct answer belongs to another branch, so attribution falls to the
-  # coarse listing - which still lists the reused branch name at its
-  # PRE-REWRITE short-sha, the historical run's own code identity.
-  CS_FAKE_STATUS_JSON="$(run_active cs/other-soldier review)"
-  CS_FAKE_RUNS_LIST="$(cat <<EOF
-  running    cs/other-soldier aaaaaaa  2026-07-02 22:10
-  parked     cs/todo-flag ${old_short}  2026-07-02 20:00
-EOF
-)"
+  # The listing still lists the reused branch name at its PRE-REWRITE head,
+  # the historical run's own code identity - unrelated to the new orphan tip.
+  CS_FAKE_RUN_LIST_JSON="$(run_list_json "$(run_row_json cs/todo-flag "$old_head" awaiting_review)")"
   CS_FAKE_HERDR_BUSY=0
   out=$(run_crew_state "$d" wishlist)
   assert_not_contains "$out" "source: run-step" "historical rewritten head must not use run-step"
@@ -953,54 +1001,42 @@ EOF
 # commits on the same history) remains current.
 test_active_run_descendant_fix_head_remains_current() {
   reset_fakes
-  local d base_head fix_head fix_short out
+  local d base_head fix_head out
   d=$(new_case pipeline-descendant)
   make_repo_on_branch "$d/wt" cs/feat-pipeline
   base_head=$(git -C "$d/wt" rev-parse HEAD)
   git -C "$d/wt" commit -q --allow-empty -m 'pipeline fix commit'
   fix_head=$(git -C "$d/wt" rev-parse HEAD)
-  fix_short=$(git -C "$d/wt" rev-parse --short=7 "$fix_head")
-  # Worktree still at the pre-fix tip; the coarse row reports the pipeline fix head.
+  # Worktree still at the pre-fix tip; the row reports the pipeline fix head.
   git -C "$d/wt" reset -q --hard "$base_head"
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/pipe.meta" "pane=p-pipe" "workspace=w-pipe" "worktree=$d/wt" "kind=ship"
-  CS_FAKE_STATUS_JSON="$(run_active cs/other-soldier review)"
-  CS_FAKE_RUNS_LIST="$(cat <<EOF
-  running    cs/other-soldier aaaaaaa  2026-07-02 22:10
-  running    cs/feat-pipeline ${fix_short}  2026-07-02 22:05
-EOF
-)"
+  CS_FAKE_RUN_LIST_JSON="$(run_list_json "$(run_row_json cs/feat-pipeline "$fix_head" running)")"
   out=$(run_crew_state "$d" pipe)
   assert_contains "$out" "source: run-step" "descendant pipeline fix head remains run-step"
-  assert_contains "$out" "state: working" "active run via the coarse listing remains working"
+  assert_contains "$out" "state: working" "active run remains working"
   pass "active run with valid descendant fix head remains current"
 }
 
-# Local work that advanced past the coarse row's head invalidates the row.
+# Local work that advanced past the run's head invalidates the row.
 test_local_advanced_past_run_head_invalidates() {
   reset_fakes
-  local d run_short out
+  local d run_head out
   d=$(new_case local-advanced)
   make_repo_on_branch "$d/wt" cs/feat-adv
-  run_short=$(git -C "$d/wt" rev-parse --short=7 HEAD)
+  run_head=$(git -C "$d/wt" rev-parse HEAD)
   git -C "$d/wt" commit -q --allow-empty -m 'local stage-2 work after prior run'
   make_fakebin "$d" >/dev/null
   cs_write_meta "$d/state/adv.meta" "pane=p-adv" "workspace=w-adv" "worktree=$d/wt" "kind=ship"
   printf 'working: stage 2 implementation in progress\n' > "$d/state/adv.status"
-  CS_FAKE_STATUS_JSON="$(run_active cs/other-soldier review)"
-  CS_FAKE_RUNS_LIST="$(cat <<EOF
-  running    cs/other-soldier aaaaaaa  2026-07-02 22:10
-  parked     cs/feat-adv ${run_short}  2026-07-02 20:00
-EOF
-)"
+  CS_FAKE_RUN_LIST_JSON="$(run_list_json "$(run_row_json cs/feat-adv "$run_head" awaiting_review)")"
   CS_FAKE_HERDR_BUSY=0
   out=$(run_crew_state "$d" adv)
-  assert_not_contains "$out" "source: run-step" "local-advanced tip must not use the historical coarse row"
-  assert_contains "$out" "source: status-log" "falls back after local advanced past the coarse row's head"
+  assert_not_contains "$out" "source: run-step" "local-advanced tip must not use the historical row"
+  assert_contains "$out" "source: status-log" "falls back after local advanced past the run's head"
   assert_contains "$out" "state: working" "status-log working: is current"
-  pass "local work advanced past the coarse row's head invalidates attribution"
+  pass "local work advanced past the run's head invalidates attribution"
 }
-
 
 # --- pane process evidence: agent gone vs agent alive vs unreadable ----------
 
@@ -1048,8 +1084,8 @@ test_unreadable_process_table_fails_closed() {
 }
 
 # Neither "TOON" nor "no-mistakes" belongs anywhere in this file any more:
-# made status --json fully replaced the TOON-format no-mistakes reader this
-# script used to shell out to.
+# made's real run list --json fully replaced the TOON-format no-mistakes reader
+# this script used to shell out to.
 test_no_toon_or_no_mistakes_references_remain() {
   local src
   src=$(cat "$CREW_STATE")
@@ -1069,13 +1105,16 @@ test_genuine_parked_not_superseded
 test_terminal_completed
 test_terminal_failed
 test_terminal_failed_names_stage_without_error
+test_failed_run_surfaces_plural_errors_array
+test_awaiting_merge_reports_done_with_pr_url
+test_canceled_reports_failed
+test_superseded_reports_stale
 test_ci_stage_pass_surfaces_done_without_a_log_line
 test_ci_stage_pass_and_log_agree_stays_run_step_sourced
 test_ci_stage_pending_ignores_a_stale_done_log
 test_ci_stage_pending_stays_working_without_a_log
 test_cross_branch_attribution_via_runs_list
 test_cross_branch_attribution_picks_most_recent_row
-test_coarse_run_trusts_the_status_log_for_ready_status
 test_other_branch_run_ignored
 test_malformed_status_json_falls_back
 test_no_run_busy_pane
