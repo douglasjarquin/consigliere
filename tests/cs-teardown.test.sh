@@ -71,34 +71,33 @@ cat > "$FAKEBIN/gh" <<'SH'
 exit 1
 SH
 cp "$FAKEBIN/gh" "$FAKEBIN/gh-axi"
-# Hermetic made: the pre-teardown run conclusion (conclude_nm_run) queries
-# `axi status` and, for a parked-and-attributed run, aborts it through
-# cs_made_abort (bin/cs-made-lib.sh), while cs_made_axi_status_read /
-# cs_made_runs_status_for_branch_read (bin/cs-made-run-lib.sh) shell `made`
-# directly for the reads. This fake serves the env-driven TOON for `axi
-# status`/`runs --limit` and models the daemon concluding the run: `axi abort`
-# touches CS_FAKE_ABORT_MARK, after which `axi status` serves
-# CS_FAKE_AXI_STATUS_AFTER instead. Default (both unset) is "no run" -> no-op,
-# so every existing case above is unaffected and never touches a real daemon.
+# Hermetic made: the pre-teardown run conclusion (conclude_nm_run) resolves the
+# run via `made run list --json [--active]` (cs_made_resolve_run,
+# bin/cs-made-run-lib.sh) and, for a slot-holding (queued/running/
+# awaiting_review) run, cancels it through cs_made_run_cancel
+# (bin/cs-made-lib.sh, `made run cancel --json <run-id>`). This fake serves the
+# env-driven StatusReport/run-list JSON (docs/made.md) and models the daemon
+# concluding the run: `run cancel` touches CS_FAKE_ABORT_MARK, after which
+# `run list --json` serves CS_FAKE_RUN_LIST_JSON_AFTER instead. Default (both
+# unset) is "no run" -> no-op, so every existing case above is unaffected and
+# never touches a real daemon.
 cat > "$FAKEBIN/made" <<'SH'
 #!/usr/bin/env bash
 set -u
-case "${1:-} ${2:-}" in
-  "axi status")
+case "${1:-} ${2:-} ${3:-}" in
+  "run list --json")
+    empty='{"schema_version":1,"protocol_version":1,"runs":[]}'
     if [ -n "${CS_FAKE_ABORT_MARK:-}" ] && [ -f "$CS_FAKE_ABORT_MARK" ]; then
-      [ "${CS_FAKE_AXI_STATUS_AFTER_FAIL:-0}" = 1 ] && exit 17
-      printf '%s\n' "${CS_FAKE_AXI_STATUS_AFTER:-}"
+      [ "${CS_FAKE_RUN_LIST_AFTER_FAIL:-0}" = 1 ] && exit 17
+      printf '%s\n' "${CS_FAKE_RUN_LIST_JSON_AFTER:-$empty}"
     else
-      [ "${CS_FAKE_AXI_STATUS_FAIL:-0}" = 1 ] && exit 19
-      printf '%s\n' "${CS_FAKE_AXI_STATUS:-}"
+      [ "${CS_FAKE_RUN_LIST_FAIL:-0}" = 1 ] && exit 19
+      printf '%s\n' "${CS_FAKE_RUN_LIST_JSON:-$empty}"
       if [ -n "${CS_FAKE_MUTATE_WORKTREE:-}" ]; then
         git -C "$CS_FAKE_MUTATE_WORKTREE" checkout -q "${CS_FAKE_MUTATE_BRANCH:?}"
       fi
     fi ;;
-  "runs --limit")
-    [ "${CS_FAKE_RUNS_FAIL:-0}" = 1 ] && exit 23
-    printf '%s\n' "${CS_FAKE_RUNS_STATUS:-}" ;;
-  "axi abort")
+  "run cancel --json")
     [ -n "${CS_FAKE_ABORT_MARK:-}" ] && : > "$CS_FAKE_ABORT_MARK"
     echo '{}' ;;
 esac
@@ -427,12 +426,12 @@ assert_no_grep "$DIS_PLUGIN_ID" "$PLUGIN_LOG" \
 pass "CS_EVENT_PLUGIN_DISABLE keeps capo retirement out of the herdr registry"
 
 make_task m1 ship local-only
-out=$(CS_FAKE_AXI_STATUS_FAIL=1 "$BIN" m1 2>&1) || fail "non-made teardown must skip run conclusion: $out"
+out=$(CS_FAKE_RUN_LIST_FAIL=1 "$BIN" m1 2>&1) || fail "non-made teardown must skip run conclusion: $out"
 assert_contains "$out" "teardown m1 complete" "non-made mode skips the run conclusion"
 pass "non-made mode skips run conclusion"
 
 make_task f1 ship
-out=$(CS_FAKE_AXI_STATUS_FAIL=1 "$BIN" f1 2>&1) \
+out=$(CS_FAKE_RUN_LIST_FAIL=1 "$BIN" f1 2>&1) \
   && fail "an unreadable made status must refuse teardown"
 assert_contains "$out" "could not verify that no orphaned" "unreadable status refusal names the orphan check"
 assert_present "$TMP/wt-f1" "worktree retained after unreadable status refusal"
@@ -441,56 +440,48 @@ pass "unreadable made status fails closed"
 
 # --- pre-teardown run conclusion + leaked-process reap ----------------------
 # A run is attributed to a task only by its exact branch AND current head
-# (bin/cs-nm-run-lib.sh, the shared owner cs-crew-state.sh also uses). These
-# builders emit the TOON `axi status` returns.
-parked_run() {  # <branch> <head>
-  cat <<EOF
-run:
-  id: "01RUN"
-  branch: $1
-  status: awaiting_approval
-  awaiting_agent: parked 7h39m
-  head: "$2"
-gate: review
-EOF
+# (bin/cs-made-run-lib.sh, the shared owner cs-crew-state.sh also uses). These
+# builders emit the StatusReport/run-list JSON `made run list --json` returns
+# (docs/made.md), wrapped straight into CS_FAKE_RUN_LIST_JSON[_AFTER].
+run_row_json() {  # <branch> <head> <state>
+  printf '{"schema_version":1,"run_id":"01RUN","repo":"o/r","branch":"%s","state":"%s","input_sha":"%s","output_sha":"%s","execution_finished":false,"error":"","errors":[],"pr_url":"","queued_at":"2026-07-02T22:00:00Z","stages":[],"pending_findings":[]}\n' \
+    "$1" "$3" "$2" "$2"
 }
-cancelled_run() {  # <branch> <head>
-  cat <<EOF
-run:
-  id: "01RUN"
-  branch: $1
-  status: completed
-  head: "$2"
-outcome: cancelled
-EOF
+run_list_json() {  # <row-json...>
+  local IFS=,
+  printf '{"schema_version":1,"protocol_version":1,"runs":[%s]}\n' "$*"
 }
+parked_run() { run_list_json "$(run_row_json "$1" "$2" awaiting_review)"; }  # <branch> <head>
+cancelled_run() { run_list_json "$(run_row_json "$1" "$2" canceled)"; }  # <branch> <head>
+empty_run_list() { run_list_json; }
 
-# 11. A parked run attributed to this exact task is aborted, the abort is
-# confirmed, and only then does teardown proceed. The worktree sits at its
-# landed base (content_in_default), so the landed-work proof passes and the only
-# thing standing between the task and cleanup is the parked run.
+# 11. A slot-holding (awaiting_review) run attributed to this exact task is
+# cancelled, the cancel is confirmed, and only then does teardown proceed. The
+# worktree sits at its landed base (content_in_default), so the landed-work
+# proof passes and the only thing standing between the task and cleanup is the
+# in-flight run.
 make_task p1 ship
 p1_head=$(git -C "$TMP/wt-p1" rev-parse HEAD)
 p1_mark="$TMP/state/p1.aborted"
 out=$(CS_FAKE_ABORT_MARK="$p1_mark" \
-      CS_FAKE_AXI_STATUS="$(parked_run cs/p1 "$p1_head")" \
-      CS_FAKE_AXI_STATUS_AFTER="$(cancelled_run cs/p1 "$p1_head")" \
-      "$BIN" p1 2>&1) || fail "parked-run teardown failed: $out"
-assert_present "$p1_mark" "the parked run was aborted"
+      CS_FAKE_RUN_LIST_JSON="$(parked_run cs/p1 "$p1_head")" \
+      CS_FAKE_RUN_LIST_JSON_AFTER="$(cancelled_run cs/p1 "$p1_head")" \
+      "$BIN" p1 2>&1) || fail "slot-holding-run teardown failed: $out"
+assert_present "$p1_mark" "the slot-holding run was cancelled"
 assert_contains "$out" "teardown p1 complete" "teardown proceeds after the run is concluded"
 assert_absent "$TMP/wt-p1" "worktree removed after the run was concluded"
 pass "a parked run attributed to this task is aborted and confirmed before cleanup"
 
-# 12. A parked run whose abort does NOT stick (still parked on re-check) is a
+# 12. A run whose cancel does NOT stick (still awaiting_review on re-check) is a
 # fail-closed refusal naming what survived - never a silent proceed.
 make_task p2 ship
 p2_head=$(git -C "$TMP/wt-p2" rev-parse HEAD)
 p2_mark="$TMP/state/p2.aborted"
 out=$(CS_FAKE_ABORT_MARK="$p2_mark" \
-      CS_FAKE_AXI_STATUS="$(parked_run cs/p2 "$p2_head")" \
-      CS_FAKE_AXI_STATUS_AFTER="$(parked_run cs/p2 "$p2_head")" \
-      "$BIN" p2 2>&1) && fail "a run that stays parked after abort must refuse teardown"
-assert_contains "$out" "still parked at a gate" "the refusal names the run that would not conclude"
+      CS_FAKE_RUN_LIST_JSON="$(parked_run cs/p2 "$p2_head")" \
+      CS_FAKE_RUN_LIST_JSON_AFTER="$(parked_run cs/p2 "$p2_head")" \
+      "$BIN" p2 2>&1) && fail "a run that stays awaiting_review after cancel must refuse teardown"
+assert_contains "$out" "is still awaiting_review after a cancel attempt" "the refusal names the run that would not conclude"
 assert_present "$TMP/wt-p2" "worktree retained when the run would not conclude"
 assert_present "$TMP/state/p2.meta" "records retained when the run would not conclude"
 pass "a parked run that will not conclude fails the teardown closed"
@@ -500,12 +491,12 @@ p2t_head=$(git -C "$TMP/wt-p2t" rev-parse HEAD)
 p2t_mark="$TMP/state/p2t.aborted"
 git -C "$TMP/wt-p2t" branch cs/p2t-other
 out=$(CS_FAKE_ABORT_MARK="$p2t_mark" \
-      CS_FAKE_AXI_STATUS="$(parked_run cs/p2t "$p2t_head")" \
+      CS_FAKE_RUN_LIST_JSON="$(parked_run cs/p2t "$p2t_head")" \
       CS_FAKE_MUTATE_WORKTREE="$TMP/wt-p2t" \
       CS_FAKE_MUTATE_BRANCH=cs/p2t-other \
       "$BIN" p2t 2>&1) && fail "a changed task identity must refuse teardown"
 assert_contains "$out" "identity changed under teardown" "identity mismatch refusal names the changed task identity"
-assert_absent "$p2t_mark" "identity mismatch does not issue an abort"
+assert_absent "$p2t_mark" "identity mismatch does not issue a cancel"
 assert_present "$TMP/wt-p2t" "worktree retained after identity mismatch"
 assert_present "$TMP/state/p2t.meta" "records retained after identity mismatch"
 pass "identity mismatch refuses abort without touching the run"
@@ -514,22 +505,22 @@ make_task p2u ship
 p2u_head=$(git -C "$TMP/wt-p2u" rev-parse HEAD)
 p2u_mark="$TMP/state/p2u.aborted"
 out=$(CS_FAKE_ABORT_MARK="$p2u_mark" \
-      CS_FAKE_AXI_STATUS="$(parked_run cs/p2u "$p2u_head")" \
-      CS_FAKE_AXI_STATUS_AFTER_FAIL=1 \
-      "$BIN" p2u 2>&1) && fail "an unreadable post-abort status must refuse teardown"
-assert_contains "$out" "could not confirm" "unreadable post-abort status names the missing confirmation"
-assert_present "$TMP/wt-p2u" "worktree retained after unreadable post-abort status"
-assert_present "$TMP/state/p2u.meta" "records retained after unreadable post-abort status"
+      CS_FAKE_RUN_LIST_JSON="$(parked_run cs/p2u "$p2u_head")" \
+      CS_FAKE_RUN_LIST_AFTER_FAIL=1 \
+      "$BIN" p2u 2>&1) && fail "an unreadable post-cancel status must refuse teardown"
+assert_contains "$out" "could not confirm" "unreadable post-cancel status names the missing confirmation"
+assert_present "$TMP/wt-p2u" "worktree retained after unreadable post-cancel status"
+assert_present "$TMP/state/p2u.meta" "records retained after unreadable post-cancel status"
 pass "unreadable post-abort status fails closed"
 
-# 13. A parked run on ANOTHER branch is never touched; teardown proceeds and no
-# abort is issued.
+# 13. A run on ANOTHER branch is never touched; teardown proceeds and no
+# cancel is issued.
 make_task p3 ship
 p3_mark="$TMP/state/p3.aborted"
 out=$(CS_FAKE_ABORT_MARK="$p3_mark" \
-      CS_FAKE_AXI_STATUS="$(parked_run cs/some-other-branch "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")" \
+      CS_FAKE_RUN_LIST_JSON="$(parked_run cs/some-other-branch "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")" \
       "$BIN" p3 2>&1) || fail "other-branch run must not block teardown: $out"
-assert_absent "$p3_mark" "a run on another branch is never aborted"
+assert_absent "$p3_mark" "a run on another branch is never cancelled"
 assert_contains "$out" "teardown p3 complete" "teardown proceeds past another branch's run"
 pass "a parked run on another branch is left untouched"
 
@@ -538,29 +529,77 @@ pass "a parked run on another branch is left untouched"
 make_task p4 ship
 p4_mark="$TMP/state/p4.aborted"
 out=$(CS_FAKE_ABORT_MARK="$p4_mark" \
-      CS_FAKE_AXI_STATUS="$(parked_run cs/p4 "cafebabecafebabecafebabecafebabecafebabe")" \
+      CS_FAKE_RUN_LIST_JSON="$(parked_run cs/p4 "cafebabecafebabecafebabecafebabecafebabe")" \
       "$BIN" p4 2>&1) || fail "diverged-head run must not block teardown: $out"
-assert_absent "$p4_mark" "a run at a diverged head on this branch is never aborted"
+assert_absent "$p4_mark" "a run at a diverged head on this branch is never cancelled"
 assert_contains "$out" "teardown p4 complete" "teardown proceeds past a diverged-head run"
 pass "a run on this branch at a diverged head is left untouched"
 
 # 15. A retried teardown after a partial first attempt converges. First attempt
-# refuses because the run stays parked; the second attempt runs against a run
-# that is now concluded (abort stuck) and completes.
+# refuses because the run stays awaiting_review; the second attempt runs
+# against a run that is now concluded (cancel stuck) and completes.
 make_task p5 ship
 p5_head=$(git -C "$TMP/wt-p5" rev-parse HEAD)
 p5_mark="$TMP/state/p5.aborted"
 out=$(CS_FAKE_ABORT_MARK="$p5_mark" \
-      CS_FAKE_AXI_STATUS="$(parked_run cs/p5 "$p5_head")" \
-      CS_FAKE_AXI_STATUS_AFTER="$(parked_run cs/p5 "$p5_head")" \
-      "$BIN" p5 2>&1) && fail "first attempt must refuse while the run stays parked"
+      CS_FAKE_RUN_LIST_JSON="$(parked_run cs/p5 "$p5_head")" \
+      CS_FAKE_RUN_LIST_JSON_AFTER="$(parked_run cs/p5 "$p5_head")" \
+      "$BIN" p5 2>&1) && fail "first attempt must refuse while the run stays awaiting_review"
 assert_present "$TMP/wt-p5" "worktree retained after the refusing first attempt"
 # Second attempt: the run now reads concluded regardless of the abort marker.
-out=$(CS_FAKE_AXI_STATUS="$(cancelled_run cs/p5 "$p5_head")" "$BIN" p5 2>&1) \
+out=$(CS_FAKE_RUN_LIST_JSON="$(cancelled_run cs/p5 "$p5_head")" "$BIN" p5 2>&1) \
   || fail "retried teardown must converge: $out"
 assert_contains "$out" "teardown p5 complete" "retried teardown converges once the run is concluded"
 assert_absent "$TMP/wt-p5" "worktree removed on the converging retry"
 pass "a retried teardown after a partial first attempt converges"
+
+# 16. A run already at awaiting_merge is left alone: cancel is never called
+# (docs/made.md: cancel against awaiting_merge hangs ~5s then errors), and
+# teardown proceeds treating it as already concluded.
+make_task p6 ship
+p6_head=$(git -C "$TMP/wt-p6" rev-parse HEAD)
+p6_mark="$TMP/state/p6.aborted"
+out=$(CS_FAKE_ABORT_MARK="$p6_mark" \
+      CS_FAKE_RUN_LIST_JSON="$(run_list_json "$(run_row_json cs/p6 "$p6_head" awaiting_merge)")" \
+      "$BIN" p6 2>&1) || fail "an awaiting_merge run must not block teardown: $out"
+assert_absent "$p6_mark" "cancel must never be issued against an awaiting_merge run"
+assert_contains "$out" "teardown p6 complete" "teardown proceeds past an awaiting_merge run"
+pass "a run already at awaiting_merge is left alone, cancel is never called, teardown proceeds"
+
+# 17. No run ever existed for this branch - teardown proceeds, not a failure.
+make_task p7 ship
+out=$(CS_FAKE_RUN_LIST_JSON="$(empty_run_list)" "$BIN" p7 2>&1) \
+  || fail "no run for this branch must not be treated as a failure: $out"
+assert_contains "$out" "teardown p7 complete" "teardown proceeds when no run ever existed for this branch"
+pass "no run ever existed for this branch - teardown proceeds, not a failure"
+
+# 18. queued and running runs are cancelled before cleanup, not only
+# awaiting_review ones (the explicit widening this rewrite's brief directed).
+make_task p8 ship
+p8_head=$(git -C "$TMP/wt-p8" rev-parse HEAD)
+p8_mark="$TMP/state/p8.aborted"
+out=$(CS_FAKE_ABORT_MARK="$p8_mark" \
+      CS_FAKE_RUN_LIST_JSON="$(run_list_json "$(run_row_json cs/p8 "$p8_head" running)")" \
+      CS_FAKE_RUN_LIST_JSON_AFTER="$(run_list_json "$(run_row_json cs/p8 "$p8_head" canceled)")" \
+      "$BIN" p8 2>&1) || fail "a running run must be cancelled before cleanup: $out"
+assert_present "$p8_mark" "a running (not just awaiting_review) run was cancelled"
+assert_contains "$out" "teardown p8 complete" "teardown proceeds once the running run is concluded"
+pass "queued and running runs are cancelled before cleanup, not only gate-parked ones"
+
+# 19. succeeded/failed/canceled/superseded runs at teardown time proceed
+# without a cancel call - they are already concluded from made's own
+# perspective.
+for p9_state in succeeded failed canceled superseded; do
+  make_task "p9-$p9_state" ship
+  p9_head=$(git -C "$TMP/wt-p9-$p9_state" rev-parse HEAD)
+  p9_mark="$TMP/state/p9-$p9_state.aborted"
+  out=$(CS_FAKE_ABORT_MARK="$p9_mark" \
+        CS_FAKE_RUN_LIST_JSON="$(run_list_json "$(run_row_json "cs/p9-$p9_state" "$p9_head" "$p9_state")")" \
+        "$BIN" "p9-$p9_state" 2>&1) || fail "a $p9_state run must not block teardown: $out"
+  assert_absent "$p9_mark" "cancel must never be issued against a $p9_state run"
+  assert_contains "$out" "teardown p9-$p9_state complete" "teardown proceeds past a $p9_state run"
+done
+pass "a succeeded/failed/canceled/superseded run at teardown time proceeds without a cancel call"
 
 # 16. Leaked task processes (cwd under the worktree) are TERM/KILLed; a process
 # rooted elsewhere is never signaled. Uses real processes and lsof, not herdr.
