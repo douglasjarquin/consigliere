@@ -17,6 +17,11 @@ ARG GID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# archive.ubuntu.com intermittently serves a stale index mid-mirror-sync
+# ("Hash Sum mismatch" / "Mirror sync in progress?"), failing apt-get update;
+# apt's own Acquire::Retries covers that transient case.
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
+
 # Baseline toolchain bin/cs-test-run.sh --portable needs (matches
 # .github/workflows/ci.yml's portable-lane "Require test tools" step: jq,
 # python3, sqlite3), plus git/curl/ca-certificates/gnupg for the install
