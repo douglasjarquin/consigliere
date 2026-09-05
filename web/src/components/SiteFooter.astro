@@ -1,0 +1,18 @@
+---
+import { MADE_URL } from "../lib/seo.mjs";
+import { sitePath } from "../lib/site-path.mjs";
+
+const { home = false } = Astro.props;
+---
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <span>Consigliere · a from-scratch personal rewrite of Firstmate</span>
+    <nav class="site-footer__links" aria-label="Site">
+      <a href={sitePath("vs-firstmate")}>vs Firstmate</a>
+      {home ? <a href={sitePath("grok-bot")}>Grok Bot pack</a> : null}
+      <a href={sitePath("usability")}>Usability system</a>
+      <a href={MADE_URL} rel="noreferrer">made ↗</a>
+    </nav>
+  </div>
+</footer>

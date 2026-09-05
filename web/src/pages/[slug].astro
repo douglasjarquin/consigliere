@@ -1,0 +1,38 @@
+---
+import DocsSidebar from "../components/DocsSidebar.astro";
+import SiteLayout from "../layouts/SiteLayout.astro";
+import { DOCS_PAGES } from "../lib/pages.mjs";
+import { rewriteHtml, tocFromHtml } from "../lib/rewrite.mjs";
+
+const modules = import.meta.glob("../content/*.html", {
+  query: "?raw",
+  eager: true,
+  import: "default",
+}) as Record<string, string>;
+
+export function getStaticPaths() {
+  return DOCS_PAGES.map((page) => ({
+    params: { slug: page.slug },
+    props: page,
+  }));
+}
+
+const page = Astro.props;
+const raw = modules[`../content/${page.slug}.html`];
+if (!raw) {
+  throw new Error(`missing content for ${page.slug}`);
+}
+const html = rewriteHtml(raw);
+const toc = page.toc ?? tocFromHtml(raw);
+---
+
+<SiteLayout
+  title={page.title}
+  description={page.description}
+  current={page.topNav}
+  pageSlug={page.slug}>
+  <div class:list={["docs-frame", page.wide && "docs-frame--wide"]}>
+    <DocsSidebar current={page.slug} variant={page.sidebar} toc={toc} />
+    <main id="main-content" class="docs-main" tabindex="-1" set:html={html} />
+  </div>
+</SiteLayout>

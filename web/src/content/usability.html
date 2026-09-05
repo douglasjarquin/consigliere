@@ -1,0 +1,266 @@
+<div style="display:flex;gap:10px;align-items:center;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);margin-bottom:24px"><a href="Home C.dc.html" style="color:inherit">Consigliere</a><span>/</span><a href="Design System.dc.html" style="color:inherit">Site</a><span>/</span><span style="color:var(--fg)">Usability system</span></div>
+      <h1 style="font-size:52px;font-weight:400;line-height:1.08;margin:0 0 22px;letter-spacing:-0.02em">Usability system</h1>
+      <p style="font-size:19px;line-height:1.6;color:var(--muted);margin:0 0 28px;text-wrap:pretty">The interaction vocabulary for this site and the ones that follow it. Every component here is live. Shared rules: Escape always closes, focus is always visible, nothing moves unless the boss asked it to, and destructive actions take two steps.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:64px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--muted)">
+        <span style="border:1px solid var(--line);padding:5px 10px;border-radius:2px">Esc closes</span><span style="border:1px solid var(--line);padding:5px 10px;border-radius:2px">click-outside dismisses</span><span style="border:1px solid var(--line);padding:5px 10px;border-radius:2px">1px accent focus ring</span><span style="border:1px solid var(--line);padding:5px 10px;border-radius:2px">120ms ease-out, once</span><span style="border:1px solid var(--line);padding:5px 10px;border-radius:2px">mono for machine text</span><span style="border:1px solid var(--line);padding:5px 10px;border-radius:2px">44px min hit target</span><span style="border:1px solid var(--line);padding:5px 10px;border-radius:2px">? for shortcuts</span>
+      </div>
+
+      <section id="skip" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Skip link <a href="#skip" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">First focusable element on every page. Hidden until Tab reaches it; jumps to <code style="font-family:'JetBrains Mono',monospace;font-size:12.5px">#main</code>.</p></div>
+          <div style="display:flex;gap:16px;align-items:center"><span style="background:var(--fg);color:var(--bg);font-family:'JetBrains Mono',monospace;font-size:12px;padding:10px 14px;border-radius:2px">Skip to content</span><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted)">Press Tab from the top of this page to see the real one.</span></div>
+        </div>
+      </section>
+
+      <section id="breadcrumb" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Breadcrumb <a href="#breadcrumb" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Mono, slash-separated, current page in foreground color. Above the h1 on every docs page. Never more than three levels.</p></div>
+          <div style="display:flex;gap:10px;align-items:center;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted)"><a href="Home C.dc.html" style="color:inherit">Consigliere</a><span>/</span><a href="Architecture.dc.html" style="color:inherit">Docs</a><span>/</span><span style="color:var(--fg)">Supervision protocol</span></div>
+        </div>
+      </section>
+
+      <section id="tocspy" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">TOC scroll-spy <a href="#tocspy" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">The sidebar on this page is the live demo. The section nearest the top third of the viewport is current: foreground text, accent dot. Heading anchors show a <code style="font-family:'JetBrains Mono',monospace;font-size:12.5px">#</code> that turns accent on hover.</p></div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--muted)">current section: <span style="color:var(--accent)">{{ currentTitle }}</span></div>
+        </div>
+      </section>
+
+      <section id="palette" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Command palette <a href="#palette" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Global search over pages and commands. <kbd style="font-family:'JetBrains Mono',monospace;font-size:11px;border:1px solid var(--line);padding:1px 5px;border-radius:2px">⌘K</kbd> opens; arrows move; Enter goes; Esc closes. Never more than eight results. Type nonsense to see the empty state.</p></div>
+          <div><button style="background:none;border:1px solid var(--line);color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:13px;padding:12px 16px;cursor:pointer;border-radius:2px;display:flex;gap:16px;align-items:center;width:100%;justify-content:space-between;box-sizing:border-box"><span>Search pages and commands…</span><kbd style="font:inherit;font-size:11px;border:1px solid var(--line);padding:1px 6px;border-radius:2px">⌘K</kbd></button></div>
+        </div>
+      </section>
+
+      <section id="drawer" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Nav drawer <a href="#drawer" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Below 768px the nav links live here. Slides from the left in 120ms, scrim behind, Esc or scrim closes. Contains the full docs sidebar, not just the top nav.</p></div>
+          <div><button style="background:none;border:1px solid var(--line);color:var(--fg);font-family:'JetBrains Mono',monospace;font-size:13px;padding:11px 16px;cursor:pointer;border-radius:2px">☰ Open the drawer</button></div>
+        </div>
+      </section>
+
+      <section id="shortcuts" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Shortcut sheet <a href="#shortcuts" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Press <kbd style="font-family:'JetBrains Mono',monospace;font-size:11px;border:1px solid var(--line);padding:1px 5px;border-radius:2px">?</kbd> anywhere. Lists every shortcut on the site in two columns. Closes with Esc or <kbd style="font-family:'JetBrains Mono',monospace;font-size:11px;border:1px solid var(--line);padding:1px 5px;border-radius:2px">?</kbd> again.</p></div>
+          <div><button style="background:none;border:1px solid var(--line);color:var(--fg);font-family:'JetBrains Mono',monospace;font-size:13px;padding:11px 16px;cursor:pointer;border-radius:2px">Show shortcuts</button></div>
+        </div>
+      </section>
+
+      <section id="popover" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Popover <a href="#popover" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Click-triggered, anchored below the trigger, one per page at a time. For short secondary content: a definition, a menu, a detail. Not for forms.</p></div>
+          <div style="position:relative;display:inline-block;align-self:start">
+            <button onClick="{{ togglePopover }}" style="background:none;border:1px solid var(--line);color:var(--fg);font-family:'JetBrains Mono',monospace;font-size:13px;padding:11px 16px;cursor:pointer;border-radius:2px">What is a capo? ▾</button>
+            
+              <div style="position:absolute;top:calc(100% + 8px);left:0;width:320px;background:var(--surface);border:1px solid var(--line);border-radius:3px;padding:18px 20px;box-shadow:0 12px 32px rgba(0,0,0,0.25);animation:cs-rise 120ms ease-out;z-index:5">
+                <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-bottom:8px">capo · n.</div>
+                <p style="margin:0 0 12px;line-height:1.55;font-size:15px">A persistent, provisioned helper on this machine's roster in <code style="font-family:'JetBrains Mono',monospace;font-size:12.5px">host/</code>. Soldiers come and go; capos stay.</p>
+                <a href="Skills.dc.html" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--accent)">capo-provisioning skill →</a>
+              </div>
+            
+          </div>
+        </div>
+      </section>
+
+      <section id="tooltip" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Tooltip <a href="#tooltip" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Hover or focus, mono, one line, no delay longer than 300ms. Labels an icon or expands an abbreviation. Never holds anything the user must read to proceed.</p></div>
+          <div style="display:flex;gap:28px;align-items:center;font-size:17px;line-height:1.6">
+            <span>Requires <span onMouseEnter="{{ showTip1 }}" onMouseLeave="{{ hideTip }}" onFocus="{{ showTip1 }}" onBlur="{{ hideTip }}" tabIndex="0" style="position:relative;border-bottom:1px dashed var(--muted);cursor:help;outline:none">herdr<span style="position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);white-space:nowrap;background:var(--fg);color:var(--bg);font-family:'JetBrains Mono',monospace;font-size:11.5px;padding:6px 10px;border-radius:2px;animation:cs-rise 120ms ease-out">terminal runtime · protocol ≥ 16</span></span> and <span onMouseEnter="{{ showTip2 }}" onMouseLeave="{{ hideTip }}" onFocus="{{ showTip2 }}" onBlur="{{ hideTip }}" tabIndex="0" style="position:relative;border-bottom:1px dashed var(--muted);cursor:help;outline:none">gh-axi<span style="position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);white-space:nowrap;background:var(--fg);color:var(--bg);font-family:'JetBrains Mono',monospace;font-size:11.5px;padding:6px 10px;border-radius:2px;animation:cs-rise 120ms ease-out">GitHub helper · authenticated · floor gated</span></span>.</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="tabs" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Tabs <a href="#tabs" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Underlined labels on a hairline, one panel visible. For alternatives of equal weight (install channels). Arrow keys move between tabs. Distinct from the harness switch, which is a setting.</p></div>
+          <div style="min-width:0">
+            <div role="tablist" style="display:flex;gap:24px;border-bottom:1px solid var(--line);font-family:'JetBrains Mono',monospace;font-size:12.5px;margin-bottom:14px">
+              <button onClick="{{ tabBrew }}" style="background:none;border:none;border-bottom:1px solid {{ tabBrewLine }};color:{{ tabBrewColor }};padding:10px 0;margin-bottom:-1px;cursor:pointer;font:inherit">brew</button>
+              <button onClick="{{ tabNpm }}" style="background:none;border:none;border-bottom:1px solid {{ tabNpmLine }};color:{{ tabNpmColor }};padding:10px 0;margin-bottom:-1px;cursor:pointer;font:inherit">npm</button>
+              <button onClick="{{ tabSrc }}" style="background:none;border:none;border-bottom:1px solid {{ tabSrcLine }};color:{{ tabSrcColor }};padding:10px 0;margin-bottom:-1px;cursor:pointer;font:inherit">source</button>
+            </div>
+            <pre style="margin:0;background:var(--code);border:1px solid var(--line);border-radius:3px;padding:18px 22px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.7;overflow:auto;min-width:0;max-width:100%">{{ tabCode }}</pre>
+          </div>
+        </div>
+      </section>
+
+      <section id="inline-edit" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Inline text editor <a href="#inline-edit" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Click text to edit it in place, same font, same size. Enter or blur commits; Esc reverts. The field never jumps: the input inherits the text's metrics exactly.</p></div>
+          <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+            <div style="display:grid;grid-template-columns:160px 1fr;gap:20px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)">
+              <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted)">project name</span>
+              
+                <input onBlur="{{ commitEdit }}" style="font-family:'Libre Caslon Text',serif;font-size:17px;color:var(--fg);background:none;border:none;border-bottom:1px solid var(--accent);padding:0 0 2px;margin:0 0 -3px;outline:none;width:100%">
+              
+              
+                <span onClick="{{ startEdit }}" tabIndex="0" style="font-size:17px;cursor:text;display:inline-flex;gap:10px;align-items:baseline;outline:none">{{ projectName }}<span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">edit</span></span>
+              
+            </div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted)">{{ editHint }}</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="copy" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Copyable command <a href="#copy" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Every shell snippet carries a copy affordance in its top-right corner. The label changes to <em>copied</em> for two seconds; no toast, no icon swap.</p></div>
+          <div style="display:flex;align-items:stretch;background:var(--code);border:1px solid var(--line);border-radius:3px;min-width:0">
+            <pre style="margin:0;padding:18px 22px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.7;overflow:auto;flex:1;min-width:0;white-space:pre">bin/cs-install-herdr.sh ~/.local/bin</pre>
+            <div style="display:flex;align-items:flex-start;padding:10px 10px 10px 0;flex-shrink:0"><button onClick="{{ copyCmd }}" style="background:var(--bg);border:1px solid var(--line);color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.06em;padding:6px 10px;cursor:pointer;border-radius:2px;white-space:nowrap">{{ copyLabel }}</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="harness" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Harness switch <a href="#harness" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">A segmented control that swaps every snippet on the page between codex and claude, and updates the badge in the nav. The choice persists across pages.</p></div>
+          <div style="min-width:0">
+            <div style="display:inline-flex;border:1px solid var(--line);border-radius:2px;font-family:'JetBrains Mono',monospace;font-size:12.5px;margin-bottom:14px">
+              <button onClick="{{ pickCodex }}" style="background:{{ codexBg }};color:{{ codexFg }};border:none;padding:9px 18px;cursor:pointer;font:inherit">codex</button>
+              <button onClick="{{ pickClaude }}" style="background:{{ claudeBg }};color:{{ claudeFg }};border:none;padding:9px 18px;cursor:pointer;font:inherit;border-left:1px solid var(--line)">claude</button>
+            </div>
+            <pre style="margin:0;background:var(--code);border:1px solid var(--line);border-radius:3px;padding:18px 22px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.7;overflow:auto;min-width:0;max-width:100%">cd consigliere
+{{ harness }}          <span style="color:var(--muted)"># {{ harnessNote }}</span></pre>
+          </div>
+        </div>
+      </section>
+
+      <section id="callouts" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Callouts <a href="#callouts" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Four kinds, told apart by the mono label and the border, never by color. Solid for note and warning; dashed for provisional; struck label for deprecated.</p></div>
+          <div style="display:flex;flex-direction:column;gap:12px;font-size:15px;line-height:1.6;min-width:0">
+            <div style="display:grid;grid-template-columns:100px 1fr;gap:16px;border:1px solid var(--line);border-radius:3px;padding:14px 18px"><span style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);padding-top:4px">note</span><span style="color:var(--muted)">Claude loads <code style="font-family:'JetBrains Mono',monospace;font-size:12.5px">AGENTS.md</code> through the <code style="font-family:'JetBrains Mono',monospace;font-size:12.5px">CLAUDE.md</code> symlink.</span></div>
+            <div style="display:grid;grid-template-columns:100px 1fr;gap:16px;border:1px solid var(--fg);border-radius:3px;padding:14px 18px"><span style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--fg);padding-top:4px">warning</span><span>Without a running herdr server the session refuses to dispatch.</span></div>
+            <div style="display:grid;grid-template-columns:100px 1fr;gap:16px;border:1px dashed var(--line);border-radius:3px;padding:14px 18px"><span style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);padding-top:4px">provisional</span><span style="color:var(--muted)">Summarised from the README. Expand from <code style="font-family:'JetBrains Mono',monospace;font-size:12.5px">docs/supervision.md</code>.</span></div>
+            <div style="display:grid;grid-template-columns:100px 1fr;gap:16px;border:1px solid var(--line);border-radius:3px;padding:14px 18px"><span style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);text-decoration:line-through;padding-top:4px">deprecated</span><span style="color:var(--muted)">Pane-regex busy detection. Replaced by herdr-native agent status.</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="disclosure" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Disclosure <a href="#disclosure" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">For optional depth under a docs section. One line closed, a hairline-bounded block open. Several may be open at once.</p></div>
+          <div style="display:flex;flex-direction:column;border-top:1px solid var(--line)">
+            <div style="border-bottom:1px solid var(--line)">
+              <button onClick="{{ toggleD1 }}" style="width:100%;text-align:left;background:none;border:none;color:var(--fg);font-family:'Libre Caslon Text',serif;font-size:17px;padding:16px 0;cursor:pointer;display:flex;justify-content:space-between;align-items:center"><span>Why is the CI gate a job-level <code style="font-family:'JetBrains Mono',monospace;font-size:13.5px">if:</code> and not a <code style="font-family:'JetBrains Mono',monospace;font-size:13.5px">paths:</code> filter?</span><span style="font-family:'JetBrains Mono',monospace;color:var(--muted);font-size:13px">{{ d1Glyph }}</span></button>
+              <p style="margin:0;padding:0 0 20px;color:var(--muted);line-height:1.7;animation:cs-rise 120ms ease-out">So a skipped lane still reports its check instead of hanging pending. An undeterminable change set (force-push, first push, shallow clone) fails open and runs everything.</p>
+            </div>
+            <div style="border-bottom:1px solid var(--line)">
+              <button onClick="{{ toggleD2 }}" style="width:100%;text-align:left;background:none;border:none;color:var(--fg);font-family:'Libre Caslon Text',serif;font-size:17px;padding:16px 0;cursor:pointer;display:flex;justify-content:space-between;align-items:center"><span>Why lint both directions of the source graph?</span><span style="font-family:'JetBrains Mono',monospace;color:var(--muted);font-size:13px">{{ d2Glyph }}</span></button>
+              <p style="margin:0;padding:0 0 20px;color:var(--muted);line-height:1.7;animation:cs-rise 120ms ease-out">ShellCheck blames a broken library contract on its consumers. So a changed file pulls in the libraries it sources and the canonical files that source it.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="confirm" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Two-step confirm <a href="#confirm" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Anything that lands, deletes, or tears down asks once, inline, in the same spot. No modal. The confirm expires after four seconds if ignored.</p></div>
+          <div style="display:flex;align-items:center;gap:14px;font-family:'JetBrains Mono',monospace;font-size:13px;min-height:44px">
+            <button onClick="{{ askLand }}" style="background:var(--fg);color:var(--bg);border:none;padding:12px 20px;cursor:pointer;border-radius:2px;font:inherit">Land PR #42</button>
+            <span style="color:var(--muted);animation:cs-rise 120ms ease-out">Your word, boss?</span><button onClick="{{ doLand }}" style="background:none;border:1px solid var(--accent);color:var(--accent);padding:11px 18px;cursor:pointer;border-radius:2px;font:inherit">Yes, land it</button><button onClick="{{ cancelLand }}" style="background:none;border:1px solid var(--line);color:var(--muted);padding:11px 18px;cursor:pointer;border-radius:2px;font:inherit">Not yet</button>
+            <span style="color:var(--accent);animation:cs-rise 120ms ease-out">landed · PR #42 merged</span><button onClick="{{ resetLand }}" style="background:none;border:none;color:var(--muted);cursor:pointer;font:inherit;text-decoration:underline">reset</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="stepper" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Run stepper <a href="#stepper" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">A run's states in order. Done states are foreground, the current one is accent with a filled dot, future ones muted. Shared with made, where it shows the gate timeline.</p></div>
+          <div style="display:flex;flex-direction:column;gap:18px;min-width:0">
+            <div style="display:flex;align-items:center;font-family:'JetBrains Mono',monospace;font-size:12px;flex-wrap:wrap;row-gap:10px">
+              
+                <span style="display:inline-flex;align-items:center"><span style="display:inline-flex;align-items:center;gap:8px;border:1px solid {{ st.border }};color:{{ st.color }};padding:6px 12px;border-radius:2px"><span style="width:6px;height:6px;border-radius:50%;background:{{ st.dot }}"></span>{{ st.name }}</span><span style="width:18px;height:1px;background:{{ st.lineAfter }}"></span></span>
+              
+            </div>
+            <div style="display:flex;gap:10px;font-family:'JetBrains Mono',monospace;font-size:12px"><button onClick="{{ advance }}" style="background:none;border:1px solid var(--line);color:var(--fg);font:inherit;padding:8px 14px;cursor:pointer;border-radius:2px">advance →</button><button onClick="{{ resetSteps }}" style="background:none;border:none;color:var(--muted);font:inherit;cursor:pointer;text-decoration:underline">reset</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="evidence" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Evidence viewer <a href="#evidence" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Failed checks as rows: name, rerun count, link. Click a row for the bounded excerpt. External checks are marked and never carry a rerun count.</p></div>
+          <div style="display:flex;flex-direction:column;border-top:1px solid var(--line);font-family:'JetBrains Mono',monospace;font-size:12.5px;min-width:0">
+            
+              <div style="border-bottom:1px solid var(--line)">
+                <div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto 24px;gap:12px;align-items:center;min-width:0">
+                  <button onClick="{{ ev.toggle }}" style="background:none;border:none;color:var(--fg);font:inherit;padding:14px 0;cursor:pointer;display:flex;gap:10px;align-items:center;text-align:left"><span style="width:6px;height:6px;border-radius:50%;background:{{ ev.dotColor }}"></span>{{ ev.name }}</button>
+                  <span style="color:var(--muted)">{{ ev.reruns }}</span>
+                  <a href="{{ ev.url }}" style="color:var(--accent)">{{ ev.linkLabel }}</a>
+                  <button onClick="{{ ev.toggle }}" aria-label="Toggle excerpt" style="background:none;border:none;color:var(--muted);font:inherit;cursor:pointer;text-align:right;padding:14px 0">{{ ev.glyph }}</button>
+                </div>
+                <pre style="margin:0 0 14px;background:var(--code);border:1px solid var(--line);border-radius:3px;padding:14px 16px;font-size:12px;line-height:1.7;color:var(--muted);animation:cs-rise 120ms ease-out;overflow:auto">{{ ev.excerpt }}</pre>
+              </div>
+            
+          </div>
+        </div>
+      </section>
+
+      <section id="logtail" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Live log tail <a href="#logtail" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">A fixed-height code block that follows the newest line. Pausing stops the follow but keeps receiving; a counter shows how many lines arrived while paused. Keeps the last 200 lines.</p></div>
+          <div style="position:relative;min-width:0">
+            <pre ref="{{ logRef }}" style="margin:0;background:var(--code);border:1px solid var(--line);border-radius:3px;padding:16px 20px 16px 20px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.7;height:180px;overflow:auto;color:var(--muted)">{{ logText }}</pre>
+            <div style="position:absolute;top:10px;right:10px;display:flex;gap:8px;align-items:center;font-family:'JetBrains Mono',monospace;font-size:11px"><span style="color:var(--accent)">+{{ logPending }} new</span><button onClick="{{ toggleLog }}" style="background:var(--bg);border:1px solid var(--line);color:var(--muted);font:inherit;letter-spacing:0.06em;padding:6px 10px;cursor:pointer;border-radius:2px">{{ logLabel }}</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="skeleton" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Skeleton <a href="#skeleton" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">While a page or list streams in. Bars in the line color, pulsing opacity at 1.6s, shaped like the content they stand in for. Never a spinner.</p></div>
+          <div style="display:flex;flex-direction:column;gap:14px;animation:cs-shimmer 1.6s ease-in-out infinite">
+            <div style="height:14px;width:40%;background:var(--line);border-radius:2px"></div>
+            <div style="height:28px;width:70%;background:var(--line);border-radius:2px"></div>
+            <div style="height:12px;width:100%;background:var(--line);border-radius:2px"></div>
+            <div style="height:12px;width:92%;background:var(--line);border-radius:2px"></div>
+            <div style="height:12px;width:60%;background:var(--line);border-radius:2px"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="empty" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Empty state <a href="#empty" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">A dashed frame, one serif sentence saying what is absent, one mono action. No illustrations. The palette uses the same shape when nothing matches.</p></div>
+          <div style="border:1px dashed var(--line);border-radius:3px;padding:36px;display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center"><span style="font-size:19px;font-style:italic">No soldiers in flight.</span><a href="Projects.dc.html" style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--accent)">dispatch one →</a></div>
+        </div>
+      </section>
+
+      <section id="status" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Status chips <a href="#status" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Soldier and run states. Mono, lowercase, a 6px dot. Only the active state uses the accent.</p></div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;font-family:'JetBrains Mono',monospace;font-size:12px">
+            <span style="display:inline-flex;gap:8px;align-items:center;border:1px solid var(--line);padding:6px 12px;border-radius:2px;color:var(--muted)"><span style="width:6px;height:6px;border-radius:50%;background:var(--line);border:1px solid var(--muted)"></span>queued</span>
+            <span style="display:inline-flex;gap:8px;align-items:center;border:1px solid var(--accent);padding:6px 12px;border-radius:2px;color:var(--fg)"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent)"></span>working</span>
+            <span style="display:inline-flex;gap:8px;align-items:center;border:1px solid var(--line);padding:6px 12px;border-radius:2px;color:var(--fg)"><span style="width:6px;height:6px;border-radius:50%;background:var(--fg)"></span>checkpoint</span>
+            <span style="display:inline-flex;gap:8px;align-items:center;border:1px solid var(--line);padding:6px 12px;border-radius:2px;color:var(--muted)"><span style="width:6px;height:6px;border-radius:50%;background:var(--muted)"></span>awaiting boss</span>
+            <span style="display:inline-flex;gap:8px;align-items:center;border:1px solid var(--line);padding:6px 12px;border-radius:2px;color:var(--muted)"><span style="width:6px;height:6px;border-radius:50%;background:var(--muted)"></span>landed</span>
+            <span style="display:inline-flex;gap:8px;align-items:center;border:1px dashed var(--line);padding:6px 12px;border-radius:2px;color:var(--muted)"><span style="width:6px;height:6px;border-radius:50%;border:1px solid var(--muted)"></span>stopped · backstop</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="toast" style="padding:40px 0;border-top:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Toast <a href="#toast" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Bottom-left, one at a time, five seconds, dismissable. Only for events that happened somewhere else. Never for confirming the click you just made.</p></div>
+          <div><button onClick="{{ fireToast }}" style="background:none;border:1px solid var(--line);color:var(--fg);font-family:'JetBrains Mono',monospace;font-size:13px;padding:11px 16px;cursor:pointer;border-radius:2px">Simulate a checkpoint</button></div>
+        </div>
+      </section>
+
+      <section id="pager" style="padding:40px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+        <div style="display:grid;grid-template-columns:240px minmax(0,1fr);gap:40px;min-width:0">
+          <div><h2 style="font-size:24px;font-weight:400;margin:0 0 10px;display:flex;gap:10px;align-items:baseline">Pager <a href="#pager" style="font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--line)">#</a></h2><p style="margin:0;color:var(--muted);line-height:1.6;font-size:15px">Bottom of every docs page: previous on the left in muted, next on the right in foreground, both with the section eyebrow above the title. Follows sidebar order.</p></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-family:'JetBrains Mono',monospace;font-size:13px">
+            <a href="Design System.dc.html" style="border:1px solid var(--line);padding:16px 18px;border-radius:2px;display:flex;flex-direction:column;gap:6px;color:var(--muted)"><span style="font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase">← previous</span><span>Design system</span></a>
+            <a href="Quick Start.dc.html" style="border:1px solid var(--line);padding:16px 18px;border-radius:2px;display:flex;flex-direction:column;gap:6px;align-items:flex-end;text-align:right"><span style="font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted)">next →</span><span>Quick start</span></a>
+          </div>
+        </div>
+      </section>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-family:'JetBrains Mono',monospace;font-size:13px;margin-top:48px">
+        <a href="Design System.dc.html" style="border:1px solid var(--line);padding:16px 18px;border-radius:2px;display:flex;flex-direction:column;gap:6px;color:var(--muted)"><span style="font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase">← previous</span><span>Design system</span></a>
+        <a href="../made/Home.dc.html" style="border:1px solid var(--line);padding:16px 18px;border-radius:2px;display:flex;flex-direction:column;gap:6px;align-items:flex-end;text-align:right"><span style="font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted)">next →</span><span>made ↗</span></a>
+      </div>

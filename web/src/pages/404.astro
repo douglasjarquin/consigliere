@@ -1,0 +1,19 @@
+---
+import DocsSidebar from "../components/DocsSidebar.astro";
+import SiteLayout from "../layouts/SiteLayout.astro";
+import { rewriteHtml } from "../lib/rewrite.mjs";
+import raw from "../content/404.html?raw";
+
+const html = rewriteHtml(raw);
+---
+
+<SiteLayout
+  title="Nobody here by that name"
+  description="The page you asked for is not on the books."
+  noindex
+  pageSlug="404">
+  <div class="docs-frame">
+    <DocsSidebar current="" />
+    <main id="main-content" class="docs-main" tabindex="-1" set:html={html} />
+  </div>
+</SiteLayout>

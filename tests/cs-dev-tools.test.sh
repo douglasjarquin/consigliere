@@ -2,7 +2,7 @@
 # Behavior (LIVE, opt-in): the dev-tools suite's container pieces build and run
 # correctly - the dev/web images build, the seven boss-private paths stay masked
 # inside the dev container, the tracked tree is still visible there, the web
-# service serves the placeholder, and bin/cs-test-run.sh --portable passes
+# service serves the built docs site, and bin/cs-test-run.sh --portable passes
 # inside the dev container.
 #
 # Skipped unless CS_TEST_DOCKER_LIVE=1 because it provisions real containers.
@@ -44,12 +44,14 @@ features_file=$("${COMPOSE[@]}" run --rm dev sh -c 'test -f /workspace/.made/fea
 [ "$features_file" = visible ] || fail "the tracked Made feature index must stay visible inside dev"
 pass "the tracked Made feature index is visible inside dev"
 
+mise run web:install >/dev/null || fail "docs site install"
+mise run web:build >/dev/null || fail "docs site build"
 "${COMPOSE[@]}" up -d web >/dev/null || fail "web service starts"
 sleep 2
 web_body=$(curl -fsS http://localhost:8080/ 2>&1) || fail "web service must respond on :8080"
-assert_contains "$web_body" "consigliere dev environment placeholder" \
-  "web service must serve the fixed placeholder body"
-pass "web service serves the placeholder"
+assert_contains "$web_body" "You describe the work" \
+  "web service must serve the built docs site"
+pass "web service serves the docs site"
 
 container_out=$("${COMPOSE[@]}" run --rm dev bin/cs-test-run.sh --portable 2>&1)
 container_rc=$?

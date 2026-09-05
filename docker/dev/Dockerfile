@@ -17,6 +17,11 @@ ARG GID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# archive.ubuntu.com intermittently serves a stale index mid-mirror-sync
+# ("Hash Sum mismatch" / "Mirror sync in progress?"), failing apt-get update;
+# apt's own Acquire::Retries covers that transient case.
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries
+
 # Baseline toolchain bin/cs-test-run.sh --portable needs (matches
 # .github/workflows/ci.yml's portable-lane "Require test tools" step: jq,
 # python3, sqlite3), plus git/curl/ca-certificates/gnupg for the install
@@ -60,7 +65,7 @@ RUN set -eu; \
     useradd -m -u "${UID}" -g "${GID}" -s /bin/bash cs
 
 WORKDIR /workspace
-COPY . /workspace
+COPY --chown=cs:cs . /workspace
 
 # Pinned ShellCheck via this repo's own installer (bin/cs-lint.sh
 # --required-version owns the exact pin; this never floats to latest).
@@ -91,6 +96,10 @@ RUN set -eu; \
 
 ENV MISE_YES=1
 ENV PATH="/home/cs/.local/share/mise/shims:${PATH}"
+# WORKDIR creates /workspace as root. COPY --chown retitles the files, not the
+# directory, and `mise install` with lockfile=true writes a sibling tempfile
+# next to mise.lock - that needs the directory itself writable by cs.
+RUN chown cs:cs /workspace
 USER cs
 # Installs node/aube per mise.toml, baked into the image rather than lazily
 # fetched at container-run time. Runs as the non-root "cs" user, not root,
