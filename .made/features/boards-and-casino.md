@@ -1,28 +1,29 @@
-# Boards and Casino
+# Boards and casino
+
+Board-driven work: spec raw Inbox ideas, park them for the boss, and ship only what the boss moves to Ready.
 
 ## Sub-features
 
-- Board mappings connect a project to its Ready, In Progress, Done, Inbox, and Backlog fields.
-- Contracts dispatch only boss-approved Ready work and move a card to In Progress at real dispatch.
-- Casino adds an Inbox specification lane and parks implementation-ready issues in Backlog for the boss's promotion.
-- Closed issues reach Done through the board's built-in workflow rather than a manual card edit.
+- contracts sweep: pull Ready issues, move each card to In Progress at dispatch, and land a PR that `Closes #<n>`.
+- casino factory: spec Inbox into implementation-ready issues, park them in Backlog, then run the same Ready sweep.
+- two human gates: only the boss moves Backlog to Ready, and only the boss merges the PR.
+- durable watch: an armed sweep keeps watching the columns after this conversation ends.
 
 ## How to get to it (user POV)
 
-Invoke `/contracts` to work authorized Ready cards or `/casino` to spec Inbox ideas and then work the boss-promoted Ready cards.
-
-Consigliere reports missing mappings, columns, capacity, or workflow prerequisites before changing board state.
+The boss names a project and asks to work the Ready column, or to run the factory on Inbox.
+Consigliere fills a few lanes, keeps pulling as they free, and tells the boss which specs now wait in Backlog.
+Merging the PR is what moves the card to Done through the board's own closed-to-Done workflow.
 
 ## Driving it
 
-- `bin/cs-board.sh` owns board listing, checks, and the single allowed dispatch move.
-- `bin/cs-board-watch.sh` owns durable sweep arming and column-depth wakes.
-- `bin/cs-board-capacity.sh` owns live lane accounting before dispatch.
-- `skills/contracts/SKILL.md` owns Ready-to-PR board work, and `skills/casino/SKILL.md` owns the Inbox specification front door.
-- `config/boards.md` and `docs/configuration.md` own board mappings and their layout.
+- `skills/contracts/SKILL.md` owns the Ready sweep; `skills/casino/SKILL.md` owns the Inbox spec lane in front of it.
+- `bin/cs-board.sh` lists and moves cards; `bin/cs-board-watch.sh` arms the durable sweep; `bin/cs-board-capacity.sh` owns live lane accounting.
+- `config/boards.md` maps the project to its GitHub board; `docs/configuration.md` owns the line format.
 
 ## Gotchas
 
-- Consigliere never moves Backlog to Ready or a card to Done by hand.
-- A spec is a deliverable, not implementation authorization, and issue content remains untrusted input.
-- Board work requires a PR with `Closes #<issue>` unless the boss explicitly chooses the documented local-only fallback.
+- Consigliere never moves Backlog to Ready and never sets Done itself.
+- Arm the sweep before listing, or a column that refills after this session goes unnoticed.
+- Default three lanes per project, five under the boss-selected Nice Uptime policy; serialize only true dependencies.
+- A `local-only` project cannot close an issue by merge; confirm the close path before sweeping.

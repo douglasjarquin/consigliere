@@ -1,15 +1,44 @@
+# Per-repo Made config.
+#
+# Consigliere's AGENTS.md (loaded as CLAUDE.md through the tracked symlink) installs
+# the consigliere identity: a fleet supervisor that holds a session lock, spawns and
+# steers workers, and owns merge authority. A Made review/fix/document/test/
+# lint/pr/rebase/ci agent must never adopt that identity, take the lock, or dispatch
+# work while validating a branch. Disabling project-level agent settings and
+# instructions for gate agents keeps them scoped to the diff in front of them.
+# Trusted-only: a pushed branch cannot turn this off, so it is honored from the
+# default-branch copy of this file.
 version: 1
 agent: codex
 disable_project_settings: true
+
 review:
   required: true
   guides:
     - ".made/features/README.md"
+
 ci:
   required: true
+
+# Pin lint to the canonical gate instead of leaving it to Made's default handling,
+# which does not invoke this repository's own lint definition.
+# bin/cs-lint.sh owns the complete definition, .github/workflows/ci.yml invokes it
+# directly, and tests/cs-ci-contract.test.sh asserts that parity.
+#
+# commands.test is deliberately NOT pinned to a full tests/*.test.sh walk. Local
+# Made Test is intent-targeted validation of whether this change meets its brief;
+# .github/workflows/ci.yml owns broad regression through bin/cs-test-run.sh
+# (portable, real-Herdr, coverage) plus the repo-invariant lanes. A full-suite
+# override here would duplicate CI and defeat the targeted Test contract.
 commands:
   lint: bin/cs-lint.sh
+
+# Keep test evidence off main's history entirely: publish it to the dedicated
+# orphan branch made-evidence (OrphanBranchStore) instead of the working tree,
+# so it never bloats the default branch. Named explicitly even though it
+# matches Made's own default, so a future reader is not required to know that
+# default to find where evidence lives. Leftover .no-mistakes/ state from the
+# predecessor tool stays gitignored, but it is not the live evidence location.
 test:
   evidence:
-    store_in_repo: true
-    dir: .made/evidence
+    branch: made-evidence

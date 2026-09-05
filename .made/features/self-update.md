@@ -1,26 +1,28 @@
 # Self-update
 
+How a running consigliere and its capos take the latest origin without disrupting in-flight work.
+
 ## Sub-features
 
-- The main home fast-forwards its default branch only when the checkout is clean and can advance safely.
-- Registered capo homes receive the same guarded fast-forward sweep.
-- In-flight operational state and project clones remain outside the tracked-files update.
-- Instruction changes trigger a re-read and live capo nudges through the normal steer path.
+- fast-forward only: this repo's default branch and every registered capo home advance only when the update is a clean fast-forward.
+- instruction refresh: if `AGENTS.md`, `bin/`, or `skills/` changed, re-read the kernel and nudge updated live capos to do the same.
+- skip is a report: a dirty tree, diverged branch, or missing origin is named and left for its owner, never forced.
 
 ## How to get to it (user POV)
 
-Ask Consigliere to update itself when a newer default-branch revision is available.
-
-It reports updated, already-current, or skipped homes and leaves conflicts for their owners instead of forcing them away.
+The boss says `/update-consigliere` or asks to pull the latest.
+Consigliere fast-forwards itself and the capo homes, then continues under the refreshed instructions when those changed.
+Project clones are not part of this flow.
 
 ## Driving it
 
-- `bin/cs-update.sh` owns the fast-forward mechanics and parseable summary.
-- `skills/update-consigliere/SKILL.md` owns re-read and capo-nudge follow-through.
-- `docs/configuration.md` owns the boundary between tracked instructions, operational homes, and project clones.
+- `skills/update-consigliere/SKILL.md` owns the boss-facing steps.
+- `bin/cs-update.sh` owns the git mechanics and the parseable summary (`reread-consigliere`, `nudge-capos`).
+- Capo-home fast-forward is the same implementation as `bin/cs-home-seed.sh --sweep`.
 
 ## Gotchas
 
-- The update path never forces, merges, stashes, or mutates anything under `projects/`.
-- A dirty, diverged, or non-default checkout is a reported skip, not a reason to reset it.
-- The shared Made daemon is not restarted by self-update.
+- Never force, merge, or stash to make an update go through.
+- A tracked-files fast-forward never touches gitignored operational dirs (`data/`, `state/`, `config/`, `projects/`, leftover `.no-mistakes/`); Made evidence lives on its own orphan branch, untouched by this fast-forward entirely.
+- Nothing under `projects/` is refreshed here; fleet sync owns clone refresh.
+- If `.codex/hooks.json` changed, each codex home's next interactive session must approve the changed hooks once.
