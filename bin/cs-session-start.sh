@@ -791,10 +791,27 @@ stage supervision
 AFK_PRESENT=0
 [ -e "$STATE/.afk" ] && AFK_PRESENT=1
 
+# Whether THIS invocation is a genuine primary/root session for this home -
+# the same predicate bin/cs-sessionstart-run.sh gates its own call on before
+# ever reaching this script. AGENTS.md tells every session, including a
+# soldier's own, to run this script directly, which reaches the writes below
+# with none of that wrapper's guard: a soldier task worktree carries the same
+# tracked hook wiring as the primary, so its own SessionStart refiring (a
+# compaction, a resume) can run this script in its own pane with CS_HOME still
+# pointed at the shared primary home. THIS_IS_PRIMARY_SESSION must gate every
+# write below that means "this home's own live pane/turn state", not merely a
+# per-task file.
+THIS_IS_PRIMARY_SESSION=0
+cs_primary_scope_matches "$CS_ROOT" "$STATE" && THIS_IS_PRIMARY_SESSION=1
+
 # A session start is a fresh turn. Drop any per-turn checkpoint counter left
 # behind by a turn that died before its turn-end hook could clear it, or the
-# first checkpoint of this session would be refused as a repeat.
-rm -f "$STATE/.checkpoint-turn" 2>/dev/null || true
+# first checkpoint of this session would be refused as a repeat. Only the
+# primary session's own turn-end guard ever sets this marker, so only the
+# primary session may clear it.
+if [ "$THIS_IS_PRIMARY_SESSION" -eq 1 ]; then
+  rm -f "$STATE/.checkpoint-turn" 2>/dev/null || true
+fi
 
 subsection "SUPERVISION (foreground checkpoint)"
 if [ "$READ_ONLY" -eq 1 ]; then
@@ -839,8 +856,10 @@ fi
 # inside the home's own pane, where HERDR_PANE_ID proves which pane that is.
 # It is a hint, never an identity: herdr recycles pane ids, so cs-activate.sh
 # revalidates (pane exists, still has an agent, still rooted in this home)
-# before it will prompt anything.
-if [ -n "${HERDR_PANE_ID:-}" ]; then
+# before it will prompt anything. Gated on THIS_IS_PRIMARY_SESSION: a soldier's
+# own task-worktree session reaching this script directly must never overwrite
+# the primary's own pane record with its own pane id.
+if [ "$THIS_IS_PRIMARY_SESSION" -eq 1 ] && [ -n "${HERDR_PANE_ID:-}" ]; then
   printf '%s\n' "$HERDR_PANE_ID" > "$STATE/.home-pane" 2>/dev/null || true
 fi
 

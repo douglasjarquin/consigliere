@@ -174,6 +174,60 @@ out=$(cd "$SOLDIER_WORKTREE" && HERDR_PANE_ID=worker:p1 \
   fail "a direct soldier session-start command cleared the checkpoint marker"
 pass "a direct soldier session-start command cannot mutate the primary home"
 
+# --- CS_ROOT_OVERRIDE-less gap: a soldier's own worktree, running the REAL
+# script with no override at all (the actual incident shape) -------------------
+# The block above only proves the ad hoc CS_ROOT_OVERRIDE check works when a
+# caller happens to pass CS_ROOT_OVERRIDE. AGENTS.md tells every session -
+# including a soldier's own - to run bin/cs-session-start.sh directly, with no
+# override of any kind, while its shell still carries a CS_HOME pointed at the
+# shared primary home (the real incident: state/.home-pane held a soldier
+# task's pane after its own session refired session start). That path resolves
+# CS_ROOT from the invoked script's own location - the soldier's linked
+# worktree - so it needs its own real linked worktree fixture, symlinked at
+# "bin" to this checkout's real scripts (matching the hook fixture below), not
+# the CS_ROOT_OVERRIDE-redirected SOLDIER_PRIMARY/SOLDIER_WORKTREE pair above.
+REALWT_PRIMARY="$TMP/realwt-primary"
+mkdir -p "$REALWT_PRIMARY"
+ln -s "$ROOT/bin" "$REALWT_PRIMARY/bin"
+: > "$REALWT_PRIMARY/AGENTS.md"
+git init -q -b main "$REALWT_PRIMARY"
+git -C "$REALWT_PRIMARY" add -A
+git -C "$REALWT_PRIMARY" -c user.name='Consigliere Tests' -c user.email='tests@example.invalid' \
+  commit -qm init
+REALWT_SOLDIER="$TMP/realwt-soldier"
+git -C "$REALWT_PRIMARY" worktree add --quiet -b cs/realwt-soldier "$REALWT_SOLDIER"
+
+REALWT_HOME="$TMP/realwt-home"
+mkdir -p "$REALWT_HOME/state" "$REALWT_HOME/data" "$REALWT_HOME/config"
+printf 'root:p1\n' > "$REALWT_HOME/state/.home-pane"
+printf 'checkpoint-sentinel\n' > "$REALWT_HOME/state/.checkpoint-turn"
+out=$(cd "$REALWT_SOLDIER" && HERDR_PANE_ID=soldier:p1 CS_TASK_ID=fix-soldier-lock-hijack \
+  CS_HOME="$REALWT_HOME" "$REALWT_SOLDIER/bin/cs-session-start.sh" 2>&1)
+[ "$(cat "$REALWT_HOME/state/.home-pane")" = 'root:p1' ] || \
+  fail "a soldier's own session-start run with no CS_ROOT_OVERRIDE overwrote the shared home-pane record, got: $(cat "$REALWT_HOME/state/.home-pane")"
+[ "$(cat "$REALWT_HOME/state/.checkpoint-turn")" = 'checkpoint-sentinel' ] || \
+  fail "a soldier's own session-start run with no CS_ROOT_OVERRIDE cleared the shared checkpoint-turn marker"
+pass "a soldier's own direct session-start run with no override cannot clobber the shared home-pane or checkpoint-turn record"
+
+# --- regression guard: a genuine primary session still records its own pane ---
+REALROOT_PRIMARY="$TMP/realroot-primary"
+mkdir -p "$REALROOT_PRIMARY"
+ln -s "$ROOT/bin" "$REALROOT_PRIMARY/bin"
+: > "$REALROOT_PRIMARY/AGENTS.md"
+git init -q -b main "$REALROOT_PRIMARY"
+git -C "$REALROOT_PRIMARY" commit -q --allow-empty -m init
+
+REALROOT_HOME="$TMP/realroot-home"
+mkdir -p "$REALROOT_HOME/state" "$REALROOT_HOME/data" "$REALROOT_HOME/config"
+printf 'checkpoint-sentinel\n' > "$REALROOT_HOME/state/.checkpoint-turn"
+out=$(cd "$REALROOT_PRIMARY" && HERDR_PANE_ID=root:p1 CS_HOME="$REALROOT_HOME" \
+  "$REALROOT_PRIMARY/bin/cs-session-start.sh" 2>&1)
+[ "$(cat "$REALROOT_HOME/state/.home-pane" 2>/dev/null)" = 'root:p1' ] || \
+  fail "a genuine primary session-start run must still record its own pane, got: $(cat "$REALROOT_HOME/state/.home-pane" 2>/dev/null)"
+[ ! -e "$REALROOT_HOME/state/.checkpoint-turn" ] || \
+  fail "a genuine primary session-start run must still clear a stale checkpoint-turn marker"
+pass "a genuine primary session-start run still records its own pane and clears a stale checkpoint marker"
+
 printf 'forged-capo\n' > "$SOLDIER_WORKTREE/.cs-capo-home"
 printf 'lock-sentinel\n' > "$SOLDIER_HOME/state/.lock"
 printf 'wake-sentinel\n' > "$SOLDIER_HOME/state/.wake-queue"
