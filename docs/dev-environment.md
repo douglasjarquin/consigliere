@@ -17,7 +17,7 @@ It gives Mac Compose, CI, and Cursor Cloud Agents one reproducible container-bas
   It copies only `mise.toml`, `bin/cs-install-shellcheck.sh`, and `bin/cs-lint.sh` while building the pinned tools, because Cursor checks out the project separately.
   It keeps the runtime user non-root and exposes mise tools through the runtime user's `.bashrc` and `/usr/local/bin` shims so Cursor's session PATH reset cannot hide them.
 - `docker-compose.yml` (root) - `dev` service (the toolchain/test container) and `web` service (see "The web placeholder" below).
-- `.dockerignore` - excludes `config/`, `host/`, `data/`, `state/`, `projects/`, `.no-mistakes/` from the build context, so none of that gitignored, boss-private content enters an image build context.
+- `.dockerignore` - excludes `config/`, `host/`, `data/`, `state/`, `projects/`, `.no-mistakes/`, and `.made/evidence/` from the build context, so none of that gitignored, boss-private content is ever baked into an image layer, regardless of what happens to exist on disk when the image is built.
 - `scripts/ci/run-in-container.sh` - builds the `dev` image and runs a given command inside it.
   Adapted from niceuptime's own `scripts/ci/run-in-dev-container.sh` wrapper pattern.
 
@@ -38,14 +38,14 @@ The `install` command is `mise install`, which Cursor runs from the project root
 There is no `start` command because this repository has no Cloud Agent service that must remain running between commands.
 The image includes `git`, passwordless `sudo` for the non-root runtime user, default `UID`/`GID` values of `1000`, and PATH persistence that survives Cursor's session environment reset.
 
-## Mount-masking: why the six sensitive paths can never leak
+## Mount-masking: why the seven sensitive paths can never leak
 
-`config/`, `host/`, `data/`, `state/`, `projects/`, and `.no-mistakes/` are this repo's gitignored, boss-private operational state (`docs/configuration.md` owns the complete layout).
+`config/`, `host/`, `data/`, `state/`, `projects/`, `.no-mistakes/`, and `.made/evidence/` are this repo's gitignored, boss-private operational state (`docs/configuration.md` owns the complete layout).
 Two independent protections keep them out of the dev-tools suite entirely:
 
-1. `.dockerignore` excludes all six from the Docker build context, so their real content cannot enter any image layer, no matter what exists in the directory the image is built from.
-2. `docker-compose.yml`'s `dev` service mounts the repo root read-write, then mounts an anonymous (empty, ephemeral) volume over each of the six paths inside the container - a standard Compose masking technique.
-   Even if a bind-mounted host directory has real content, the container's view of those six paths stays empty.
+1. `.dockerignore` excludes all seven from the Docker build context, so `docker/dev/Dockerfile`'s `COPY . /workspace` step can never bake their real content into any image layer, no matter what exists in the directory the image is built from.
+2. `docker-compose.yml`'s `dev` service mounts the repo root read-write, then mounts an anonymous (empty, ephemeral) volume over each of the seven paths inside the container - a standard Compose masking technique.
+   Even if a bind-mounted host directory has real content, the container's view of those seven paths stays empty.
 
 The `web` service needs neither protection: it mounts only `./web:/srv/web:ro`, nothing else.
 
