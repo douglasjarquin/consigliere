@@ -9,7 +9,7 @@
 # Trusted-only: a pushed branch cannot turn this off, so it is honored from the
 # default-branch copy of this file.
 version: 1
-agent: codex
+agent: claude
 disable_project_settings: true
 
 review:

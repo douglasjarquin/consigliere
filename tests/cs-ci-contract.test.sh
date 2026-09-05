@@ -183,6 +183,8 @@ pass "repo invariants run for every change, including docs-only ones"
 [ -f "$ROOT/.made/features/README.md" ] || fail "Made features index README must exist"
 grep -F 'store_in_repo' "$ROOT/.made.yaml" >/dev/null \
   && fail ".made.yaml must not re-enable in-repo evidence storage"
+grep -E '^agent: claude$' "$ROOT/.made.yaml" >/dev/null \
+  || fail ".made.yaml must configure agent: claude (Codex weekly quota exhaustion blocked the review gate; see PR #173's override note)"
 grep -F '.made/features' "$ROOT/.gitignore" >/dev/null \
   && fail "gitignore must not hide tracked .made/features/"
 grep -E -- '- /workspace/\.made$' "$ROOT/docker-compose.yml" >/dev/null \
