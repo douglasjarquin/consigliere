@@ -12,16 +12,15 @@ services:
       - .:/workspace
       # Anonymous volumes shadow these gitignored, boss-private paths so
       # the container can never see their real host content, regardless of
-      # what this machine actually has on disk in them.
-      # .made/features/ is tracked review material and must stay visible;
-      # only .made/evidence/ is masked.
+      # what this machine actually has on disk in them. Made evidence lives
+      # on its own orphan branch, never in the working tree, so it needs no
+      # entry here; .made/features/ is tracked review material and stays visible.
       - /workspace/config
       - /workspace/host
       - /workspace/data
       - /workspace/state
       - /workspace/projects
       - /workspace/.no-mistakes
-      - /workspace/.made/evidence
 
   web:
     build:

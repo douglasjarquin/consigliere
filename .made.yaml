@@ -33,11 +33,12 @@ ci:
 commands:
   lint: bin/cs-lint.sh
 
-# Keep test evidence in the repo, under the gitignored local evidence directory.
-# .gitignore excludes .made/evidence/, so evidence stays on this machine and is
-# never committed or pushed. Leftover .no-mistakes/ state from the predecessor
-# tool stays gitignored too, but it is not the live evidence dir.
+# Keep test evidence off main's history entirely: publish it to the dedicated
+# orphan branch made-evidence (OrphanBranchStore) instead of the working tree,
+# so it never bloats the default branch. Named explicitly even though it
+# matches Made's own default, so a future reader is not required to know that
+# default to find where evidence lives. Leftover .no-mistakes/ state from the
+# predecessor tool stays gitignored, but it is not the live evidence location.
 test:
   evidence:
-    store_in_repo: true
-    dir: .made/evidence
+    branch: made-evidence

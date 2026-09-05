@@ -23,6 +23,6 @@ Project clones are not part of this flow.
 ## Gotchas
 
 - Never force, merge, or stash to make an update go through.
-- A tracked-files fast-forward never touches gitignored operational dirs (`data/`, `state/`, `config/`, `projects/`, `.made/evidence/`, leftover `.no-mistakes/`).
+- A tracked-files fast-forward never touches gitignored operational dirs (`data/`, `state/`, `config/`, `projects/`, leftover `.no-mistakes/`); Made evidence lives on its own orphan branch, untouched by this fast-forward entirely.
 - Nothing under `projects/` is refreshed here; fleet sync owns clone refresh.
 - If `.codex/hooks.json` changed, each codex home's next interactive session must approve the changed hooks once.

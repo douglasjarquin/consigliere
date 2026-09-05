@@ -23,7 +23,7 @@ README.md            public overview
 .claude/              claude SessionStart digest run and Stop-hook turn-end guard (settings.json), committed
 CLAUDE.md            symlink to AGENTS.md (claude loads CLAUDE.md; codex loads AGENTS.md)
 .tasks.toml          tracked tasks-axi backlog backend config
-.made.yaml           tracked per-repo Made config; gate-agent scope, canonical lint, review guides, and local evidence placement
+.made.yaml           tracked per-repo Made config; gate-agent scope, canonical lint, review guides, and the orphan evidence branch
 .made/features/      tracked Made review index (README plus per-area files); do not gitignore
 skills/              consigliere-loaded skills, committed (source of truth)
 .claude/skills       symlink to ../skills, so claude discovers project skills
@@ -84,8 +84,7 @@ state/               volatile runtime signals; gitignored
   .decision-cursor-*   per-task byte cursor and folded open-decision set bounding the wake drain's open-decision scan to new status appends; written only by cs-classify-lib.sh; safe to delete (forces one full re-fold)
   .hash-* .count-* .stale-* .paused-* .seen-* .last-*   watcher internals; never touch
   .subsuper-*        away-mode delivery internals (cs-activate.sh, cs-afk-start.sh, cs-afk-return.sh); never touch
-.made/evidence/      local Made validation evidence; gitignored
-.no-mistakes/        leftover local validation state from the predecessor tool; gitignored; not the live evidence dir
+.no-mistakes/        leftover local validation state from the predecessor tool; gitignored; Made evidence lives on the orphan made-evidence branch, not here
 ```
 
 A `state/<id>.status` line is a wake event, not current-state truth; `bin/cs-crew-state.sh` owns current-state reconciliation.
