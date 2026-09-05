@@ -1,8 +1,8 @@
-# Dev-tools suite: mise + aube + container dev/CI
+# Dev-tools suite: mise + aube + container dev/CI/Cloud Agents
 
-This is a purely additive dev-tools suite on top of consigliere's own bash-script tooling.
-No existing `bin/*.sh` script's content changed to add it.
-It exists to give consigliere its own reproducible, container-based dev environment and CI path - `mise` for tooling/tasks, `aube` for the JS package-manager work that needs it, and Docker for a single dev/CI image - inspired by (not copied from) the boss's `niceuptime` project's own mid-implementation container setup.
+This is a mostly additive dev-tools suite on top of consigliere's own bash-script tooling.
+The existing CI lane map routes `.cursor/environment.json` into the portable contract suite.
+It gives Mac Compose, CI, and Cursor Cloud Agents one reproducible container-based environment - `mise` for tooling/tasks, `aube` for the JS package-manager work that needs it, and Docker for one shared image - inspired by (not copied from) the boss's `niceuptime` project's own mid-implementation container setup.
 
 ## Layout
 
@@ -11,9 +11,11 @@ It exists to give consigliere its own reproducible, container-based dev environm
   It does not replace `bin/cs-deps-lib.sh`, which stays the single owner of consigliere's own required/optional tool floors for the human/doctor-check path.
   The two are independent, compatible mechanisms: `mise.toml` governs what's baked into the container image; `cs-deps-lib.sh` governs what a human running consigliere directly needs on their own machine.
 - `mise-tasks/dev/{install,up,down,shell,test}` - file-based mise tasks (namespaced `dev:*`), each a thin composition of already-built pieces (a mise task invoking a `docker compose` command), never a duplicate of logic that already lives in `bin/cs-test-run.sh` or `docker-compose.yml`.
-- `docker/dev/Dockerfile` - a single image (deliberately not split into a toolchain image and a dev image the way niceuptime's own setup is - that split was flagged there as needing manual sync, a rough edge this image avoids).
-  Installs the toolchain `bin/cs-test-run.sh --portable` needs (bash, git, jq, sqlite3, python3, gh, lsof), a pinned ShellCheck via `bin/cs-install-shellcheck.sh` (reused as-is, not modified), and a SHA-pinned `mise` bootstrap that then installs `node`/`aube` per `mise.toml` and `node`/`tasks-axi` again via mise's global config, so `tasks-axi` is reachable from any directory.
-  Never runs as root at container runtime.
+- `docker/dev/Dockerfile` - a single image for Mac Compose, CI, and Cursor Cloud Agents.
+  It is deliberately not split into a toolchain image and a dev image because that split was flagged in niceuptime as needing manual synchronization.
+  It installs the toolchain `bin/cs-test-run.sh --portable` needs (bash, git, jq, sqlite3, python3, gh, lsof, and sudo), a pinned ShellCheck via `bin/cs-install-shellcheck.sh` (reused as-is, not modified), and a SHA-pinned `mise` bootstrap that installs `node`/`aube` per `mise.toml` and `node`/`tasks-axi` again via mise's global config.
+  It copies only `mise.toml`, `bin/cs-install-shellcheck.sh`, and `bin/cs-lint.sh` while building the pinned tools, because Cursor checks out the project separately.
+  It keeps the runtime user non-root and exposes mise tools through the runtime user's `.bashrc` and `/usr/local/bin` shims so Cursor's session PATH reset cannot hide them.
 - `docker-compose.yml` (root) - `dev` service (the toolchain/test container) and `web` service (see "The docs site" below).
 - `.dockerignore` - excludes `config/`, `host/`, `data/`, `state/`, `projects/`, `.no-mistakes/`, and `.made/evidence/` from the build context, so none of that gitignored, boss-private content is ever baked into an image layer, regardless of what happens to exist on disk when the image is built.
 - `scripts/ci/run-in-container.sh` - builds the `dev` image and runs a given command inside it.
@@ -26,6 +28,15 @@ It exists to give consigliere its own reproducible, container-based dev environm
 - `mise run dev:shell` - open an interactive shell inside the `dev` container.
 - `mise run dev:test` - run consigliere's existing portable test suite (`bin/cs-test-run.sh --portable`, unmodified) inside the `dev` container.
 - `mise run dev:down` - tear down the local dev stack.
+
+## Cursor Cloud Agents
+
+Cursor Cloud Agents use the same `docker/dev/Dockerfile` through `.cursor/environment.json`.
+The configuration's `build.dockerfile` is `../docker/dev/Dockerfile` and its `build.context` is `..`, both relative to `.cursor/` with `..` special-cased by Cursor as the repository root.
+Cursor checks out the requested commit into the workspace, so the Dockerfile copies only the files needed to bake the pinned tools and never copies the full project.
+The `install` command is `mise install`, which Cursor runs from the project root after checkout for an idempotent dependency refresh.
+There is no `start` command because this repository has no Cloud Agent service that must remain running between commands.
+The image includes `git`, passwordless `sudo` for the non-root runtime user, default `UID`/`GID` values of `1000`, and PATH persistence that survives Cursor's session environment reset.
 
 ## Mount-masking: why the seven sensitive paths can never leak
 
@@ -46,7 +57,7 @@ Build it first with `mise run web:install` and `mise run web:build`.
 
 ## CI
 
-`.github/workflows/ci.yml`'s `lint`, `test-coverage`, and `portable` jobs stay on `ubuntu-latest`, but `portable` and `test-coverage` now run their `bin/cs-test-run.sh` invocation through `scripts/ci/run-in-container.sh`, inside the same `dev` image the local workflow above uses.
+`.github/workflows/ci.yml`'s `lint`, `test-coverage`, and `portable` jobs stay on `ubuntu-latest`, but `portable` and `test-coverage` now run their `bin/cs-test-run.sh` invocation through `scripts/ci/run-in-container.sh`, inside the same `dev` image the Mac Compose workflow and Cursor Cloud Agents use.
 `lint` itself is unaffected - `bin/cs-lint.sh`'s canonical glob set already covers the new `scripts/ci/*.sh` and `mise-tasks/dev/*` files directly on the runner.
 
 Two jobs are deliberately **not** containerized:

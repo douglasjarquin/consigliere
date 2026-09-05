@@ -19,6 +19,7 @@ This section is the single owner of the complete tree; the sections below it add
 AGENTS.md            always-loaded kernel
 README.md            public overview
 .codex/              codex SessionStart digest run and Stop-hook turn-end guard, committed
+.cursor/             Cursor Cloud Agent environment.json and local Cursor CLI hooks, committed
 .claude/              claude SessionStart digest run and Stop-hook turn-end guard (settings.json), committed
 CLAUDE.md            symlink to AGENTS.md (claude loads CLAUDE.md; codex loads AGENTS.md)
 .tasks.toml          tracked tasks-axi backlog backend config
@@ -31,7 +32,7 @@ bin/                 helper scripts, committed; read each script's header before
 docs/                architecture, configuration schema, herdr and codex verified facts, supervision protocol, upstream-review ledger
 mise.toml            dev-tools suite: pinned tool versions (node, aube, npm:tasks-axi); docs/dev-environment.md
 mise-tasks/dev/      file-based mise tasks (install, up, down, shell, test) for the dev-tools suite; docs/dev-environment.md
-docker/dev/Dockerfile  dev-tools suite's single dev/CI container image; docs/dev-environment.md
+docker/dev/Dockerfile  dev-tools suite's single dev/CI/Cloud Agent container image; docs/dev-environment.md
 docker-compose.yml   dev-tools suite: dev + web services, with mount-masking over the six LOCAL/gitignored paths below; docs/dev-environment.md
 scripts/ci/          CI-only helper scripts, committed; run-in-container.sh wraps a command inside the dev-tools image
 config/              THE USER-OWNED TREE; LOCAL, gitignored; back it up wholesale; per-file inventory and symlink policy below

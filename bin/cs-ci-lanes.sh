@@ -158,6 +158,9 @@ while IFS= read -r path; do
     grokbot/*)
       portable=true
       ;;
+    .cursor/environment.json)
+      portable=true
+      ;;
     mise.toml | mise.lock)
       lint=true
       portable=true
