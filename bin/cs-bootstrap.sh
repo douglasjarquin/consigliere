@@ -23,8 +23,10 @@
 #                              the same builds this dispatch gate does.
 #   HERDR_DOWN / HERDR_PROTOCOL:  the herdr server is unreachable or below the
 #                              minimum protocol (docs/herdr.md).
-#   MADE_DOWN                  the made daemon is unreachable; start it with
-#                              made daemon start before dispatching.
+#   MADE_DOWN                  the made daemon was unreachable and an
+#                              automatic start attempt (cs_made_daemon_start,
+#                              bin/cs-made-lib.sh) failed; this line names the
+#                              log path checked so far.
 #   NEEDS_GH_AUTH              gh is present but not authenticated.
 #   TANGLE: ...                the primary checkout is on a named non-default
 #                              branch (cs-tangle-lib.sh owns classification);
@@ -230,19 +232,22 @@ EOF
 
   # --- made daemon health -------------------------------------------------
   # Local: made's daemon is reached over a local unix socket (internal/api),
-  # so this probe never leaves the machine either.
+  # so this probe never leaves the machine either. Unlike the herdr probe
+  # above, a down daemon here is fixed automatically before being reported:
+  # only consigliere's own root session runs this bootstrap path (soldiers
+  # never do), so auto-starting a down shared daemon here does not risk a
+  # soldier restarting infrastructure out from under other lanes - rule 7's
+  # "only consigliere manages the daemon" is this very code path.
   if command -v made >/dev/null 2>&1; then
     # shellcheck source=bin/cs-made-lib.sh
     . "$SCRIPT_DIR/cs-made-lib.sh"
-    # `made status --json` fails BOTH when the daemon is unreachable and when
-    # the daemon is healthy but has run nothing yet ("no runs found") - unlike
-    # herdr's status probe above, a nonzero exit here is not on its own proof
-    # of an unreachable daemon. Grepping stderr for made's own
-    # "daemon not reachable" wording (cmd/made/status.go) tells the two apart.
-    # shellcheck disable=SC2119  # cs_made_status with no run-id means "latest"
-    made_err=$(cs_made_status 2>&1 >/dev/null) || true
-    if printf '%s' "$made_err" | grep -q 'daemon not reachable'; then
-      printf 'MADE_DOWN: cannot reach the made daemon; start it (made daemon start) before dispatching.\n'
+    doctor_json=$(cs_made_doctor --json 2>/dev/null) || doctor_json=""
+    daemon_check=$(printf '%s' "$doctor_json" | jq -r '.checks.daemon // empty' 2>/dev/null)
+    if [ "$daemon_check" != reachable ]; then
+      made_log="$CS_HOME/state/.made-daemon.err"
+      if ! cs_made_daemon_start "$made_log" "${CS_MADE_DAEMON_START_TIMEOUT:-30}"; then
+        printf 'MADE_DOWN: made daemon was unreachable; an automatic start attempt failed - see %s.\n' "$made_log"
+      fi
     fi
   fi
 }

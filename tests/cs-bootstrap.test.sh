@@ -394,44 +394,71 @@ assert_contains "$ev_fail" 'supervision continues on the poll loop' \
   || fail 'a failed install left a spool behind, arming the watcher onto a dead transport'
 pass 'the herdr event plugin sweep installs silently and degrades to an advisory'
 # --- MADE_DOWN: made daemon health, mirroring the HERDR_DOWN probe -----------
-# `made status --json` also fails cleanly when the daemon IS up but has run
-# nothing yet, so the fixture below must distinguish that from an unreachable
-# daemon: the fake made prints made's own "daemon not reachable" stderr text
-# only in the down case, per cmd/made/status.go.
+# `made doctor --json` (docs/made.md) is the real health probe: .checks.daemon
+# is exactly "reachable" or "unreachable", nothing else. A down daemon is
+# auto-started (cs_made_daemon_start, bin/cs-made-lib.sh) before MADE_DOWN is
+# ever reported - only a failed auto-start attempt still reports it, reworded
+# to say so and to name the log path. This needs jq for real (unlike
+# run_bootstrap's restrictive BASE_PATH above, which has no jq at all), so it
+# prepends a fake `made` to the real PATH instead, the same pattern the herdr
+# event plugin fixture above already uses.
 
-cat > "$FAKEBIN/made" <<'SH'
+MD_HOME="$TMP/made-home"
+mkdir -p "$MD_HOME/config" "$MD_HOME/state" "$MD_HOME/data"
+MD_FB=$(cs_fakebin "$TMP/made-tools")
+
+run_made_bootstrap() {
+  PATH="$MD_FB:$PATH" CS_HOME="$MD_HOME" CS_ROOT_OVERRIDE="$ROOT" \
+    CS_BOOTSTRAP_DETECT_ONLY=1 "$BOOTSTRAP" 2>&1
+}
+
+cat > "$MD_FB/made" <<'SH'
 #!/usr/bin/env bash
-case "$MADE_TEST_MODE" in
-  down)
-    echo "made status: daemon not reachable: dial unix /made.sock: connect: no such file or directory" >&2
-    exit 1
+case "${1:-} ${2:-}" in
+  "doctor --json")
+    if [ "${MADE_TEST_MODE:-}" = up ]; then
+      printf '{"schema_version":1,"protocol_version":1,"healthy":true,"checks":{"daemon":"reachable"}}\n'
+    else
+      printf '{"schema_version":1,"protocol_version":1,"healthy":false,"checks":{"daemon":"unreachable"}}\n'
+    fi
     ;;
-  no-runs)
-    echo "made status: status: no runs found" >&2
-    exit 1
-    ;;
-  up)
-    printf '{"schema_version":1,"run_id":"run-1","repo":"acme/widgets","branch":"main","state":"passed","stages":[],"pending_findings":[]}\n'
-    exit 0
-    ;;
+  "daemon start") ;;
 esac
+exit 0
 SH
-chmod +x "$FAKEBIN/made"
+chmod +x "$MD_FB/made"
 
-out=$(MADE_TEST_MODE=down run_bootstrap)
-assert_line "$out" '^MADE_DOWN: cannot reach the made daemon' \
-  'an unreachable made daemon reports MADE_DOWN clearly'
-pass "MADE_DOWN fires when the made daemon is unreachable"
-
-out=$(MADE_TEST_MODE=up run_bootstrap)
-assert_no_line "$out" '^MADE_DOWN' 'a reachable made daemon with a run must stay silent'
+out=$(MADE_TEST_MODE=up CS_MADE_DAEMON_START_TIMEOUT=2 run_made_bootstrap)
+assert_no_line "$out" '^MADE_DOWN' 'a reachable made daemon must stay silent, no auto-start attempted'
 pass "a healthy made daemon triggers no MADE_DOWN"
 
-out=$(MADE_TEST_MODE=no-runs run_bootstrap)
-assert_no_line "$out" '^MADE_DOWN' \
-  'a healthy but idle made daemon (no runs yet) must never be mistaken for MADE_DOWN'
-pass "a healthy idle made daemon (no runs found) triggers no MADE_DOWN"
+out=$(MADE_TEST_MODE=down CS_MADE_DAEMON_START_TIMEOUT=1 run_made_bootstrap)
+assert_line "$out" '^MADE_DOWN: made daemon was unreachable; an automatic start attempt failed' \
+  'an unreachable made daemon whose auto-start also fails reports MADE_DOWN clearly'
+assert_contains "$out" "$MD_HOME/state/.made-daemon.err" 'the MADE_DOWN line names the daemon log path'
+pass "MADE_DOWN fires when made is down and an automatic start attempt fails"
 
-rm -f "$FAKEBIN/made"
+MD_CAME_UP_MARK="$TMP/made-came-up"
+rm -f "$MD_CAME_UP_MARK"
+cat > "$MD_FB/made" <<SH
+#!/usr/bin/env bash
+case "\${1:-} \${2:-}" in
+  "doctor --json")
+    if [ -f "$MD_CAME_UP_MARK" ]; then
+      printf '{"schema_version":1,"protocol_version":1,"healthy":true,"checks":{"daemon":"reachable"}}\n'
+    else
+      printf '{"schema_version":1,"protocol_version":1,"healthy":false,"checks":{"daemon":"unreachable"}}\n'
+    fi
+    ;;
+  "daemon start")
+    touch "$MD_CAME_UP_MARK"
+    ;;
+esac
+exit 0
+SH
+chmod +x "$MD_FB/made"
+out=$(MADE_TEST_MODE=down CS_MADE_DAEMON_START_TIMEOUT=5 run_made_bootstrap)
+assert_no_line "$out" '^MADE_DOWN' 'a down daemon that comes up after an automatic start attempt must stay silent'
+pass "a down daemon that comes up after auto-start triggers no MADE_DOWN, cs_made_daemon_start was invoked"
 
 printf 'ok - cs-bootstrap axi version floors and network phase split\n'

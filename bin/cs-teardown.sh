@@ -146,7 +146,6 @@ NM_TIMEOUT=${CS_TEARDOWN_NM_TIMEOUT:-10}
 case "$NM_TIMEOUT" in ''|*[!0-9]*) NM_TIMEOUT=10 ;; esac
 NM_READ_ATTEMPTS=3
 NM_READ_RETRY=0.3
-NM_RUNS_LIMIT=200
 # lsof is the verified mechanism for the leaked-process sweep; resolved once.
 LSOF_BIN=$(command -v lsof || true)
 CS_REAP_SURVIVORS=""
@@ -463,49 +462,60 @@ require_pane_gone() { # <what-is-being-retained>
 # herdr workspace is closed. Both are idempotent: a retried teardown after a
 # partial first attempt finds nothing left parked and no surviving process.
 
-# Conclude a made run parked at a gate that belongs to this task's exact
-# branch AND current head. Teardown can otherwise remove a task whose pipeline
-# run is still parked at a post-CI approval gate, leaving an orphaned run holding
-# a fleet slot indefinitely. Attribution is bin/cs-made-run-lib.sh's contract, the
-# same owner cs-crew-state.sh uses: a run on another branch, or on this branch at
-# a rewritten or diverged head, is never touched. The abort is issued cd'd into
-# the worktree so the daemon resolves the run itself (teardown never names a run
-# id), and is CONFIRMED by re-reading the run rather than assumed. Returns
-# non-zero only when a parked run is still parked after the abort.
+# Conclude a made run that is still slot-holding (queued/running/
+# awaiting_review) for this task's exact branch AND current head. Teardown can
+# otherwise remove a task whose pipeline run is still in flight, leaving an
+# orphaned run holding a fleet slot indefinitely. Attribution is
+# bin/cs-made-run-lib.sh's contract, the same owner cs-crew-state.sh uses: a
+# run on another branch, or on this branch at a rewritten or diverged head, is
+# never touched. awaiting_merge and every terminal state (succeeded/failed/
+# canceled/superseded) are treated as ALREADY CONCLUDED - no cancel is issued:
+# made run cancel against awaiting_merge hangs ~5s then errors (docs/made.md),
+# since that run's work-goroutine has already finished, and a landed task's run
+# may legitimately still show awaiting_merge at teardown time since the daemon
+# cannot observe the eventual GitHub merge itself. The cancel is confirmed by
+# re-resolving the run rather than assumed. Returns non-zero only when a
+# slot-holding run is still slot-holding after the cancel, or when made never
+# answers at all.
 conclude_nm_run() {
-  local branch current_branch status_out coarse_status attempt readable=0
+  local branch current_branch row out attempt readable=0
   CS_MADE_CONCLUDE_FAILURE=""
   [ "$MODE" = made ] || return 0
   branch=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || return 0
   [ -n "$branch" ] || return 0
 
-  status_out=""
+  row=""
   for ((attempt = 1; attempt <= NM_READ_ATTEMPTS; attempt++)); do
-    if status_out=$(cs_made_axi_status_read "$WT" "$NM_TIMEOUT"); then
+    if row=$(cs_made_resolve_run "$WT" "$NM_TIMEOUT" "$branch"); then
       readable=1
       break
     fi
-    status_out=""
+    # cs_made_resolve_run returns 1 both when made answered (well-formed JSON)
+    # but no run matched this branch, and when the raw call itself failed - a
+    # direct reachability probe of the same listing tells the two apart.
+    if out=$(cs_made_run_read "$WT" "$NM_TIMEOUT" run list --json --active) \
+       && printf '%s' "$out" | jq -e . >/dev/null 2>&1; then
+      readable=1
+      break
+    fi
+    row=""
     [ "$attempt" -lt "$NM_READ_ATTEMPTS" ] && sleep "$NM_READ_RETRY"
   done
   if [ "$readable" -eq 0 ]; then
     CS_MADE_CONCLUDE_FAILURE="could not verify that no orphaned made run remains for this task because the daemon did not answer; retry once it responds"
     return 1
   fi
+  # No run ever existed for this branch (a task that never pushed, or one
+  # whose run already fell out of made's history) - nothing to conclude.
+  [ -n "$row" ] || return 0
 
-  if cs_made_status_is_attributed "$WT" "$branch" "$status_out"; then
-    cs_made_run_is_gate_parked "$status_out" || return 0
-  else
-    if ! coarse_status=$(cs_made_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT"); then
-      CS_MADE_CONCLUDE_FAILURE="could not verify that no orphaned made run remains for this task because the runs list did not answer; retry once it responds"
-      return 1
-    fi
-    if cs_made_run_status_is_active "$coarse_status"; then
-      :
-    else
-      return 0
-    fi
-  fi
+  local state run_id
+  state=$(printf '%s' "$row" | jq -r '.state // empty')
+  run_id=$(printf '%s' "$row" | jq -r '.run_id // empty')
+  case "$state" in
+    queued|running|awaiting_review) ;;
+    *) return 0 ;;  # awaiting_merge, succeeded, failed, canceled, superseded: already concluded
+  esac
 
   current_branch=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || {
     CS_MADE_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this made run; retry"
@@ -515,45 +525,33 @@ conclude_nm_run() {
     CS_MADE_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this made run; retry"
     return 1
   fi
-  if cs_made_status_is_attributed "$WT" "$branch" "$status_out"; then
-    :
-  elif cs_made_run_status_is_active "$coarse_status"; then
-    if ! coarse_status=$(cs_made_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT") \
-       || ! cs_made_run_status_is_active "$coarse_status"; then
-      CS_MADE_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this made run; retry"
-      return 1
-    fi
-  else
-    CS_MADE_CONCLUDE_FAILURE="task identity changed under teardown, so it cannot safely conclude this made run; retry"
-    return 1
-  fi
 
-  echo "note: concluding this task's made run parked at a gate before cleanup." >&2
-  cs_made_abort "$WT" >/dev/null 2>&1 || true
-  local confirmation_readable=0 parked_seen=0
+  echo "note: concluding this task's made run ($state) before cleanup." >&2
+  cs_made_run_cancel "$run_id" >/dev/null 2>&1 || true
+  local confirmation_readable=0 still_holding=0 confirm_state=""
   for ((attempt = 1; attempt <= NM_READ_ATTEMPTS; attempt++)); do
-    if status_out=$(cs_made_axi_status_read "$WT" "$NM_TIMEOUT"); then
+    if row=$(cs_made_resolve_run "$WT" "$NM_TIMEOUT" "$branch"); then
       confirmation_readable=1
-      if [ -n "$status_out" ] && cs_made_status_is_attributed "$WT" "$branch" "$status_out"; then
-        if ! cs_made_run_is_gate_parked "$status_out"; then
-          return 0
-        fi
-        parked_seen=1
-      elif [ -n "$status_out" ] && coarse_status=$(cs_made_runs_status_for_branch_read "$WT" "$branch" "$NM_RUNS_LIMIT" "$NM_TIMEOUT"); then
-        if ! cs_made_run_status_is_active "$coarse_status"; then
-          return 0
-        fi
-        parked_seen=1
-      fi
+      confirm_state=$(printf '%s' "$row" | jq -r '.state // empty')
+      case "$confirm_state" in
+        queued|running|awaiting_review) still_holding=1 ;;
+        *) still_holding=0 ;;
+      esac
+      [ "$still_holding" -eq 0 ] && break
+    elif out=$(cs_made_run_read "$WT" "$NM_TIMEOUT" run list --json --active) \
+         && printf '%s' "$out" | jq -e . >/dev/null 2>&1; then
+      confirmation_readable=1
+      still_holding=0
+      break
     fi
     [ "$attempt" -lt "$NM_READ_ATTEMPTS" ] && sleep "$NM_READ_RETRY"
   done
   if [ "$confirmation_readable" -eq 0 ]; then
-    CS_MADE_CONCLUDE_FAILURE="abort was issued, but teardown could not confirm that this task's made run stopped; retry after the daemon responds"
-  elif [ "$parked_seen" -eq 1 ]; then
-    CS_MADE_CONCLUDE_FAILURE="this task's made run is still parked at a gate after an abort attempt"
+    CS_MADE_CONCLUDE_FAILURE="cancel was issued, but teardown could not confirm that this task's made run stopped; retry after the daemon responds"
+  elif [ "$still_holding" -eq 1 ]; then
+    CS_MADE_CONCLUDE_FAILURE="this task's made run is still ${confirm_state:-active} after a cancel attempt"
   else
-    CS_MADE_CONCLUDE_FAILURE="abort was issued, but teardown could not positively confirm that this task's made run stopped; retry after the daemon responds"
+    return 0
   fi
   return 1
 }

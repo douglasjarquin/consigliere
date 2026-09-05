@@ -77,8 +77,8 @@ mkdir -p "$STATE"
 # (bin/cs-herdr-event-plugin.sh installs the plugin that feeds it).
 # shellcheck source=bin/cs-herdr-event-lib.sh
 . "$SCRIPT_DIR/cs-herdr-event-lib.sh"
-# The one made-CLI layer (made status --json, etc.) - made_run_state below
-# calls cs_made_status through here, mirroring cs-herdr-lib.sh's own
+# The one made-CLI layer (made run status --json, etc.) - made_run_state
+# below calls cs_made_status through here, mirroring cs-herdr-lib.sh's own
 # separation of concerns for herdr.
 # shellcheck source=bin/cs-made-lib.sh
 . "$SCRIPT_DIR/cs-made-lib.sh"
@@ -154,7 +154,7 @@ BUSY_REGEX=${CS_BUSY_REGEX:-$CS_CODEX_BUSY_RE}
 # marker, logs to a debug log, and keeps blocking WITHOUT enqueuing or exiting.
 # The no-verb signal / stale path is absorb-only-when-provably-working: such a
 # wake is absorbed ONLY while the soldier shows positive evidence it is still
-# working (an actively-running made validation step - a `made status --json`
+# working (an actively-running made validation step - a `made run list --json`
 # socket query, never scraped log text, see made_run_state below - or a busy
 # pane, via crew_is_provably_working over cs-crew-state.sh); a soldier that stopped its
 # turn with no running pipeline and no busy pane is SURFACED, so a finish
@@ -213,28 +213,38 @@ hash_pane() {
 }
 
 # made_run_state: the OTHER form of positive evidence a soldier is still
-# working (see the "Always-on wake triage" note above) - an actively-running
-# or queued `made` validation run - read directly from made's structured
-# socket state (cs_made_status, bin/cs-made-lib.sh) rather than inferred from
-# any scraped log/status text. running/queued -> busy; completed/failed ->
-# idle. A query that fails for ANY reason (made not installed, daemon not
-# running, socket unreachable, unparseable JSON) reports the DISTINCT
-# `unreachable` state - never silently treated as idle or busy, and never a
-# fallback to stale scraped content (plans/made-rewrite.md Task 28).
-made_run_state() {  # [run-id] -> busy|idle|unreachable
-  local json state
-  json=$(cs_made_status "${1:-}" 2>/dev/null) || { printf 'unreachable'; return 0; }
+# working (see the "Always-on wake triage" note above) - an in-flight `made`
+# run read directly from made's real run.status RPC (cs_made_status,
+# bin/cs-made-lib.sh) rather than inferred from any scraped log/status text.
+# Uses StatusReport's own execution_finished boolean rather than re-deriving
+# a state-string allowlist, so it tracks made's own notion of "still
+# executing" exactly: false (queued/running/awaiting_review, including a run
+# parked awaiting a decision - the soldier is not idle, it is blocked) ->
+# busy; true (awaiting_merge plus every terminal state: succeeded/failed/
+# canceled/superseded) -> idle. A query that fails for ANY reason (made not
+# installed, daemon down, unreachable, unparseable JSON) reports the
+# DISTINCT `unreachable` state - never silently idle or busy, and never a
+# fallback to stale scraped content. <run-id> is REQUIRED (made's run.status
+# RPC takes an exact id; there is no "latest" any more) - the caller must
+# already have resolved one, e.g. via cs_made_resolve_run
+# (bin/cs-made-run-lib.sh). This function has no production caller today and
+# wiring one in is out of scope for this task.
+made_run_state() {  # <run-id> -> busy|idle|unreachable
+  local run_id=${1:-} json finished
+  [ -n "$run_id" ] || { printf 'unreachable'; return 0; }
+  json=$(cs_made_status "$run_id" 2>/dev/null) || { printf 'unreachable'; return 0; }
   [ -n "$json" ] || { printf 'unreachable'; return 0; }
-  state=$(printf '%s' "$json" | jq -r '.state // empty' 2>/dev/null) || { printf 'unreachable'; return 0; }
-  case "$state" in
-    running|queued)   printf 'busy' ;;
-    completed|failed) printf 'idle' ;;
-    *)                printf 'unreachable' ;;
+  printf '%s' "$json" | jq -e . >/dev/null 2>&1 || { printf 'unreachable'; return 0; }
+  finished=$(printf '%s' "$json" | jq -r '.execution_finished' 2>/dev/null)
+  case "$finished" in
+    true)  printf 'idle' ;;
+    false) printf 'busy' ;;
+    *)     printf 'unreachable' ;;
   esac
 }
 
-# made_run_is_busy: 0 iff made_run_state (above) reports busy (running/queued).
-made_run_is_busy() {  # [run-id]
+# made_run_is_busy: 0 iff made_run_state (above) reports busy.
+made_run_is_busy() {  # <run-id>
   [ "$(made_run_state "${1:-}")" = busy ]
 }
 
@@ -1487,7 +1497,7 @@ while :; do
     # not re-fire, log, and keep blocking without enqueuing. The
     # provably-working check is the only costly one (it may run a bounded
     # made status query - crew_is_provably_working over cs-crew-state.sh, a
-    # `made status --json` read, never a log scrape), so the || ordering
+    # `made run list --json` read, never a log scrape), so the || ordering
     # evaluates it only for a no-boss-verb signal.
     # A no-verb wake has a second absorb proof after provably-working: bounded
     # recent pane churn for a turn-ended-only wake (signal_turn_end_churn_absorbable

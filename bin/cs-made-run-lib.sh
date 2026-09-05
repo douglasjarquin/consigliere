@@ -25,17 +25,16 @@
 #     invalidates attribution.
 #
 # Every function is a pure read plus a bounded `made` call; nothing here
-# mutates a run. Teardown owns the one state-changing step (the abort) itself,
+# mutates a run. Teardown owns the one state-changing step (the cancel) itself,
 # because only teardown carries the discard authority for it.
 #
-# CLI-surface note (see bin/cs-made-lib.sh's own note, verified against
-# made's source on 2026-08-13): `axi status`, `axi logs`, and the plain
-# `runs` listing this file's TOON readers and cs_made_runs_status_for_branch
-# parse are carried over verbatim from the predecessor tool's own CLI shape -
-# made's CLI does not implement any of them yet. These are forward
-# references, same as cs-made-lib.sh's cs_made_gate_init and cs_made_abort:
-# each starts working the moment made's CLI grows the matching subcommand,
-# with no caller-side change needed.
+# CLI-surface note, verified against made's own source
+# (~/github/douglasjarquin/made, HEAD ebc2fa0df816a14bdf2d17847d04a16fbca43576)
+# on 2026-09-05: attribution resolves over made's real `made run list --json
+# [--active]`, whose rows are full StatusReport JSON objects (branch,
+# input_sha, output_sha, state, pr_url, pending_findings[], ...) - there is no
+# TOON output, no `axi status`, and no plain-text `runs` listing anywhere in
+# made's CLI. See docs/made.md for the full verified-facts record.
 
 # Bounded execution routes through the shared owner (bin/cs-timeout-lib.sh),
 # which selects timeout/gtimeout/perl/bash and kills the whole process group so
@@ -62,95 +61,6 @@ cs_made_run() {
   cs_made_run_read "$@" || true
 }
 
-# --- TOON parsing primitives (shared, pure) ---------------------------------
-
-cs_made_trim() {
-  local s=${1:-}
-  s="${s#"${s%%[![:space:]]*}"}"
-  s="${s%"${s##*[![:space:]]}"}"
-  printf '%s' "$s"
-}
-
-cs_made_strip_quotes() {
-  local s
-  s=$(cs_made_trim "${1:-}")
-  case "$s" in
-    \"*\") s=${s#\"}; s=${s%\"} ;;
-  esac
-  cs_made_trim "$s"
-}
-
-# Scalar value of a TOON key in a captured run output. <toon> <key>
-cs_made_field() {
-  printf '%s\n' "$1" | sed -n "s/^[[:space:]]*$2:[[:space:]]*\(.*\)/\1/p" | head -1
-}
-
-# Finding count from a findings[N]{...} table header; empty when none. <toon>
-cs_made_findings_count() {
-  printf '%s\n' "$1" | grep -oE 'findings\[[0-9]+\]' | head -1 | grep -oE '[0-9]+'
-}
-
-# Split the "<step>, <status>, <findings>, ..." row of an awaiting_approval /
-# fix_review step into "step|status|findings". <toon>
-cs_made_gate_step_row() {
-  local toon=$1 row step rest status findings
-  row=$(printf '%s\n' "$toon" | grep -E '^[[:space:]]*[^,]+,[[:space:]]*"?(awaiting_approval|fix_review)"?[[:space:]]*,' | head -1)
-  [ -n "$row" ] || return 0
-  row=$(cs_made_trim "$row")
-  step=$(cs_made_trim "${row%%,*}")
-  rest=${row#*,}
-  status=$(cs_made_strip_quotes "$(cs_made_trim "${rest%%,*}")")
-  rest=${rest#*,}
-  findings=$(cs_made_trim "${rest%%,*}")
-  printf '%s|%s|%s' "$step" "$status" "$findings"
-}
-
-cs_made_gate_status() {
-  local toon=$1 s row
-  s=$(printf '%s\n' "$toon" | grep -E '^[[:space:]]*(status|state):[[:space:]]*"?(awaiting_approval|fix_review)"?[[:space:]]*$' | head -1)
-  if [ -n "$s" ]; then
-    s=$(cs_made_strip_quotes "$(cs_made_trim "${s#*:}")")
-    printf '%s' "$s"
-    return
-  fi
-  row=$(cs_made_gate_step_row "$toon")
-  [ -n "$row" ] && { row=${row#*|}; printf '%s' "${row%%|*}"; }
-}
-
-cs_made_has_gate() {
-  printf '%s\n' "$1" | grep -Eq '^[[:space:]]*gate:[[:space:]]*'
-}
-
-cs_made_gate_line_name() {
-  local toon=$1 gate step
-  gate=$(cs_made_strip_quotes "$(cs_made_field "$toon" gate)")
-  [ -n "$gate" ] && { printf '%s' "$gate"; return; }
-  step=$(printf '%s\n' "$toon" | sed -n '/^[[:space:]]*gate:[[:space:]]*$/,/^[^[:space:]][^:]*:/s/^[[:space:]]*step:[[:space:]]*\(.*\)/\1/p' | head -1)
-  step=$(cs_made_strip_quotes "$step")
-  [ -n "$step" ] && printf '%s' "$step"
-}
-
-cs_made_gate_name() {
-  local toon=$1 gate row
-  gate=$(cs_made_gate_line_name "$toon")
-  [ -n "$gate" ] && { printf '%s' "$gate"; return; }
-  row=$(cs_made_gate_step_row "$toon")
-  [ -n "$row" ] && printf '%s' "${row%%|*}"
-}
-
-cs_made_gate_findings_count() {
-  local toon=$1 f row rest
-  f=$(cs_made_findings_count "$toon")
-  [ -n "$f" ] && { printf '%s' "$f"; return; }
-  row=$(cs_made_gate_step_row "$toon")
-  [ -n "$row" ] || return 0
-  rest=${row#*|}
-  rest=${rest#*|}
-  rest=${rest%%|*}
-  case "$rest" in ''|*[!0-9]*) return 0 ;; esac
-  printf '%s' "$rest"
-}
-
 # --- the attribution contract -----------------------------------------------
 
 # 0 if <run_head> names this worktree's code identity under the header rules:
@@ -169,87 +79,48 @@ cs_made_head_matches_worktree() {
   return 1
 }
 
-# Coarse cross-branch attribution. The made `runs` listing (forward reference,
-# see header) is plain, human-oriented text - newest-first, no run id, no
-# quoting, columns "<status> <branch> <short-sha> <date> [<pr-url>]" separated
-# by runs of spaces. Echoes the first (most recent) matching row's status word
-# for <branch> whose short-sha still matches this worktree's head, or empty
-# when the branch has no attributable run within <limit> rows.
-# <wt> <branch> <limit> <timeout>
-cs_made_runs_status_for_branch() {
-  cs_made_runs_status_for_branch_read "$@" || true
-}
-
-cs_made_runs_status_for_branch_read() {
-  local wt=$1 branch=$2 limit=$3 timeout=$4 out row st rest br sha
-  out=$(cs_made_run_read "$wt" "$timeout" runs --limit "$limit") || return 1
-  [ -n "$out" ] || return 0
-  while IFS= read -r row; do
-    row=$(cs_made_trim "$row")
-    [ -n "$row" ] || continue
-    st=${row%% *}
-    rest=${row#* }
-    rest=$(cs_made_trim "$rest")
-    br=${rest%% *}
-    rest=${rest#* }
-    rest=$(cs_made_trim "$rest")
-    sha=${rest%% *}
-    if [ "$br" = "$branch" ]; then
-      # Same code-identity rule as axi status: skip a same-branch row whose
-      # short-sha does not match this worktree (rewritten or advanced tip).
-      if ! cs_made_head_matches_worktree "$wt" "$sha"; then
-        continue
-      fi
-      printf '%s' "$st"
-      return 0
-    fi
-  done <<< "$out"
-  return 0
-}
-
-# `made axi status` output for this worktree, bounded (forward reference, see
-# header). <wt> <timeout>
-cs_made_axi_status() {
-  cs_made_run "$1" "$2" axi status
-}
-
-cs_made_axi_status_read() {
-  cs_made_run_read "$1" "$2" axi status
-}
-
-cs_made_run_status_is_active() {
-  case "${1:-}" in
-    ''|completed|cancelled|failed|passed|done|success|terminal) return 1 ;;
-    *) return 0 ;;
-  esac
-}
-
-# 0 if <toon> is an `axi status` run attributed to <branch> at a matching head.
-# This is the precise ownership gate teardown uses before it touches a run:
-# branch field must equal <branch> AND the head field must bind to the worktree.
-# <wt> <branch> <toon>
-cs_made_status_is_attributed() {
-  local wt=$1 branch=$2 toon=$3 run_branch run_head
-  run_branch=$(cs_made_strip_quotes "$(cs_made_field "$toon" branch)")
-  [ -n "$run_branch" ] && [ "$run_branch" = "$branch" ] || return 1
-  run_head=$(cs_made_strip_quotes "$(cs_made_field "$toon" head)")
-  cs_made_head_matches_worktree "$wt" "$run_head"
-}
-
-# 0 if <toon> describes a run parked at an approval / fix-review gate. A run
-# with any terminal outcome is never parked. This is the single owner of the
-# "parked at a gate" rule: crew-state maps it to state=parked, teardown treats
-# it as a slot-holding run that must be concluded before cleanup. <toon>
-cs_made_run_is_gate_parked() {
-  local toon=$1 outcome awaiting status gate_status
-  outcome=$(cs_made_strip_quotes "$(cs_made_field "$toon" outcome)")
-  [ -z "$outcome" ] || return 1
-  awaiting=$(printf '%s\n' "$toon" | grep -E '^[[:space:]]*awaiting_agent:' | head -1 || true)
-  status=$(cs_made_strip_quotes "$(cs_made_field "$toon" status)")
-  gate_status=$(cs_made_gate_status "$toon")
-  if [ -n "$awaiting" ] || [ "$status" = awaiting_approval ] || [ "$status" = fix_review ] \
-     || [ -n "$gate_status" ] || cs_made_has_gate "$toon"; then
+# cs_made_resolve_run <wt> <timeout> <branch>
+# Prints the StatusReport JSON object (one line, compact) for the made run
+# attributed to <branch> at a head cs_made_head_matches_worktree accepts for
+# <wt>, or nothing (empty stdout, exit 1) if no such run exists. Tries the
+# cheap --active listing first (the common in-flight case); falls back to the
+# full (unfiltered) listing so a just-finished or failed run is still
+# reported instead of "no run found". Prefers output_sha, falling back to
+# input_sha, as the head to match - made run list --json rows are full
+# StatusReports either way, so there is no "coarse" vs "full" split any more,
+# unlike the TOON-based attribution this replaces.
+cs_made_resolve_run() {
+  local wt=$1 timeout=$2 branch=$3 out row
+  [ -n "$branch" ] || return 1
+  out=$(cs_made_run_read "$wt" "$timeout" run list --json --active) || true
+  row=$(_cs_made_resolve_run_from_list "$wt" "$branch" "$out")
+  if [ -n "$row" ]; then
+    printf '%s\n' "$row"
     return 0
   fi
+  out=$(cs_made_run_read "$wt" "$timeout" run list --json) || true
+  row=$(_cs_made_resolve_run_from_list "$wt" "$branch" "$out")
+  [ -n "$row" ] || return 1
+  printf '%s\n' "$row"
+}
+
+# Internal helper, not part of the public contract. <wt> <branch>
+# <run-list-json> - filters $3's .runs[] to <branch>, sorts newest-queued-
+# first, and returns the first row whose head cs_made_head_matches_worktree
+# accepts.
+_cs_made_resolve_run_from_list() {
+  local wt=$1 branch=$2 list=$3 row head
+  [ -n "$list" ] || return 1
+  printf '%s\n' "$list" | jq -e . >/dev/null 2>&1 || return 1
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    head=$(printf '%s' "$row" | jq -r '.output_sha // empty')
+    [ -n "$head" ] || head=$(printf '%s' "$row" | jq -r '.input_sha // empty')
+    if cs_made_head_matches_worktree "$wt" "$head"; then
+      printf '%s\n' "$row"
+      return 0
+    fi
+  done < <(printf '%s' "$list" | jq -c --arg b "$branch" \
+    '[.runs[]? | select(.branch == $b)] | sort_by(.queued_at // "") | reverse | .[]')
   return 1
 }
