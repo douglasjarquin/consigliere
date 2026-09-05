@@ -510,7 +510,10 @@ cs_herdr_agent_start_timeout_ms() {
 # Herdr's grammar, l- for longer valid task ids that need a digest, and n- for
 # ids whose logical spelling must be normalized. These prefixes belong only to
 # the native launch name; metadata, paths, and all other task identity remain
-# keyed by the original logical task id.
+# keyed by the original logical task id. A capo is not a separate namespace
+# here: its caller (bin/cs-spawn.sh) passes "capo-$ID" as an ordinary logical
+# name, which lands on whichever of v-/l-/n- its own shape earns like any
+# other id - a capo id needs no special-casing in this function.
 cs_herdr_agent_name() {
   local logical=$1 name suffix keep digest namespace
   name=$(printf '%s' "$logical" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -c 'a-z0-9_-' '-')

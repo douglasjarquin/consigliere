@@ -310,8 +310,32 @@ pass "native spawn fails closed without attempting agent start when both digest 
 # The old cs_harness_capo_launch unit test is gone with the function; this is
 # its end-to-end replacement, exercising cs-spawn.sh's own capo argv
 # construction (bin/cs-spawn.sh's capo branch) against a real launch.
-cross_kind_ship_launch=$(spawn_one codex capo-foo --mode made --yolo off)
-cross_kind_ship_name=$(printf '%s\n' "$cross_kind_ship_launch" | sed -n 's/^name=//p')
+#
+# Regression: bin/cs-spawn.sh used to hand cs_herdr_agent_name a capo's logical
+# name as "capo:$ID" (a colon). Normalization (cs_herdr_agent_name,
+# bin/cs-herdr-lib.sh) always turns ':' into '-', so the normalized name never
+# equalled the input and the clean "v-" fast path never fired for a capo -
+# every capo fell into the ugly hash-suffixed "n-" fallback even though its
+# name was already short and valid. The fix passes "capo-$ID" (a hyphen)
+# instead, so a capo takes the SAME clean v- path an ordinary short task id
+# does. That reuse is exactly why an ordinary ship/scout id must never be
+# allowed to start with "capo-": it would otherwise produce the identical
+# native agent name as some already-running capo of the same suffix. That
+# refusal is proven first, below.
+reserved_id=capo-foo
+mkdir -p "$HOME_DIR/data/$reserved_id"
+printf 'implement the fixture\nDelivery contract: mode=made\n' > "$HOME_DIR/data/$reserved_id/brief.md"
+reserved_out=$(env PATH="$FAKEBIN:$PATH" CS_HARNESS_OVERRIDE=codex \
+  CS_HOME="$HOME_DIR" CS_DATA_OVERRIDE="$HOME_DIR/data" CS_STATE_OVERRIDE="$HOME_DIR/state" \
+  CS_CLAUDE_JSON="$TMP/claude.json" CS_FAKE_SPAWN_WORKTREE="$TMP/wt-$reserved_id" \
+  CS_FAKE_SPAWN_LAUNCH="$TMP/launch-$reserved_id" \
+  "$SPAWN" "$reserved_id" "$REPO" --mode made --yolo off 2>&1) &&
+  fail "a ship/scout task id starting with 'capo-' must be refused, not spawned"
+assert_contains "$reserved_out" "cannot start with 'capo-'" \
+  "the refusal names the reserved capo- prefix"
+assert_absent "$TMP/launch-$reserved_id" "a refused task id must never reach native agent start"
+pass "an ordinary task id cannot claim the capo- prefix reserved for capo agent-name disjointness"
+
 CAPO_HOME="$TMP/capo-home"
 mkdir -p "$CAPO_HOME"
 : > "$CAPO_HOME/.cs-capo-home"
@@ -328,9 +352,10 @@ capo_native_name=$(printf '%s\n' "$launch" | sed -n 's/^name=//p')
 [ "$(cs_meta_get "$HOME_DIR/state/foo.meta" kind)" = capo ] || fail "capo meta kind"
 [ "$(cs_meta_get "$CAPO_HOME/state/foo.meta" kind)" = capo ] || fail "capo home meta kind"
 [ "$(cs_meta_get "$CAPO_HOME/state/foo.meta" parent_task_id)" = root ] || fail "capo home parent edge"
-[ "$cross_kind_ship_name" != "$capo_native_name" ] \
-  || fail "ship capo-foo and capo foo must not collide as native agent names"
-assert_contains "$launch" "name=n-capo-foo-" "capo native names use a delimiter that lands in the normalized namespace"
+[ "$capo_native_name" = "v-capo-foo" ] \
+  || fail "capo native name expected 'v-capo-foo' (the clean short-id path), got '$capo_native_name'"
+assert_contains "$launch" "name=v-capo-foo" \
+  "a capo takes the same clean v- path an ordinary short task id does, no hash suffix"
 assert_contains "$launch" "kind=claude" "capo launches the root harness"
 assert_not_contains "$launch" '--settings' "capo has no turn-end wiring"
 assert_not_contains "$launch" 'notify=' "capo has no turn-end wiring"

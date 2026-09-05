@@ -381,6 +381,23 @@ fi
 case "$ID" in
   *[!A-Za-z0-9._-]*|'') echo "error: task id must be [A-Za-z0-9._-]+: '$ID'" >&2; exit 2 ;;
 esac
+# A capo's native agent name is "capo-$ID" (this file's capo branch, below),
+# landing it in the SAME shared herdr agent-name space every ship/scout task id
+# lands in (cs_herdr_agent_name, bin/cs-herdr-lib.sh). Capo ids and task ids
+# share this exact charset with no other reserved-namespace check anywhere in
+# this repo (cs-capo-registry-lib.sh's id validator is identical), so without
+# this guard a NEW ship/scout task literally named "capo-<x>" would produce the
+# identical native agent name as an already-running capo "<x>" - a real
+# collision. Reserving the prefix here closes it. A capo id itself is exempt:
+# one literally starting with "capo-" only deepens its own prefix
+# ("capo-capo-x"), which this guard does not forbid and cannot collide with.
+# Relaunch reuses an id that already passed this gate (or predates it), so it
+# is exempt too.
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != capo ]; then
+  case "$ID" in
+    capo-*) echo "error: task id '$ID' cannot start with 'capo-': that prefix is reserved for capo agent-name disjointness" >&2; exit 2 ;;
+  esac
+fi
 
 if [ -n "$PARENT_TASK" ] && [ -z "$PARENT_HOME" ]; then
   PARENT_META="$STATE/$PARENT_TASK.meta"
@@ -951,12 +968,17 @@ if [ "$KIND" = capo ]; then
   # either harness.
   declare -a AGENT_ARGV=()
   cs_harness_autonomy_argv AGENT_ARGV "$HARNESS" || { echo "error: unsupported harness '$HARNESS' for capo $ID" >&2; exit 1; }
-  # The colon is native-only identity syntax: it normalizes into Herdr's n
-  # namespace, keeping capo foo distinct from ship/scout task id capo-foo.
-  # Metadata, paths, and operator-facing IDs stay keyed by the raw capo ID;
-  # capo relaunch is refused, so this native-only delimiter does not alter any
-  # relaunch identity path.
-  if ! cs_herdr_agent_start "$PANE" "capo:$ID" "$HARNESS" "$(cs_herdr_agent_start_timeout_ms "$LAUNCH_WAIT")" "${AGENT_ARGV[@]}"; then
+  # The hyphen is native-only identity syntax: cs_herdr_agent_name's clean "v-"
+  # fast path fires only when normalizing the input changes nothing, and a
+  # colon here used to break that (it always normalizes to a hyphen), pushing
+  # every capo into the ugly hash-suffixed "n-" fallback. "capo-$ID" already
+  # IS its own normalized form, so a short capo id now takes the same clean
+  # path an ordinary short task id does; the task-id validation above reserves
+  # the "capo-" prefix from ordinary ship/scout ids so the two can never
+  # collide there. Metadata, paths, and operator-facing IDs stay keyed by the
+  # raw capo ID; capo relaunch is refused, so this native-only delimiter does
+  # not alter any relaunch identity path.
+  if ! cs_herdr_agent_start "$PANE" "capo-$ID" "$HARNESS" "$(cs_herdr_agent_start_timeout_ms "$LAUNCH_WAIT")" "${AGENT_ARGV[@]}"; then
     echo "error: capo $ID launched into $PANE but no agent appeared within ${LAUNCH_WAIT}s. The home and its workspace are left intact - retry the spawn." >&2
     exit 1
   fi
