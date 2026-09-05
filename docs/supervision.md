@@ -69,6 +69,8 @@ Once drained, handle each actionable wake as follows:
 2. `stale:` - inspect the recorded endpoint and load `stuck-soldier-recovery` for a stopped, looping, confused, or unresponsive soldier; a demand-deep-inspection reason also requires current-state and validation-log inspection.
 3. `check:` - act on the named poll result, including a merge the boss has already authorized.
 4. A message wake - drain the addressed inbox through the generic parent/child protocol and act only on the current task's records.
+   Acknowledge each message once genuinely handled with `cs-inbox.sh --ack <message-id>` (`docs/recursive-messaging.md` owns the full ack contract).
+   An unacked message is retried, not dropped, so acking is what stops the retries once you have actually acted on it.
 5. `heartbeat:` - review the whole fleet from `bin/cs-fleet-view.sh`, reconcile suspicious tasks and PR state, update the backlog, and never report an unchanged fleet as progress.
 
 When any wake reports a merged PR for a project cloned in this home, refresh that clone through the guarded fleet-sync path.
