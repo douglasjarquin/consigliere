@@ -10,6 +10,9 @@ projects/
 .lavish/
 .DS_Store
 
+# omo planning/evidence scratch (plans, drafts, ledger, evidence) — never tracked.
+.omo/
+
 # Executor worktrees (Agent isolation) — never tracked.
 .claude/worktrees/
 
