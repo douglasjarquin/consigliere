@@ -19,6 +19,7 @@ services:
       - /workspace/state
       - /workspace/projects
       - /workspace/.no-mistakes
+      - /workspace/.made/evidence
 
   web:
     build:

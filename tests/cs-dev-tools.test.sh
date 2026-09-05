@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Behavior (LIVE, opt-in): the dev-tools suite's container pieces build and run
-# correctly - the dev/web images build, the six boss-private paths stay masked
+# correctly - the dev/web images build, the seven boss-private paths stay masked
 # inside the dev container, the tracked tree is still visible there, the web
 # service serves the built docs site, and bin/cs-test-run.sh --portable passes
 # inside the dev container.
@@ -29,16 +29,20 @@ trap cleanup EXIT
 pass "dev and web images build"
 
 sensitive_ok=1
-for d in config host data state projects .no-mistakes; do
+for d in config host data state projects .no-mistakes .made/evidence; do
   count=$("${COMPOSE[@]}" run --rm dev sh -c "ls /workspace/$d 2>/dev/null | wc -l" | tr -d ' ')
   [ "$count" = 0 ] || { sensitive_ok=0; echo "LEAK: $d has $count entries" >&2; }
 done
 [ "$sensitive_ok" = 1 ] || fail "boss-private paths must stay masked inside the dev container"
-pass "config/host/data/state/projects/.no-mistakes stay masked inside dev"
+pass "config/host/data/state/projects/.no-mistakes/.made/evidence stay masked inside dev"
 
 tracked_lines=$("${COMPOSE[@]}" run --rm dev sh -c 'wc -l < /workspace/bin/cs-test-run.sh' | tr -d ' ')
 [ "$tracked_lines" -gt 0 ] 2>/dev/null || fail "the tracked tree must still be visible inside dev"
 pass "the tracked tree is visible inside dev"
+
+features_file=$("${COMPOSE[@]}" run --rm dev sh -c 'test -f /workspace/.made/features/README.md && echo visible')
+[ "$features_file" = visible ] || fail "the tracked Made feature index must stay visible inside dev"
+pass "the tracked Made feature index is visible inside dev"
 
 mise run web:install >/dev/null || fail "docs site install"
 mise run web:build >/dev/null || fail "docs site build"

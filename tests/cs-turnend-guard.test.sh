@@ -21,6 +21,7 @@
 set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+unset CS_TASK_ID CS_ROOT_OVERRIDE CS_HOME CS_STATE_OVERRIDE CS_DATA_OVERRIDE
 
 TMP_ROOT=$(cs_test_tmproot cs-turnend-guard)
 
@@ -61,14 +62,16 @@ make_wakeable_home() {
 # monitor into a temporary directory.
 run_guard() {
   local home=$1; shift
-  printf '{"stop_hook_active":false}' | \
-    env CS_ROOT_OVERRIDE="$home" \
-    CS_HOME="$home" \
-    CS_GUARD_GRACE=999 \
-    CS_LOCK_HARNESS_RE="$GUARD_HARNESS_RE" \
-    CS_MONITOR_BIN="$home/no-such-monitor" \
-    HERDR_PANE_ID=w1:p1 \
-    "$@" "$ROOT/bin/cs-turnend-guard.sh" 2>&1
+  (
+    cd "$home" && printf '{"stop_hook_active":false}' | \
+      env CS_ROOT_OVERRIDE="$home" \
+      CS_HOME="$home" \
+      CS_GUARD_GRACE=999 \
+      CS_LOCK_HARNESS_RE="$GUARD_HARNESS_RE" \
+      CS_MONITOR_BIN="$home/no-such-monitor" \
+      HERDR_PANE_ID=w1:p1 \
+      "$@" "$ROOT/bin/cs-turnend-guard.sh" 2>&1
+  )
 }
 
 test_defers_when_another_live_session_holds_lock() {

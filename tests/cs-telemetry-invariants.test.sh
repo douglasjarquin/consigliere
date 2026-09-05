@@ -64,13 +64,14 @@ crumb_files() { # <home>
 run_guard() {
   local home=$1 active=${2:-false}
   printf '{"stop_hook_active":%s,"session_id":"inv-1","hook_event_name":"Stop"}' "$active" |
+    (cd "$home" &&
     CS_ROOT_OVERRIDE="$home" \
     CS_HOME="$home" \
     CS_GUARD_GRACE=999 \
     CS_LOCK_HARNESS_RE="$GUARD_HARNESS_RE" \
     CS_MONITOR_BIN="$home/no-such-monitor" \
     CS_TELEMETRY_DISABLE='' \
-    "$ROOT/bin/cs-turnend-guard.sh" 2>&1
+    "$ROOT/bin/cs-turnend-guard.sh" 2>&1)
 }
 
 # --- the turn-end guard -------------------------------------------------------

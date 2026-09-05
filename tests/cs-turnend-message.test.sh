@@ -57,7 +57,7 @@ export HERDR_PANE_ID=w1:p1 CS_GUARD_GRACE=999
 recovery_id=$(cs_message_recovery_id child child-generation) || fail "recovery id derivation"
 
 set +e
-printf '%s\n' '{"stop_hook_active":false}' | "$ROOT/bin/cs-turnend-guard.sh" >/dev/null 2>&1
+printf '%s\n' '{"stop_hook_active":false}' | (cd "$HOME_DIR" && "$ROOT/bin/cs-turnend-guard.sh") >/dev/null 2>&1
 rc=$?
 set -e
 expect_code 0 "$rc" "settled-child backstop must not block the turn end"
@@ -71,7 +71,7 @@ assert_line "$(cat "$TMP/prompts")" "CONSIGLIERE_WAKE v1 message=$recovery_id" \
   "recovery must wake the immediate parent"
 
 set +e
-printf '%s\n' '{"stop_hook_active":false}' | "$ROOT/bin/cs-turnend-guard.sh" >/dev/null 2>&1
+printf '%s\n' '{"stop_hook_active":false}' | (cd "$HOME_DIR" && "$ROOT/bin/cs-turnend-guard.sh") >/dev/null 2>&1
 second_rc=$?
 set -e
 expect_code 0 "$second_rc" "a repeated turn end must remain permitted"

@@ -5,6 +5,7 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+unset CS_TASK_ID CS_ROOT_OVERRIDE CS_HOME CS_STATE_OVERRIDE CS_DATA_OVERRIDE
 
 OP="$ROOT/bin/cs-operational-input.sh"
 CLASSIFY="$ROOT/bin/cs-classify-lib.sh"
@@ -89,7 +90,7 @@ test_turnend_guard_stamping() {
   printf '# fixture\n' > "$root/AGENTS.md"
   git -C "$root" init -q
   printf 'pane=w1:p1\nkind=ship\n' > "$state/task.meta"
-  out=$(printf '{"stop_hook_active":false}' | env CS_ROOT_OVERRIDE="$root" \
+  out=$(cd "$root" && printf '{"stop_hook_active":false}' | env CS_ROOT_OVERRIDE="$root" \
     CS_STATE_OVERRIDE="$state" CS_GUARD_GRACE=0 "$TURNEND_GUARD" 2>&1)
   rc=$?
   expect_code 2 "$rc" "turn-end guard with unsupervised work"

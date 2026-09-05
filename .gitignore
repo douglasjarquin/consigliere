@@ -5,6 +5,7 @@ config/
 host/
 projects/
 .no-mistakes/
+.made/evidence/
 
 # Local review artifacts and macOS noise — never tracked.
 .lavish/

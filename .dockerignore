@@ -5,6 +5,7 @@ data
 state
 projects
 .no-mistakes
+.made/evidence
 web/node_modules
 web/.astro
 web/test-results

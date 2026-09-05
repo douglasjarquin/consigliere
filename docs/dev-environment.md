@@ -15,7 +15,7 @@ It exists to give consigliere its own reproducible, container-based dev environm
   Installs the toolchain `bin/cs-test-run.sh --portable` needs (bash, git, jq, sqlite3, python3, gh, lsof), a pinned ShellCheck via `bin/cs-install-shellcheck.sh` (reused as-is, not modified), and a SHA-pinned `mise` bootstrap that then installs `node`/`aube` per `mise.toml` and `node`/`tasks-axi` again via mise's global config, so `tasks-axi` is reachable from any directory.
   Never runs as root at container runtime.
 - `docker-compose.yml` (root) - `dev` service (the toolchain/test container) and `web` service (see "The docs site" below).
-- `.dockerignore` - excludes `config/`, `host/`, `data/`, `state/`, `projects/`, `.no-mistakes/` from the build context, so none of that gitignored, boss-private content is ever baked into an image layer, regardless of what happens to exist on disk when the image is built.
+- `.dockerignore` - excludes `config/`, `host/`, `data/`, `state/`, `projects/`, `.no-mistakes/`, and `.made/evidence/` from the build context, so none of that gitignored, boss-private content is ever baked into an image layer, regardless of what happens to exist on disk when the image is built.
 - `scripts/ci/run-in-container.sh` - builds the `dev` image and runs a given command inside it.
   Adapted from niceuptime's own `scripts/ci/run-in-dev-container.sh` wrapper pattern.
 
@@ -27,14 +27,14 @@ It exists to give consigliere its own reproducible, container-based dev environm
 - `mise run dev:test` - run consigliere's existing portable test suite (`bin/cs-test-run.sh --portable`, unmodified) inside the `dev` container.
 - `mise run dev:down` - tear down the local dev stack.
 
-## Mount-masking: why the six sensitive paths can never leak
+## Mount-masking: why the seven sensitive paths can never leak
 
-`config/`, `host/`, `data/`, `state/`, `projects/`, and `.no-mistakes/` are this repo's gitignored, boss-private operational state (`docs/configuration.md` owns the complete layout).
+`config/`, `host/`, `data/`, `state/`, `projects/`, `.no-mistakes/`, and `.made/evidence/` are this repo's gitignored, boss-private operational state (`docs/configuration.md` owns the complete layout).
 Two independent protections keep them out of the dev-tools suite entirely:
 
-1. `.dockerignore` excludes all six from the Docker build context, so `docker/dev/Dockerfile`'s `COPY . /workspace` step can never bake their real content into any image layer, no matter what exists in the directory the image is built from.
-2. `docker-compose.yml`'s `dev` service mounts the repo root read-write, then mounts an anonymous (empty, ephemeral) volume over each of the six paths inside the container - a standard Compose masking technique.
-   Even if a bind-mounted host directory has real content, the container's view of those six paths stays empty.
+1. `.dockerignore` excludes all seven from the Docker build context, so `docker/dev/Dockerfile`'s `COPY . /workspace` step can never bake their real content into any image layer, no matter what exists in the directory the image is built from.
+2. `docker-compose.yml`'s `dev` service mounts the repo root read-write, then mounts an anonymous (empty, ephemeral) volume over each of the seven paths inside the container - a standard Compose masking technique.
+   Even if a bind-mounted host directory has real content, the container's view of those seven paths stays empty.
 
 The `web` service needs neither protection: it mounts only `./web/dist:/srv/web:ro`, nothing else.
 
