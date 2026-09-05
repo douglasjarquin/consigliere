@@ -402,7 +402,7 @@ fi
 if [ -n "$PARENT_TASK" ] && [ -z "$PARENT_HOME" ]; then
   PARENT_META="$STATE/$PARENT_TASK.meta"
   if [ -f "$PARENT_META" ]; then
-    PARENT_HOME=$(cs_meta_get "$PARENT_META" home 2>/dev/null || true)
+    PARENT_HOME=$(cs_meta_home "$PARENT_META" 2>/dev/null || true)
     PARENT_PANE=${PARENT_PANE:-$(cs_meta_get "$PARENT_META" pane 2>/dev/null || true)}
     PARENT_GENERATION=${PARENT_GENERATION:-$(cs_meta_get "$PARENT_META" endpoint_generation 2>/dev/null || true)}
     PARENT_HERDR_SESSION=${PARENT_HERDR_SESSION:-$(cs_meta_get "$PARENT_META" herdr_session 2>/dev/null || true)}
