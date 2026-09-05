@@ -911,6 +911,14 @@ if [ "$KIND" = capo ]; then
   PANE=$(cs_herdr_workspace_root_pane "$WS") || {
     echo "error: cannot resolve a pane in capo workspace $WS" >&2; exit 1; }
 
+  # A capo id reused here is a respawn (dead-capo recovery relaunches through
+  # this same branch - cs-spawn.sh refuses to relaunch a capo any other way),
+  # so both meta copies may already carry a generation in flight: fold in
+  # every prior pair via cs_meta_endpoint_generation_rotation_lines instead of
+  # a bare endpoint_generation= line, or a respawn silently orphans any
+  # message still queued against the pre-respawn generation.
+  declare -a ROOT_ROTATION_LINES=()
+  mapfile -t ROOT_ROTATION_LINES < <(cs_meta_endpoint_generation_rotation_lines "$STATE/$ID.meta" "$ENDPOINT_GENERATION")
   cs_meta_write "$STATE/$ID.meta" \
     "workspace=$WS" \
     "pane=$PANE" \
@@ -927,9 +935,11 @@ if [ "$KIND" = capo ]; then
     "parent_pane=$PARENT_PANE" \
     "parent_generation=$PARENT_GENERATION" \
     "parent_herdr_session=$PARENT_HERDR_SESSION" \
-    "endpoint_generation=$ENDPOINT_GENERATION" \
+    "${ROOT_ROTATION_LINES[@]}" \
     "herdr_session=$(cs_herdr_session)"
   mkdir -p "$HOME_ABS/state"
+  declare -a CAPO_ROTATION_LINES=()
+  mapfile -t CAPO_ROTATION_LINES < <(cs_meta_endpoint_generation_rotation_lines "$HOME_ABS/state/$ID.meta" "$ENDPOINT_GENERATION")
   cs_meta_write "$HOME_ABS/state/$ID.meta" \
     "workspace=$WS" \
     "pane=$PANE" \
@@ -946,7 +956,7 @@ if [ "$KIND" = capo ]; then
     "parent_pane=$PARENT_PANE" \
     "parent_generation=$PARENT_GENERATION" \
     "parent_herdr_session=$PARENT_HERDR_SESSION" \
-    "endpoint_generation=$ENDPOINT_GENERATION" \
+    "${CAPO_ROTATION_LINES[@]}" \
     "herdr_session=$(cs_herdr_session)"
   report_task_metadata "$PANE" "$ID" capo
 

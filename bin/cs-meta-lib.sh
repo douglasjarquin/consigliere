@@ -178,6 +178,33 @@ cs_meta_endpoint_generation_known() {
   return 1
 }
 
+cs_meta_endpoint_generation_rotation_lines() { # <existing-meta-file-or-empty> <new-generation>
+  # -> key=value lines for a cs_meta_write (full-overwrite) call site to fold
+  # in, carrying forward every previous_endpoint_generation/_at pair already
+  # on file plus the just-superseded current generation. Each pair must stay
+  # adjacent: cs_meta_endpoint_generation_known's reader pairs a
+  # previous_endpoint_generation line with only the very next
+  # previous_endpoint_generation_at line, silently dropping an unpaired one.
+  local existing=$1 new=$2 current previous previous_at
+  if [ -n "$existing" ] && [ -f "$existing" ]; then
+    while IFS=$'\t' read -r previous previous_at; do
+      printf 'previous_endpoint_generation=%s\n' "$previous"
+      printf 'previous_endpoint_generation_at=%s\n' "$previous_at"
+    done < <(awk -F= '
+      $1 == "previous_endpoint_generation" { previous=substr($0, 30); next }
+      $1 == "previous_endpoint_generation_at" && previous != "" {
+        print previous "\t" substr($0, 33); previous=""
+      }
+    ' "$existing")
+    current=$(cs_meta_get "$existing" endpoint_generation 2>/dev/null || true)
+    if [ -n "$current" ]; then
+      printf 'previous_endpoint_generation=%s\n' "$current"
+      printf 'previous_endpoint_generation_at=%s\n' "$(date +%s)"
+    fi
+  fi
+  printf 'endpoint_generation=%s\n' "$new"
+}
+
 cs_meta_event_route() {
   local state=$1 pane=$2 workspace=$3 agent=$4 meta id found=''
   [ -d "$state" ] || return 1

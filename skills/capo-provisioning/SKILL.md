@@ -145,10 +145,16 @@ Do not hand off `local-only` items.
 
 ## Recovery
 
-For `kind=capo` meta with a dead endpoint or no recorded workspace, treat the capo as a dead persistent direct report and respawn it with:
+For `kind=capo` meta with a dead endpoint or no recorded workspace, treat the capo as a dead persistent direct report and respawn it.
+`cs-spawn.sh` refuses outright ("already has metadata") when `state/<id>.meta` still exists and `--relaunch` was not passed, and it refuses `--relaunch` for a capo, so move ONLY that tracking copy aside first, mirroring `bin/cs-home-seed.sh`'s own sweep - never delete it, and never touch the capo's own copy under its home, which correctly keeps its endpoint-generation history intact:
 
 ```sh
-bin/cs-spawn.sh <id> <home> --capo
+mv "state/<id>.meta" "state/<id>.meta.pre-respawn"
+if bin/cs-spawn.sh <id> <home> --capo; then
+  rm -f "state/<id>.meta.pre-respawn"
+else
+  mv "state/<id>.meta.pre-respawn" "state/<id>.meta"
+fi
 ```
 
 Use the recorded `home=` in meta.
