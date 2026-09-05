@@ -1,0 +1,20 @@
+---
+---
+
+<div class="overlay" data-overlay="palette" hidden>
+  <div class="palette" data-overlay-panel id="site-palette" role="dialog" aria-label="Search pages and commands">
+    <input
+      class="palette__input"
+      data-palette-input
+      type="search"
+      placeholder="Search pages and commands…"
+      autocomplete="off"
+    />
+    <div class="palette__results" data-palette-items></div>
+    <div class="palette__empty" data-palette-empty hidden>
+      <span class="palette__empty-title">Nothing on the books for “<span data-palette-query></span>”.</span>
+      <a class="palette__hint" href="https://github.com/douglasjarquin/consigliere/issues" rel="noreferrer">search the repo issues ↗</a>
+    </div>
+    <div class="palette__footer"><span>↑↓ move</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>

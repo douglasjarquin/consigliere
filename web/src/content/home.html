@@ -1,0 +1,24 @@
+<article style="max-width:720px;width:100%;margin:0 auto;padding:128px 32px 96px;box-sizing:border-box">
+    <div style="font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent);margin-bottom:40px;display:flex;justify-content:space-between"><span>Consigliere</span><span>n. — the boss's counsel</span></div>
+    <h1 style="font-size:64px;line-height:1.08;font-weight:400;margin:0 0 48px;letter-spacing:-0.02em;text-wrap:pretty">You describe the work. You give the word. Nothing else is yours to carry.</h1>
+    <p style="font-size:21px;line-height:1.65;margin:0 0 28px;text-wrap:pretty"><span style="float:left;font-size:84px;line-height:0.8;padding:10px 12px 0 0;color:var(--accent)">L</span>aunch codex or claude in this repo and it becomes the consigliere: the boss's single point of contact for all software work, delegating everything to autonomous soldiers it spawns, supervises, and lands work from.</p>
+    <p style="font-size:21px;line-height:1.65;margin:0 0 28px;color:var(--muted);text-wrap:pretty">It is a from-scratch personal rewrite of Firstmate, built for two harnesses and one terminal runtime, leaning on their native features instead of generic multi-backend shims. Soldiers inherit the root session's harness, so one consigliere works wherever you work: codex at home, claude at work.</p>
+    <blockquote style="margin:64px 0;padding:0 0 0 32px;border-left:1px solid var(--accent);font-size:30px;line-height:1.35;font-style:italic;text-wrap:pretty">It never merges without you. Landing is always your call.</blockquote>
+    <p style="font-size:21px;line-height:1.65;margin:0 0 28px;color:var(--muted);text-wrap:pretty">Every soldier gets its own herdr worktree. Every session opens with one ordered digest of the whole operating picture. Every decision that lands code passes through you; <code style="font-family:'JetBrains Mono',monospace;font-size:16px;color:var(--fg)">yolo</code> lets it answer routine review decisions alone, but nothing lands without the boss.</p>
+    <p style="font-size:21px;line-height:1.65;margin:0 0 64px;color:var(--muted);text-wrap:pretty">Roughly nine thousand lines of bash. One harness layer, one supervision protocol, one Stop-hook backstop.</p>
+    <div style="display:flex;gap:16px;align-items:center;padding-top:40px;border-top:1px solid var(--line)">
+      <a href="Quick Start.dc.html" style="background:var(--fg);color:var(--bg);padding:14px 24px;font-family:'JetBrains Mono',monospace;font-size:13px;border-radius:2px">Begin →</a>
+      <a href="Architecture.dc.html" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--muted);padding:14px 8px">or read how it is built</a>
+    </div>
+  </article>
+
+  <section style="border-top:1px solid var(--line)">
+    <div style="max-width:720px;margin:0 auto;padding:72px 32px;display:flex;flex-direction:column;gap:0;font-family:'JetBrains Mono',monospace;font-size:13px">
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:24px;padding:16px 0;border-bottom:1px solid var(--line)"><span style="color:var(--accent)">bin/</span><span style="color:var(--muted)">cs-* scripts; read each header before first use</span></div>
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:24px;padding:16px 0;border-bottom:1px solid var(--line)"><span style="color:var(--accent)">skills/</span><span style="color:var(--muted)">agent-loaded procedures: afk, rundown, the-books, vault, capo-provisioning, upstream-review</span></div>
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:24px;padding:16px 0;border-bottom:1px solid var(--line)"><span style="color:var(--accent)">docs/</span><span style="color:var(--muted)">architecture, configuration schema, supervision protocol, lifecycle control, telemetry</span></div>
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:24px;padding:16px 0;border-bottom:1px solid var(--line)"><span style="color:var(--accent)">config/</span><span style="color:var(--muted)">the user-owned tree: settings and durable memory, boss-private, gitignored</span></div>
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:24px;padding:16px 0;border-bottom:1px solid var(--line)"><span style="color:var(--accent)">host/</span><span style="color:var(--muted)">machine-local sibling: capo roster, harness pin, activation</span></div>
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:24px;padding:16px 0"><span style="color:var(--accent)">data/ state/ projects/</span><span style="color:var(--muted)">generated output, volatile runtime state, and clones; disposable or re-creatable</span></div>
+    </div>
+  </section>

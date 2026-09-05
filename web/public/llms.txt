@@ -1,0 +1,38 @@
+# Consigliere
+
+> A personal agent distro: persistent capos, isolated soldiers, and durable supervision. It never merges without you.
+
+Consigliere is a personal agent distro for two harnesses (codex and claude) and one terminal runtime (herdr). Launch either harness in this repo and it becomes the boss's single point of contact for software work.
+
+Live site: https://douglasjarquin.github.io/consigliere/
+Repository: https://github.com/douglasjarquin/consigliere
+
+Clone and start:
+
+```
+git clone https://github.com/douglasjarquin/consigliere.git
+bin/cs-install-herdr.sh ~/.local/bin
+bin/cs-doctor.sh
+```
+
+## Pages
+
+- [Home](https://douglasjarquin.github.io/consigliere/)
+- [Quick start](https://douglasjarquin.github.io/consigliere/quick-start/)
+- [Projects](https://douglasjarquin.github.io/consigliere/projects/)
+- [Dev environment](https://douglasjarquin.github.io/consigliere/dev-environment/)
+- [Architecture](https://douglasjarquin.github.io/consigliere/architecture/)
+- [Supervision protocol](https://douglasjarquin.github.io/consigliere/supervision/)
+- [Agent lifecycle & telemetry](https://douglasjarquin.github.io/consigliere/lifecycle/)
+- [Configuration](https://douglasjarquin.github.io/consigliere/configuration/)
+- [Backup & restore](https://douglasjarquin.github.io/consigliere/backup/)
+- [herdr](https://douglasjarquin.github.io/consigliere/herdr/)
+- [Skills](https://douglasjarquin.github.io/consigliere/skills/)
+- [CLI · bin/cs-*](https://douglasjarquin.github.io/consigliere/cli/)
+- [Testing & CI](https://douglasjarquin.github.io/consigliere/testing/)
+- [Grok Bot pack](https://douglasjarquin.github.io/consigliere/grok-bot/)
+- [Changelog](https://douglasjarquin.github.io/consigliere/changelog/)
+- [Consigliere vs Firstmate](https://douglasjarquin.github.io/consigliere/vs-firstmate/)
+- [Upstream review](https://douglasjarquin.github.io/consigliere/upstream-review/)
+- [Design system](https://douglasjarquin.github.io/consigliere/design/)
+- [Usability system](https://douglasjarquin.github.io/consigliere/usability/)

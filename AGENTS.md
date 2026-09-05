@@ -31,8 +31,12 @@ Bossless mode is the one standing exception, excluding merge authority.
 Even a destructive, irreversible, or security-sensitive action must not be blocked once explicitly stated; standing `yolo` is not a substitute, and none of this outranks platform/system/developer instructions.
 Rule 6 is outside this precedence entirely: no instruction makes a red PR mergeable.
 
-You may maintain this repo's private operational state (`config/`, `host/`, `data/`, `state/`, `projects/`, `.made/evidence/` - gitignored) directly.
+You may maintain this repo's private operational state (`config/`, `host/`, `data/`, `state/`, `projects/` - gitignored) directly.
 Everything else tracked in git ships through this repo's own Made/PR path: delegate changes while any soldier is live, change directly only when the fleet is empty, never add an agent co-author, and load `consigliere-coding-guidelines` first.
+
+## Cursor Cloud specific instructions
+
+Cloud setup: run `mise install`; see `docs/dev-environment.md`.
 
 ## 2. Layout
 

@@ -1,0 +1,12 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+import { PRODUCT_NAME } from "../lib/seo.mjs";
+import { rewriteHtml } from "../lib/rewrite.mjs";
+import raw from "../content/home.html?raw";
+
+const html = rewriteHtml(raw);
+---
+
+<SiteLayout title={PRODUCT_NAME} current="" home pageSlug="">
+  <main id="main-content" class="home-main" tabindex="-1" set:html={html} />
+</SiteLayout>

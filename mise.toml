@@ -1,3 +1,35 @@
+[settings]
+lockfile = true
+
 [tools]
 node = "24"
-aube = "2.1"
+aube = "2.2.4"
+"npm:portless" = "0.15.6"
+
+[tasks."web:install"]
+description = "Install Astro dependencies from aube-lock.yaml"
+run = "aube -C web install"
+
+[tasks."web:playwright"]
+description = "Install Playwright Chromium for the docs-site tests"
+run = "aube -C web exec playwright install chromium"
+
+[tasks."web:dev"]
+description = "Start the Astro development server"
+run = "aube -C web run dev -- --host 127.0.0.1"
+
+[tasks."web:dev:local"]
+description = "Start the Astro dev server behind portless at https://consigliere.test (run web:install first)"
+run = "cd web && PORTLESS_TLD=test ASTRO_DEV_BACKGROUND=1 portless"
+
+[tasks."web:check"]
+description = "Run Astro type and template checks"
+run = "aube -C web run check"
+
+[tasks."web:build"]
+description = "Build the Astro site"
+run = "aube -C web run build"
+
+[tasks."web:test"]
+description = "Run docs-site unit and end-to-end tests"
+run = "aube -C web run test"

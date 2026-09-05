@@ -4,6 +4,8 @@
 
 A personal agent distro: launch codex or claude in this repo and it becomes the consigliere - the boss's single point of contact for all software work, delegating everything to autonomous soldiers it spawns, supervises, and lands work from.
 
+Docs: https://douglasjarquin.github.io/consigliere/.
+
 Consigliere is a from-scratch personal rewrite of [Firstmate](https://github.com/kunchenguid/firstmate) built for two harnesses (**codex** and **claude**) and one terminal runtime (**herdr**), leaning on their native features instead of generic multi-backend shims. Soldiers inherit the root session's harness, so one consigliere works wherever you work (codex at home, claude at work):
 
 - herdr-native worktrees (workspace-per-task) replace the treehouse pool
@@ -77,6 +79,7 @@ Then talk to it in plain language: describe the work, name the project when it i
 - `skills/` - agent-loaded procedures (afk, rundown, the-books, vault, capo-provisioning, upstream-review, ...)
 - `docs/` - architecture, configuration schema (owner), supervision protocol, agent lifecycle control, optional turn telemetry, verified herdr/codex/claude/lavish/codegraph facts
 - `tests/` - colocated behavior tests (`bash tests/<name>.test.sh`, or `bin/cs-test-run.sh --portable`; live suites opt in via `CS_TEST_HERDR_LIVE=1` / `CS_TEST_CODEX_LIVE=1` / `CS_TEST_CLAUDE_LIVE=1`)
+- `web/` - Astro docs site (GitHub Pages at `/consigliere`); `mise run web:dev` locally
 - `config/` - the user-owned tree (settings and durable memory), boss-private and gitignored; back it up wholesale
 - `host/` - machine-local sibling (capo roster, harness pin, activation); never backed up, re-created per machine
 - `data/ state/ projects/` - generated output, volatile runtime state, and clones; boss-private, gitignored, disposable or re-creatable
@@ -114,9 +117,11 @@ checks cannot drift from what you run before pushing:
 | Real Herdr behavior | `CS_TEST_HERDR_LIVE=1 bin/cs-test-run.sh --herdr` (needs a real herdr + a running default session for the lab tripwire) |
 | Repo invariants | `git ls-files -- .env data state config host projects .no-mistakes .made/evidence` prints nothing; tracked symlinks stay symlinks |
 | Coverage guard | `bin/cs-test-run.sh --check-coverage` (proves every `tests/*.test.sh` is in exactly one lane) |
+| Docs site | `mise run web:install && mise run web:build && mise run web:check && mise run web:test` |
 | Dev-tools container | `CS_TEST_DOCKER_LIVE=1 bin/cs-test-run.sh --docker` (needs a live Docker daemon; see [`docs/dev-environment.md`](docs/dev-environment.md)) |
 
 Each lane except repo invariants runs only when the change can affect it.
+The docs-site lane runs for `web/` and the mise pin.
 `bin/cs-ci-lanes.sh` owns the path-to-lane map and prints the decision for a diff
 (`bin/cs-ci-lanes.sh <base> <head>`, or `--paths-from -` for a path list).
 Repo invariants stay unconditional, because any commit can track a boss-private

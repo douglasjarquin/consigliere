@@ -34,6 +34,7 @@ jobs:
       portable: ${{ steps.lanes.outputs.portable }}
       herdr: ${{ steps.lanes.outputs.herdr }}
       docker: ${{ steps.lanes.outputs.docker }}
+      web: ${{ steps.lanes.outputs.web }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -204,6 +205,26 @@ jobs:
             exit 1
           }
 
+  web:
+    name: Docs site
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v2
+      - name: Install Astro dependencies
+        run: mise run web:install
+      - name: Install Playwright Chromium
+        run: aube -C web exec playwright install --with-deps chromium
+      - name: Build
+        run: mise run web:build
+      - name: Check
+        run: mise run web:check
+      - name: Test
+        run: mise run web:test
+
   # Real-docker lane: exercises the dev-tools suite itself (mise.toml,
   # mise-tasks/dev/*, docker/*, docker-compose.yml). Runs bare, not through
   # scripts/ci/run-in-container.sh - its whole job is building and running the
@@ -220,16 +241,21 @@ jobs:
       - uses: jdx/mise-action@v2
         with:
           install: true
+      - name: Build the docs site for the compose web service
+        run: |
+          set -eu
+          mise run web:install
+          mise run web:build
       - name: Bring up the dev stack
         run: |
           set -eu
           mise run dev:install
           mise run dev:up
-      - name: Verify the placeholder web service
+      - name: Verify the docs site on the compose web service
         run: |
           set -eu
           sleep 2
-          curl -fsS http://localhost:8080/ | grep -qF "consigliere dev environment placeholder"
+          curl -fsS http://localhost:8080/ | grep -qF "You describe the work"
       - name: Run the dev-tools test suite
         env:
           CS_TEST_DOCKER_LIVE: "1"

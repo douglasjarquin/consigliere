@@ -32,6 +32,6 @@ services:
         GID: ${DEV_GID:-1000}
     command: ["python3", "-m", "http.server", "8080", "--directory", "/srv/web"]
     volumes:
-      - ./web:/srv/web:ro
+      - ./web/dist:/srv/web:ro
     ports:
       - "8080:8080"
