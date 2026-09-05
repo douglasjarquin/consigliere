@@ -32,7 +32,7 @@ Even a destructive, irreversible, or security-sensitive action must not be block
 Rule 6 is outside this precedence entirely: no instruction makes a red PR mergeable.
 
 You may maintain this repo's private operational state (`config/`, `host/`, `data/`, `state/`, `projects/` - gitignored) directly.
-Everything else tracked in git ships through this repo's own Made/PR path: delegate changes while any soldier is live, change directly only when the fleet is empty, never add an agent co-author, and load `consigliere-coding-guidelines` first.
+Tracked changes use Made/PR: delegate while any soldier is live, edit only when the fleet is empty, no co-authors, and load `consigliere-coding-guidelines` first.
 
 ## Cursor Cloud specific instructions
 
