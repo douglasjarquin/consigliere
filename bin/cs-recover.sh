@@ -116,7 +116,7 @@ reconcile_settled_child() {
   [ "$kind" != capo ] || return 0
   parent_state=$(cs_meta_get "$meta" parent_state 2>/dev/null || true)
   parent_task=$(cs_meta_get "$meta" parent_task_id 2>/dev/null || true)
-  child_home=$(cs_meta_get "$meta" home 2>/dev/null || true)
+  child_home=$(cs_meta_home "$meta" 2>/dev/null || true)
   status="$STATE/$task.status"
   generation=$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)
   pane=$(cs_meta_get "$meta" pane 2>/dev/null || true)
@@ -282,7 +282,7 @@ for message_file in "$STATE"/inbox/*.msg; do
   source_home=$(cs_message_field "$message_file" from_home)
   source_meta="$source_home/state/$source_task.meta"
   if [ ! -f "$source_meta" ] || ! cs_meta_validate_parent_edge "$source_meta" ||
-    [ "$(cs_meta_get "$source_meta" home 2>/dev/null || true)" != "$source_home" ] ||
+    [ "$(cs_meta_home "$source_meta" 2>/dev/null || true)" != "$source_home" ] ||
     [ "$(cs_meta_get "$source_meta" parent_task_id 2>/dev/null || true)" != "$task" ] ||
     [ "$(cs_meta_get "$source_meta" parent_home 2>/dev/null || true)" != "$CS_HOME" ] ||
     ! cs_meta_endpoint_generation_known "$source_meta" \

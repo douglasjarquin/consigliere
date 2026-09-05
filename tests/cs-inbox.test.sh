@@ -224,4 +224,27 @@ fi
 grep -F 'malformed' "$TMP/malformed.err" >/dev/null || fail "malformed refusal must name the record"
 pass "malformed inbox records fail loudly"
 
+cat > "$STATE/plain-child.meta" <<EOF
+task_id=plain-child
+kind=ship
+worktree=$WORKTREE
+parent_task_id=current
+parent_home=$HOME_DIR
+parent_state=$STATE
+parent_pane=unknown
+parent_generation=current-generation
+endpoint_generation=plain-child-generation
+harness=codex
+EOF
+cs_message_publish "$STATE/inbox" \
+  "schema=cs-message.v1" "message_id=message-plain-child" "correlation_id=message-plain-child" \
+  "sequence=1" "kind=failed" "from_task_id=plain-child" "to_task_id=current" \
+  "from_home=$HOME_DIR" "from_endpoint_generation=plain-child-generation" \
+  "to_endpoint_generation=current-generation" "summary=settled child has no semantic result" "artifact=" \
+  "commit_sha=" "pull_request=" "created_at=1700000000" || fail "plain-child message setup"
+"$INBOX" --ack message-plain-child >/dev/null \
+  || fail "an ordinary (non-capo) child's message must be acknowledgeable"
+[ -f "$STATE/inbox/message-plain-child.ack" ] || fail "ordinary child acknowledgement record missing"
+pass "inbox acknowledges an ordinary (non-capo) child's message"
+
 pass "parent-scoped inbox drain contract"

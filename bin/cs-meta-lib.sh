@@ -205,6 +205,17 @@ cs_meta_endpoint_generation_rotation_lines() { # <existing-meta-file-or-empty> <
   printf 'endpoint_generation=%s\n' "$new"
 }
 
+# home= is written only for capos (cs-spawn.sh's capo-spawn branch); an
+# ordinary task's effective home is its own recorded parent_home. Callers
+# already wrap this in `|| true` and compare a non-empty value, so an absent
+# home AND parent_home correctly degrades to reject, not to a silent pass.
+cs_meta_home() { # <meta-file> -> the task's own home, defaulting to its parent's
+  local meta=$1 home
+  home=$(cs_meta_get "$meta" home 2>/dev/null || true)
+  [ -n "$home" ] && { printf '%s\n' "$home"; return 0; }
+  cs_meta_get "$meta" parent_home
+}
+
 cs_meta_event_route() {
   local state=$1 pane=$2 workspace=$3 agent=$4 meta id found=''
   [ -d "$state" ] || return 1

@@ -16,6 +16,10 @@ projects/
 # Executor worktrees (Agent isolation) — never tracked.
 .claude/worktrees/
 
+# Planning scratch (plans, drafts) - never tracked; a file already tracked
+# under this path before this rule existed stays tracked regardless.
+.omo/
+
 # Python bytecode caches (bin/cs-detach.py) — build artifacts, never tracked.
 __pycache__/
 

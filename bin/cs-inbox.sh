@@ -89,7 +89,7 @@ message_source_valid() {
     echo "error: message '$file' names missing sender metadata '$source_meta'" >&2
     return 1
   }
-  source_recorded_home=$(cs_meta_get "$source_meta" home 2>/dev/null || true)
+  source_recorded_home=$(cs_meta_home "$source_meta" 2>/dev/null || true)
   [ "$source_recorded_home" = "$from_home" ] || {
     echo "error: message '$file' does not match the sender metadata home" >&2
     return 1

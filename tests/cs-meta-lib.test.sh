@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Behavior (portable): cs_meta_endpoint_generation_rotation_lines carries every
-# prior endpoint-generation pair forward across a cs_meta_write full-overwrite,
-# so a capo respawn never orphans a message queued against an earlier
-# generation.
+# Behavior (portable): bin/cs-meta-lib.sh's helper contracts -
+# cs_meta_endpoint_generation_rotation_lines carries every prior
+# endpoint-generation pair forward across a cs_meta_write full-overwrite, so a
+# capo respawn never orphans a message queued against an earlier generation;
+# cs_meta_home falls back to parent_home for any task (ordinary, non-capo)
+# whose meta never records its own home=.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=tests/lib.sh
@@ -82,3 +84,22 @@ done
 pass "rotation-lines output never separates a previous_ pair"
 
 pass "cs_meta_endpoint_generation_rotation_lines contract"
+
+cs_write_meta "$TMP/ordinary.meta" "kind=ship" "parent_home=/tmp/fake-root"
+result=$(cs_meta_home "$TMP/ordinary.meta") || fail "cs_meta_home should succeed when parent_home is set"
+[ "$result" = "/tmp/fake-root" ] || fail "cs_meta_home should fall back to parent_home when home is unset"
+pass "cs_meta_home falls back to parent_home when home is unset"
+
+cs_write_meta "$TMP/capo.meta" "kind=capo" "home=/tmp/fake-capo-home" "parent_home=/tmp/fake-root"
+result=$(cs_meta_home "$TMP/capo.meta") || fail "cs_meta_home should succeed when home is set"
+[ "$result" = "/tmp/fake-capo-home" ] || fail "cs_meta_home should return the literal home value when set, ignoring parent_home"
+pass "cs_meta_home returns the literal home value when set"
+
+cs_write_meta "$TMP/bare.meta" "kind=ship"
+if result=$(cs_meta_home "$TMP/bare.meta" 2>/dev/null); then
+  fail "cs_meta_home should fail when neither home nor parent_home is recorded"
+fi
+[ -z "$result" ] || fail "cs_meta_home should print nothing when neither home nor parent_home is recorded"
+pass "cs_meta_home degrades to a failure when neither home nor parent_home is recorded"
+
+pass "cs_meta_home capo-only fallback contract"
