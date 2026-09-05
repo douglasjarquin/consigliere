@@ -21,6 +21,8 @@
 set -u
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=bin/cs-message-lib.sh
+. "$ROOT/bin/cs-message-lib.sh"
 unset CS_TASK_ID CS_ROOT_OVERRIDE CS_HOME CS_STATE_OVERRIDE CS_DATA_OVERRIDE
 
 TMP_ROOT=$(cs_test_tmproot cs-turnend-guard)
@@ -245,6 +247,33 @@ test_clears_the_per_turn_checkpoint_marker() {
   pass "cs-turnend-guard: clears the per-turn checkpoint marker at a primary turn boundary"
 }
 
+test_worker_settled_without_report_skips_an_already_reported_ordinary_child() {
+  local home
+  home=$(make_wakeable_home settled-ordinary-child)
+  cs_write_meta "$home/state/childtask.meta" \
+    "kind=ship" "parent_state=$home/state" "parent_task_id=root" \
+    "parent_home=$home" "parent_pane=unknown" "parent_generation=root-generation" \
+    "endpoint_generation=childtask-generation"
+  printf '%s\n' 'done: finished' > "$home/state/childtask.status"
+  mkdir -p "$home/state/inbox"
+  cs_message_publish "$home/state/inbox" \
+    "schema=cs-message.v1" "message_id=message-childtask-report" \
+    "correlation_id=message-childtask-report" "sequence=1" "kind=result" \
+    "from_task_id=childtask" "to_task_id=root" "from_home=$home" \
+    "from_endpoint_generation=childtask-generation" "to_endpoint_generation=root-generation" \
+    "summary=childtask reported normally" "artifact=" "commit_sha=" "pull_request=" \
+    "created_at=1700000000" || fail "childtask report message setup"
+
+  run_guard "$home" CS_TASK_ID=childtask >/dev/null
+
+  [ -f "$home/state/inbox/message-childtask-report.msg" ] || fail "the genuine report message vanished"
+  find "$home/state/inbox" -name '*.msg' ! -name 'message-childtask-report.msg' -print \
+    | grep -q . && fail "the guard re-escalated a child that already reported normally"
+  find "$home/state" -maxdepth 1 -name '.message-recovery-*' -print \
+    | grep -q . && fail "the guard recorded a recovery marker for a child that already reported normally"
+  pass "cs-turnend-guard: worker_settled_without_report does not re-escalate an already-reported ordinary child"
+}
+
 test_defers_when_another_live_session_holds_lock
 test_permits_a_stop_when_the_home_can_wake_itself
 test_blocks_when_no_monitor_can_be_started
@@ -255,3 +284,4 @@ test_no_work_in_flight_is_always_permitted
 test_away_mode_permits_a_stop_when_the_home_can_wake_itself
 test_away_mode_blocks_when_the_home_cannot_wake_itself
 test_clears_the_per_turn_checkpoint_marker
+test_worker_settled_without_report_skips_an_already_reported_ordinary_child
