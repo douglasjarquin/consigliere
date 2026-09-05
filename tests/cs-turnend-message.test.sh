@@ -95,3 +95,22 @@ CS_TASK_ID=worker "$ROOT/bin/cs-worker-turnend.sh"
 [ "$(find "$PARENT_STATE/inbox" -name "$worker_id.msg" -type f | wc -l | tr -d ' ')" = 1 ] || \
   fail "worker turn-end hook must not publish a duplicate recovery message"
 pass "worker turn-end hook recovers a terminal child outside primary scope"
+
+printf '%s\n' 'task_id=already-reported-worker' 'kind=ship' 'worktree='"$HOME_DIR" \
+  'pane=w5:p5' 'endpoint_generation=arw-generation' 'parent_task_id=root' \
+  'parent_home='"$TMP" 'parent_state='"$PARENT_STATE" 'parent_pane=w1:p1' \
+  'parent_generation=root-generation' 'parent_herdr_session=test' \
+  'harness=codex' 'herdr_session=test' > "$STATE/already-reported-worker.meta"
+printf '%s\n' 'done: already reported' > "$STATE/already-reported-worker.status"
+cs_message_publish "$PARENT_STATE/inbox" \
+  "schema=cs-message.v1" "message_id=message-already-reported-worker" \
+  "correlation_id=message-already-reported-worker" "sequence=1" "kind=result" \
+  "from_task_id=already-reported-worker" "to_task_id=root" "from_home=$TMP" \
+  "from_endpoint_generation=arw-generation" "to_endpoint_generation=root-generation" \
+  "summary=reported normally" "artifact=" "commit_sha=" "pull_request=" \
+  "created_at=1700000000" || fail "already-reported-worker message setup"
+arw_id=$(cs_message_recovery_id already-reported-worker arw-generation) || fail "already-reported-worker recovery id derivation"
+CS_TASK_ID=already-reported-worker "$ROOT/bin/cs-worker-turnend.sh"
+[ -e "$PARENT_STATE/inbox/$arw_id.msg" ] && fail "worker turn-end hook re-escalated an already-reported (non-capo) child"
+[ -e "$STATE/.message-recovery-$arw_id" ] && fail "worker turn-end hook recorded a marker for an already-reported (non-capo) child"
+pass "worker turn-end hook does not re-escalate an already-reported (non-capo) child"

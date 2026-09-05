@@ -26,7 +26,7 @@ esac
 
 parent_state=$(cs_meta_get "$meta" parent_state 2>/dev/null || true)
 parent_task=$(cs_meta_get "$meta" parent_task_id 2>/dev/null || true)
-child_home=$(cs_meta_get "$meta" home 2>/dev/null || true)
+child_home=$(cs_meta_home "$meta" 2>/dev/null || true)
 generation=$(cs_meta_get "$meta" endpoint_generation 2>/dev/null || true)
 [ -d "$parent_state/inbox" ] && [ -n "$generation" ] || exit 0
 for file in "$parent_state/inbox"/*.msg; do
