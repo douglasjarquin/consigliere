@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Behavior (LIVE, opt-in): the dev-tools suite's container pieces build and run
-# correctly - the dev/web images build, the boss-private paths stay masked
+# correctly - the dev/web images build, the seven boss-private paths stay masked
 # inside the dev container, tracked .made/features/ stays visible, the web
 # service serves the placeholder, and bin/cs-test-run.sh --portable passes
 # inside the dev container.
@@ -40,9 +40,9 @@ tracked_lines=$("${COMPOSE[@]}" run --rm dev sh -c 'wc -l < /workspace/bin/cs-te
 [ "$tracked_lines" -gt 0 ] 2>/dev/null || fail "the tracked tree must still be visible inside dev"
 pass "the tracked tree is visible inside dev"
 
-"${COMPOSE[@]}" run --rm dev test -f /workspace/.made/features/README.md \
-  || fail "tracked .made/features/ must stay visible inside dev"
-pass "tracked .made/features/ stays visible inside dev"
+features_file=$("${COMPOSE[@]}" run --rm dev sh -c 'test -f /workspace/.made/features/README.md && echo visible')
+[ "$features_file" = visible ] || fail "the tracked Made feature index must stay visible inside dev"
+pass "the tracked Made feature index is visible inside dev"
 
 "${COMPOSE[@]}" up -d web >/dev/null || fail "web service starts"
 sleep 2

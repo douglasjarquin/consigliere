@@ -83,7 +83,7 @@ state/               volatile runtime signals; gitignored
   .decision-cursor-*   per-task byte cursor and folded open-decision set bounding the wake drain's open-decision scan to new status appends; written only by cs-classify-lib.sh; safe to delete (forces one full re-fold)
   .hash-* .count-* .stale-* .paused-* .seen-* .last-*   watcher internals; never touch
   .subsuper-*        away-mode delivery internals (cs-activate.sh, cs-afk-start.sh, cs-afk-return.sh); never touch
-.made/evidence/      local Made test evidence; gitignored
+.made/evidence/      local Made validation evidence; gitignored
 .no-mistakes/        leftover local validation state from the predecessor tool; gitignored; not the live evidence dir
 ```
 

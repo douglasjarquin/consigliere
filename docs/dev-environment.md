@@ -28,15 +28,15 @@ It exists to give consigliere its own reproducible, container-based dev environm
 - `mise run dev:test` - run consigliere's existing portable test suite (`bin/cs-test-run.sh --portable`, unmodified) inside the `dev` container.
 - `mise run dev:down` - tear down the local dev stack.
 
-## Mount-masking: why the sensitive paths can never leak
+## Mount-masking: why the seven sensitive paths can never leak
 
 `config/`, `host/`, `data/`, `state/`, `projects/`, leftover `.no-mistakes/`, and `.made/evidence/` are this repo's gitignored, boss-private operational state (`docs/configuration.md` owns the complete layout).
 Tracked `.made/features/` is review material and must stay visible inside the container.
 Two independent protections keep the private paths out of the dev-tools suite entirely:
 
-1. `.dockerignore` excludes those private paths from the Docker build context, so `docker/dev/Dockerfile`'s `COPY . /workspace` step can never bake their real content into any image layer, no matter what exists in the directory the image is built from.
-2. `docker-compose.yml`'s `dev` service mounts the repo root read-write, then mounts an anonymous (empty, ephemeral) volume over each private path inside the container - a standard Compose masking technique.
-   Even if a bind-mounted host directory has real content, the container's view of those paths stays empty.
+1. `.dockerignore` excludes all seven from the Docker build context, so `docker/dev/Dockerfile`'s `COPY . /workspace` step can never bake their real content into any image layer, no matter what exists in the directory the image is built from.
+2. `docker-compose.yml`'s `dev` service mounts the repo root read-write, then mounts an anonymous (empty, ephemeral) volume over each of the seven paths inside the container - a standard Compose masking technique.
+   Even if a bind-mounted host directory has real content, the container's view of those seven paths stays empty.
    The overlay is `.made/evidence/`, never `.made/`, so the tracked features index remains visible.
 
 The `web` service needs neither protection: it mounts only `./web:/srv/web:ro`, nothing else.

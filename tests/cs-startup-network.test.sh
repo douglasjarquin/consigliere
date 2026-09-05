@@ -747,7 +747,7 @@ pass "an adopted pass whose worker dies still names the uncovered check and a re
 # a bet on the digest outrunning a timer.
 HOME_DIR=$(fresh_home digest-blocked)
 FB=$(fakebin "$TMP/fb-digest-blocked" "$TMP/gate-never")
-digest=$(PATH="$FB:$PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$FIX_ROOT" \
+digest=$(cd "$FIX_ROOT" && PATH="$FB:$PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$FIX_ROOT" \
   "$SESSION_START" 2>/dev/null)
 # The hang has served its purpose the moment the digest is out, so the worker is
 # stopped rather than waited out and the open-ended block costs the suite nothing.
@@ -788,7 +788,7 @@ pass "a hanging network dependency delays a reported check, never the digest"
 HOME_DIR=$(fresh_home digest-deferred)
 GATE="$TMP/gate-deferred"
 FB=$(fakebin "$TMP/fb-digest-deferred" "$GATE")
-digest=$(PATH="$FB:$PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$FIX_ROOT" \
+digest=$(cd "$FIX_ROOT" && PATH="$FB:$PATH" CS_HOME="$HOME_DIR" CS_ROOT_OVERRIDE="$FIX_ROOT" \
   "$SESSION_START" 2>/dev/null)
 assert_contains "$digest" 'IN PROGRESS - the deferred network checks have not finished yet' \
   "the digest printed the result inline, so this case proves nothing about the wake path"
